@@ -1,4 +1,4 @@
-// brand_render: writes the Sonora brand assets (UI-42) drawn by src/gfx/Brand.cpp.
+// brand_render: writes the Sonora brand assets (UI-51) drawn by src/gfx/Brand.cpp.
 //
 //   brand_render <out-dir>                  icon PNGs (16..1024), icon/mark/wordmark SVGs, splash and cursor previews
 //   brand_render <out-dir> --status "TEXT"  splash preview with that status line (and --progress 0..1)
@@ -90,6 +90,21 @@ int main(int argc, char** argv)
     const float promptH = brand::promptHeight(prompt);
     ok &= writePng((dir / "preview-prompt.png").string(), (int) brand::promptWidth * 2, (int) promptH * 2, 2.0f,
                    [&](SkCanvas& c) { brand::drawPrompt(c, brand::promptWidth, promptH, prompt); });
+    // About window (COM-8), with sample supporters and with none.
+    for (const bool sample : {true, false})
+    {
+        brand::AboutState about;
+        about.version = "Version 0.1.2";
+        about.credit = "Created by Wellington Chaves \u00B7 Lordillusions";
+        about.emptyText = "No supporters listed yet. Monthly supporters on Ko-fi can have their name here and on sonoradaw.com.";
+        if (sample)
+            about.groups = {{"Studio", {"Example Studio"}}, {"Producers", {"Ana B.", "Kenji M."}},
+                            {"Supporters", {"Lucas R.", "Mika T.", "Jordan P.", "Sam O.", "Chiara L.", "Noah W."}}};
+        about.hovered = brand::AboutSupport;
+        const float h = brand::aboutHeight(about);
+        ok &= writePng((dir / (sample ? "preview-about.png" : "preview-about-empty.png")).string(), (int) brand::aboutWidth * 2,
+                       (int) h * 2, 2.0f, [&](SkCanvas& c) { brand::drawAbout(c, brand::aboutWidth, h, about); });
+    }
     ok &= writePng((dir / "preview-wordmark.png").string(), 1200, 320, 2.0f, [](SkCanvas& c) {
         brand::drawWordmark(c, 40, 110, 70, SkColorSetRGB(0x11, 0x11, 0x11));
     }, SK_ColorWHITE);

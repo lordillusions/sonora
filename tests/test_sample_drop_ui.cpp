@@ -54,7 +54,7 @@ TEST_CASE("sample drop: a loop's detected tempo sets its beats, and a set tempo 
     engine::SampleCache cache;
     const auto loaded = cache.load(file.getFullPathName().toStdString());
     REQUIRE(loaded != nullptr);
-    const double detected = engine::estimateSampleTempo(loaded->onsets, 120).bpm;
+    const double detected = engine::estimateSampleTempo(loaded->audio, loaded->sampleRate, 120).bpm;
     CHECK_NEAR(detected, 128, 0.5);
 
     auto song = io::parseAls(*io::createNewSetDom(), "/tmp/sonora_sample_drop.als").song;

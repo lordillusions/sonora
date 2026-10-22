@@ -311,3 +311,15 @@ details > div { padding: 0 0 18px; color: var(--text-muted); max-width: 48em; }
 .dl-card .btn-row { margin-top: auto; gap: 8px; }
 .dl-card .btn-row .btn { margin-top: 0; }
 
+/* Support on Ko-fi: Ko-fi's blue, a plain link (no external script) */
+.btn-bmc, .btn-bmc:hover { background: #29abe0; color: #fff; border-color: #29abe0; }
+.btn-bmc:hover { background: #4bbbe8; }
+.supporter-tier { margin-top: 18px; }
+.supporter-tier h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 6px; }
+.supporter-names { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--text); }
+.support-box { max-width: 760px; }
+.support-list { margin: 18px 0; padding-left: 20px; color: var(--text-muted); }
+.support-list li { margin: 8px 0; }
+.support-list strong { color: var(--text); }
+.support-note h2 { font-size: 22px; margin-bottom: 8px; }
+

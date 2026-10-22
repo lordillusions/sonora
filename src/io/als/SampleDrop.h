@@ -19,6 +19,7 @@ struct DroppedSample
     double sampleRate = 0;
     int64_t frames = 0;
     double detectedBpm = 0;    // UI-47: tempo found while reading the file (0: none, the set's tempo is assumed)
+    double tempoConfidence = 0; // UI-47b: 0..1, how clear that tempo was
 };
 
 struct SampleDropTarget
@@ -40,6 +41,11 @@ struct SampleDropPlan
 
 // A new audio clip referencing `sample`, with a set's existing audio clip XML reused as its template when present.
 model::Clip makeSampleClip(const model::Song& song, const DroppedSample& sample, int colorIndex, double start);
+
+// UI-47b: song-length files (>= 30 s) dropped together with the same length and rate are stems of one song (vocals, bass, drums...): they all
+// take the clearest tempo among them, so they stay in sync even where one stem has no detectable pulse.
+// Returns how many samples changed.
+int shareStemTempo(std::vector<DroppedSample>& samples);
 
 SampleDropPlan placeSamples(const model::Song& song, const std::vector<DroppedSample>& samples, SampleDropTarget target);
 

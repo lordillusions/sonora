@@ -27,7 +27,7 @@ void StatusBar::paint(SkCanvas& c, const Theme& t)
     const auto& m = t.metrics;
     Rect r{m.outerMargin, m.panelGap, width() - 2 * m.outerMargin, height() - m.panelGap - 6};
     const auto* busy = x.currentBusy();
-    if (busy) // UI-42: the activity bars replace the info badge while the user waits
+    if (busy) // UI-51: the activity bars replace the info badge while the user waits
         gfx::brand::drawActivity(c, SkRect::MakeXYWH(r.x + 1, r.centreY() - 6, 12, 12), juce::Time::getMillisecondCounterHiRes() / 1000.0,
                                  t.color("ControlForeground"));
     else

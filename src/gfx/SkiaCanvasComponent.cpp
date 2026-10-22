@@ -191,7 +191,7 @@ void SkiaCanvasComponent::updateCursor()
 {
     if (root_.context().waitingForBusy())
     {
-        // UI-42: an animated arrow + activity badge while the user waits (never the system's spinning wait cursor).
+        // UI-51: an animated arrow + activity badge while the user waits (never the system's spinning wait cursor).
         constexpr int frames = 12;
         constexpr double period = 0.9; // seconds per loop of the cached frames
         if (busyCursors_.empty())

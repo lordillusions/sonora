@@ -65,7 +65,7 @@ public:
                                                            int blockSize,
                                                            juce::String& error);
 
-    // UI-42: starts an instance ahead of a graph build. Opening a set preloads its plug-ins one per message-loop turn, so
+    // UI-51: starts an instance ahead of a graph build. Opening a set preloads its plug-ins one per message-loop turn, so
     // the window keeps painting (no system wait cursor); instantiate() then hands out the matching instance (same plug-in,
     // kind, state, rate and block size) instead of creating one. Message thread. False when the instance failed.
     bool preload(const juce::PluginDescription& desc, const model::PluginInfo& stateSource, model::DeviceKind kindInSet,

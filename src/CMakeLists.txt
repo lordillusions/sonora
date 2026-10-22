@@ -36,6 +36,7 @@ add_library(sonora_core STATIC
     core/DeviceCatalog.cpp
     core/LiveColors.cpp
     core/AppDataFolder.cpp
+    core/Supporters.cpp
     io/als/AlsReader.cpp
     io/als/AlsWriter.cpp
     io/als/AlsTemplates.cpp
@@ -139,7 +140,7 @@ option(SONORA_DEBUG_OPTIMIZE_AUDIO "Compile audio-thread DSP with -O2 in Debug b
 if (SONORA_DEBUG_OPTIMIZE_AUDIO)
     get_target_property(_sonoraAudioSources sonora_engine SOURCES)
     list(FILTER _sonoraAudioSources INCLUDE REGEX
-         "^(dsp/|devices/native/|devices/RackProcessor\\.cpp|engine/stretch/|engine/(AudioEngine|AudioClipPlayer|ClipPlayers|Automation|ResynthAnalysis)\\.cpp)")
+         "^(dsp/|devices/native/|devices/RackProcessor\\.cpp|engine/stretch/|engine/(AudioEngine|AudioClipPlayer|ClipPlayers|Automation|ResynthAnalysis|TempoAnalysis)\\.cpp)")
     set_source_files_properties(${_sonoraAudioSources} PROPERTIES
         COMPILE_OPTIONS "$<$<AND:$<CONFIG:Debug>,$<CXX_COMPILER_ID:Clang,AppleClang,GNU>>:-O2>")
 endif()
@@ -375,13 +376,14 @@ juce_add_gui_app(Sonora
     MICROPHONE_PERMISSION_ENABLED TRUE
     MICROPHONE_PERMISSION_TEXT "Sonora records audio from your inputs."
     DOCUMENT_EXTENSIONS als
-    ICON_BIG "${CMAKE_SOURCE_DIR}/resources/brand/icon-1024.png" # UI-42: tools/brand_render writes it
+    ICON_BIG "${CMAKE_SOURCE_DIR}/resources/brand/icon-1024.png" # UI-51: tools/brand_render writes it
     ICON_SMALL "${CMAKE_SOURCE_DIR}/resources/brand/icon-256.png")
 
 target_sources(Sonora PRIVATE
     app/Main.cpp
     app/MainWindow.cpp
     app/PromptWindow.cpp
+    app/AboutWindow.cpp
     app/SplashWindow.cpp
     app/AppControl.cpp
     app/AppController.cpp
@@ -424,7 +426,7 @@ target_compile_options(Sonora PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
 add_dependencies(Sonora sonora_plugin_scanner)
 set_property(TARGET Sonora APPEND PROPERTY LINK_DEPENDS
     "${CMAKE_SOURCE_DIR}/docs/UI_GUIDE.md" "${CMAKE_SOURCE_DIR}/docs/MENU_SETTINGS_GAPS.md" "${CMAKE_SOURCE_DIR}/docs/SHORTCUT_AUDIT.md"
-    "${CMAKE_SOURCE_DIR}/docs/NATIVE_DEVICE_FACES.md")
+    "${CMAKE_SOURCE_DIR}/docs/NATIVE_DEVICE_FACES.md" "${CMAKE_SOURCE_DIR}/resources/supporters.txt")
 set_property(TARGET Sonora APPEND PROPERTY LINK_DEPENDS "${CMAKE_SOURCE_DIR}/docs/RESYNTH.md")
 # The scanner lives next to the executable (PluginHost::scannerExecutable); docs go to Resources/.
 if(APPLE)
@@ -438,6 +440,7 @@ add_custom_command(TARGET Sonora POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:sonora_plugin_scanner> ${_sonora_exe_dir}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${_sonora_resource_dir}
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/docs/UI_GUIDE.md ${_sonora_resource_dir}/UI_GUIDE.md
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/resources/supporters.txt ${_sonora_resource_dir}/supporters.txt
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/docs/NATIVE_DEVICE_FACES.md ${_sonora_resource_dir}/NATIVE_DEVICE_FACES.md
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/docs/RESYNTH.md ${_sonora_resource_dir}/RESYNTH.md
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/docs/MENU_SETTINGS_GAPS.md ${_sonora_resource_dir}/MENU_SETTINGS_GAPS.md

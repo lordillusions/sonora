@@ -1,0 +1,4 @@
+# Sonora supporters, shown in Sonora's About window and on sonoradaw.com/about.html#supporters.
+# Only people who asked to be listed. One per line: tier | name as they want it shown.
+# Tiers: studio, producer, supporter, coffee. Lines starting with # are ignored.
+# After editing: python3 scripts/site/update_supporters.py (updates the website); the app reads this file at runtime.

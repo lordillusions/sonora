@@ -188,7 +188,7 @@ private:
     void addStemTracks(const model::Clip& original, const std::vector<engine::StemFile>& stems, const juce::File& projectDirectory);
     bool stemsRunning_ = false;
     int stemsBusy_ = 0; // UiContext busy task while separating
-    // UI-42: opening a set starts its plug-ins one per message-loop turn before installSong().
+    // UI-51: opening a set starts its plug-ins one per message-loop turn before installSong().
     void preloadPluginsThenInstall(std::shared_ptr<io::AlsLoadResult> result, std::shared_ptr<std::vector<const model::Device*>> plugins,
                                    size_t index, int generation, int busy, std::string name);
     int openGeneration_ = 0;

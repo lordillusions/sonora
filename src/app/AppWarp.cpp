@@ -29,7 +29,7 @@ void AppController::toggleClipWarp(const model::ClipLocation& location)
     pool_.addJob([this, alive, original, path, generation, version, tempo, location, busy] {
         engine::TempoEstimate estimate;
         if (! path.empty())
-            if (const auto sample = engine_.sampleCache().load(path)) estimate = engine::estimateSampleTempo(sample->onsets, tempo);
+            if (const auto sample = engine_.sampleCache().load(path)) estimate = engine::estimateSampleTempo(sample->audio, sample->sampleRate, tempo);
         juce::MessageManager::callAsync([this, alive, original, generation, version, tempo, location, estimate, busy] {
             if (alive.expired()) return;
             warpAnalysisPending_.erase(original.uid);

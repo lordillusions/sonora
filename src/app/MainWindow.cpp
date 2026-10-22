@@ -2,6 +2,7 @@
 #include "util/Log.h"
 #include "ui/TrackMenu.h"
 #include "app/WindowChrome.h"
+#include "app/AboutWindow.h"
 
 #include "ui/GridMenu.h"
 #include "ui/views/BrowserPanel.h"
@@ -78,7 +79,7 @@ enum MenuIds
     FoldNotes, FoldScale, HighlightScales, PianoPreview,
     InsertTakeLane, FreezeTrack, BounceTrack, BounceNew, ConsolidateClips, ConvertMelody, ConvertHarmony, ConvertDrums, SliceMidi, ResynthesizeClip,
     DeactivateTrack, HideTrack, ShowHiddenTracks, StripSilence, NextTransient, PreviousTransient,
-    CheckForUpdates,
+    CheckForUpdates, AboutSonora,
     ShareSessionLan, ShareSessionRelay, JoinSession, CollaboratePanel, LeaveSession,
     RecentBase = 1000,
 };
@@ -170,6 +171,8 @@ MainWindow::MainWindow(AppController& app)
     createUpdater();
 #if JUCE_MAC
     juce::PopupMenu applicationMenu;
+    applicationMenu.addItem(AboutSonora, "About Sonora");
+    applicationMenu.addSeparator();
     applicationMenu.addItem(CheckForUpdates, "Check for Updates...", updater_->canCheckNow() || updater_->installPending());
     applicationMenu.addSeparator();
     applicationMenu.addItem(Preferences, "Settings...    (Cmd+,)");
@@ -554,6 +557,8 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         m.addItem(ReadManual, "Read the Sonora Guide...");
         unavailable(m, {"Learn View", "Pack Overview", "Load Demo Set", "Get Support"});
         m.addItem(CheckForUpdates, "Check for Updates...", updater_ != nullptr && (updater_->canCheckNow() || updater_->installPending()));
+        m.addSeparator();
+        m.addItem(AboutSonora, "About Sonora");
     }
     juce::PopupMenu::MenuItemIterator iterator(m, true);
     while (iterator.next())
@@ -640,7 +645,7 @@ void MainWindow::menuItemSelected(int itemId, int)
     auto& ui = app_.ui();
     if (app_.exporting())
         return; // the export dialog is modal: nothing may edit or play while it renders
-    if (ui.preferencesOpen && itemId != Preferences && itemId != AudioSettings && itemId != CheckForUpdates) return;
+    if (ui.preferencesOpen && itemId != Preferences && itemId != AudioSettings && itemId != CheckForUpdates && itemId != AboutSonora) return;
     if (itemId >= RecentBase && (size_t) (itemId - RecentBase) < recentMenuFiles_.size())
     {
         const auto file = recentMenuFiles_[(size_t) (itemId - RecentBase)];
@@ -701,6 +706,7 @@ void MainWindow::menuItemSelected(int itemId, int)
         case StopAllClips: if (ui.stopAllClips) ui.stopAllClips(); break;
         case Preferences: ui.preferencesOpen = ! ui.preferencesOpen; break;
         case CheckForUpdates: if (updater_) updater_->checkNow(); break;
+        case AboutSonora: AboutWindow::show(); break;
         case AudioSettings: ui.preferencesOpen = true; ui.settingsPage = 3; break;
         case ScanVst3: app_.scanPlugins(false); break;
         case ScanVst3AndAu: app_.scanPlugins(true); break;

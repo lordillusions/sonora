@@ -39,7 +39,7 @@ public:
 
     void initialise(const juce::String& commandLine) override
     {
-        // UI-42: the splash paints before the slow startup steps and mirrors the first document's busy task.
+        // UI-51: the splash paints before the slow startup steps and mirrors the first document's busy task.
         splash_ = std::make_unique<SplashWindow>(std::string("Version ") + SONORA_APP_VERSION_STRING);
         splash_->setStatus("Starting audio and MIDI...");
         controller_ = std::make_unique<AppController>();

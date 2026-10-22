@@ -9,7 +9,7 @@
 
 using namespace sonora;
 
-TEST_CASE("brand: busy tasks stack, update and end by id (UI-42)")
+TEST_CASE("brand: busy tasks stack, update and end by id (UI-51)")
 {
     ui::UiContext ctx;
     CHECK(ctx.currentBusy() == nullptr);
@@ -97,4 +97,28 @@ TEST_CASE("brand: save prompt buttons sit inside the panel like a macOS alert (U
     CHECK(SkColorGetR(save) > 200); // the primary button is the light one
     const auto cancel = pixels.getColor((int) rects[2].left() + 6, (int) rects[2].centerY());
     CHECK(SkColorGetR(cancel) < 80);
+}
+
+TEST_CASE("brand: About window buttons stay inside the panel, apart, and the height follows the supporters (COM-8)")
+{
+    gfx::brand::AboutState empty;
+    empty.version = "Version 0.1.2";
+    empty.credit = "Created by Wellington Chaves";
+    empty.emptyText = "No supporters listed yet.";
+    auto many = empty;
+    many.groups = {{"Studio", {"Example Studio"}}, {"Supporters", std::vector<std::string>(40, "Somebody Long")}};
+    CHECK(gfx::brand::aboutHeight(many) > gfx::brand::aboutHeight(empty)); // names wrap onto more lines
+    const float w = gfx::brand::aboutWidth, h = gfx::brand::aboutHeight(many);
+    const auto rects = gfx::brand::aboutButtonRects(many, w, h);
+    for (size_t i = 0; i < rects.size(); ++i)
+    {
+        CHECK(rects[i].left() > 0 && rects[i].right() < w && rects[i].bottom() < h);
+        for (size_t j = i + 1; j < rects.size(); ++j) CHECK(! SkRect::Intersects(rects[i], rects[j]));
+    }
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul((int) w, (int) h));
+    gfx::brand::drawAbout(*surface->getCanvas(), w, h, many);
+    SkPixmap pixels;
+    REQUIRE(surface->peekPixels(&pixels));
+    const auto& support = rects[gfx::brand::AboutSupport];
+    CHECK(SkColorGetR(pixels.getColor((int) support.left() + 6, (int) support.centerY())) > 200); // the primary button
 }

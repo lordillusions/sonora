@@ -34,6 +34,7 @@ set(SONORA_TEST_SOURCES
     test_wavetable_effects_content.cpp
     test_wavetable_effects_integration.cpp
     test_prism_preset.cpp
+    test_supporters.cpp
     test_curve_lfo.cpp
     test_midi.cpp
     test_midi_release.cpp

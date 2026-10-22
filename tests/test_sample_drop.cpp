@@ -213,3 +213,24 @@ TEST_CASE("sample drop: a MIDI target gets a new audio track after it; unreadabl
     CHECK(unreadable.error == "Could not read the audio file");
     CHECK(io::placeSamples(*song, good, {(int) song->tracks.size() + 3, 0.0, -1, false}).command.apply == nullptr);
 }
+
+TEST_CASE("sample drop: stems of one song share the clearest tempo, loops keep their own (UI-47b)")
+{
+    const int64_t song = 48000LL * 200;
+    std::vector<io::DroppedSample> samples{{"/tmp/Drums.wav", 48000.0, song, 98.0, 0.7},
+                                           {"/tmp/Vocals.wav", 48000.0, song, 0.0, 0.0},
+                                           {"/tmp/Bass.wav", 48000.0, song + 10, 147.0, 0.2},
+                                           {"/tmp/Other.wav", 44100.0, song, 120.0, 0.9},       // another rate: another song
+                                           {"/tmp/LoopA.wav", 48000.0, 48000 * 6, 140.0, 0.8},
+                                           {"/tmp/LoopB.wav", 48000.0, 48000 * 6, 70.0, 0.3}};  // short: kept
+    CHECK(io::shareStemTempo(samples) == 2);
+    CHECK_NEAR(samples[0].detectedBpm, 98, 1e-12);
+    CHECK_NEAR(samples[1].detectedBpm, 98, 1e-12);
+    CHECK_NEAR(samples[2].detectedBpm, 98, 1e-12);
+    CHECK_NEAR(samples[3].detectedBpm, 120, 1e-12);
+    CHECK_NEAR(samples[4].detectedBpm, 140, 1e-12);
+    CHECK_NEAR(samples[5].detectedBpm, 70, 1e-12);
+    std::vector<io::DroppedSample> none{{"/tmp/A.wav", 48000.0, song}, {"/tmp/B.wav", 48000.0, song}};
+    CHECK(io::shareStemTempo(none) == 0);
+    CHECK_NEAR(none[0].detectedBpm, 0, 1e-12);
+}

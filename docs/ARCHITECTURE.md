@@ -251,7 +251,9 @@ readiness; denied automatic requests are not repeated until an explicit input ed
 | Collab hashing (1) | SHA-256 of shared samples | results collected by `CollabSession::poll()` |
 
 First-Warp analysis (`AppWarp`, UI-41) captures the clip, document generation and history version on the message thread,
-then decodes through SampleCache and estimates a bounded rhythmic tempo from its attack times on a worker. Repeated
+then decodes through SampleCache and estimates the sample's tempo on a worker (`engine/TempoAnalysis`, UI-47b: spectral-flux
+onset envelope of at most 90 s from the middle, comb tempogram + subdivision coverage, whole-beat length prior for
+loops; 1-45 ms per file in Release, also -O2 in Debug). Sample drops (UI-47) run the same estimator. Repeated
 requests for the same clip coalesce; at most eight are pending. Completion rejects replaced documents, intervening edits
 and busy/recording state, then commits through ordinary clip history. Known/manual tempos and authored multi-anchor
 grids bypass detection. Neither file decoding nor tempo estimation runs on the audio callback.

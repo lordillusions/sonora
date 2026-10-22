@@ -50,6 +50,34 @@ model::Clip makeSampleClip(const model::Song& song, const DroppedSample& sample,
     return clip;
 }
 
+int shareStemTempo(std::vector<DroppedSample>& samples)
+{
+    int changed = 0;
+    for (size_t i = 0; i < samples.size(); ++i)
+    {
+        // Loops of one length from a pack keep their own tempos: only song-length files count as stems.
+        if (samples[i].sampleRate <= 0 || (double) samples[i].frames < 30 * samples[i].sampleRate) continue;
+        const auto sameSong = [&](const DroppedSample& other)
+        {
+            return std::abs(other.sampleRate - samples[i].sampleRate) < 0.5
+                && std::abs(other.frames - samples[i].frames) <= (int64_t) (0.001 * other.sampleRate);
+        };
+        const DroppedSample* clearest = nullptr;
+        int members = 0;
+        for (const auto& other : samples)
+            if (sameSong(other))
+            {
+                ++members;
+                if (other.detectedBpm > 0 && (! clearest || other.tempoConfidence > clearest->tempoConfidence)) clearest = &other;
+            }
+        if (members < 2 || ! clearest || std::abs(samples[i].detectedBpm - clearest->detectedBpm) < 1e-9) continue;
+        samples[i].detectedBpm = clearest->detectedBpm;
+        samples[i].tempoConfidence = clearest->tempoConfidence;
+        ++changed;
+    }
+    return changed;
+}
+
 SampleDropPlan placeSamples(const model::Song& song, const std::vector<DroppedSample>& samples, SampleDropTarget target)
 {
     SampleDropPlan plan;

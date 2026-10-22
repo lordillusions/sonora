@@ -1,5 +1,5 @@
 #pragma once
-// Sonora brand drawing (UI-42): the "S" mark, the wordmark, the app icon, the launch splash and the
+// Sonora brand drawing (UI-51): the "S" mark, the wordmark, the app icon, the launch splash and the
 // busy indicator / cursor. Everything is grayscale and drawn from the geometry in Brand.cpp, so the
 // app, tools/brand_render (icon PNGs, SVGs) and the website share one source. No font files are
 // involved: the wordmark letters are stroked paths.
@@ -10,6 +10,7 @@
 
 #include <juce_graphics/juce_graphics.h>
 
+#include <array>
 #include <functional>
 #include <string>
 #include <vector>
@@ -76,6 +77,23 @@ constexpr float promptWidth = 460;
 float promptHeight(const PromptState& state);
 std::vector<SkRect> promptButtonRects(const PromptState& state, float width, float height); // one per button
 void drawPrompt(SkCanvas& canvas, float width, float height, const PromptState& state);
+
+// About Sonora (COM-8): the splash's panel with the wordmark, version, licence, the author's credit and the supporters by
+// tier (or an invitation when there are none), and four buttons.
+enum AboutButton { AboutWebsite, AboutGitHub, AboutClose, AboutSupport, aboutButtonCount };
+inline constexpr std::array<const char*, aboutButtonCount> aboutButtonLabels{"Website", "GitHub", "Close", "Support on Ko-fi"};
+struct AboutState
+{
+    std::string version; // "Version 0.1.2"
+    std::string credit;  // "Created by ..."
+    std::vector<std::pair<std::string, std::vector<std::string>>> groups; // tier title, names
+    std::string emptyText;           // shown when there are no supporters
+    int hovered = -1, pressed = -1;  // AboutButton, -1 for none
+};
+constexpr float aboutWidth = 540;
+float aboutHeight(const AboutState& state);
+std::array<SkRect, aboutButtonCount> aboutButtonRects(const AboutState& state, float width, float height);
+void drawAbout(SkCanvas& canvas, float width, float height, const AboutState& state);
 
 // Activity indicator: four bars swinging like a level meter, centred in `box`.
 void drawActivity(SkCanvas& canvas, const SkRect& box, double timeSeconds, SkColor color);

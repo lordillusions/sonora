@@ -673,7 +673,7 @@ void AppController::openFileNow(const juce::File& file)
                 return;
             }
             // Plug-ins are created on the message thread and some take a second each. Starting them one per message
-            // loop turn (UI-42) keeps the window painting and the busy cursor moving, so macOS never shows its wait
+            // loop turn (UI-51) keeps the window painting and the busy cursor moving, so macOS never shows its wait
             // cursor; installSong() then picks the started instances up.
             auto plugins = std::make_shared<std::vector<const model::Device*>>();
             const std::function<void(const std::vector<model::Device>&)> collect = [&](const std::vector<model::Device>& devices) {
@@ -2662,7 +2662,7 @@ void AppController::dropBrowserItem(const ui::BrowserDrag& item, int trackIndex,
         auto paths = item.files.empty() ? std::vector<std::string>{item.value} : item.files;
         const io::SampleDropTarget target{trackIndex, beat, scene, item.oneTrackPerFile};
         const auto alive = alive_;
-        const double tempoHint = song_->tempo; // estimateSampleTempo folds its answer towards the set's tempo
+        const double tempoHint = song_->tempo; // estimateSampleTempo breaks octave ties towards the set's tempo
         ui_.statusText = "Reading " + item.label;
         pool_.addJob([this, alive, dropGeneration, item, paths, target, tempoHint] {
             std::vector<io::DroppedSample> samples;
@@ -2673,11 +2673,16 @@ void AppController::dropBrowserItem(const ui::BrowserDrag& item, int trackIndex,
                 const std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(juce::File(juce::String::fromUTF8(path.c_str()))));
                 samples.push_back({path, reader ? reader->sampleRate : 0.0, reader ? (int64_t) reader->lengthInSamples : 0});
                 // UI-47: the clip starts warped at the sample's own tempo, like Live, so detect it now (the sample cache
-                // loads the file for playback anyway). Loops find a tempo; one-shots keep the set's.
+                // loads the file for playback anyway). Loops find a tempo; one-shots keep the set's (and the status says so).
                 if (reader && reader->lengthInSamples > 0 && *alive)
                     if (const auto loaded = engine_.sampleCache().load(path))
-                        samples.back().detectedBpm = engine::estimateSampleTempo(loaded->onsets, tempoHint).bpm;
+                    {
+                        const auto estimate = engine::estimateSampleTempo(loaded->audio, loaded->sampleRate, tempoHint);
+                        samples.back().detectedBpm = estimate.bpm;
+                        samples.back().tempoConfidence = estimate.confidence;
+                    }
             }
+            io::shareStemTempo(samples); // UI-47b: stems of one song keep one grid
             juce::MessageManager::callAsync([this, alive, dropGeneration, item, target, samples] {
                 if (! *alive || dropGeneration != documentGeneration_ || ! song_ || editingDevices_ || syncingModel_ || exporting_) return;
                 if (ui_.recording || ui_.recordingRequested) { ui_.statusText = "Finish recording before dropping samples"; return; }
@@ -2695,10 +2700,21 @@ void AppController::dropBrowserItem(const ui::BrowserDrag& item, int trackIndex,
                     if (ui_.modelChanged) ui_.modelChanged();
                 }
                 const int skipped = (int) samples.size() - plan.placed;
+                int noTempo = 0;
+                double tempo = 0;
+                for (const auto& sample : samples)
+                    if (sample.sampleRate > 0 && sample.frames > 0) { noTempo += sample.detectedBpm <= 0; tempo = sample.detectedBpm; }
                 ui_.statusText = (plan.placed == 1 ? "Inserted " + juce::File(juce::String::fromUTF8(item.value.c_str())).getFileName().toStdString()
                                                    : "Inserted " + std::to_string(plan.placed) + " samples")
                                + (plan.newTrackForKind ? " on a new audio track" : "")
                                + (skipped > 0 ? " (" + std::to_string(skipped) + " could not be read)" : "");
+                // UI-47b: never fall back to the set's tempo silently.
+                if (noTempo == 0 && plan.placed == 1)
+                    ui_.statusText += " at " + juce::String(tempo, 2).toStdString() + " BPM";
+                else if (noTempo > 0)
+                    ui_.statusText += (plan.placed == 1 ? ". No tempo detected; the clip uses"
+                                                        : ". " + std::to_string(noTempo) + " without a detected tempo use")
+                                    + std::string(" the set tempo (edit the clip BPM in Warp)");
             });
         });
         return;

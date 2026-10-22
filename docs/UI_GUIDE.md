@@ -43,6 +43,25 @@ Sonora-only state identities and the remaining visual/DSP parity boundaries.
 | `LoopColor` | loop brace |
 | `GridLineBase` | bar lines in lanes |
 
+## Brand, splash and busy feedback (UI-51)
+
+- **Look**: black, grayscale and white only. The mark is an "S" ribbon (three bars joined by half circles); the wordmark
+  "Sonora" uses the same construction as stroked paths, so no font file is involved. Geometry lives in
+  `src/gfx/Brand.cpp`; `tools/brand_render <dir>` writes the icon PNGs (`resources/brand/icon-1024.png` is `ICON_BIG`),
+  `icon.svg`, `mark.svg` (`currentColor`) and `wordmark-{white,black}.svg` for the website. Change the geometry there,
+  re-run the tool, copy the files into `resources/brand/`. Splash: ![splash](screenshots/splash.png)
+- **Splash** (`src/app/SplashWindow`): appears before the controller is built, shows the startup steps and then the first
+  document's busy task, stays at least 1.2 s and fades out once a song is installed and no blocking task is left. A click
+  dismisses it once ready.
+- **Busy tasks**: `UiContext::beginBusy(text, background)` / `updateBusy(id, text, progress)` / `endBusy(id)`. The status
+  bar replaces its info badge with four moving bars, shows the newest task's text and a progress hairline when the
+  progress is known. Blocking tasks (`background == false`, e.g. opening a set) also switch the canvas to the busy cursor:
+  the arrow plus a small dark badge with the same bars (![cursor](screenshots/busy-cursor.png)). Background tasks
+  (plug-in scan, stems, tempo detection) keep the normal cursor.
+- **No system wait cursor**: macOS shows its spinning cursor when the message thread stops handling events for a few
+  seconds. Long work goes to a worker; work that must stay on the message thread is split per item. Opening a set starts
+  one plug-in per message-loop turn (`AudioEngine::preloadPlugin`) before `loadSong()` picks up the started instances.
+
 ## Typography
 Default: the macOS system font (San Francisco, "SF Pro Text") via CoreText, falling back to Helvetica Neue — it is the
 closest installed match to Live's own "Ableton Sans" face, which we do not ship. For a closer look on a machine that has Live installed, you may point Sonora at a font

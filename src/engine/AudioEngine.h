@@ -50,7 +50,7 @@ public:
 
     // Builds and installs a graph for the song. Message thread. Returns the build log.
     std::vector<std::string> loadSong(const model::Song& song);
-    // UI-42: starts `device`'s plug-in ahead of loadSong(), which then uses that instance (message thread). False when
+    // UI-51: starts `device`'s plug-in ahead of loadSong(), which then uses that instance (message thread). False when
     // nothing was started: not a plug-in, not installed, or it failed (loadSong() reports those).
     bool preloadPlugin(const model::Device& device);
 

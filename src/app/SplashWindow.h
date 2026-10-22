@@ -1,5 +1,5 @@
 #pragma once
-// Launch splash (UI-42): a borderless, always-on-top panel drawn by gfx::brand::drawSplash. It shows while the
+// Launch splash (UI-51): a borderless, always-on-top panel drawn by gfx::brand::drawSplash. It shows while the
 // controller, the window and the first document come up, mirrors UiContext's busy task (e.g. "Starting plug-ins 3 of
 // 12"), then fades out once the document is ready.
 

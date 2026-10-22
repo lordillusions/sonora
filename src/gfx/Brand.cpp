@@ -1,5 +1,7 @@
 #include "gfx/Brand.h"
 
+#include <cstring>
+
 #include "gfx/Fonts.h"
 
 #include "include/core/SkCanvas.h"
@@ -109,7 +111,7 @@ void drawText(SkCanvas& c, std::string text, float x, float baseline, float size
     c.drawSimpleText(text.data(), text.size(), SkTextEncoding::kUTF8, x, baseline, f, p);
 }
 
-// The splash's panel (UI-42), shared by the prompts (UI-44): black, lit slightly from the top-left, rounded like a
+// The splash's panel (UI-51), shared by the prompts (UI-44): black, lit slightly from the top-left, rounded like a
 // macOS window, with a hairline border drawn last.
 SkRRect panelShape(const SkRect& bounds) { return SkRRect::MakeRectXY(bounds, 12, 12); }
 
@@ -435,6 +437,38 @@ std::vector<SkRect> promptButtonRects(const PromptState& state, float width, flo
     return rects;
 }
 
+namespace
+{
+// A prompt button: the primary is the splash's white on black, the others dark with a hairline; hover lifts, press sinks.
+void drawPanelButton(SkCanvas& canvas, const SkRect& rect, const std::string& label, bool primary, bool hot, bool down, bool focused)
+{
+    const auto rr = SkRRect::MakeRectXY(rect, 7, 7);
+    SkPaint fill;
+    fill.setAntiAlias(true);
+    if (primary)
+        fill.setColor(down ? SkColorSetRGB(0xc4, 0xc4, 0xc4) : hot ? SK_ColorWHITE : SkColorSetRGB(0xec, 0xec, 0xec));
+    else
+        fill.setColor(down ? SkColorSetRGB(0x1c, 0x1c, 0x1c) : hot ? SkColorSetRGB(0x3a, 0x3a, 0x3a) : SkColorSetRGB(0x2c, 0x2c, 0x2c));
+    canvas.drawRRect(rr, fill);
+    SkPaint edge;
+    edge.setAntiAlias(true);
+    edge.setStyle(SkPaint::kStroke_Style);
+    edge.setStrokeWidth(1);
+    edge.setColor(primary ? SkColorSetARGB(0, 0, 0, 0) : SkColorSetARGB(46, 255, 255, 255));
+    canvas.drawRRect(SkRRect::MakeRectXY(rect.makeInset(0.5f, 0.5f), 6.5f, 6.5f), edge);
+    if (focused && ! primary)
+    {
+        edge.setStrokeWidth(2);
+        edge.setColor(SkColorSetARGB(150, 255, 255, 255));
+        canvas.drawRRect(SkRRect::MakeRectXY(rect.makeOutset(2, 2), 9, 9), edge);
+    }
+    const auto f = font(promptMessageSize, true);
+    const float tw = f.measureText(label.data(), label.size(), SkTextEncoding::kUTF8);
+    drawText(canvas, label, rect.centerX() - tw / 2, rect.centerY() + promptMessageSize * 0.36f, promptMessageSize,
+             primary ? SkColorSetRGB(0x11, 0x11, 0x11) : SkColorSetRGB(0xe8, 0xe8, 0xe8), true);
+}
+} // namespace
+
 void drawPrompt(SkCanvas& canvas, float width, float height, const PromptState& state)
 {
     const SkRect bounds = SkRect::MakeWH(width, height);
@@ -472,35 +506,107 @@ void drawPrompt(SkCanvas& canvas, float width, float height, const PromptState& 
 
     // Buttons: the primary is the splash's white on black, the others dark with a hairline; hover lifts, press sinks.
     const auto rects = promptButtonRects(state, width, height);
-    const auto f = font(promptMessageSize, true);
     for (size_t i = 0; i < rects.size(); ++i)
+        drawPanelButton(canvas, rects[i], state.buttons[i].label, state.buttons[i].primary, state.hovered == (int) i,
+                        state.pressed == (int) i && state.hovered == (int) i, state.focused == (int) i);
+    canvas.restore();
+    drawPanelBorder(canvas, bounds);
+}
+
+namespace
+{
+// About window layout (COM-8), in points.
+constexpr float aboutPad = 34, aboutTop = 66;
+constexpr float aboutNameSize = 12.5f, aboutLine = 18, aboutTitleSize = 11;
+
+float aboutTextWidth(float width) { return width - 2 * aboutPad; }
+
+// Content below the header (credits, supporters) as drawn lines: (text, size, colour, bold, gap before).
+struct AboutLine { std::string text; float size; SkColor color; bool bold; float gap; };
+std::vector<AboutLine> aboutLines(const AboutState& state, float width)
+{
+    std::vector<AboutLine> lines;
+    const SkColor light = SkColorSetRGB(0xd8, 0xd8, 0xd8), dim = SkColorSetRGB(0x8e, 0x8e, 0x8e);
+    lines.push_back({state.version + "  \u00B7  Free and open source (AGPL-3.0-or-later)", 12, dim, false, 0});
+    lines.push_back({state.credit, 12.5f, light, false, 4});
+    lines.push_back({"Thank you, supporters", 14, SkColorSetRGB(0xf4, 0xf4, 0xf4), true, 26});
+    if (state.groups.empty())
+        for (const auto& line : wrapText(state.emptyText, aboutNameSize, aboutTextWidth(width)))
+            lines.push_back({line, aboutNameSize, dim, false, lines.size() == 3 ? 6.0f : 0.0f});
+    for (const auto& [title, names] : state.groups)
     {
-        const auto& b = state.buttons[i];
-        const bool hot = state.hovered == (int) i, down = state.pressed == (int) i && hot;
-        const auto rr = SkRRect::MakeRectXY(rects[i], 7, 7);
-        SkPaint fill;
-        fill.setAntiAlias(true);
-        if (b.primary)
-            fill.setColor(down ? SkColorSetRGB(0xc4, 0xc4, 0xc4) : hot ? SK_ColorWHITE : SkColorSetRGB(0xec, 0xec, 0xec));
-        else
-            fill.setColor(down ? SkColorSetRGB(0x1c, 0x1c, 0x1c) : hot ? SkColorSetRGB(0x3a, 0x3a, 0x3a) : SkColorSetRGB(0x2c, 0x2c, 0x2c));
-        canvas.drawRRect(rr, fill);
-        SkPaint edge;
-        edge.setAntiAlias(true);
-        edge.setStyle(SkPaint::kStroke_Style);
-        edge.setStrokeWidth(1);
-        edge.setColor(b.primary ? SkColorSetARGB(0, 0, 0, 0) : SkColorSetARGB(46, 255, 255, 255));
-        canvas.drawRRect(SkRRect::MakeRectXY(rects[i].makeInset(0.5f, 0.5f), 6.5f, 6.5f), edge);
-        if (state.focused == (int) i && ! b.primary)
-        {
-            edge.setStrokeWidth(2);
-            edge.setColor(SkColorSetARGB(150, 255, 255, 255));
-            canvas.drawRRect(SkRRect::MakeRectXY(rects[i].makeOutset(2, 2), 9, 9), edge);
-        }
-        const float tw = f.measureText(b.label.data(), b.label.size(), SkTextEncoding::kUTF8);
-        drawText(canvas, b.label, rects[i].centerX() - tw / 2, rects[i].centerY() + promptMessageSize * 0.36f, promptMessageSize,
-                 b.primary ? SkColorSetRGB(0x11, 0x11, 0x11) : SkColorSetRGB(0xe8, 0xe8, 0xe8), true);
+        lines.push_back({title, aboutTitleSize, dim, true, 12});
+        std::string joined;
+        for (size_t i = 0; i < names.size(); ++i) joined += (i ? "   " : "") + names[i];
+        for (const auto& line : wrapText(joined, aboutNameSize, aboutTextWidth(width))) lines.push_back({line, aboutNameSize, light, false, 0});
     }
+    return lines;
+}
+float aboutContentBottom(const AboutState& state)
+{
+    float y = aboutTop + 70;
+    for (const auto& line : aboutLines(state, aboutWidth)) y += line.gap + aboutLine;
+    return y;
+}
+} // namespace
+
+float aboutHeight(const AboutState& state) { return aboutContentBottom(state) + 26 + promptButtonH + 24; }
+
+std::array<SkRect, aboutButtonCount> aboutButtonRects(const AboutState& state, float width, float height)
+{
+    (void) state;
+    const auto f = font(promptMessageSize, true);
+    auto widthOf = [&](const char* label) {
+        return std::max(promptButtonMinW, f.measureText(label, std::strlen(label), SkTextEncoding::kUTF8) + 30);
+    };
+    std::array<SkRect, aboutButtonCount> rects;
+    const float y = height - 24 - promptButtonH;
+    float left = aboutPad, right = width - aboutPad;
+    for (int i : {AboutWebsite, AboutGitHub})
+    {
+        const float w = widthOf(aboutButtonLabels[(size_t) i]);
+        rects[(size_t) i] = SkRect::MakeXYWH(left, y, w, promptButtonH);
+        left += w + promptButtonGap;
+    }
+    for (int i : {AboutSupport, AboutClose})
+    {
+        const float w = widthOf(aboutButtonLabels[(size_t) i]);
+        rects[(size_t) i] = SkRect::MakeXYWH(right - w, y, w, promptButtonH);
+        right -= w + promptButtonGap;
+    }
+    return rects;
+}
+
+void drawAbout(SkCanvas& canvas, float width, float height, const AboutState& state)
+{
+    const SkRect bounds = SkRect::MakeWH(width, height);
+    canvas.clear(SK_ColorTRANSPARENT);
+    drawPanel(canvas, bounds);
+    canvas.save();
+    canvas.clipRRect(panelShape(bounds), true);
+    {
+        // The splash's ghost mark, top right.
+        const float h = 230;
+        const SkRect box = SkRect::MakeXYWH(width - 40 - h * markAspect, 24, h * markAspect, h);
+        SkPaint ghost;
+        const SkPoint g[2] = {{0, box.top()}, {0, box.bottom()}};
+        const SkColor gc[2] = {SkColorSetARGB(26, 255, 255, 255), SkColorSetARGB(0, 255, 255, 255)};
+        ghost.setShader(SkGradientShader::MakeLinear(g, gc, nullptr, 2, SkTileMode::kClamp));
+        drawStrokes(canvas, markStrokes(box), ghost);
+    }
+    drawWordmark(canvas, aboutPad, aboutTop, 34, SkColorSetRGB(0xf4, 0xf4, 0xf4));
+    drawText(canvas, "Music production, open.", aboutPad + 2, aboutTop + 28, 14, SkColorSetRGB(0x9a, 0x9a, 0x9a));
+    float y = aboutTop + 70;
+    for (const auto& line : aboutLines(state, width))
+    {
+        y += line.gap;
+        drawText(canvas, line.text, aboutPad + 2, y, line.size, line.color, line.bold, false, aboutTextWidth(width));
+        y += aboutLine;
+    }
+    const auto rects = aboutButtonRects(state, width, height);
+    for (int i = 0; i < aboutButtonCount; ++i)
+        drawPanelButton(canvas, rects[(size_t) i], aboutButtonLabels[(size_t) i], i == AboutSupport, state.hovered == i,
+                        state.pressed == i && state.hovered == i, false);
     canvas.restore();
     drawPanelBorder(canvas, bounds);
 }

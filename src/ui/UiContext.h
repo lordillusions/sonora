@@ -308,7 +308,7 @@ struct UiContext
     float scrollTracksY = 0.0f;  // vertical scroll (both views)
     std::string statusText = "Ready";
     std::vector<std::string> buildLog;
-    // UI-42: work the user waits for (opening a set, starting plug-ins, scans). While a task is open the status bar shows
+    // UI-51: work the user waits for (opening a set, starting plug-ins, scans). While a task is open the status bar shows
     // the newest one with an activity indicator, the launch splash mirrors it and, unless the task runs in the background
     // while the user keeps working (scans, stems), the canvas shows the busy cursor.
     struct BusyTask { int id = 0; std::string text; float progress = -1; /* 0..1, < 0 unknown */ bool background = false; };
