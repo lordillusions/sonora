@@ -95,6 +95,45 @@ so every MSVC target does too (top `CMakeLists.txt`) and no Visual C++ redistrib
 | Windows | no | SmartScreen warns "unknown publisher" until an Authenticode certificate or signing service is set up (COM-4m) |
 | Linux | no | AppImage/.deb signatures are optional; publish the `.sha256` next to them |
 
+## First signed macOS release (COM-4b)
+
+The scripts already sign inside-out with the hardened runtime and `scripts/release/Sonora.entitlements`, notarize,
+staple and sign the image. Everything in the bundle (the app, `sonora_plugin_scanner`, Sparkle's framework, XPC services,
+Autoupdate and Updater.app) is covered by `make_release.sh`. What a maintainer's Mac still needs (checked 2026-10-23:
+`security find-identity -v -p codesigning` lists 0 identities, no `sonora-notary` profile, no Sparkle key):
+
+1. **Apple Developer Program** membership (paid, yearly). Only the Account Holder can create Developer ID certificates.
+   An individual account puts the person's legal name on the certificate and in Gatekeeper's dialog; an organization
+   account needs a D-U-N-S number.
+2. **Developer ID Application** certificate in the login keychain: Xcode > Settings > Accounts > Manage Certificates >
+   "+" > Developer ID Application, or a CSR from Keychain Access uploaded at developer.apple.com. Back up the private
+   key (export a `.p12`). For the Sonora Prism package also create a **Developer ID Installer** certificate.
+   Check: `security find-identity -v -p codesigning` shows `Developer ID Application: NAME (TEAMID)`.
+3. **Notary credentials** stored as the profile the scripts use. With an app-specific password (account.apple.com >
+   Sign-In and Security) or an App Store Connect API key:
+   `xcrun notarytool store-credentials sonora-notary --apple-id APPLE_ID --team-id TEAMID` (it prompts for the
+   password). Check: `xcrun notarytool history --keychain-profile sonora-notary`. The Command Line Tools are enough
+   (`notarytool` and `stapler` are there); full Xcode is not required.
+4. **Sparkle EdDSA key** (updates): `third_party/sparkle/bin/generate_keys` once, then `generate_keys -x FILE` to an
+   offline backup. Its public key goes to `--public-key`. Losing the private key strands every installed copy.
+5. **The appcast URL**, fixed for the life of the app (for example `https://sonoradaw.com/appcast.xml`, served by the
+   site). See [UPDATES.md](UPDATES.md) "Hosting".
+6. **Build and sign**, with a new version (the published 0.1.2 image is CI's ad hoc one):
+   `scripts/release/make_release.sh --version 0.1.3 --feed-url URL --public-key KEY --download-url-prefix
+   https://github.com/lordillusions/sonora/releases/download/v0.1.3/ --sign-identity "Developer ID Application: NAME
+   (TEAMID)" --notary-profile sonora-notary`, then `make_vst3_pkg.sh` with both identities (above).
+7. **Check before uploading**: `spctl -a -vvv dist/installers/Sonora-0.1.3.dmg -t open --context
+   context:primary-signature` and, on the mounted app, `spctl -a -vvv Sonora.app` (expect `source=Notarized Developer
+   ID`) and `xcrun stapler validate`. Then download the image through a browser on another Mac or user account (so it
+   is quarantined) and open it with a double-click: no Gatekeeper warning.
+8. **Publish**: pushing the `v0.1.3` tag makes CI draft the release with its ad hoc images, including the stable names
+   the website links to. Replace both before publishing the draft:
+   `gh release upload v0.1.3 Sonora-0.1.3.dmg Sonora-macOS.dmg --clobber` (the signed image under both names), and the
+   signed `.pkg` the same way. Upload the Sparkle archive and the appcast as `make_release.sh` prints.
+
+Later: sign and notarize in CI instead (the `.p12` and an App Store Connect API key as repository secrets, a temporary
+keychain in the macOS job), so a tag alone produces the signed release.
+
 ## Verification
 
 - macOS: `make_dmg.sh` on an ad hoc signed Debug app: image verifies (`hdiutil verify`), mounts with `Sonora.app` +

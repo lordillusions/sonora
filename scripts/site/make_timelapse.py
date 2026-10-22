@@ -45,7 +45,9 @@ def storyboard():
             if tid == 23:  # the Prism opens in its own window, like a plug-in
                 add(index + 1, {}, index, 1.8, window=True)
     add(len(ORDER), {}, 9, 0.6, returns=True)
-    for beat in range(0, BARS * 4 + 1, 16):  # play it back, showing the Lead's Echo, Delay and Reverb
+    # Play it back, showing the Lead's Echo, Delay and Reverb. Stop inside the last bar: at the very end the view follows
+    # the playhead past the song and the held last frame would be an empty arrangement.
+    for beat in range(0, BARS * 4, 16):
         add(len(ORDER), {}, 9, 0.14, play=beat, returns=True)
     frames[-1] = (*frames[-1][:2], 2.5, *frames[-1][3:])
     return frames
