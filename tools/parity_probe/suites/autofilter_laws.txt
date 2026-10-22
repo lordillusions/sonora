@@ -1,0 +1,73 @@
+# DEV-22b Auto Filter 2 law probes (one variable per case).
+case src-noise sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case af-lp24 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=0 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-lp12 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=0 Filter_Slope=0 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-lp24-r05 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0.5 Filter_Type=0 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-lp24-r1 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=1 Filter_Type=0 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-hp24 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=1 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-bp24 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=2 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-notch sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=3 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-morph05 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=4 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1 Filter_Morph=0.5
+case af-dj sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=5 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1 Filter_DjControl=0.5
+case af-comb sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=100 Filter_Resonance=0.5 Filter_Type=6 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-vowel sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=7 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-osr sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0.5 Filter_Type=0 Filter_Slope=1 Filter_Circuit=1 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-ms2 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0.5 Filter_Type=0 Filter_Slope=1 Filter_Circuit=2 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-smp sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0.5 Filter_Type=0 Filter_Slope=1 Filter_Circuit=3 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-prd sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0.5 Filter_Type=0 Filter_Slope=1 Filter_Circuit=4 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case src-saw sample=saw notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case af-ms2-drive sample=saw notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=0 Filter_Slope=1 Filter_Circuit=2 Filter_Drive=0.5 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1
+case af-out05 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=0 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=0.5 SoftClipOn=false DryWet=1
+case af-softclip sample=saw notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=18000 Filter_Resonance=0 Filter_Type=0 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=true DryWet=1
+case af-lfo sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=0 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0.5 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1 Lfo_Waveform=0 Lfo_TimeMode=0 Lfo_Frequency=1
+case af-lfo-sync sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=0 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0.5 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=1 Lfo_Waveform=0 Lfo_TimeMode=2
+case src-burst sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case af-env sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=0 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0.5 Output=1 SoftClipOn=false DryWet=1
+case af-wet05 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Auto Filter.adv" Filter_Frequency=1000 Filter_Resonance=0 Filter_Type=0 Filter_Slope=1 Filter_Circuit=0 Filter_Drive=0 Lfo_Amount=0 Envelope_Amount=0 Output=1 SoftClipOn=false DryWet=0.5

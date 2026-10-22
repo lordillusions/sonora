@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Features · Sonora DAW</title>
+<meta name="description" content="What Sonora can do today: real-time collaboration, a built-in assistant and MCP control, Sonora Prism and Sonora Resynth, recording, editing, mixing, plug-ins and controllers.">
+<link rel="canonical" href="https://sonoradaw.com/features.html">
+<meta name="theme-color" content="#0b0b0c">
+<meta name="color-scheme" content="dark">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Sonora DAW">
+<meta property="og:url" content="https://sonoradaw.com/features.html">
+<meta property="og:title" content="Features · Sonora DAW">
+<meta property="og:description" content="What Sonora can do today: real-time collaboration, a built-in assistant and MCP control, Sonora Prism and Sonora Resynth, recording, editing, mixing, plug-ins and controllers.">
+<meta property="og:image" content="https://sonoradaw.com/assets/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Sonora wordmark with the line: Free, open-source DAW for macOS. Alpha.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/brand/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/brand/apple-touch-icon.png">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="alpha-bar" role="note" aria-label="Release status">
+  <div class="wrap">
+    <span class="badge badge-alpha">Alpha</span>
+    <span>Sonora is very early software and it will have bugs. Save often and keep backups.</span>
+    <a href="community.html">Help us make it better</a>
+  </div>
+</div>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Sonora home">
+      <img class="mark" src="assets/brand/icon.svg" alt="" width="30" height="30">
+      <img class="word" src="assets/brand/wordmark-white.svg" alt="Sonora" width="80" height="17">
+    </a>
+    <button class="nav-toggle" aria-expanded="false" aria-controls="nav">Menu</button>
+    <nav class="nav" id="nav" aria-label="Main">
+      <a href="features.html" aria-current="page">Features</a>
+      <a href="compatibility.html">Compatibility</a>
+      <a href="download.html">Download</a>
+      <a href="faq.html">FAQ</a>
+      <a href="about.html">About</a>
+      <a href="community.html">Community</a>
+      <a class="nav-gh" href="https://github.com/lordillusions/sonora" aria-label="Sonora source code on GitHub"><svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <a class="btn btn-primary btn-small" href="download.html">Download the alpha</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero page-hero">
+  <div class="wrap">
+    <span class="eyebrow">Features</span>
+    <h1>A complete studio, growing fast.</h1>
+    <p class="lede">Record, edit, mix and export, with a few things you won't find elsewhere. This page lists what works today in the alpha. Some parts are rough around the edges, and we say so where it matters.</p>
+    <div class="toc" aria-label="On this page">
+      <a href="#collab">Collaboration</a><a href="#agent">Assistant and agents</a><a href="#instruments">Instruments</a>
+      <a href="#requests">Producer requests</a><a href="#views">Session and Arrangement</a><a href="#editing">Editing</a>
+      <a href="#recording">Recording</a><a href="#audio">Audio</a><a href="#devices">Devices</a>
+      <a href="#plugins">Plug-ins</a><a href="#mixing">Mixing and export</a><a href="#controllers">Controllers</a>
+      <a href="#workflow">Your workflow</a><a href="#updates">Updates</a>
+    </div>
+  </div>
+</section>
+
+<section id="collab">
+  <div class="wrap">
+    <div class="feature wide">
+      <div>
+        <span class="eyebrow">Collaboration <span class="badge badge-soft">New</span></span>
+        <h2>One project, several producers, at the same time.</h2>
+        <p class="muted">Share a session from the File menu or the people button in the control bar. Guests join with an invite link, or find your session on the local network and ask to join.</p>
+      </div>
+      <div>
+        <ul>
+          <li><strong>Live presence:</strong> everyone's pointer, selected clip and time selection in the Arrangement, their column in the Session view, and their position in the piano roll.</li>
+          <li><strong>Shared transport</strong> that starts together, with late joiners catching up. Each guest can switch it off.</li>
+          <li><strong>Mixer and device moves</strong> show up for everyone as they happen.</li>
+          <li><strong>Samples are sent</strong> to guests automatically and checked before use. A guest can save a complete copy.</li>
+          <li><strong>Per-person undo</strong>, so your undo never removes someone else's work. Conflicting edits are resolved, and you're told when it happens.</li>
+          <li><strong>Roles and safety:</strong> host-approved join requests, Editor or Listener roles, a four-word safety code and Remove.</li>
+          <li><strong>Local network or internet:</strong> peer-to-peer connections, with an open-source relay server for internet sessions.</li>
+        </ul>
+        <p class="small faint">Still to come: a public relay (today you run your own), voice chat, sharing recordings made by guests, and smoother sync timing.</p>
+      </div>
+      <figure class="shot"><img src="assets/img/collab-presence.webp" width="2880" height="1325" alt="Arrangement view during a shared session: avatars in the control bar, and other people's name tags and cursors on the tracks." loading="lazy"></figure>
+    </div>
+  </div>
+</section>
+
+<section id="agent">
+  <div class="wrap">
+    <div class="feature">
+      <div>
+        <span class="eyebrow">Assistant and agents</span>
+        <h2>One command service, two ways in.</h2>
+        <p class="muted">The built-in assistant and outside agents use the same set of checked operations. Nothing reaches into your project behind your back.</p>
+        <ul>
+          <li><strong>Built-in assistant</strong> with OpenAI, Anthropic, Gemini, DeepSeek, GLM, OpenRouter or a custom compatible endpoint. You pay your provider directly; the key is stored in the macOS Keychain.</li>
+          <li><strong>MCP control:</strong> Claude, Codex and other MCP clients attach to one open project, after you allow it.</li>
+          <li><strong>What they can do:</strong> inspect the project, add, edit and delete MIDI notes, insert and remove devices, and change native, rack and VST3 parameters.</li>
+          <li><strong>Guard rails:</strong> every change is checked against the current project, reported with a result, and can be undone. Access ends when you switch projects or quit.</li>
+        </ul>
+        <p class="small faint">Connecting an MCP client is a developer setup for now (Node.js and the bridge from the repository). Export, recording and some track operations aren't exposed to agents yet.</p>
+      </div>
+      <figure class="shot tall"><img src="assets/img/assistant.webp" width="840" height="1560" alt="Agent Control with a configured assistant, a prompt box, Run and Undo agent edit." loading="lazy"></figure>
+    </div>
+  </div>
+</section>
+
+<section id="instruments">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Instruments</span>
+      <h2>Sonora's own instruments.</h2>
+      <p class="lede">Original instruments with their own sound engines, included for free.</p>
+    </div>
+    <div class="feature wide">
+      <div>
+        <h3>Sonora Prism</h3>
+        <p class="muted">A powerful wavetable synth with its own sound engine, built for big leads, basses and pads. It opens in its own window, like a plug-in. It's also available as a separate VST3 plug-in for Apple silicon Macs, so you can try it in other VST3 hosts.</p>
+      </div>
+      <div>
+        <ul>
+          <li><strong>Oscillators:</strong> three wavetable oscillators with two warps each, sub oscillator and noise; import your own wavetables and samples.</li>
+          <li><strong>Shaping:</strong> two filters, four envelopes, ten LFOs, 64 modulation routes and eight macros.</li>
+          <li><strong>Hands-on:</strong> drag an envelope, LFO or macro onto a knob to modulate it, and watch the modulation move live.</li>
+          <li><strong>Voices:</strong> up to 32 voices with 16-voice unison, mono and legato modes, glide.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="assets/img/prism.webp" width="1440" height="900" alt="Sonora Prism window with oscillators, filters, macros, envelopes, LFOs and a keyboard." loading="lazy"></figure>
+    </div>
+    <div class="feature wide">
+      <div>
+        <h3>Sonora Resynth</h3>
+        <p class="muted">From a recording to a playable instrument. Resynth analyzes a bass line or melody and rebuilds its sound from up to 96 harmonics and modeled noise. It doesn't play back the recording: it synthesizes the sound, so you can play new notes and reshape it.</p>
+      </div>
+      <div>
+        <ul>
+          <li><strong>Stem to MIDI:</strong> Create &rsaquo; Resynthesize to New MIDI Track adds editable MIDI and the instrument in one step, in one undo.</li>
+          <li><strong>Or load audio</strong> straight into the instrument and create the MIDI from there.</li>
+          <li><strong>Synth, Hybrid or Reference</strong> playback, to compare with the source.</li>
+          <li><strong>Sound design:</strong> drag single harmonics, shape four noise bands, filter, two envelopes, an LFO, and mono, legato or 8-voice poly.</li>
+          <li><strong>Keep it or drop it:</strong> remove the recording and keep only the sound model.</li>
+        </ul>
+        <p class="small faint">Native in Sonora only (no plug-in version yet). Best with dry parts, one note at a time, up to 30 seconds. Polyphonic material, heavy reverb or distortion can produce wrong notes. Runs locally, with no cloud service.</p>
+      </div>
+      <figure class="shot"><img src="assets/img/resynth.webp" width="2199" height="801" alt="Sonora Resynth panel with harmonic spectrum, note regions, generated cycle and sound controls." loading="lazy"></figure>
+    </div>
+    <div class="grid mt">
+      <div class="card"><span class="tag">Also included</span><h3>More instruments</h3><ul><li>Sonora FM and Sonora Sampler</li><li>Sonora Vector, a compact two-oscillator wavetable synth</li><li>Simpler and Impulse for samples and drums</li><li>Drum, Instrument and Audio Effect Racks with macros</li></ul></div>
+      <div class="card"><span class="tag">Modulation</span><h3>LFOs for anything</h3><ul><li>Sonora LFO and Sonora Curve LFO, mappable to any parameter</li><li>Arpeggiator, Note Length and Velocity MIDI effects</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<section id="requests">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Producer requests</span>
+      <h2>Long-requested, now built in.</h2>
+      <p class="lede">Features producers have asked for in forums for years.</p>
+    </div>
+    <div class="grid grid-3">
+      <div class="card"><h3>Capture Audio</h3><p>Sonora keeps the last 60 seconds of up to eight inputs. Press Capture and the passage you just played becomes a clip.</p></div>
+      <div class="card"><h3>Linked MIDI clips</h3><p>Duplicate as Linked, then edit one copy and every linked copy follows, in a single undo step.</p></div>
+      <div class="card"><h3>Hide and deactivate tracks</h3><p>Hidden tracks get out of the way. Deactivated tracks load no plug-ins and use no CPU.</p></div>
+      <div class="card"><h3>Strip Silence</h3><p>Cut an audio clip into its sounding parts. Option-Left and Option-Right jump between transients.</p></div>
+      <div class="card"><h3>Rebindable shortcuts</h3><p>Change the key for any menu command in Settings &rsaquo; Keyboard Shortcuts.</p></div>
+      <div class="card"><h3>Audio to MIDI and stems</h3><p>Convert melody, harmony or drums to MIDI, slice audio to a MIDI track, or split a clip into stems with a separator you've installed (audio-separator or Demucs).</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="views">
+  <div class="wrap">
+    <div class="feature wide">
+      <div>
+        <span class="eyebrow">Session and Arrangement</span>
+        <h2>Both views, linked the way you know them.</h2>
+      </div>
+      <div>
+        <ul>
+          <li><strong>Session view:</strong> clip launching, scenes, stop buttons, groups that fold, and the mixer with sends and routing.</li>
+          <li><strong>Arrangement view:</strong> grid and zoom, loop brace, locators, multi-track selection and dragging, automation lanes.</li>
+          <li><strong>Track groups</strong> with automatic numbering, folding and framing.</li>
+          <li><strong>Return tracks:</strong> insert new ones with Option-Cmd-T.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="assets/img/session-mixer.webp" width="2000" height="918" alt="Session view with clip slots, scenes, routing, sends and the mixer." loading="lazy"></figure>
+    </div>
+  </div>
+</section>
+
+<section id="editing">
+  <div class="wrap">
+    <div class="feature wide">
+      <div>
+        <span class="eyebrow">Editing</span>
+        <h2>Fast hands, small tools.</h2>
+      </div>
+      <div>
+        <ul>
+          <li><strong>MIDI editor</strong> with scale highlighting, folding, velocity lane and MPE view. Fit to Scale, Legato, Reverse, Invert, Humanize, &times;2 and &divide;2.</li>
+          <li><strong>Audio editing:</strong> fades with curves, split, consolidate, copy-drag, and a sample view with warp markers.</li>
+          <li><strong>Automation</strong> with curves, plus clip envelopes for mixer, device and MIDI controller parameters.</li>
+          <li><strong>Freeze and bounce:</strong> freeze a heavy track, bounce in place or to a new track.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="assets/img/midi-editor.webp" width="2000" height="745" alt="MIDI editor with scale highlighting, clip properties and Fit to Scale, Legato and Humanize tools." loading="lazy"></figure>
+    </div>
+    <div class="feature wide">
+      <div>
+        <h3>Automation that reads like music</h3>
+        <p class="muted">Draw breakpoints, bend curves, and pick any mixer or device parameter from the lane choosers.</p>
+      </div>
+      <figure class="shot"><img src="assets/img/automation.webp" width="2000" height="389" alt="A track volume automation lane with a curved segment." loading="lazy"></figure>
+    </div>
+  </div>
+</section>
+
+<section id="recording">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Recording</span>
+      <h2>Catch the take, even the one you missed.</h2>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>Audio and MIDI recording</h3><p>Record in Arrangement or Session, with input monitoring, count-in, punch in and out, and a metronome.</p></div>
+      <div class="card"><h3>Take lanes and comping</h3><p>Loop recording builds take lanes. Pick the best parts of each take into one comp.</p></div>
+      <div class="card"><h3>Capture MIDI and Capture Audio</h3><p>Sonora keeps listening while the transport is stopped, for MIDI and for audio.</p></div>
+      <div class="card"><h3>Session overdub</h3><p>Overdub into looping Session clips, and record each track independently.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="audio">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Audio</span>
+      <h2>A real-time engine of its own.</h2>
+      <p class="lede">The audio engine is written for low-latency playback: the audio thread never allocates memory, takes a lock or writes a log line.</p>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>Time-stretching</h3><p>Beats, Tones, Texture, Complex and Complex Pro warp modes, all written for Sonora.</p></div>
+      <div class="card"><h3>Tempo detection</h3><p>Drop a loop in and Sonora detects its tempo so it fits your project.</p></div>
+      <div class="card"><h3>Plug-in delay compensation</h3><p>Every path stays in time, through groups and returns.</p></div>
+      <div class="card"><h3>File formats</h3><p>WAV, AIFF, FLAC, Ogg and MP3, and on macOS also M4A/AAC/ALAC and CAF.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="devices">
+  <div class="wrap">
+    <div class="feature stack">
+      <div class="section-head">
+        <span class="eyebrow">Devices</span>
+        <h2>Native devices, original code.</h2>
+        <p class="lede">Sonora brings its own versions of the effects producers use most, written from scratch, with faces that follow a layout you may know.</p>
+      </div>
+      <figure class="shot"><img src="assets/img/fx-chain.webp" width="2834" height="398" alt="A device chain with Sonora Echo, Delay and Reverb, drawn with familiar device faces." loading="lazy"></figure>
+      <p class="shot-caption">Sonora Echo, Delay and Reverb.</p>
+      <figure class="shot"><img src="assets/img/curve-lfo.webp" width="2310" height="395" alt="Sonora Curve LFO: a drawn curve modulating volume, pan, cutoff, resonance and variation, with sync, swing and depth controls." loading="lazy"></figure>
+      <p class="shot-caption">Sonora Curve LFO: draw a curve and send it to volume, pan or the filter.</p>
+      <figure class="shot"><img src="assets/img/instrument-rack.webp" width="2400" height="372" alt="Native Instrument Rack with macros and chain list next to a Simpler." loading="lazy"></figure>
+    </div>
+    <div class="grid mt">
+      <div class="card"><span class="tag">Audio effects</span><h3>Shape the sound</h3><ul><li>EQ Eight, Utility, Compressor, Limiter</li><li>Reverb, Delay, Echo</li><li>Auto Filter, Auto Pan, Redux, Gate</li><li>Tuner and a loudness meter</li></ul></div>
+      <div class="card"><span class="tag">Instruments</span><h3>Play the parts</h3><ul><li>Sonora Prism, Sonora Resynth</li><li>Sonora FM, Sonora Sampler, Sonora Vector</li><li>Simpler, Impulse and Racks</li></ul></div>
+      <div class="card"><span class="tag">MIDI effects and modulators</span><h3>Move the notes</h3><ul><li>Arpeggiator, Note Length, Velocity</li><li>Sonora LFO and Curve LFO</li></ul></div>
+    </div>
+    <p class="table-note">Native devices are Sonora's own implementations and may not sound identical to devices of the same name elsewhere. See <a href="compatibility.html#devices">Compatibility</a>.</p>
+  </div>
+</section>
+
+<section id="plugins">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Plug-ins</span>
+      <h2>Your plug-ins, your sounds.</h2>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>VST3 and Audio Units</h3><p>Host your plug-ins, with their state saved in the project.</p></div>
+      <div class="card"><h3>Safe scanning</h3><p>Plug-ins are scanned in a separate process with a timeout. One that crashes or hangs is blocked instead of taking the app down.</p></div>
+      <div class="card"><h3>A browser that sorts itself</h3><p>Browse plug-ins by vendor, format and tags, and drag them onto tracks.</p></div>
+      <div class="card"><h3>Host transport</h3><p>Plug-ins see tempo, position and play state, so synced arps and delays lock to the song.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="mixing">
+  <div class="wrap">
+    <div class="feature wide">
+      <div>
+        <span class="eyebrow">Mixing and export</span>
+        <h2>Finish the track in the same app.</h2>
+      </div>
+      <div>
+        <ul>
+          <li><strong>Monitor tab:</strong> integrated, short-term and momentary LUFS, loudness range, true peak, spectrum, oscilloscope, correlation and goniometer.</li>
+          <li><strong>Export Audio:</strong> render the main output, one track or all stems to WAV, AIFF or FLAC, with normalize, dither and a loudness report.</li>
+          <li><strong>Solo</strong> including exclusive solo and solo through groups and returns.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="assets/img/monitor.webp" width="2400" height="332" alt="Monitor tab with LUFS readouts, spectrum curve, correlation meter and goniometer." loading="lazy"></figure>
+    </div>
+  </div>
+</section>
+
+<section id="controllers">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">MIDI controllers</span>
+      <h2>Plug in and play.</h2>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>MIDI learn</h3><p>Enter MIDI map mode, click a control and move a knob. Works for mixer, device and clip controls.</p></div>
+      <div class="card"><h3>Sample-accurate input</h3><p>Incoming notes are timed to the sample, not to the audio buffer.</p></div>
+      <div class="card"><h3>MIDI out and clock</h3><p>Drive hardware synths and sync drum machines to Sonora's tempo.</p></div>
+      <div class="card"><h3>Computer keyboard</h3><p>No controller with you? Play notes from your Mac's keyboard.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="workflow">
+  <div class="wrap">
+    <div class="feature flip">
+      <div>
+        <span class="eyebrow">Your workflow</span>
+        <h2>Make it yours.</h2>
+        <ul>
+          <li><strong>Keyboard shortcuts:</strong> rebind any menu command, with conflicts moved for you.</li>
+          <li><strong>Themes:</strong> a light default theme, and you can load <code>.ask</code> theme files.</li>
+          <li><strong>Resizable layout</strong> with UI zoom, and browser, detail and mixer sections you can show or hide.</li>
+          <li><strong>GPU drawing</strong> with Metal on macOS.</li>
+          <li><strong>Offline by default:</strong> no account, no telemetry. Your projects stay on your Mac.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="assets/img/settings-shortcuts.webp" width="1280" height="1118" alt="Settings window showing Keyboard Shortcuts with rebound commands." loading="lazy"></figure>
+    </div>
+  </div>
+</section>
+
+<section id="updates">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Updates</span>
+      <h2>Keeping up is easy.</h2>
+      <p class="lede">On the Mac, Sonora updates itself with Sparkle, the open-source updater many Mac apps use. Delta updates download only what changed; if a delta can't be used, Sonora downloads the full update instead. Updates are signed and checked, and Sonora never restarts in the middle of a take. <a href="download.html#updates">More about updates</a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="wrap">
+    <h2>Try it, break it, tell us.</h2>
+    <p class="lede">Sonora is in alpha. Your bug reports decide what gets fixed first.</p>
+    <div class="btn-row"><a class="btn btn-primary" href="download.html">Download the alpha</a><a class="btn btn-ghost" href="community.html">Join the community</a></div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <img src="assets/brand/wordmark-white.svg" alt="Sonora" width="75" height="16">
+        <p>Sonora DAW. Music production, open.<br>Free and open source, made with the community.</p>
+      </div>
+      <div>
+        <h2 class="footer-h">Product</h2>
+        <ul><li><a href="features.html">Features</a></li><li><a href="compatibility.html">Compatibility</a></li><li><a href="download.html">Download</a></li><li><a href="faq.html">FAQ</a></li></ul>
+      </div>
+      <div>
+        <h2 class="footer-h">Project</h2>
+        <ul><li><a href="about.html">About</a></li><li><a href="community.html">Community</a></li><li><a href="https://github.com/lordillusions/sonora">Source code</a></li><li><a href="https://github.com/lordillusions/sonora/blob/main/LICENSE">License (AGPL-3.0)</a></li></ul>
+      </div>
+      <div>
+        <h2 class="footer-h">Help</h2>
+        <ul><li><a href="https://github.com/lordillusions/sonora/issues">Report a bug</a></li><li><a href="https://github.com/lordillusions/sonora/discussions">Discussions</a></li><li><a href="download.html#build">Build from source</a></li></ul>
+      </div>
+    </div>
+    <p class="legal">&copy; <span id="year">2026</span> the Sonora contributors. Sonora is free software under the GNU AGPL-3.0-or-later.<br>
+    Ableton and Live are trademarks of Ableton AG. Sonora is an independent project, not affiliated with or endorsed by Ableton. VST is a trademark of Steinberg Media Technologies GmbH.</p>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,88 @@
+# COM-7 cross-platform qualification (docs/PLATFORMS.md).
+#   linux:   Ubuntu 24.04 x64 in ci/linux/Dockerfile — headless + Skia UI build, sonora_tests under Xvfb.
+#   windows: windows-latest + MSVC x64 — headless build (no Skia UI yet), sonora_tests.
+# macOS arm64 is built and tested locally, not in CI.
+name: platforms
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platforms-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the container
+        run: docker build -t sonora-linux ci/linux
+
+      - name: Build headless + UI and run sonora_tests
+        run: |
+          docker run --rm -v "$PWD":/src -w /src \
+            -e SONORA_THIRD_PARTY_DIR=/src/third_party \
+            -e SONORA_BUILD_ROOT=/src \
+            -e SONORA_JOBS=4 \
+            sonora-linux ci/linux/build.sh all
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-logs
+          path: |
+            build-linux-*/build.log
+            build-linux-*/tests.log
+          if-no-files-found: ignore
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      # Keep LF: bash scripts and byte-exact test fixtures break with the runner's default autocrlf=true.
+      - name: Disable CRLF conversion
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - uses: actions/checkout@v4
+
+      # cl.exe, link.exe and Visual Studio's bundled CMake/Ninja on PATH for the following steps.
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Fetch JUCE (no Skia for the headless build)
+        shell: bash
+        run: SONORA_FETCH_SKIA=0 scripts/bootstrap.sh
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSONORA_WITH_UI=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run sonora_tests
+        shell: bash
+        run: |
+          set -o pipefail
+          build/tests/sonora_tests.exe | tee build/tests.log
+          grep -q " 0 failed checks" build/tests.log
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-logs
+          path: build/tests.log
+          if-no-files-found: ignore

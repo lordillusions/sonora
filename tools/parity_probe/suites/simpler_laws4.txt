@@ -1,0 +1,151 @@
+# DEV-22a Simpler law probes, round 4 (generated layout): filter circuits, resonance, drive, LFO/velocity depth.
+case noise-ref sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/IsOn=false
+case lp-osr-r0 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case lp-osr-r0.25 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.25 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case lp-osr-r0.75 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.75 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case lp-osr-r1 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=1 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case lp-osr-r1.25 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=1.25 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case lp-ms2-r0 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case lp-ms2-r0.25 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.25 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case lp-ms2-r0.75 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.75 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case lp-ms2-r1 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=1 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case lp-ms2-r1.25 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=1.25 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case lp-smp-r0 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case lp-smp-r0.25 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.25 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case lp-smp-r0.75 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.75 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case lp-smp-r1 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=1 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case lp-smp-r1.25 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=1.25 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case lp-prd-r0 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case lp-prd-r0.25 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.25 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case lp-prd-r0.75 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.75 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case lp-prd-r1 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=1 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case lp-prd-r1.25 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=1.25 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case lp12-osr-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/Slope=false Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case hp-osr-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Type=1 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case lp-osr-200-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=200 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case lp-osr-5000-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case lp12-ms2-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/Slope=false Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case hp-ms2-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Type=1 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case lp-ms2-200-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=200 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case lp-ms2-5000-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case lp12-smp-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/Slope=false Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case hp-smp-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Type=1 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case lp-smp-200-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=200 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case lp-smp-5000-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case lp12-prd-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/Slope=false Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case hp-prd-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Type=1 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case lp-prd-200-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=200 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case lp-prd-5000-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case lp-clean-drive12 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=12
+case lp-osr-drive6 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=6 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case lp-osr-drive12 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=12 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case lp-osr-drive24 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=24 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case lp-ms2-drive6 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=6 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case lp-ms2-drive12 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=12 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case lp-ms2-drive24 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=24 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case lp-smp-drive6 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=6 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case lp-smp-drive12 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=12 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case lp-smp-drive24 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=24 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case lp-prd-drive6 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=6 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case lp-prd-drive12 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=12 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case lp-prd-drive24 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Drive=24 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case sine-osr-drive0 sample=tone220 notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Drive=0 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case sine-osr-drive12 sample=tone220 notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Drive=12 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case sine-osr-drive24 sample=tone220 notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Drive=24 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1
+case sine-ms2-drive0 sample=tone220 notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Drive=0 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case sine-ms2-drive12 sample=tone220 notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Drive=12 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case sine-ms2-drive24 sample=tone220 notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Drive=24 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2
+case sine-smp-drive0 sample=tone220 notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Drive=0 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case sine-smp-drive12 sample=tone220 notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Drive=12 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case sine-smp-drive24 sample=tone220 notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Drive=24 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3
+case sine-prd-drive0 sample=tone220 notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Drive=0 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case sine-prd-drive12 sample=tone220 notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Drive=12 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case sine-prd-drive24 sample=tone220 notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=5000 Filter/Slot/Value/SimplerFilter/Drive=24 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4
+case bp-osr-r0 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Type=2 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0 Filter/Slot/Value/SimplerFilter/CircuitBpNoMo=1
+case bp-osr-r1 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Type=2 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=1 Filter/Slot/Value/SimplerFilter/CircuitBpNoMo=1
+case notch-osr-r0.5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Type=3 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitBpNoMo=1
+case lfo-filter-12 sample=saw notes=single
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=800 Filter/Slot/Value/SimplerFilter/ModByLfo=12 Lfo/Slot/Value/SimplerLfo/Frequency=2
+case filtervel-half sample=noise notes=vsweep
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/ModByVelocity=0.5
+case lfo-offset-90 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/IsOn=false VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/Frequency=2 Lfo/Slot/Value/SimplerLfo/Offset=90
+case lfo-offset-180 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/IsOn=false VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/Frequency=2 Lfo/Slot/Value/SimplerLfo/Offset=180
+case lfo-key-0.5 sample=sine notes=keys
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/IsOn=false VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/Frequency=2 Lfo/Slot/Value/SimplerLfo/FrequencyKeyScale=0.5
+case lfo-key-1 sample=sine notes=keys
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/IsOn=false VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/Frequency=2 Lfo/Slot/Value/SimplerLfo/FrequencyKeyScale=1
+case amp-loop-mode1 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/IsOn=false VolumeAndPan/Envelope/AttackTime=50 VolumeAndPan/Envelope/DecayTime=200 VolumeAndPan/Envelope/SustainLevel=0.3 VolumeAndPan/Envelope/DecaySlope=0 VolumeAndPan/Envelope/LoopMode=1 VolumeAndPan/Envelope/LoopTime=100
+case amp-loop-mode2 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/IsOn=false VolumeAndPan/Envelope/AttackTime=50 VolumeAndPan/Envelope/DecayTime=200 VolumeAndPan/Envelope/SustainLevel=0.3 VolumeAndPan/Envelope/DecaySlope=0 VolumeAndPan/Envelope/LoopMode=2 VolumeAndPan/Envelope/LoopTime=100
+case amp-loop-mode3 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/IsOn=false VolumeAndPan/Envelope/AttackTime=50 VolumeAndPan/Envelope/DecayTime=200 VolumeAndPan/Envelope/SustainLevel=0.3 VolumeAndPan/Envelope/DecaySlope=0 VolumeAndPan/Envelope/LoopMode=3 VolumeAndPan/Envelope/LoopTime=100
+case amp-loop-mode4 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/IsOn=false VolumeAndPan/Envelope/AttackTime=50 VolumeAndPan/Envelope/DecayTime=200 VolumeAndPan/Envelope/SustainLevel=0.3 VolumeAndPan/Envelope/DecaySlope=0 VolumeAndPan/Envelope/LoopMode=4 VolumeAndPan/Envelope/LoopTime=100

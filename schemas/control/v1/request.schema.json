@@ -1,0 +1,839 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sonora control request 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "operation"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "1.0"
+    },
+    "operation": {
+      "enum": [
+        "project.inspect",
+        "capabilities.get",
+        "clips.get",
+        "devices.parameters",
+        "edits.apply",
+        "workflow.serum_supersaw",
+        "history.undo",
+        "devices.parameters.set",
+        "devices.catalog",
+        "devices.insert",
+        "devices.remove"
+      ]
+    },
+    "target": {
+      "$ref": "#/$defs/target"
+    },
+    "expectedRevision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "arguments": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "enum": [
+              "clips.get",
+              "devices.parameters",
+              "edits.apply",
+              "workflow.serum_supersaw",
+              "history.undo",
+              "devices.parameters.set",
+              "devices.catalog",
+              "devices.insert",
+              "devices.remove"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "target",
+          "arguments"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "enum": [
+              "edits.apply",
+              "workflow.serum_supersaw",
+              "history.undo",
+              "devices.parameters.set",
+              "devices.insert",
+              "devices.remove"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "expectedRevision",
+          "idempotencyKey"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "clips.get"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "$ref": "#/$defs/clipQuery"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "devices.parameters"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "$ref": "#/$defs/deviceQuery"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "history.undo"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "$ref": "#/$defs/undo"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "workflow.serum_supersaw"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "$ref": "#/$defs/serum"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "edits.apply"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "$ref": "#/$defs/batch"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "devices.parameters.set"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "$ref": "#/$defs/parameterBatch"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "devices.catalog"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "$ref": "#/$defs/catalogQuery"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "devices.insert"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "$ref": "#/$defs/deviceInsert"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "devices.remove"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "$ref": "#/$defs/deviceQuery"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000000
+    },
+    "beat": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instanceId",
+        "documentId"
+      ],
+      "properties": {
+        "instanceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "clipQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trackId",
+        "clipId"
+      ],
+      "properties": {
+        "trackId": {
+          "$ref": "#/$defs/id"
+        },
+        "clipId": {
+          "$ref": "#/$defs/id"
+        },
+        "scene": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "laneId": {
+          "$ref": "#/$defs/id"
+        },
+        "offset": {
+          "$ref": "#/$defs/id"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        }
+      },
+      "not": {
+        "required": [
+          "scene",
+          "laneId"
+        ]
+      }
+    },
+    "deviceQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trackId",
+        "deviceId"
+      ],
+      "properties": {
+        "trackId": {
+          "$ref": "#/$defs/id"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "undo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "undoToken"
+      ],
+      "properties": {
+        "undoToken": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "serum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "mode",
+        "bars",
+        "startBeat"
+      ],
+      "properties": {
+        "root": {
+          "const": "D#"
+        },
+        "mode": {
+          "const": "minor"
+        },
+        "bars": {
+          "const": 4
+        },
+        "startBeat": {
+          "$ref": "#/$defs/beat"
+        }
+      }
+    },
+    "batch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commands"
+      ],
+      "properties": {
+        "commands": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/edit"
+          }
+        }
+      }
+    },
+    "edit": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "bpm"
+          ],
+          "properties": {
+            "type": {
+              "const": "tempo.set"
+            },
+            "bpm": {
+              "type": "number",
+              "minimum": 20,
+              "maximum": 999
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trackId",
+            "gainDb"
+          ],
+          "properties": {
+            "type": {
+              "const": "track.set_gain"
+            },
+            "trackId": {
+              "$ref": "#/$defs/id"
+            },
+            "gainDb": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 6
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trackId",
+            "clipId",
+            "destinationBeat"
+          ],
+          "properties": {
+            "type": {
+              "const": "clip.duplicate"
+            },
+            "trackId": {
+              "$ref": "#/$defs/id"
+            },
+            "clipId": {
+              "$ref": "#/$defs/id"
+            },
+            "destinationBeat": {
+              "$ref": "#/$defs/beat"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trackId",
+            "clipId",
+            "notes"
+          ],
+          "not": {
+            "required": [
+              "scene",
+              "laneId"
+            ]
+          },
+          "properties": {
+            "trackId": {
+              "$ref": "#/$defs/id"
+            },
+            "clipId": {
+              "$ref": "#/$defs/id"
+            },
+            "scene": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "laneId": {
+              "$ref": "#/$defs/id"
+            },
+            "type": {
+              "const": "notes.add"
+            },
+            "notes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/note"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trackId",
+            "clipId",
+            "notes"
+          ],
+          "not": {
+            "required": [
+              "scene",
+              "laneId"
+            ]
+          },
+          "properties": {
+            "trackId": {
+              "$ref": "#/$defs/id"
+            },
+            "clipId": {
+              "$ref": "#/$defs/id"
+            },
+            "scene": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "laneId": {
+              "$ref": "#/$defs/id"
+            },
+            "type": {
+              "const": "notes.replace"
+            },
+            "notes": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/note"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trackId",
+            "clipId",
+            "updates"
+          ],
+          "not": {
+            "required": [
+              "scene",
+              "laneId"
+            ]
+          },
+          "properties": {
+            "trackId": {
+              "$ref": "#/$defs/id"
+            },
+            "clipId": {
+              "$ref": "#/$defs/id"
+            },
+            "scene": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "laneId": {
+              "$ref": "#/$defs/id"
+            },
+            "type": {
+              "const": "notes.update"
+            },
+            "updates": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/noteUpdate"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trackId",
+            "clipId",
+            "noteIndices"
+          ],
+          "not": {
+            "required": [
+              "scene",
+              "laneId"
+            ]
+          },
+          "properties": {
+            "trackId": {
+              "$ref": "#/$defs/id"
+            },
+            "clipId": {
+              "$ref": "#/$defs/id"
+            },
+            "scene": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "laneId": {
+              "$ref": "#/$defs/id"
+            },
+            "type": {
+              "const": "notes.delete"
+            },
+            "noteIndices": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/id"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "note": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pitch",
+        "startBeat",
+        "durationBeats",
+        "velocity"
+      ],
+      "properties": {
+        "pitch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "startBeat": {
+          "$ref": "#/$defs/beat"
+        },
+        "durationBeats": {
+          "type": "number",
+          "minimum": 1e-06,
+          "maximum": 1000000
+        },
+        "velocity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "releaseVelocity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "probability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "velocityDeviation": {
+          "type": "number",
+          "minimum": -127,
+          "maximum": 127
+        }
+      }
+    },
+    "noteUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 2,
+      "required": [
+        "noteIndex"
+      ],
+      "properties": {
+        "pitch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "startBeat": {
+          "$ref": "#/$defs/beat"
+        },
+        "durationBeats": {
+          "type": "number",
+          "minimum": 1e-06,
+          "maximum": 1000000
+        },
+        "velocity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "releaseVelocity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "probability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "velocityDeviation": {
+          "type": "number",
+          "minimum": -127,
+          "maximum": 127
+        },
+        "noteIndex": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "parameterWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parameterId",
+        "name"
+      ],
+      "properties": {
+        "parameterId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "normalized": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "value": {
+          "type": "number",
+          "minimum": -1000000000000.0,
+          "maximum": 1000000000000.0
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "normalized"
+          ],
+          "not": {
+            "required": [
+              "value"
+            ]
+          }
+        },
+        {
+          "required": [
+            "value"
+          ],
+          "not": {
+            "required": [
+              "normalized"
+            ]
+          }
+        }
+      ]
+    },
+    "parameterBatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trackId",
+        "deviceId",
+        "parameters"
+      ],
+      "properties": {
+        "trackId": {
+          "$ref": "#/$defs/id"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/id"
+        },
+        "parameters": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/parameterWrite"
+          }
+        }
+      }
+    },
+    "catalogQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "kind": {
+          "enum": [
+            "native",
+            "vst3"
+          ]
+        },
+        "offset": {
+          "$ref": "#/$defs/id"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        }
+      },
+      "required": []
+    },
+    "deviceInsert": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trackId": {
+          "$ref": "#/$defs/id"
+        },
+        "catalogId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        }
+      },
+      "required": [
+        "trackId",
+        "catalogId"
+      ]
+    }
+  }
+}

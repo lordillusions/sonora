@@ -1,0 +1,44 @@
+# DEV-22b Glue Compressor law probes (one variable per case).
+case src-sweep sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+case gl-r2 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-20 Range=70 Makeup=0 Attack=0 Ratio=0 Release=4 DryWet=1 PeakClipIn=false SideChainEq/On=false
+case gl-r4 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-20 Range=70 Makeup=0 Attack=0 Ratio=1 Release=4 DryWet=1 PeakClipIn=false SideChainEq/On=false
+case gl-r10 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-20 Range=70 Makeup=0 Attack=0 Ratio=2 Release=4 DryWet=1 PeakClipIn=false SideChainEq/On=false
+case gl-t30 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-30 Range=70 Makeup=0 Attack=0 Ratio=1 Release=4 DryWet=1 PeakClipIn=false SideChainEq/On=false
+case gl-range6 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-20 Range=6 Makeup=0 Attack=0 Ratio=1 Release=4 DryWet=1 PeakClipIn=false SideChainEq/On=false
+case gl-mk10 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-20 Range=70 Makeup=10 Attack=0 Ratio=1 Release=4 DryWet=1 PeakClipIn=false SideChainEq/On=false
+case gl-clip sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-20 Range=70 Makeup=20 Attack=0 Ratio=1 Release=4 DryWet=1 PeakClipIn=true SideChainEq/On=false
+case src-burst sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case gl-a0-r0 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-14 Range=70 Makeup=0 Attack=0 Ratio=1 Release=0 DryWet=1 PeakClipIn=false SideChainEq/On=false
+case gl-a3-r0 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-14 Range=70 Makeup=0 Attack=3 Ratio=1 Release=0 DryWet=1 PeakClipIn=false SideChainEq/On=false
+case gl-a5-r0 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-14 Range=70 Makeup=0 Attack=5 Ratio=1 Release=0 DryWet=1 PeakClipIn=false SideChainEq/On=false
+case gl-a0-r2 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-14 Range=70 Makeup=0 Attack=0 Ratio=1 Release=2 DryWet=1 PeakClipIn=false SideChainEq/On=false
+case gl-a0-auto sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-14 Range=70 Makeup=0 Attack=0 Ratio=1 Release=5 DryWet=1 PeakClipIn=false SideChainEq/On=false
+case gl-wet05 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Glue Compressor/Bass - Punch.adv" Threshold=-14 Range=70 Makeup=0 Attack=0 Ratio=1 Release=0 DryWet=0.5 PeakClipIn=false SideChainEq/On=false

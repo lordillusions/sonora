@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compatibility · Sonora DAW</title>
+<meta name="description" content="Platforms, plug-in formats, native devices, and how Sonora opens Ableton Live 12 sets. Honest status, updated with each release.">
+<link rel="canonical" href="https://sonoradaw.com/compatibility.html">
+<meta name="theme-color" content="#0b0b0c">
+<meta name="color-scheme" content="dark">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Sonora DAW">
+<meta property="og:url" content="https://sonoradaw.com/compatibility.html">
+<meta property="og:title" content="Compatibility · Sonora DAW">
+<meta property="og:description" content="Platforms, plug-in formats, native devices, and how Sonora opens Ableton Live 12 sets. Honest status, updated with each release.">
+<meta property="og:image" content="https://sonoradaw.com/assets/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Sonora wordmark with the line: Free, open-source DAW for macOS. Alpha.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/brand/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/brand/apple-touch-icon.png">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="alpha-bar" role="note" aria-label="Release status">
+  <div class="wrap">
+    <span class="badge badge-alpha">Alpha</span>
+    <span>Sonora is very early software and it will have bugs. Save often and keep backups.</span>
+    <a href="community.html">Help us make it better</a>
+  </div>
+</div>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Sonora home">
+      <img class="mark" src="assets/brand/icon.svg" alt="" width="30" height="30">
+      <img class="word" src="assets/brand/wordmark-white.svg" alt="Sonora" width="80" height="17">
+    </a>
+    <button class="nav-toggle" aria-expanded="false" aria-controls="nav">Menu</button>
+    <nav class="nav" id="nav" aria-label="Main">
+      <a href="features.html">Features</a>
+      <a href="compatibility.html" aria-current="page">Compatibility</a>
+      <a href="download.html">Download</a>
+      <a href="faq.html">FAQ</a>
+      <a href="about.html">About</a>
+      <a href="community.html">Community</a>
+      <a class="nav-gh" href="https://github.com/lordillusions/sonora" aria-label="Sonora source code on GitHub"><svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <a class="btn btn-primary btn-small" href="download.html">Download the alpha</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero page-hero">
+  <div class="wrap">
+    <span class="eyebrow">Compatibility</span>
+    <h1>What works today, and how well.</h1>
+    <p class="lede">We'd rather tell you exactly where Sonora stands than promise that everything works. This page is updated with each release.</p>
+    <div class="toc" aria-label="On this page">
+      <a href="#platforms">Platforms</a><a href="#plugins">Plug-ins</a><a href="#sets">Opening Live sets</a><a href="#devices">Devices</a><a href="#compare">Sonora and Live 12</a>
+    </div>
+  </div>
+</section>
+
+<section id="platforms">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Platforms</span>
+      <h2>Where Sonora runs</h2>
+      <p class="lede">The Mac is home. Windows and Linux builds exist, but they are even earlier than the Mac version.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Platform</th><th scope="col">Status</th><th scope="col">Notes</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">macOS 13 or later, Apple silicon</th><td class="yes">Main platform (alpha)</td><td>Metal drawing, VST3 and Audio Units, automatic delta updates, collaboration and the assistant.</td></tr>
+          <tr><th scope="row">macOS on Intel</th><td class="no">Not supported</td><td>The graphics library Sonora uses is built for Apple silicon only.</td></tr>
+          <tr><th scope="row">Windows x64</th><td class="part">Early alpha build</td><td>Installer built automatically and barely tested on real machines. The interface draws on the CPU, there are no automatic updates, and the installer isn't code-signed yet, so Windows will warn about an unknown publisher.</td></tr>
+          <tr><th scope="row">Linux x64</th><td class="part">Early alpha build</td><td>AppImage and <code>.deb</code>, tested by installing on Ubuntu 24.04 and starting the app. The interface draws on the CPU and there are no automatic updates. Audio hardware and plug-ins are not yet qualified.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="plugins">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Plug-ins</span>
+      <h2>Third-party plug-ins</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Format</th><th scope="col">Status</th><th scope="col">Notes</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">VST3</th><td class="yes">Supported</td><td>The main format. Plug-in state is saved with the project and restored.</td></tr>
+          <tr><th scope="row">Audio Units</th><td class="yes">Supported (macOS)</td><td>Hosted through the same plug-in layer.</td></tr>
+          <tr><th scope="row">VST2</th><td class="no">Not supported</td><td>The VST2 SDK can no longer be licensed.</td></tr>
+          <tr><th scope="row">Intel-only (x86_64) plug-ins</th><td class="no">Not supported</td><td>Sonora runs natively on Apple silicon and can't load Intel-only plug-ins.</td></tr>
+          <tr><th scope="row">CLAP, ARA 2</th><td class="no">Planned</td><td>On the roadmap.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="table-note">Sonora Prism is also available as a VST3 plug-in for Apple silicon Macs. See <a href="download.html#files">Download</a>.</p>
+  </div>
+</section>
+
+<section id="sets">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Opening Live sets</span>
+      <h2>Possible, but not the main idea.</h2>
+      <p class="lede">Sonora can open sets saved by Ableton Live&nbsp;12, edit them and save them back. That's handy for bringing an idea or a loop over. But Sonora is made for starting new music, and an existing set may sound different or be missing devices, so we don't recommend it as a way to keep working on finished Live projects.</p>
+    </div>
+    <div class="grid">
+      <div class="card"><span class="tag">Tested</span><h3>Opening</h3><p>A library of 65 real-world sets, from sketches to 50-track productions, opens on every build.</p></div>
+      <div class="card"><span class="tag">Tested</span><h3>Saving</h3><p>Untouched sets re-save to identical XML, and edited sets were checked by opening them in Live&nbsp;12 again.</p></div>
+      <div class="card"><span class="tag">By design</span><h3>Nothing is thrown away</h3><p>Data Sonora doesn't understand stays in the file when you save. A load report lists everything Sonora skipped.</p></div>
+      <div class="card"><span class="tag">Sonora-only</span><h3>Extras stay in Sonora</h3><p>Linked clips, hidden or deactivated tracks and Sonora's own instruments are stored in a form Live ignores. Live opens the set, but doesn't play Sonora's instruments and drops these extras if it saves the set.</p></div>
+    </div>
+    <p class="table-note">Sonora reads and writes the set format only. It doesn't use any part of Live, and you don't need Live installed. Samples from Live's own library are found only if that library is on your Mac.</p>
+  </div>
+</section>
+
+<section id="devices">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Devices</span>
+      <h2>Native device status</h2>
+      <p class="lede">When a set uses a built-in device, Sonora runs its own implementation if it has one. These are original code: they may not sound identical to the device with the same name.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Device</th><th scope="col">Status</th><th scope="col">Notes</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">EQ Eight, Utility</th><td class="yes">Native</td><td>Complete controls.</td></tr>
+          <tr><th scope="row">Simpler</th><td class="yes">Native</td><td>Classic, 1-Shot and Slice modes, filter, LFO and envelopes.</td></tr>
+          <tr><th scope="row">Racks (Instrument, Drum, Audio Effect)</th><td class="yes">Native</td><td>Chains, key, velocity and chain-select zones, macros.</td></tr>
+          <tr><th scope="row">Reverb, Delay</th><td class="yes">Native</td><td>Complete parameter sets.</td></tr>
+          <tr><th scope="row">Impulse, Echo, Compressor, Limiter, Auto Filter</th><td class="part">Native, early</td><td>Play back and edit.</td></tr>
+          <tr><th scope="row">Redux, Tuner, Gate, Auto Pan</th><td class="part">Native, early</td><td>First versions.</td></tr>
+          <tr><th scope="row">Arpeggiator, Note Length, Velocity</th><td class="part">Native, early</td><td>MIDI effects run before the instrument.</td></tr>
+          <tr><th scope="row">Max for Live devices</th><td class="no">Not supported</td><td>Kept in the file and listed in the load report. A few common ones, such as a loudness meter, have a native stand-in.</td></tr>
+          <tr><th scope="row">Other built-in instruments and effects</th><td class="no">Not yet</td><td>Kept in the file and listed in the load report. A missing instrument can play a placeholder sound so you still hear the part.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="compare">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Sonora and Live 12</span>
+      <h2>An honest comparison</h2>
+      <p class="lede">Only facts you can check. We don't compare sound or speed.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">&nbsp;</th><th scope="col">Sonora</th><th scope="col">Ableton Live 12</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Source code</th><td class="yes">Open, AGPL-3.0-or-later</td><td class="no">Closed</td></tr>
+          <tr><th scope="row">Account to use the app</th><td class="yes">None</td><td>Ableton account to authorize</td></tr>
+          <tr><th scope="row">Real-time co-editing of a project</th><td class="yes">Built in (alpha)</td><td class="no">Not built in</td></tr>
+          <tr><th scope="row">Built-in AI assistant</th><td class="yes">Yes, bring your own provider</td><td class="no">No</td></tr>
+          <tr><th scope="row">MCP control by external agents</th><td class="yes">Built in</td><td class="part">Third-party remote scripts</td></tr>
+          <tr><th scope="row">Linked (alias) MIDI clips</th><td class="yes">Built in</td><td class="part">Max for Live workaround</td></tr>
+          <tr><th scope="row">Retroactive capture</th><td class="yes">MIDI and audio</td><td class="part">MIDI only</td></tr>
+          <tr><th scope="row">Strip Silence</th><td class="yes">Built in</td><td class="part">Third-party extensions (12.4.5 Suite beta)</td></tr>
+          <tr><th scope="row">Rebind menu shortcuts in the app</th><td class="yes">Yes</td><td class="no">No (Key Map assigns keys to controls)</td></tr>
+          <tr><th scope="row">Hide tracks, and deactivate them to free CPU</th><td class="yes">Both</td><td class="no">No (the track activator mutes)</td></tr>
+          <tr><th scope="row">Linux</th><td class="part">Early alpha build</td><td class="no">No</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="table-note">Checked against Live 12.4 documentation and public forums in October 2026. Live is updated often: if a row is out of date, <a href="https://github.com/lordillusions/sonora/issues">open an issue</a> and we'll fix it.</p>
+
+    <div class="callout mt">
+      <h3>Where Live is ahead, by a lot</h3>
+      <ul>
+        <li><strong>Maturity:</strong> a finished, polished product with years of documentation and professional support. Sonora is an alpha.</li>
+        <li><strong>Max for Live</strong> and its huge ecosystem of devices.</li>
+        <li><strong>The full set of built-in devices</strong>, and sound content in Packs.</li>
+        <li><strong>Hardware integration</strong> such as Push, and Ableton Link.</li>
+      </ul>
+      <p>If you're a professional, or you can afford it, <a href="https://www.ableton.com/">buy Ableton Live</a>. It's amazing software and you'll get support with it. Sonora is for everyone else, and for anyone who wants to help build something open.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <img src="assets/brand/wordmark-white.svg" alt="Sonora" width="75" height="16">
+        <p>Sonora DAW. Music production, open.<br>Free and open source, made with the community.</p>
+      </div>
+      <div>
+        <h2 class="footer-h">Product</h2>
+        <ul><li><a href="features.html">Features</a></li><li><a href="compatibility.html">Compatibility</a></li><li><a href="download.html">Download</a></li><li><a href="faq.html">FAQ</a></li></ul>
+      </div>
+      <div>
+        <h2 class="footer-h">Project</h2>
+        <ul><li><a href="about.html">About</a></li><li><a href="community.html">Community</a></li><li><a href="https://github.com/lordillusions/sonora">Source code</a></li><li><a href="https://github.com/lordillusions/sonora/blob/main/LICENSE">License (AGPL-3.0)</a></li></ul>
+      </div>
+      <div>
+        <h2 class="footer-h">Help</h2>
+        <ul><li><a href="https://github.com/lordillusions/sonora/issues">Report a bug</a></li><li><a href="https://github.com/lordillusions/sonora/discussions">Discussions</a></li><li><a href="download.html#build">Build from source</a></li></ul>
+      </div>
+    </div>
+    <p class="legal">&copy; <span id="year">2026</span> the Sonora contributors. Sonora is free software under the GNU AGPL-3.0-or-later.<br>
+    Ableton and Live are trademarks of Ableton AG. Sonora is an independent project, not affiliated with or endorsed by Ableton. VST is a trademark of Steinberg Media Technologies GmbH.</p>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

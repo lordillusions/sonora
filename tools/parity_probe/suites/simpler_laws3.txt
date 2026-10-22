@@ -1,0 +1,123 @@
+# DEV-22 Simpler law probes, round 3 (generated layout): loop snapping, anti-aliasing, voices, LFO tables.
+case snap-tone100 sample=tone100 notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 
+case snap-tone440 sample=tone440 notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 
+case snap-tone1000 sample=tone1000 notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 
+case snap-tone50 sample=tone50 notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 
+case snap-tone261.6255653-0.5 sample=tone261.6255653-0.5 notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 
+case snap-tone261.6255653-2 sample=tone261.6255653-2 notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 
+case snap-noise sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 
+case snap-saw sample=saw notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 
+case snap-tone440-0.3 sample=tone440-0.3 notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 
+case snap-half-440 sample=tone440 notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Player/LoopModulators/LoopLength=0.5
+case snap-start-440 sample=tone440 notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Player/LoopModulators/SampleStart=0.1 Player/LoopModulators/LoopOn=false
+case snap-q-440 sample=tone440 notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Player/LoopModulators/SampleStart=0.1 Player/LoopModulators/LoopLength=0.37
+case nosnap-half-440 sample=tone440 notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Player/Snap=false Player/LoopModulators/LoopLength=0.5
+case aa-3 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Pitch/TransposeKey=3 Player/Snap=false
+case aa-7 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Pitch/TransposeKey=7 Player/Snap=false
+case aa-12 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Pitch/TransposeKey=12 Player/Snap=false
+case aa-24 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Pitch/TransposeKey=24 Player/Snap=false
+case aa--12 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Pitch/TransposeKey=-12 Player/Snap=false
+case aa--24 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Pitch/TransposeKey=-24 Player/Snap=false
+case voices-0 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=0
+case voices-1 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=1
+case voices-2 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=2
+case voices-3 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=3
+case voices-4 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=4
+case voices-5 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=5
+case voices-6 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=6
+case voices-7 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=7
+case voices-8 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=8
+case voices-9 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=9
+case voices-10 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=10
+case voices-11 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=11
+case voices-12 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=12
+case voices-13 sample=sine notes=stack
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/NumVoices=13
+case beat-0 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=0
+case beat-1 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=1
+case beat-2 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=2
+case beat-3 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=3
+case beat-4 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=4
+case beat-5 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=5
+case beat-6 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=6
+case beat-7 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=7
+case beat-8 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=8
+case beat-9 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=9
+case beat-10 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=10
+case beat-11 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=11
+case beat-12 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=12
+case beat-13 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=13
+case beat-14 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=14
+case beat-15 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=15
+case beat-16 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/RateType=1 Lfo/Slot/Value/SimplerLfo/BeatRate=16
+case lfopitch-025 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Pitch/PitchLfoAmount=0.25 Lfo/Slot/Value/SimplerLfo/Frequency=2
+case lfopitch-1 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Pitch/PitchLfoAmount=1 Lfo/Slot/Value/SimplerLfo/Frequency=2
+case spread-25 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/SpreadAmount=25
+case spread-100 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/SpreadAmount=100
+case filtervel sample=noise notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/IsOn=true Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/ModByVelocity=1
+case filterenv-amt sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/IsOn=true Filter/Slot/Value/SimplerFilter/Freq=200 Filter/Slot/Value/SimplerFilter/Envelope/Amount=24 Filter/Slot/Value/SimplerFilter/Envelope/AttackTime=1000 Filter/Slot/Value/SimplerFilter/Envelope/SustainLevel=1
+case oneshot-gate sample=sine notes=melody
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/PlaybackMode=1 VolumeAndPan/OneShotEnvelope/SustainMode=1
+case oneshot-trig sample=sine notes=melody
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Globals/PlaybackMode=1
+case lfo-phase sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/Frequency=2 Lfo/Slot/Value/SimplerLfo/Phase=90
+case lfo-noretrig sample=sine notes=melody
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/Frequency=2 Lfo/Slot/Value/SimplerLfo/Retrigger=false
+case lfo-attack sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/Frequency=4 Lfo/Slot/Value/SimplerLfo/Attack=500

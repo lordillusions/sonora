@@ -1,0 +1,16 @@
+# DEV-22 native effect parity: a Simpler saw melody through each implemented effect's factory presets
+# (read from the local reference install; effects without a Sonora implementation are skipped by the tool).
+case source sample=saw notes=melody
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=-6 Filter/IsOn=false Player/LoopModulators/LoopOn=true
+presets "Devices/Audio Effects/EQ Eight" max=6 source=source
+presets "Devices/Audio Effects/EQ Three" max=4 source=source
+presets "Devices/Audio Effects/Utility" max=4 source=source
+presets "Devices/Audio Effects/Compressor" max=6 source=source
+presets "Devices/Audio Effects/Glue Compressor" max=4 source=source
+presets "Devices/Audio Effects/Limiter" max=4 source=source
+presets "Devices/Audio Effects/Gate" max=4 source=source
+presets "Devices/Audio Effects/Multiband Dynamics" max=4 source=source
+presets "Devices/Audio Effects/Auto Filter" max=6 source=source
+presets "Devices/Audio Effects/Redux" max=4 source=source
+presets "Devices/Audio Effects/Delay" max=4 source=source
+presets "Devices/Audio Effects/Reverb" max=4 source=source

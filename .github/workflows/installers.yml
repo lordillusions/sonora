@@ -1,0 +1,223 @@
+# COM-4/COM-7 installers (docs/INSTALLERS.md):
+#   windows: Release UI build (MSVC, static CRT) + sonora_tests, then Inno Setup -> Sonora-<v>-windows-x64-setup.exe
+#   linux:   ci/linux/Dockerfile, Release UI build -> Sonora-<v>-x86_64.AppImage + sonora_<v>_amd64.deb
+#   macos:   Release app (arm64), ad hoc signed -> Sonora-<v>.dmg, plus the Sonora Prism VST3 installer
+#            Sonora-Prism-VST3-<v>.pkg (PLG-11c). Unsigned/not notarized: the signed release is made on
+#            a maintainer's Mac with scripts/release/make_release.sh. Off by default for manual runs (macOS minutes cost 10x).
+# A v* tag builds all three and attaches them to a draft GitHub Release; nothing is published automatically.
+# Manual runs (workflow_dispatch) work once this file is on the default branch.
+name: installers
+
+on:
+  push:
+    tags: ["v*"]
+  # Pull requests that touch packaging build the Windows and Linux installers (no macOS, no release).
+  pull_request:
+    paths:
+      - "packaging/**"
+      - ".github/workflows/installers.yml"
+      - "ci/linux/**"
+      - "cmake/**"
+      - "CMakeLists.txt"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (empty = project version from CMakeLists.txt)"
+        required: false
+        default: ""
+      macos:
+        description: "Also build the macOS disk image"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then v="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.version }}" ]; then v="${{ inputs.version }}"
+          else v="$(sed -nE 's/^project\(Sonora VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"; fi
+          [[ "$v" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]] || { echo "bad version '$v'"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      # Keep LF: bash scripts and byte-exact test fixtures break with the runner's default autocrlf=true.
+      - name: Disable CRLF conversion
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Fetch JUCE and Skia
+        shell: bash
+        run: scripts/bootstrap.sh
+
+      - name: Configure (Release, UI)
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSONORA_WITH_UI=ON -DSONORA_APP_VERSION="$env:VERSION"
+
+      # -k 0: report every compile error of a run, not only the first one.
+      - name: Build
+        run: cmake --build build -- -k 0
+
+      - name: Run sonora_tests
+        shell: bash
+        run: |
+          set -o pipefail
+          build/tests/sonora_tests.exe | tee build/tests.log
+          grep -q " 0 failed checks" build/tests.log
+
+      - name: Installer (Inno Setup)
+        shell: bash
+        run: |
+          set -euo pipefail
+          iscc="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          [ -x "$iscc" ] || { choco install innosetup -y --no-progress; }
+          app="$(dirname "$(find build/src/Sonora_artefacts -name Sonora.exe | head -1)")"
+          ls -la "$app" "$app/Resources"
+          icon="$(find build/src -name icon.ico | head -1)"
+          args=("/DAppVersion=$VERSION" "/DSourceDir=$(cygpath -w "$PWD/$app")" "/DOutputDir=$(cygpath -w "$PWD/dist/windows")")
+          [ -n "$icon" ] && args+=("/DIconFile=$(cygpath -w "$PWD/$icon")")
+          # Git Bash rewrites arguments that start with "/" into Windows paths; ISCC's /D switches must reach it as is.
+          MSYS2_ARG_CONV_EXCL='*' "$iscc" "${args[@]}" packaging/windows/sonora.iss
+          (cd dist/windows && sha256sum *.exe > "Sonora-$VERSION-windows.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows
+          path: dist/windows/*
+          if-no-files-found: error
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-logs
+          path: build/tests.log
+          if-no-files-found: ignore
+
+  linux:
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the container
+        run: docker build -t sonora-linux ci/linux
+
+      - name: Release build + AppImage + .deb
+        run: |
+          docker run --rm -v "$PWD":/src -w /src \
+            -e SONORA_THIRD_PARTY_DIR=/src/third_party \
+            -e SONORA_BUILD_ROOT=/src \
+            -e SONORA_JOBS=4 \
+            -e SONORA_APP_VERSION="${{ needs.version.outputs.version }}" \
+            sonora-linux ci/linux/build.sh package
+
+      - name: Install the .deb and start the app on a clean Ubuntu
+        run: |
+          docker run --rm -v "$PWD/dist/linux":/dist ubuntu:24.04 bash -euc '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /dist/sonora_*_amd64.deb xvfb xauth >/dev/null
+            test -x /opt/sonora/Sonora -a -x /opt/sonora/sonora_plugin_scanner
+            set +e; timeout 20 xvfb-run -a sonora; code=$?; set -e
+            echo "sonora exited with $code after the timeout (124 = still running, expected)"
+            [ "$code" = 124 ]'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-linux
+          path: dist/linux/*
+          if-no-files-found: error
+
+  macos:
+    needs: version
+    if: github.ref_type == 'tag' || inputs.macos
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch JUCE, Skia and Sparkle
+        run: scripts/bootstrap.sh
+
+      - name: Release build
+        run: |
+          cmake -S . -B build-release-app -G Ninja -DCMAKE_BUILD_TYPE=Release -DSONORA_APP_VERSION="$VERSION" -DSONORA_BUILD_TESTS=OFF
+          cmake --build build-release-app --target Sonora SonoraPrism_VST3
+
+      - name: Disk image (ad hoc signed, not notarized)
+        run: |
+          app=build-release-app/src/Sonora_artefacts/Release/Sonora.app
+          codesign --force --sign - "$app/Contents/MacOS/sonora_plugin_scanner"
+          codesign --force --sign - "$app"
+          packaging/macos/make_dmg.sh "$app" "dist/macos/Sonora-$VERSION.dmg"
+          (cd dist/macos && shasum -a 256 *.dmg > "Sonora-$VERSION-macos.sha256")
+
+      - name: VST3 installer package (unsigned, not notarized)
+        run: |
+          packaging/macos/make_vst3_pkg.sh "build-release-app/src/SonoraPrism_artefacts/Release/VST3/Sonora Prism.vst3" \
+              "dist/macos/Sonora-Prism-VST3-$VERSION.pkg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-macos
+          path: dist/macos/*
+          if-no-files-found: error
+
+  release:
+    needs: [version, windows, linux, macos]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: dist
+          merge-multiple: true
+      # sonoradaw.com links to releases/latest/download/<stable name>, so every release also carries version-free copies.
+      - name: Stable download names for the website
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cd dist
+          cp "Sonora-$VERSION.dmg" Sonora-macOS.dmg
+          cp "Sonora-Prism-VST3-$VERSION.pkg" Sonora-Prism-VST3-macOS.pkg
+          cp "Sonora-$VERSION-windows-x64-setup.exe" Sonora-Windows-x64-setup.exe
+          cp "Sonora-$VERSION-x86_64.AppImage" Sonora-Linux-x86_64.AppImage
+          cp "sonora_${VERSION}_amd64.deb" Sonora-Linux-amd64.deb
+      - name: Draft release with the installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft \
+            --title "Sonora ${{ needs.version.outputs.version }}" \
+            --notes "Installers for macOS (arm64), Windows x64 and Linux x64. Draft: review before publishing."

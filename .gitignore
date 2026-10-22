@@ -1,0 +1,9 @@
+/build*/
+/third_party/JUCE/
+/third_party/skia/
+.DS_Store
+compile_commands.json
+*.ips
+node_modules/
+/third_party/sparkle/
+/dist/

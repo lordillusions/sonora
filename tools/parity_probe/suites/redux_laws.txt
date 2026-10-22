@@ -1,0 +1,52 @@
+# DEV-22b Redux 2 law probes (one variable per case).
+case src-saw sample=saw notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case rd-id sample=saw notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=40000 Jitter=0 BitDepth=16 QuantizerShape=0 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=false PostFilterValue=0 DryWet=1
+case src-sine sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case rd-sr8k sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=8000 Jitter=0 BitDepth=16 QuantizerShape=0 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=false PostFilterValue=0 DryWet=1
+case rd-sr8k-saw sample=saw notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=8000 Jitter=0 BitDepth=16 QuantizerShape=0 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=false PostFilterValue=0 DryWet=1
+case rd-sr8k-pre sample=saw notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=8000 Jitter=0 BitDepth=16 QuantizerShape=0 QuantizerDcShift=false EnablePreFilter=true EnablePostFilter=false PostFilterValue=0 DryWet=1
+case rd-sr8k-post0 sample=saw notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=8000 Jitter=0 BitDepth=16 QuantizerShape=0 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=true PostFilterValue=0 DryWet=1
+case rd-sr8k-postm2 sample=saw notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=8000 Jitter=0 BitDepth=16 QuantizerShape=0 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=true PostFilterValue=-2 DryWet=1
+case rd-sr8k-postp2 sample=saw notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=8000 Jitter=0 BitDepth=16 QuantizerShape=0 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=true PostFilterValue=2 DryWet=1
+case rd-sr300 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=300 Jitter=0 BitDepth=16 QuantizerShape=0 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=false PostFilterValue=0 DryWet=1
+case rd-b4 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=40000 Jitter=0 BitDepth=4 QuantizerShape=0 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=false PostFilterValue=0 DryWet=1
+case rd-b4-shape1 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=40000 Jitter=0 BitDepth=4 QuantizerShape=1 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=false PostFilterValue=0 DryWet=1
+case rd-b4-shape05 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=40000 Jitter=0 BitDepth=4 QuantizerShape=0.5 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=false PostFilterValue=0 DryWet=1
+case rd-b4-dc sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=40000 Jitter=0 BitDepth=4 QuantizerShape=0 QuantizerDcShift=true EnablePreFilter=false EnablePostFilter=false PostFilterValue=0 DryWet=1
+case rd-b1 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=40000 Jitter=0 BitDepth=1 QuantizerShape=0 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=false PostFilterValue=0 DryWet=1
+case src-sweep sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+case rd-b4-sweep sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=40000 Jitter=0 BitDepth=4 QuantizerShape=0 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=false PostFilterValue=0 DryWet=1
+case rd-wet05 sample=sine notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Redux/Kaputt.adv" SampleRate=40000 Jitter=0 BitDepth=4 QuantizerShape=0 QuantizerDcShift=false EnablePreFilter=false EnablePostFilter=false PostFilterValue=0 DryWet=0.5

@@ -1,0 +1,98 @@
+# DEV-22b Compressor law probes (one variable per case). Static curve: a C3 sine velocity sweep (vsweep,
+# Simpler velocity scale 1 -> ~-58..-7 dBFS peaks); time constants: noisebursts over a -20 dBFS 110 Hz sine.
+case src-sweep sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+case st-r2 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=2 Attack=0.01 Release=1000 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case st-r4 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=4 Attack=0.01 Release=1000 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case st-rinf sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=340282326356119256160033759537265639424 Attack=0.01 Release=1000 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case st-r4-t30 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.0316227766 Ratio=4 Attack=0.01 Release=1000 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case st-r4-k6 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=4 Attack=0.01 Release=1000 Knee=6 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case st-r4-k18 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=4 Attack=0.01 Release=1000 Knee=18 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case st-r4-rms sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=4 Attack=0.01 Release=1000 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=1
+case st-r4-exp sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=4 Attack=0.01 Release=1000 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=2
+case mk-r4 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=4 Attack=0.01 Release=1000 Knee=0 GainCompensation=true Gain=0 LookAhead=0 Model=0
+case mk-r2 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=2 Attack=0.01 Release=1000 Knee=0 GainCompensation=true Gain=0 LookAhead=0 Model=0
+case mk-rinf sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=340282326356119256160033759537265639424 Attack=0.01 Release=1000 Knee=0 GainCompensation=true Gain=0 LookAhead=0 Model=0
+case mk-r4-t30 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.0316227766 Ratio=4 Attack=0.01 Release=1000 Knee=0 GainCompensation=true Gain=0 LookAhead=0 Model=0
+case mk-r4-k6 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=4 Attack=0.01 Release=1000 Knee=6 GainCompensation=true Gain=0 LookAhead=0 Model=0
+case mk-r4-t6 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.5011872336 Ratio=4 Attack=0.01 Release=1000 Knee=0 GainCompensation=true Gain=0 LookAhead=0 Model=0
+case gain-p6 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=4 Attack=0.01 Release=1000 Knee=0 GainCompensation=false Gain=6 LookAhead=0 Model=0
+case st-r4-lin sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=4 Attack=0.01 Release=1000 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0 LogEnvelope=false
+case src-burst sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case t-a001-r50 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.2 Ratio=4 Attack=0.01 Release=50 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case t-a1-r50 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.2 Ratio=4 Attack=1 Release=50 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case t-a10-r50 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.2 Ratio=4 Attack=10 Release=50 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case t-a30-r50 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.2 Ratio=4 Attack=30 Release=50 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case t-a001-r10 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.2 Ratio=4 Attack=0.01 Release=10 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case t-a001-r200 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.2 Ratio=4 Attack=0.01 Release=200 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case t-a001-auto sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.2 Ratio=4 Attack=0.01 Release=50 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0 AutoReleaseControlOnOff=true
+case t-a1-r50-la1 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.2 Ratio=4 Attack=1 Release=50 Knee=0 GainCompensation=false Gain=0 LookAhead=1 Model=0
+case t-a1-r50-la10 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.2 Ratio=4 Attack=1 Release=50 Knee=0 GainCompensation=false Gain=0 LookAhead=2 Model=0
+case t-a1-r50-lin sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.2 Ratio=4 Attack=1 Release=50 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0 LogEnvelope=false
+case t-a1-r50-rms sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.2 Ratio=4 Attack=1 Release=50 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=1
+case t-a1-r50-k6 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.2 Ratio=4 Attack=1 Release=50 Knee=6 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case src-sawsweep sample=saw notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+case st-saw-r4 sample=saw notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=4 Attack=0.01 Release=1000 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=0
+case st-saw-r4-rms sample=saw notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Compressor/Basic Peak Compressor.adv" Threshold=0.1 Ratio=4 Attack=0.01 Release=1000 Knee=0 GainCompensation=false Gain=0 LookAhead=0 Model=1

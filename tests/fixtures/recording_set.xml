@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Ableton MajorVersion="5" MinorVersion="12.0_12500" Creator="Sonora">
+  <LiveSet>
+    <Tracks>
+      <MidiTrack Id="1">
+        <Name><EffectiveName Value="Keys"/><UserName Value=""/></Name><Color Value="12"/>
+        <DeviceChain><Mixer><Volume><Manual Value="1"/></Volume><Pan><Manual Value="0"/></Pan></Mixer>
+          <MainSequencer><ClipTimeable><ArrangerAutomation><Events>
+            <MidiClip Id="0" Time="0"><CurrentStart Value="0"/><CurrentEnd Value="4"/>
+              <Name Value="Template"/><Color Value="12"/><Disabled Value="false"/>
+              <Loop><LoopStart Value="0"/><LoopEnd Value="4"/><StartRelative Value="0"/><LoopOn Value="false"/></Loop>
+              <Notes><KeyTracks/><NoteIdGenerator><NextId Value="1"/></NoteIdGenerator></Notes>
+            </MidiClip>
+          </Events></ArrangerAutomation></ClipTimeable></MainSequencer>
+          <DeviceChain><Devices/></DeviceChain>
+        </DeviceChain>
+      </MidiTrack>
+      <AudioTrack Id="2">
+        <Name><EffectiveName Value="Input"/><UserName Value=""/></Name><Color Value="20"/>
+        <DeviceChain><Mixer><Volume><Manual Value="1"/></Volume><Pan><Manual Value="0"/></Pan></Mixer>
+          <MainSequencer><Sample><ArrangerAutomation><Events>
+            <AudioClip Id="0" Time="0"><CurrentStart Value="0"/><CurrentEnd Value="4"/>
+              <Name Value="Template"/><Color Value="20"/><Disabled Value="false"/>
+              <Loop><LoopStart Value="0"/><LoopEnd Value="2"/><StartRelative Value="0"/><LoopOn Value="false"/></Loop>
+              <IsWarped Value="true"/><PitchCoarse Value="12"/><PitchFine Value="50"/><SampleVolume Value="0.5"/>
+              <SampleRef><FileRef><Path Value="/missing/template.wav"/><RelativePath Value="old.wav"/>
+                <RelativePathType Value="3"/><OriginalFileSize Value="123"/><OriginalCrc Value="123"/></FileRef>
+                <DefaultDuration Value="100"/><DefaultSampleRate Value="48000"/>
+                <LastModDate Value="123"/><SourceContext/></SampleRef>
+              <WarpMarkers><WarpMarker Id="0" SecTime="0" BeatTime="0"/></WarpMarkers>
+            </AudioClip>
+          </Events></ArrangerAutomation></Sample></MainSequencer>
+          <DeviceChain><Devices/></DeviceChain>
+        </DeviceChain>
+      </AudioTrack>
+    </Tracks>
+    <MainTrack><DeviceChain><Mixer><Tempo><Manual Value="120"/></Tempo></Mixer><DeviceChain><Devices/></DeviceChain></DeviceChain></MainTrack>
+  </LiveSet>
+</Ableton>

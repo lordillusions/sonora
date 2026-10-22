@@ -1,0 +1,46 @@
+# DEV-22b Multiband Dynamics law probes (one variable per case). The C3 sine lies in the mid band.
+case src-noise sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case mb-neutral sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=0 BelowRatioLow=0 AttackLow=0.1 ReleaseLow=1000 AboveThresholdLow=-30 BelowThresholdLow=-50 AboveRatioMid=0 BelowRatioMid=0 AttackMid=0.1 ReleaseMid=1000 AboveThresholdMid=-30 BelowThresholdMid=-50 AboveRatioHigh=0 BelowRatioHigh=0 AttackHigh=0.1 ReleaseHigh=1000 AboveThresholdHigh=-30 BelowThresholdHigh=-50 SoftKnee=true EnvelopeIsPeak=false GlobalAmount=1 GlobalTime=1 OutputGain=0
+case mb-split sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=0 BelowRatioLow=0 AttackLow=0.1 ReleaseLow=1000 AboveThresholdLow=-30 BelowThresholdLow=-50 AboveRatioMid=0 BelowRatioMid=0 AttackMid=0.1 ReleaseMid=1000 AboveThresholdMid=-30 BelowThresholdMid=-50 AboveRatioHigh=0 BelowRatioHigh=0 AttackHigh=0.1 ReleaseHigh=1000 AboveThresholdHigh=-30 BelowThresholdHigh=-50 SoftKnee=true EnvelopeIsPeak=false GlobalAmount=1 GlobalTime=1 OutputGain=0 SplitLowMid=500 SplitMidHigh=2000
+case src-sweep sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+case mb-above sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=0 BelowRatioLow=0 AttackLow=0.1 ReleaseLow=1000 AboveThresholdLow=-30 BelowThresholdLow=-50 AboveRatioMid=-0.75 BelowRatioMid=0 AttackMid=0.1 ReleaseMid=1000 AboveThresholdMid=-30 BelowThresholdMid=-50 AboveRatioHigh=0 BelowRatioHigh=0 AttackHigh=0.1 ReleaseHigh=1000 AboveThresholdHigh=-30 BelowThresholdHigh=-50 SoftKnee=true EnvelopeIsPeak=false GlobalAmount=1 GlobalTime=1 OutputGain=0
+case mb-above-hard sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=0 BelowRatioLow=0 AttackLow=0.1 ReleaseLow=1000 AboveThresholdLow=-30 BelowThresholdLow=-50 AboveRatioMid=-0.75 BelowRatioMid=0 AttackMid=0.1 ReleaseMid=1000 AboveThresholdMid=-30 BelowThresholdMid=-50 AboveRatioHigh=0 BelowRatioHigh=0 AttackHigh=0.1 ReleaseHigh=1000 AboveThresholdHigh=-30 BelowThresholdHigh=-50 SoftKnee=false EnvelopeIsPeak=false GlobalAmount=1 GlobalTime=1 OutputGain=0
+case mb-above-peak sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=0 BelowRatioLow=0 AttackLow=0.1 ReleaseLow=1000 AboveThresholdLow=-30 BelowThresholdLow=-50 AboveRatioMid=-0.75 BelowRatioMid=0 AttackMid=0.1 ReleaseMid=1000 AboveThresholdMid=-30 BelowThresholdMid=-50 AboveRatioHigh=0 BelowRatioHigh=0 AttackHigh=0.1 ReleaseHigh=1000 AboveThresholdHigh=-30 BelowThresholdHigh=-50 SoftKnee=true EnvelopeIsPeak=true GlobalAmount=1 GlobalTime=1 OutputGain=0
+case mb-above-exp sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=0 BelowRatioLow=0 AttackLow=0.1 ReleaseLow=1000 AboveThresholdLow=-30 BelowThresholdLow=-50 AboveRatioMid=0.5 BelowRatioMid=0 AttackMid=0.1 ReleaseMid=1000 AboveThresholdMid=-30 BelowThresholdMid=-50 AboveRatioHigh=0 BelowRatioHigh=0 AttackHigh=0.1 ReleaseHigh=1000 AboveThresholdHigh=-30 BelowThresholdHigh=-50 SoftKnee=true EnvelopeIsPeak=false GlobalAmount=1 GlobalTime=1 OutputGain=0
+case mb-below-exp sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=0 BelowRatioLow=0 AttackLow=0.1 ReleaseLow=1000 AboveThresholdLow=-30 BelowThresholdLow=-50 AboveRatioMid=0 BelowRatioMid=0.5 AttackMid=0.1 ReleaseMid=1000 AboveThresholdMid=-30 BelowThresholdMid=-50 AboveRatioHigh=0 BelowRatioHigh=0 AttackHigh=0.1 ReleaseHigh=1000 AboveThresholdHigh=-30 BelowThresholdHigh=-50 SoftKnee=true EnvelopeIsPeak=false GlobalAmount=1 GlobalTime=1 OutputGain=0
+case mb-below-up sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=0 BelowRatioLow=0 AttackLow=0.1 ReleaseLow=1000 AboveThresholdLow=-30 BelowThresholdLow=-50 AboveRatioMid=0 BelowRatioMid=-0.5 AttackMid=0.1 ReleaseMid=1000 AboveThresholdMid=-30 BelowThresholdMid=-50 AboveRatioHigh=0 BelowRatioHigh=0 AttackHigh=0.1 ReleaseHigh=1000 AboveThresholdHigh=-30 BelowThresholdHigh=-50 SoftKnee=true EnvelopeIsPeak=false GlobalAmount=1 GlobalTime=1 OutputGain=0
+case mb-amount05 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=0 BelowRatioLow=0 AttackLow=0.1 ReleaseLow=1000 AboveThresholdLow=-30 BelowThresholdLow=-50 AboveRatioMid=-0.75 BelowRatioMid=0 AttackMid=0.1 ReleaseMid=1000 AboveThresholdMid=-30 BelowThresholdMid=-50 AboveRatioHigh=0 BelowRatioHigh=0 AttackHigh=0.1 ReleaseHigh=1000 AboveThresholdHigh=-30 BelowThresholdHigh=-50 SoftKnee=true EnvelopeIsPeak=false GlobalAmount=0.5 GlobalTime=1 OutputGain=0
+case mb-gains sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=0 BelowRatioLow=0 AttackLow=0.1 ReleaseLow=1000 AboveThresholdLow=-30 BelowThresholdLow=-50 AboveRatioMid=0 BelowRatioMid=0 AttackMid=0.1 ReleaseMid=1000 AboveThresholdMid=-30 BelowThresholdMid=-50 AboveRatioHigh=0 BelowRatioHigh=0 AttackHigh=0.1 ReleaseHigh=1000 AboveThresholdHigh=-30 BelowThresholdHigh=-50 SoftKnee=true EnvelopeIsPeak=false GlobalAmount=1 GlobalTime=1 OutputGain=2 InputGainMid=6 GainMid=-3
+case src-burst sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case mb-t-a1-r50 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=-0.75 BelowRatioLow=0 AttackLow=1 ReleaseLow=50 AboveThresholdLow=-25 BelowThresholdLow=-50 AboveRatioMid=-0.75 BelowRatioMid=0 AttackMid=1 ReleaseMid=50 AboveThresholdMid=-25 BelowThresholdMid=-50 AboveRatioHigh=-0.75 BelowRatioHigh=0 AttackHigh=1 ReleaseHigh=50 AboveThresholdHigh=-25 BelowThresholdHigh=-50 SoftKnee=true EnvelopeIsPeak=false GlobalAmount=1 GlobalTime=1 OutputGain=0
+case mb-t-a10-r200 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=-0.75 BelowRatioLow=0 AttackLow=10 ReleaseLow=200 AboveThresholdLow=-25 BelowThresholdLow=-50 AboveRatioMid=-0.75 BelowRatioMid=0 AttackMid=10 ReleaseMid=200 AboveThresholdMid=-25 BelowThresholdMid=-50 AboveRatioHigh=-0.75 BelowRatioHigh=0 AttackHigh=10 ReleaseHigh=200 AboveThresholdHigh=-25 BelowThresholdHigh=-50 SoftKnee=true EnvelopeIsPeak=false GlobalAmount=1 GlobalTime=1 OutputGain=0
+case mb-t-time2 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Multiband Dynamics/A Standard Multiband Comp.adv" AboveRatioLow=-0.75 BelowRatioLow=0 AttackLow=1 ReleaseLow=50 AboveThresholdLow=-25 BelowThresholdLow=-50 AboveRatioMid=-0.75 BelowRatioMid=0 AttackMid=1 ReleaseMid=50 AboveThresholdMid=-25 BelowThresholdMid=-50 AboveRatioHigh=-0.75 BelowRatioHigh=0 AttackHigh=1 ReleaseHigh=50 AboveThresholdHigh=-25 BelowThresholdHigh=-50 SoftKnee=true EnvelopeIsPeak=false GlobalAmount=1 GlobalTime=2 OutputGain=0

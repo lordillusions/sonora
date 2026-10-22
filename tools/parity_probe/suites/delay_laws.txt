@@ -1,0 +1,44 @@
+# DEV-22b Delay law probes (one variable per case); noiseburst 'single' = 4 hits then a 9 s tail.
+case src-burstone sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case dl-time sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=false DelayLine_SyncR=false DelayLine_Link=true DelayLine_TimeL=0.2 DelayLine_TimeR=0.2 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0.5 Filter_On=false DryWet=1
+case dl-fb0 sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=false DelayLine_SyncR=false DelayLine_Link=true DelayLine_TimeL=0.2 DelayLine_TimeR=0.2 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0 Filter_On=false DryWet=1
+case dl-fb09 sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=false DelayLine_SyncR=false DelayLine_Link=true DelayLine_TimeL=0.2 DelayLine_TimeR=0.2 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0.9 Filter_On=false DryWet=1
+case dl-filter1k sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=false DelayLine_SyncR=false DelayLine_Link=true DelayLine_TimeL=0.2 DelayLine_TimeR=0.2 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0.5 Filter_On=true DryWet=1 Filter_Frequency=1000 Filter_Bandwidth=8
+case dl-filter1k-bw2 sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=false DelayLine_SyncR=false DelayLine_Link=true DelayLine_TimeL=0.2 DelayLine_TimeR=0.2 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0.5 Filter_On=true DryWet=1 Filter_Frequency=1000 Filter_Bandwidth=2
+case dl-filter5k-bw9 sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=false DelayLine_SyncR=false DelayLine_Link=true DelayLine_TimeL=0.2 DelayLine_TimeR=0.2 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0.5 Filter_On=true DryWet=1 Filter_Frequency=5000 Filter_Bandwidth=9
+case dl-pingpong sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=false DelayLine_SyncR=false DelayLine_Link=true DelayLine_TimeL=0.2 DelayLine_TimeR=0.2 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0.5 Filter_On=false DryWet=1 DelayLine_PingPong=true
+case dl-unlink sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=false DelayLine_SyncR=false DelayLine_Link=false DelayLine_TimeL=0.2 DelayLine_TimeR=0.3 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0.5 Filter_On=false DryWet=1
+case dl-sync sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=true DelayLine_SyncR=true DelayLine_Link=true DelayLine_TimeL=0.2 DelayLine_TimeR=0.2 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0.5 Filter_On=false DryWet=1
+case dl-wet05-eq sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=false DelayLine_SyncR=false DelayLine_Link=true DelayLine_TimeL=0.2 DelayLine_TimeR=0.2 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0.5 Filter_On=false DryWet=0.5
+case dl-wet05-classic sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=false DelayLine_SyncR=false DelayLine_Link=true DelayLine_TimeL=0.2 DelayLine_TimeR=0.2 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0.5 Filter_On=false DryWet=0.5 DryWetMode=0
+case dl-mod sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=false DelayLine_SyncR=false DelayLine_Link=true DelayLine_TimeL=0.2 DelayLine_TimeR=0.2 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0.5 Filter_On=false DryWet=1 Modulation_AmountTime=0.5 Modulation_Frequency=2
+case src-sawone sample=saw notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-6 VolumeAndPan/VolumeVelScale=0
+case dl-saw sample=saw notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-6 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Delay.adv" DelayLine_SyncL=false DelayLine_SyncR=false DelayLine_Link=true DelayLine_TimeL=0.2 DelayLine_TimeR=0.2 DelayLine_SimpleDelayTimeL=100 DelayLine_SimpleDelayTimeR=100 Feedback=0.5 Filter_On=true DryWet=0.5

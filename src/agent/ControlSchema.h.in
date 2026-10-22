@@ -1,0 +1,2 @@
+#pragma once
+namespace sonora::agent { inline constexpr auto controlSchema = R"SONORA_SCHEMA(@SONORA_CONTROL_SCHEMA@)SONORA_SCHEMA"; }

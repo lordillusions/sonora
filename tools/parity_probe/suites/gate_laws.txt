@@ -1,0 +1,65 @@
+# DEV-22b Gate law probes (one variable per case). noiseburst: 4 decaying noise hits per second over a -20 dBFS
+# 110 Hz sine, so the closed-gate floor stays measurable; the threshold sweep uses the C3 sine vsweep.
+case src-burst sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case g-def sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=0 Release=50 Return=0 Gain=-40 FlipMode=0 LookAhead=0
+case g-att1 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=1 Hold=0 Release=50 Return=0 Gain=-40 FlipMode=0 LookAhead=0
+case g-att10 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=10 Hold=0 Release=50 Return=0 Gain=-40 FlipMode=0 LookAhead=0
+case g-hold50 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=50 Release=50 Return=0 Gain=-40 FlipMode=0 LookAhead=0
+case g-hold150 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=150 Release=50 Return=0 Gain=-40 FlipMode=0 LookAhead=0
+case g-rel10 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=0 Release=10 Return=0 Gain=-40 FlipMode=0 LookAhead=0
+case g-rel200 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=0 Release=200 Return=0 Gain=-40 FlipMode=0 LookAhead=0
+case g-ret3 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=0 Release=50 Return=3 Gain=-40 FlipMode=0 LookAhead=0
+case g-ret12 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=0 Release=50 Return=12 Gain=-40 FlipMode=0 LookAhead=0
+case g-floor20 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=0 Release=50 Return=0 Gain=-20 FlipMode=0 LookAhead=0
+case g-floor75 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=0 Release=50 Return=0 Gain=-75 FlipMode=0 LookAhead=0
+case g-floor0 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=0 Release=50 Return=0 Gain=0 FlipMode=0 LookAhead=0
+case g-flip sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=0 Release=50 Return=0 Gain=-40 FlipMode=1 LookAhead=0
+case g-la1 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=0 Release=50 Return=0 Gain=-40 FlipMode=0 LookAhead=1
+case g-la2 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.25 Attack=0.02 Hold=0 Release=50 Return=0 Gain=-40 FlipMode=0 LookAhead=2
+case g-thr30 sample=noiseburst notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.0316227766 Attack=0.02 Hold=0 Release=50 Return=0 Gain=-40 FlipMode=0 LookAhead=0
+case src-sweep sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+case gs-t30 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.0316227766 Attack=0.02 Hold=0 Release=50 Return=0 Gain=-40 FlipMode=0 LookAhead=0
+case gs-t20-ret6 sample=sine notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.1 Attack=0.02 Hold=0 Release=50 Return=6 Gain=-40 FlipMode=0 LookAhead=0
+case src-sawsweep sample=saw notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+case gs-saw-t30 sample=saw notes=vsweep
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-24 VolumeAndPan/VolumeVelScale=1
+  device "Devices/Audio Effects/Gate/Soft Reducer.adv" Threshold=0.0316227766 Attack=0.02 Hold=0 Release=50 Return=0 Gain=-40 FlipMode=0 LookAhead=0

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Sonora
+GenericName=Digital Audio Workstation
+Comment=Open, play and edit .als music sets
+Exec=@EXEC@ %F
+Icon=sonora
+Terminal=false
+Categories=AudioVideo;Audio;Sequencer;Midi;
+MimeType=application/x-sonora-als;
+Keywords=DAW;music;audio;MIDI;VST3;

@@ -1,0 +1,86 @@
+# DEV-22 Simpler parity suite. Template: the reference application's default Simpler (read from the local install).
+# Paths are relative to the OriginalSimpler element; "part:" edits apply to our sample's MultiSamplePart.
+# F = Filter/Slot/Value/SimplerFilter, E = VolumeAndPan/Envelope (written out in full below).
+
+case default
+  device Defaults/Instruments/Simpler.adv
+case flat notes=velocities
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0 Filter/IsOn=false
+case vel100 notes=velocities
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=1 Filter/IsOn=false
+case pan-left
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Panorama=-0.5 Filter/IsOn=false
+case pan-right-full sample=ramp
+  device Defaults/Instruments/Simpler.adv VolumeAndPan/Panorama=1 Filter/IsOn=false
+case adsr notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Envelope/AttackTime=200 VolumeAndPan/Envelope/DecayTime=300 VolumeAndPan/Envelope/SustainLevel=0.25 VolumeAndPan/Envelope/ReleaseTime=500
+case adsr-slopes notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Envelope/AttackTime=300 VolumeAndPan/Envelope/AttackSlope=0.6 VolumeAndPan/Envelope/DecayTime=400 VolumeAndPan/Envelope/DecaySlope=-0.5 VolumeAndPan/Envelope/SustainLevel=0.5 VolumeAndPan/Envelope/ReleaseTime=400 VolumeAndPan/Envelope/ReleaseSlope=0
+case release-long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Envelope/ReleaseTime=1500
+case lp24-1k
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=1000
+case lp24-1k-res50
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5
+case lp24-1k-res100
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=1
+case lp12-1k
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Slope=false
+case hp24-2k
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Type=1 Filter/Slot/Value/SimplerFilter/Freq=2000
+case bp-1k
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Type=2 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.3
+case notch-1k
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Type=3 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.3
+case morph-1k
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Type=4 Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/X=0.5
+case lp-osr
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=1 Filter/Slot/Value/SimplerFilter/Drive=6
+case lp-ms2
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=2 Filter/Slot/Value/SimplerFilter/Drive=6
+case lp-smp
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=3 Filter/Slot/Value/SimplerFilter/Drive=6
+case lp-prd
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=1000 Filter/Slot/Value/SimplerFilter/Res=0.5 Filter/Slot/Value/SimplerFilter/CircuitLpHp=4 Filter/Slot/Value/SimplerFilter/Drive=6
+case filter-env
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=300 Filter/Slot/Value/SimplerFilter/Envelope/Amount=48 Filter/Slot/Value/SimplerFilter/Envelope/DecayTime=200 Filter/Slot/Value/SimplerFilter/Envelope/SustainLevel=0.2
+case filter-key notes=keys
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=800 Filter/Slot/Value/SimplerFilter/ModByPitch=1
+case filter-vel notes=velocities
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=500 Filter/Slot/Value/SimplerFilter/ModByVelocity=1 Filter/Slot/Value/SimplerFilter/Envelope/Amount=24
+case transpose notes=keys
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Pitch/TransposeKey=7 Pitch/TransposeFine=30
+case oneshot
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Globals/PlaybackMode=1 VolumeAndPan/OneShotEnvelope/FadeInTime=50 VolumeAndPan/OneShotEnvelope/FadeOutTime=200
+case loop-half sample=ramp
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Player/LoopModulators/LoopOn=true Player/LoopModulators/LoopLength=0.5
+case loop-fade sample=ramp
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Player/LoopModulators/LoopOn=true Player/LoopModulators/LoopLength=0.3 Player/LoopModulators/LoopFade=0.5
+case loop-off sample=ramp
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Player/LoopModulators/LoopOn=false
+case start-length sample=ramp
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Player/LoopModulators/SampleStart=0.25 Player/LoopModulators/SampleLength=0.5 Player/LoopModulators/LoopOn=false
+case lfo-pitch notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Pitch/PitchLfoAmount=1 Lfo/Slot/Value/SimplerLfo/Frequency=4
+case lfo-volume notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/VolumeLfoAmount=1 Lfo/Slot/Value/SimplerLfo/Frequency=3
+case lfo-pan notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/PanoramaLfoAmount=1 Lfo/Slot/Value/SimplerLfo/Frequency=2
+case lfo-filter notes=single
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=800 Filter/Slot/Value/SimplerFilter/ModByLfo=1 Lfo/Slot/Value/SimplerLfo/Frequency=2
+case glide notes=legato
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Globals/PortamentoMode=2 Globals/PortamentoTime=128 Globals/NumVoices=0
+case mono notes=legato
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Globals/NumVoices=0
+case voices2 notes=chords
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Globals/NumVoices=1
+case spread notes=chords
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Globals/SpreadAmount=50
+case pitch-env notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Pitch/Envelope/Slot/Value/SimplerPitchEnvelope/Amount=12 Pitch/Envelope/Slot/Value/SimplerPitchEnvelope/DecayTime=300
+case vol-keyscale notes=keys
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/VolumeKeyScale=0.5
+case slice sample=noiseburst notes=slices
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false Globals/PlaybackMode=2
+case obsaw-like
+  device Defaults/Instruments/Simpler.adv Filter/Slot/Value/SimplerFilter/Freq=537.886475 Filter/Slot/Value/SimplerFilter/Envelope/Amount=72 Filter/Slot/Value/SimplerFilter/Envelope/DecayTime=189.27 Filter/Slot/Value/SimplerFilter/ModByPitch=1 VolumeAndPan/Volume=-14.2857141 Player/LoopModulators/LoopOn=false Globals/PortamentoMode=2 Globals/PortamentoTime=128 Globals/NumVoices=5

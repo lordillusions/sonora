@@ -1,0 +1,578 @@
+{
+  "reference": "live-palette.jpg",
+  "origin": [
+    31,
+    779
+  ],
+  "step": [
+    34,
+    34
+  ],
+  "tolerance": 8,
+  "passed": 70,
+  "total": 70,
+  "max_channel_error": 8,
+  "capture_limit": "Monitor ICC profile converted to sRGB; interior median limits JPEG noise, not an exact RGB proof.",
+  "swatches": [
+    {
+      "index": 0,
+      "name": "Salmon",
+      "expected": "FF94A6",
+      "observed_srgb": "FF94A6",
+      "max_channel_error": 0,
+      "passed": true
+    },
+    {
+      "index": 1,
+      "name": "Frank Orange",
+      "expected": "FFA529",
+      "observed_srgb": "FFA629",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 2,
+      "name": "Dirty Gold",
+      "expected": "CC9927",
+      "observed_srgb": "CC9928",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 3,
+      "name": "Lemonade",
+      "expected": "F7F47C",
+      "observed_srgb": "F8F47C",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 4,
+      "name": "Lime",
+      "expected": "BFFB00",
+      "observed_srgb": "BFFB06",
+      "max_channel_error": 6,
+      "passed": true
+    },
+    {
+      "index": 5,
+      "name": "Highlighter Green",
+      "expected": "1AFF2F",
+      "observed_srgb": "18FF2E",
+      "max_channel_error": 2,
+      "passed": true
+    },
+    {
+      "index": 6,
+      "name": "Bianchi",
+      "expected": "25FFA8",
+      "observed_srgb": "1EFFA8",
+      "max_channel_error": 7,
+      "passed": true
+    },
+    {
+      "index": 7,
+      "name": "Turquoise",
+      "expected": "5CFFE8",
+      "observed_srgb": "5CFFE9",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 8,
+      "name": "Sky Blue",
+      "expected": "8BC5FF",
+      "observed_srgb": "8CC5FF",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 9,
+      "name": "Sapphire",
+      "expected": "5480E4",
+      "observed_srgb": "5480E5",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 10,
+      "name": "Periwinkle",
+      "expected": "92A7FF",
+      "observed_srgb": "92A8FF",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 11,
+      "name": "Orchid",
+      "expected": "D86CE4",
+      "observed_srgb": "D86DE4",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 12,
+      "name": "Magenta",
+      "expected": "E553A0",
+      "observed_srgb": "E5539F",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 13,
+      "name": "White",
+      "expected": "FFFFFF",
+      "observed_srgb": "FFFFFF",
+      "max_channel_error": 0,
+      "passed": true
+    },
+    {
+      "index": 14,
+      "name": "Fire Hydrant Red",
+      "expected": "FF3636",
+      "observed_srgb": "FF3634",
+      "max_channel_error": 2,
+      "passed": true
+    },
+    {
+      "index": 15,
+      "name": "Tangerine",
+      "expected": "F66C03",
+      "observed_srgb": "F66D03",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 16,
+      "name": "Sand",
+      "expected": "99724B",
+      "observed_srgb": "9A714A",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 17,
+      "name": "Sunshine Yellow",
+      "expected": "FFF034",
+      "observed_srgb": "FEF236",
+      "max_channel_error": 2,
+      "passed": true
+    },
+    {
+      "index": 18,
+      "name": "Terminal Green",
+      "expected": "87FF67",
+      "observed_srgb": "87FE68",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 19,
+      "name": "Forest",
+      "expected": "3DC300",
+      "observed_srgb": "3BC308",
+      "max_channel_error": 8,
+      "passed": true
+    },
+    {
+      "index": 20,
+      "name": "Tiffany Blue",
+      "expected": "00BFAF",
+      "observed_srgb": "03BFAF",
+      "max_channel_error": 3,
+      "passed": true
+    },
+    {
+      "index": 21,
+      "name": "Cyan",
+      "expected": "19E9FF",
+      "observed_srgb": "11E9FE",
+      "max_channel_error": 8,
+      "passed": true
+    },
+    {
+      "index": 22,
+      "name": "Cerulean",
+      "expected": "10A4EE",
+      "observed_srgb": "0CA3EE",
+      "max_channel_error": 4,
+      "passed": true
+    },
+    {
+      "index": 23,
+      "name": "United Nations Blue",
+      "expected": "007DC0",
+      "observed_srgb": "007EC1",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 24,
+      "name": "Amethyst",
+      "expected": "886CE4",
+      "observed_srgb": "886BE5",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 25,
+      "name": "Iris",
+      "expected": "B677C6",
+      "observed_srgb": "B676C6",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 26,
+      "name": "Flamingo",
+      "expected": "FF39D4",
+      "observed_srgb": "FF39D3",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 27,
+      "name": "Aluminum",
+      "expected": "D0D0D0",
+      "observed_srgb": "D0D0D0",
+      "max_channel_error": 0,
+      "passed": true
+    },
+    {
+      "index": 28,
+      "name": "Terracotta",
+      "expected": "E2675A",
+      "observed_srgb": "E4675A",
+      "max_channel_error": 2,
+      "passed": true
+    },
+    {
+      "index": 29,
+      "name": "Light Salmon",
+      "expected": "FFA374",
+      "observed_srgb": "FFA375",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 30,
+      "name": "Whiskey",
+      "expected": "D3AD71",
+      "observed_srgb": "D3AD70",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 31,
+      "name": "Canary",
+      "expected": "EDFFAE",
+      "observed_srgb": "EEFFAF",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 32,
+      "name": "Primrose",
+      "expected": "D2E498",
+      "observed_srgb": "D0E498",
+      "max_channel_error": 2,
+      "passed": true
+    },
+    {
+      "index": 33,
+      "name": "Wild Willow",
+      "expected": "BAD074",
+      "observed_srgb": "BAD074",
+      "max_channel_error": 0,
+      "passed": true
+    },
+    {
+      "index": 34,
+      "name": "Dark Sea Green",
+      "expected": "9BC48D",
+      "observed_srgb": "9BC48D",
+      "max_channel_error": 0,
+      "passed": true
+    },
+    {
+      "index": 35,
+      "name": "Honeydew",
+      "expected": "D4FDE1",
+      "observed_srgb": "D6FDE2",
+      "max_channel_error": 2,
+      "passed": true
+    },
+    {
+      "index": 36,
+      "name": "Pale Turquoise",
+      "expected": "CDF1F8",
+      "observed_srgb": "CCF1F7",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 37,
+      "name": "Periwinkle",
+      "expected": "B9C1E3",
+      "observed_srgb": "BAC1E4",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 38,
+      "name": "Fog",
+      "expected": "CDBBE4",
+      "observed_srgb": "CDBBE3",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 39,
+      "name": "Dull Lavender",
+      "expected": "AE98E5",
+      "observed_srgb": "AE98E5",
+      "max_channel_error": 0,
+      "passed": true
+    },
+    {
+      "index": 40,
+      "name": "Whisper",
+      "expected": "E5DCE1",
+      "observed_srgb": "E4DDE1",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 41,
+      "name": "Silver Chalice",
+      "expected": "A9A9A9",
+      "observed_srgb": "A9A9A9",
+      "max_channel_error": 0,
+      "passed": true
+    },
+    {
+      "index": 42,
+      "name": "Dusty Pink",
+      "expected": "C6928B",
+      "observed_srgb": "C7928B",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 43,
+      "name": "Barley Corn",
+      "expected": "B78256",
+      "observed_srgb": "B78155",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 44,
+      "name": "Pale Oyster",
+      "expected": "99836A",
+      "observed_srgb": "97826A",
+      "max_channel_error": 2,
+      "passed": true
+    },
+    {
+      "index": 45,
+      "name": "Dark Khaki",
+      "expected": "BFBA69",
+      "observed_srgb": "BFBA68",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 46,
+      "name": "Pistachio",
+      "expected": "A6BE00",
+      "observed_srgb": "A8BE00",
+      "max_channel_error": 2,
+      "passed": true
+    },
+    {
+      "index": 47,
+      "name": "Dollar Bill",
+      "expected": "7DB04D",
+      "observed_srgb": "7DB04D",
+      "max_channel_error": 0,
+      "passed": true
+    },
+    {
+      "index": 48,
+      "name": "Neptune",
+      "expected": "88C2BA",
+      "observed_srgb": "86C2B9",
+      "max_channel_error": 2,
+      "passed": true
+    },
+    {
+      "index": 49,
+      "name": "Nepal",
+      "expected": "9BB3C4",
+      "observed_srgb": "9CB2C3",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 50,
+      "name": "Polo Blue",
+      "expected": "85A5C2",
+      "observed_srgb": "85A5C3",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 51,
+      "name": "Vista Blue",
+      "expected": "8393CC",
+      "observed_srgb": "8394CB",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 52,
+      "name": "Amethyst Smoke",
+      "expected": "A595B5",
+      "observed_srgb": "A695B4",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 53,
+      "name": "Lilac",
+      "expected": "BF9FBE",
+      "observed_srgb": "BF9FBF",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 54,
+      "name": "Turkish Rose",
+      "expected": "BC7196",
+      "observed_srgb": "BC7198",
+      "max_channel_error": 2,
+      "passed": true
+    },
+    {
+      "index": 55,
+      "name": "Steel",
+      "expected": "7B7B7B",
+      "observed_srgb": "7B7B7B",
+      "max_channel_error": 0,
+      "passed": true
+    },
+    {
+      "index": 56,
+      "name": "Medium Carmine",
+      "expected": "AF3333",
+      "observed_srgb": "AD3433",
+      "max_channel_error": 2,
+      "passed": true
+    },
+    {
+      "index": 57,
+      "name": "Red Ochre",
+      "expected": "A95131",
+      "observed_srgb": "A85130",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 58,
+      "name": "Coffee",
+      "expected": "724F41",
+      "observed_srgb": "724E40",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 59,
+      "name": "Durian Yellow",
+      "expected": "DBC300",
+      "observed_srgb": "DAC403",
+      "max_channel_error": 3,
+      "passed": true
+    },
+    {
+      "index": 60,
+      "name": "Pomelo Green",
+      "expected": "85961F",
+      "observed_srgb": "85971E",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 61,
+      "name": "Apple",
+      "expected": "539F31",
+      "observed_srgb": "549E31",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 62,
+      "name": "Aquamarine",
+      "expected": "0A9C8E",
+      "observed_srgb": "0B9D8E",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 63,
+      "name": "Sea Blue",
+      "expected": "236384",
+      "observed_srgb": "226384",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 64,
+      "name": "Cosmic Cobalt",
+      "expected": "1A2F96",
+      "observed_srgb": "1C2E97",
+      "max_channel_error": 2,
+      "passed": true
+    },
+    {
+      "index": 65,
+      "name": "Sapphire",
+      "expected": "2F52A2",
+      "observed_srgb": "2F52A3",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 66,
+      "name": "Plump Purple",
+      "expected": "624BAD",
+      "observed_srgb": "634BAC",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 67,
+      "name": "Purpureus",
+      "expected": "A34BAD",
+      "observed_srgb": "A44BAE",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 68,
+      "name": "Fuchsia Rose",
+      "expected": "CC2E6E",
+      "observed_srgb": "CC2D6E",
+      "max_channel_error": 1,
+      "passed": true
+    },
+    {
+      "index": 69,
+      "name": "Eclipse",
+      "expected": "3C3C3C",
+      "observed_srgb": "3C3C3C",
+      "max_channel_error": 0,
+      "passed": true
+    }
+  ]
+}

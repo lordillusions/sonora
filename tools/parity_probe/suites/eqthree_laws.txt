@@ -1,0 +1,54 @@
+# DEV-22b EQ Three law probes (one variable per case): white noise through band gains, kills, slopes, crossovers.
+case src-noise sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case e-flat sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1 FreqLo=250 FreqHi=2500 LowOn=true MidOn=true HighOn=true Slope=0
+case e-flat48 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1 FreqLo=250 FreqHi=2500 LowOn=true MidOn=true HighOn=true Slope=1
+case e-lokill sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1 FreqLo=250 FreqHi=2500 LowOn=false MidOn=true HighOn=true Slope=0
+case e-midkill sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1 FreqLo=250 FreqHi=2500 LowOn=true MidOn=false HighOn=true Slope=0
+case e-hikill sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1 FreqLo=250 FreqHi=2500 LowOn=true MidOn=true HighOn=false Slope=0
+case e-lokill48 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1 FreqLo=250 FreqHi=2500 LowOn=false MidOn=true HighOn=true Slope=1
+case e-midkill48 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1 FreqLo=250 FreqHi=2500 LowOn=true MidOn=false HighOn=true Slope=1
+case e-hikill48 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1 FreqLo=250 FreqHi=2500 LowOn=true MidOn=true HighOn=false Slope=1
+case e-lo+6 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1.99526203 GainMid=1 GainHi=1 FreqLo=250 FreqHi=2500 LowOn=true MidOn=true HighOn=true Slope=0
+case e-mid+6 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1.99526203 GainHi=1 FreqLo=250 FreqHi=2500 LowOn=true MidOn=true HighOn=true Slope=0
+case e-hi+6 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1.99526203 FreqLo=250 FreqHi=2500 LowOn=true MidOn=true HighOn=true Slope=0
+case e-hi-6 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=0.5011872336 FreqLo=250 FreqHi=2500 LowOn=true MidOn=true HighOn=true Slope=0
+case e-lomin sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=0.00031622799 GainMid=1 GainHi=1 FreqLo=250 FreqHi=2500 LowOn=true MidOn=true HighOn=true Slope=0
+case e-hi+6-48 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1.99526203 FreqLo=250 FreqHi=2500 LowOn=true MidOn=true HighOn=true Slope=1
+case e-lokill-f100 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1 FreqLo=100 FreqHi=2500 LowOn=false MidOn=true HighOn=true Slope=0
+case e-hikill-f8k sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1 FreqLo=250 FreqHi=8000 LowOn=true MidOn=true HighOn=false Slope=0
+case e-midonly-close sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/EQ Three/Remove.adv" GainLo=1 GainMid=1 GainHi=1 FreqLo=500 FreqHi=600 LowOn=false MidOn=true HighOn=false Slope=0

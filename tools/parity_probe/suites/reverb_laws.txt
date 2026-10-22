@@ -1,0 +1,53 @@
+# DEV-22b Reverb law probes (one variable per case); noiseburst 'single' = 4 hits then a 9 s tail.
+case src-burstone sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case rv-def sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1
+case rv-plain sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 ChorusOn=false SpinOn=false
+case rv-decay500 sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 DecayTime=500
+case rv-decay4s sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 DecayTime=4000
+case rv-size20 sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 RoomSize=20
+case rv-size300 sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 RoomSize=300
+case rv-predelay50 sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 PreDelay=50
+case rv-er-only sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 MixDiffuse=0
+case rv-tail-only sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 MixReflect=0
+case rv-noshelf sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 ShelfHighOn=false
+case rv-noinput sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 BandLowOn=false BandHighOn=false
+case rv-diff0 sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 AllPassGain=0
+case rv-sparse sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 RoomType=0
+case rv-high sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 RoomType=3
+case rv-mono sample=noiseburst notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=1 StereoSeparation=0
+case src-sawone sample=saw notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-6 VolumeAndPan/VolumeVelScale=0
+case rv-saw sample=saw notes=single
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=-6 VolumeAndPan/VolumeVelScale=0
+  device "Defaults/Audio Effects/Reverb.adv" MixDirect=0.55
