@@ -1,5 +1,16 @@
 # Sonora
 
+<p align="center">
+  <a href="https://sonoradaw.com"><img src="docs/screenshots/sonora-timelapse.gif" width="900" alt="A track coming together in Sonora: tracks and clips appear, EQ Eight, Compressor, Sonora Prism, Echo, Delay and Reverb drop into the device chains, then the song plays."></a>
+</p>
+
+<p align="center">
+  <a href="https://sonoradaw.com/download.html"><b>Download</b></a> ·
+  <a href="https://sonoradaw.com">Website</a> ·
+  <a href="docs/ROADMAP.md">Features</a> ·
+  <a href="https://ko-fi.com/lordillusions">☕ Buy me a coffee</a>
+</p>
+
 **Sonora DAW** is a free, open-source digital audio workstation for macOS, written from scratch. Its layout follows
 the workflow many producers already know, so you can start making music without learning a new program. It is built
 for starting new tracks, especially electronic music, and it can also open and save Ableton Live 12 sets.
@@ -21,6 +32,14 @@ for starting new tracks, especially electronic music, and it can also open and s
 - Real-time collaboration over the internet or the local network.
 - A built-in assistant, and an MCP server so external agents can work on the open project, every change undoable.
 - Updates delivered as small delta patches.
+
+<p align="center"><img src="site/assets/img/prism.webp" width="760" alt="Sonora Prism, the built-in wavetable synth: three oscillators, two filters, envelopes, LFOs and a modulation matrix."></p>
+
+## Support
+
+Sonora is free and stays free. Hosting, collaboration servers, AI tools and a lot of evenings go into it; if it helps
+you make music, you can [buy me a coffee on Ko-fi](https://ko-fi.com/lordillusions). Monthly supporters can have their
+name in Sonora's About window and on [sonoradaw.com](https://sonoradaw.com/about.html#supporters).
 
 ## Build from source
 
