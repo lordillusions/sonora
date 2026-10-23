@@ -98,6 +98,15 @@ jobs:
           [ -x "$iscc" ] || { choco install innosetup -y --no-progress; }
           app="$(dirname "$(find build/src/Sonora_artefacts -name Sonora.exe | head -1)")"
           ls -la "$app" "$app/Resources"
+          # The installer ships only the two executables: they must not need OpenSSL or the VC++ runtime DLLs, which
+          # are on this runner's PATH but not on a user's machine (0.1.1 asked for libcrypto-3-x64.dll).
+          for exe in "$app/Sonora.exe" "$app/sonora_plugin_scanner.exe"; do
+            deps="$(dumpbin -nologo -dependents "$(cygpath -w "$exe")")"
+            echo "$deps"
+            if echo "$deps" | grep -iE "libcrypto|libssl|vcruntime|msvcp|ucrtbased"; then
+              echo "::error::$exe depends on a DLL the installer does not ship"; exit 1
+            fi
+          done
           icon="$(find build/src -name icon.ico | head -1)"
           args=("/DAppVersion=$VERSION" "/DSourceDir=$(cygpath -w "$PWD/$app")" "/DOutputDir=$(cygpath -w "$PWD/dist/windows")")
           [ -n "$icon" ] && args+=("/DIconFile=$(cygpath -w "$PWD/$icon")")

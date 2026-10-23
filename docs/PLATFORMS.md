@@ -110,7 +110,7 @@ and the WebSocket signalling client/server. It is optional on every platform.
 
 | | macOS arm64 | Linux x64 | Windows x64 |
 |---|---|---|---|
-| OpenSSL 3 | built by `scripts/bootstrap.sh` from the pinned source tarball (`OPENSSL_VERSION`, 3.5 LTS, SHA-256 checked) into `third_party/openssl-macos-arm64`: static only, `-mmacosx-version-min=13.0`, `OPENSSLDIR=/etc/ssl` so default CA roots come from macOS's `/etc/ssl/cert.pem`. Override with `SONORA_OPENSSL_ROOT`. No dylib in the app. | distro `libssl-dev` (not in `ci/linux/Dockerfile` yet, so OFF there) | any OpenSSL 3 CMake finds; none in CI, so OFF |
+| OpenSSL 3 | built by `scripts/bootstrap.sh` from the pinned source tarball (`OPENSSL_VERSION`, 3.5 LTS, SHA-256 checked) into `third_party/openssl-macos-arm64`: static only, `-mmacosx-version-min=13.0`, `OPENSSLDIR=/etc/ssl` so default CA roots come from macOS's `/etc/ssl/cert.pem`. Override with `SONORA_OPENSSL_ROOT`. No dylib in the app. | distro `libssl-dev` (not in `ci/linux/Dockerfile` yet, so OFF there) | static `/MT` libraries (`lib/VC/x64/MT/libcrypto_static.lib`) of an OpenSSL 3 install; the runner's preinstalled `C:\Program Files\OpenSSL` has them. Only DLL import libraries found: OFF, because the installer ships no OpenSSL DLL (0.1.1 failed to start on users' machines asking for `libcrypto-3-x64.dll`). `installers.yml` fails if `Sonora.exe` imports an OpenSSL or VC++ runtime DLL. |
 
 Homebrew's `openssl@3` is not used: its static libraries are built for the newest macOS only (`minos 26.0`), which
 makes `ld` warn on every object at Sonora's 13.0 deployment target. To move to a new OpenSSL, bump `OPENSSL_VERSION`

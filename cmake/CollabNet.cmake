@@ -9,7 +9,8 @@
 # TLS/DTLS uses OpenSSL 3, linked statically so Sonora.app has no OpenSSL dylib:
 #   macOS: third_party/openssl-macos-arm64, built by scripts/bootstrap.sh from pinned source with
 #          -mmacosx-version-min=13.0 (Homebrew's openssl@3 targets the newest macOS only); see SONORA_OPENSSL_ROOT.
-#   Linux: the distribution's libssl-dev. Windows: any OpenSSL found by CMake's FindOpenSSL.
+#   Linux: the distribution's libssl-dev. Windows: the static /MT libraries (libcrypto_static.lib) of an OpenSSL 3
+#   install found by CMake's FindOpenSSL; with only DLL import libraries collab is OFF (the installer ships no DLL).
 
 set(_sonora_dc_dir "${SONORA_THIRD_PARTY_DIR}/libdatachannel")
 
@@ -24,8 +25,21 @@ if(APPLE)
         set(_sonora_dc_ssl_ok TRUE)
     endif()
 else()
+    if(WIN32)
+        # Static libraries built for /MT (libcrypto_static.lib in lib/VC/x64/MT of the usual OpenSSL installer,
+        # preinstalled on GitHub's windows runners). These must be set before the first find_package: the cached
+        # paths are reused by libdatachannel's own find_package.
+        set(OPENSSL_USE_STATIC_LIBS TRUE)
+        set(OPENSSL_MSVC_STATIC_RT TRUE)
+    endif()
     find_package(OpenSSL 3 QUIET)
     set(_sonora_dc_ssl_ok ${OPENSSL_FOUND})
+    # FindOpenSSL falls back to the import library (libcrypto.lib -> libcrypto-3-x64.dll) when no static one exists.
+    # The installer ships no OpenSSL DLL, so Sonora.exe would not start: build without collab instead.
+    if(WIN32 AND _sonora_dc_ssl_ok AND NOT OPENSSL_CRYPTO_LIBRARY MATCHES "_static")
+        message(STATUS "Sonora: OpenSSL at ${OPENSSL_CRYPTO_LIBRARY} is not a static library")
+        set(_sonora_dc_ssl_ok FALSE)
+    endif()
 endif()
 
 set(_sonora_dc_default OFF)
@@ -40,7 +54,7 @@ if(NOT SONORA_WITH_COLLAB_NET)
     if(NOT EXISTS "${_sonora_dc_dir}/CMakeLists.txt")
         message(STATUS "Sonora: collab network OFF (no ${_sonora_dc_dir}; run scripts/bootstrap.sh)")
     elseif(NOT _sonora_dc_ssl_ok)
-        message(STATUS "Sonora: collab network OFF (OpenSSL 3 not found; macOS: run scripts/bootstrap.sh)")
+        message(STATUS "Sonora: collab network OFF (no static OpenSSL 3; macOS: run scripts/bootstrap.sh)")
     else()
         message(STATUS "Sonora: collab network OFF (SONORA_WITH_COLLAB_NET=OFF)")
     endif()
