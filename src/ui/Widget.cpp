@@ -74,6 +74,13 @@ void Widget::paintTree(SkCanvas& canvas, const Theme& theme)
         canvas.clipRRect(SkRRect::MakeRectXY(localBounds().sk(), cornerRadius, cornerRadius), true);
     else
         canvas.clipRect(localBounds().sk());
+    // UI-54: a clip discards pixels, but does not avoid expensive paint() work (EQ curves,
+    // paths, text). Use the actual canvas clip so scaled device overviews still draw correctly.
+    if (canvas.isClipEmpty())
+    {
+        canvas.restore();
+        return;
+    }
     paint(canvas, theme);
     for (auto& c : children_)
         c->paintTree(canvas, theme);

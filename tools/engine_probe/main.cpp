@@ -1,6 +1,6 @@
 // engine_probe — headless engine check: load a set, time the build, render audio offline.
 //
-//   engine_probe <set.als> [--export file.wav|--stems folder] [--to <beat>] [--tail <s>] [--normalize] [--render <seconds>] [--from <beat>] [--out file.wav] [--no-plugins] [--check-finite] [--stress] [--bypass NAME]... [--launch TRACK:SCENE]... [--profile] [--block N]
+//   engine_probe <set.als> [--export file.wav|--stems folder] [--to <beat>] [--tail <s>] [--normalize] [--render <seconds>] [--from <beat>] [--out file.wav] [--no-plugins] [--check-finite] [--stress] [--bypass NAME]... [--editor-query-at <s>] [--launch TRACK:SCENE]... [--profile] [--block N]
 //
 // Prints: model load time, graph build time (UI-blocking part), background sample load time,
 // failed samples, build log. With --render it plays the arrangement from --from (default 0)
@@ -69,7 +69,7 @@ int main(int argc, char** argv)
 {
     if (argc < 2)
     {
-        std::fprintf(stderr, "usage: engine_probe <set.als> [--render <seconds>] [--from <beat>] [--out f.wav] [--no-plugins] [--check-finite] [--stress] [--bypass NAME]... [--launch TRACK:SCENE]... [--profile] [--block N]\n");
+        std::fprintf(stderr, "usage: engine_probe <set.als> [--render <seconds>] [--from <beat>] [--out f.wav] [--no-plugins] [--check-finite] [--stress] [--bypass NAME]... [--editor-query-at <s>] [--launch TRACK:SCENE]... [--profile] [--block N]\n");
         return 2;
     }
     juce::ScopedJuceInitialiser_GUI juceInit;
@@ -82,6 +82,7 @@ int main(int argc, char** argv)
     double exportTo = 0.0, exportTail = 0.0;
     std::vector<std::string> launches;
     std::vector<std::string> bypassNames; // devices to bypass by name (bisecting problems)
+    double editorQueryAt = -1.0; // PLG-13: ask every device hasEditor() at this render time, like the device title does
     for (int i = 2; i < argc; ++i)
     {
         const juce::String a = argv[i];
@@ -101,6 +102,8 @@ int main(int argc, char** argv)
             launches.push_back(argv[++i]); // "track:scene", launched (immediately) before rendering
         else if (a == "--bypass" && i + 1 < argc)
             bypassNames.push_back(argv[++i]);
+        else if (a == "--editor-query-at" && i + 1 < argc)
+            editorQueryAt = std::atof(argv[++i]);
         else if (a == "--export" && i + 1 < argc)
             exportFile = argv[++i];
         else if (a == "--stems" && i + 1 < argc)
@@ -372,6 +375,19 @@ int main(int argc, char** argv)
         {
             const double beatBefore = engine.transport().positionBeats();
             for (auto* t : timed) t->blockMs = 0.0;
+            if (editorQueryAt >= 0.0 && b == (juce::int64) (editorQueryAt * sr / block))
+            {
+                std::function<void(devices::DeviceProcessor&)> query = [&](devices::DeviceProcessor& d) {
+                    if (d.isHostedPlugin()) std::printf("  hasEditor() on %s: %d\n", d.name().c_str(), (int) d.hasEditor());
+                    if (auto* rack = dynamic_cast<devices::RackProcessor*>(&d))
+                        for (auto& chain : rack->chains())
+                            for (auto& child : chain.devices)
+                                query(*child);
+                };
+                for (auto& node : engine.latestGraph()->nodes)
+                    for (auto& d : node.devices)
+                        query(*d);
+            }
             const auto blockStart = std::chrono::steady_clock::now();
             engine.renderBlock(out, 2, block);
             if (profile)

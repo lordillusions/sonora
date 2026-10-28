@@ -1,10 +1,12 @@
 # COM-4/COM-7 installers (docs/INSTALLERS.md):
 #   windows: Release UI build (MSVC, static CRT) + sonora_tests, then Inno Setup -> Sonora-<v>-windows-x64-setup.exe
 #   linux:   ci/linux/Dockerfile, Release UI build -> Sonora-<v>-x86_64.AppImage + sonora_<v>_amd64.deb
-#   macos:   Release app (arm64), ad hoc signed -> Sonora-<v>.dmg, plus the Sonora Prism VST3 installer
-#            Sonora-Prism-VST3-<v>.pkg (PLG-11c). Unsigned/not notarized: the signed release is made on
+#   macos:   Release app (arm64), ad hoc signed -> Sonora-<v>.dmg, plus the VST3 installers
+#            Sonora-Prism-VST3-<v>.pkg (PLG-11c), Sonora-Curve-LFO-VST3-<v>.pkg (PLG-12b) and Sonora-Hush-VST3-<v>.pkg (PLG-14). Unsigned/not notarized: the signed release is made on
 #            a maintainer's Mac with scripts/release/make_release.sh. Off by default for manual runs (macOS minutes cost 10x).
 # A v* tag builds all three and attaches them to a draft GitHub Release; nothing is published automatically.
+# The tag must equal project() in CMakeLists.txt (the version About shows), and the release must carry every file the
+# website links to (site/*.html releases/latest/download/<name>). docs/INSTALLERS.md "Release checks".
 # Manual runs (workflow_dispatch) work once this file is on the default branch.
 name: installers
 
@@ -47,11 +49,20 @@ jobs:
       - id: v
         shell: bash
         run: |
+          project="$(sed -nE 's/^project\(Sonora VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"
           if [ "${GITHUB_REF_TYPE}" = tag ]; then v="${GITHUB_REF_NAME#v}"
           elif [ -n "${{ inputs.version }}" ]; then v="${{ inputs.version }}"
-          else v="$(sed -nE 's/^project\(Sonora VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"; fi
+          else v="$project"; fi
           [[ "$v" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]] || { echo "bad version '$v'"; exit 1; }
+          # A release whose tag differs from project() would leave developer builds showing an old version in About.
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "$v" != "$project" ]; then
+            echo "::error::tag $GITHUB_REF_NAME but CMakeLists.txt says project(Sonora VERSION $project): bump it first (docs/INSTALLERS.md "Release checks")"
+            exit 1
+          fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Release is ready (version, every plug-in packaged and on the website)
+        if: github.ref_type == 'tag'
+        run: scripts/release/check_release_ready.sh "${GITHUB_REF_NAME#v}"
 
   windows:
     needs: version
@@ -179,7 +190,7 @@ jobs:
       - name: Release build
         run: |
           cmake -S . -B build-release-app -G Ninja -DCMAKE_BUILD_TYPE=Release -DSONORA_APP_VERSION="$VERSION" -DSONORA_BUILD_TESTS=OFF
-          cmake --build build-release-app --target Sonora SonoraPrism_VST3
+          cmake --build build-release-app --target Sonora SonoraPrism_VST3 SonoraCurveLfo_VST3 SonoraHush_VST3
 
       - name: Disk image (ad hoc signed, not notarized)
         run: |
@@ -193,6 +204,16 @@ jobs:
         run: |
           packaging/macos/make_vst3_pkg.sh "build-release-app/src/SonoraPrism_artefacts/Release/VST3/Sonora Prism.vst3" \
               "dist/macos/Sonora-Prism-VST3-$VERSION.pkg"
+          packaging/macos/make_vst3_pkg.sh "build-release-app/src/SonoraCurveLfo_artefacts/Release/VST3/Sonora Curve LFO.vst3" \
+              "dist/macos/Sonora-Curve-LFO-VST3-$VERSION.pkg"
+          packaging/macos/make_vst3_pkg.sh "build-release-app/src/SonoraHush_artefacts/Release/VST3/Sonora Hush.vst3" \
+              "dist/macos/Sonora-Hush-VST3-$VERSION.pkg"
+          # Every bundle must say the release's version (the plug-ins' own About/host info).
+          for b in build-release-app/src/*_artefacts/Release/VST3/*.vst3 build-release-app/src/Sonora_artefacts/Release/Sonora.app; do
+            v="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$b/Contents/Info.plist")"
+            echo "$b: $v"
+            [ "$v" = "$VERSION" ] || { echo "::error::$b says $v, expected $VERSION"; exit 1; }
+          done
 
       - uses: actions/upload-artifact@v4
         with:
@@ -207,6 +228,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
       - uses: actions/download-artifact@v4
         with:
           pattern: installer-*
@@ -220,9 +244,20 @@ jobs:
           cd dist
           cp "Sonora-$VERSION.dmg" Sonora-macOS.dmg
           cp "Sonora-Prism-VST3-$VERSION.pkg" Sonora-Prism-VST3-macOS.pkg
+          cp "Sonora-Curve-LFO-VST3-$VERSION.pkg" Sonora-Curve-LFO-VST3-macOS.pkg
+          cp "Sonora-Hush-VST3-$VERSION.pkg" Sonora-Hush-VST3-macOS.pkg
           cp "Sonora-$VERSION-windows-x64-setup.exe" Sonora-Windows-x64-setup.exe
           cp "Sonora-$VERSION-x86_64.AppImage" Sonora-Linux-x86_64.AppImage
           cp "sonora_${VERSION}_amd64.deb" Sonora-Linux-amd64.deb
+      # The website's download buttons must never point at a file the release lacks (a 404 for a visitor).
+      - name: Every file the website links to is in this release
+        run: |
+          missing=0
+          for name in $(grep -oh 'releases/latest/download/[^"]*' src/site/*.html | sed 's|.*/||' | sort -u); do
+            if [ -f "dist/$name" ]; then echo "ok $name ($(stat -c %s "dist/$name") bytes)"
+            else echo "::error::site links to $name but the release has no such file"; missing=1; fi
+          done
+          [ "$missing" = 0 ]
       - name: Draft release with the installers
         env:
           GH_TOKEN: ${{ github.token }}

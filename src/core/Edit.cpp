@@ -619,6 +619,30 @@ EditCommand transferArrangementRegion(const Song& song, int first, int last, Bea
     return command;
 }
 
+EditCommand deleteArrangementRegion(const Song& song, int first, int last, Beats start, Beats end)
+{
+    if (! std::isfinite(start) || ! std::isfinite(end) || end - start <= 1e-9) return {};
+    struct State { std::vector<Clip> before, after; };
+    auto states = std::make_shared<std::map<int, State>>();
+    for (int index = std::max(0, first); index <= last && index < (int) song.tracks.size(); ++index)
+    {
+        const auto& track = song.tracks[(size_t) index];
+        if (track.frozen || std::none_of(track.arrangementClips.begin(), track.arrangementClips.end(), [&](const auto& clip) {
+                return clip.currentStart < end && clip.currentEnd > start; }))
+            continue;
+        State state{track.arrangementClips, track.arrangementClips};
+        eraseRegionClips(state.after, song, index, start, end);
+        std::stable_sort(state.after.begin(), state.after.end(), [](const auto& a, const auto& b) { return a.currentStart < b.currentStart; });
+        states->emplace(index, std::move(state));
+    }
+    if (states->empty()) return {};
+    EditCommand command; command.label = "Delete Selection";
+    for (const auto& [index, state] : *states) command.tracks.push_back(index);
+    command.apply = [states](Song& s) { for (const auto& [index, state] : *states) s.tracks[(size_t) index].arrangementClips = state.after; };
+    command.revert = [states](Song& s) { for (const auto& [index, state] : *states) s.tracks[(size_t) index].arrangementClips = state.before; };
+    return command;
+}
+
 EditCommand moveClipToTrack(const Song& song, int fromTrack, int uid, int toTrack, Beats at)
 {
     std::vector<EditCommand> parts;
@@ -1272,14 +1296,74 @@ EditCommand renameTrack(const Song& song, int track, std::string name)
     return command;
 }
 
-EditCommand addLocator(const Song& song, Beats time, std::string name)
+int nextLocatorId(const Song& song)
 {
+    int next = 0;
+    for (const auto& locator : song.locators) next = std::max(next, locator.id + 1);
+    return next;
+}
+
+const Locator* findLocator(const Song& song, int id)
+{
+    for (const auto& locator : song.locators)
+        if (locator.id == id && id >= 0) return &locator;
+    return nullptr;
+}
+
+std::string defaultLocatorName(const Song& song)
+{
+    for (size_t n = song.locators.size() + 1;; ++n)
+    {
+        auto name = std::to_string(n);
+        if (std::none_of(song.locators.begin(), song.locators.end(), [&name](const Locator& l) { return l.name == name; })) return name;
+    }
+}
+
+namespace
+{
+EditCommand replaceLocators(const Song& song, std::vector<Locator> after, std::string label)
+{
+    std::stable_sort(after.begin(), after.end(), [](const Locator& a, const Locator& b) { return a.time < b.time; });
     EditCommand command;
-    command.label = "Add Locator";
-    const auto before = song.locators;
-    command.apply = [time, name](Song& s) { s.locators.push_back({std::max(0.0, time), name}); };
-    command.revert = [before](Song& s) { s.locators = before; };
+    command.label = std::move(label);
+    command.apply = [after](Song& s) { s.locators = after; };
+    command.revert = [before = song.locators](Song& s) { s.locators = before; };
     return command;
+}
+} // namespace
+
+EditCommand addLocator(const Song& song, Beats time, std::string name, int colorIndex)
+{
+    auto after = song.locators;
+    Locator locator;
+    locator.time = std::max(0.0, time);
+    locator.name = std::move(name);
+    locator.id = nextLocatorId(song);
+    locator.colorIndex = colorIndex;
+    after.push_back(std::move(locator));
+    return replaceLocators(song, std::move(after), "Add Locator");
+}
+
+EditCommand changeLocator(const Song& song, int id, Locator changed, std::string label)
+{
+    if (! findLocator(song, id)) return {};
+    auto after = song.locators;
+    changed.id = id;
+    changed.time = std::max(0.0, changed.time);
+    for (auto& locator : after)
+    {
+        if (locator.id == id) locator = changed;
+        else if (changed.isSongStart) locator.isSongStart = false;
+    }
+    return replaceLocators(song, std::move(after), std::move(label));
+}
+
+EditCommand deleteLocator(const Song& song, int id)
+{
+    if (! findLocator(song, id)) return {};
+    auto after = song.locators;
+    std::erase_if(after, [id](const Locator& locator) { return locator.id == id; });
+    return replaceLocators(song, std::move(after), "Delete Locator");
 }
 
 EditCommand setGlobalQuantisation(const Song& song, int value)

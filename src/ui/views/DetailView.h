@@ -30,6 +30,8 @@ public:
     void paintOverview(SkCanvas&, const Theme&, const Rect&);
     void navigateOverview(float fraction);
     Rect noteTabBounds(int tab) const;
+    // UI-55: the level meter in the gap after device box `box` (chain order), in this view's coordinates.
+    Rect chainMeterBounds(int box) const;
     // Device title drags forward here; only the parent commits the edit after release.
     void beginDeviceDrag(int deviceId, float x, float y);
     void updateDeviceDrag(float x, float y);

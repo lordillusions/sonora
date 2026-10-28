@@ -12,6 +12,7 @@
 
 #include "core/Model.h"
 #include "devices/native/WavetableSynth.h"
+#include "plugin/PluginCommon.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -24,7 +25,7 @@
 namespace sonora::plugin
 {
 
-class WavetablePlugin final : public juce::AudioProcessor, private juce::Timer
+class WavetablePlugin final : public juce::AudioProcessor, public ParameterOwner, private juce::Timer
 {
 public:
     WavetablePlugin();
@@ -65,8 +66,8 @@ public:
     std::vector<std::string> buildLog; // load/import notes, newest last
 
     // Plain value of a host parameter (an index below ParameterCount).
-    float parameterValue(int index) const;
-    void setParameterValue(int index, float plainValue); // host automation: any thread
+    float parameterValue(int index) const override;
+    void setParameterValue(int index, float plainValue) override; // host automation: any thread
 
     // Editor edits write the synth directly: tells the host about every control that changed since the last call
     // (the timer runs it 20 times a second).

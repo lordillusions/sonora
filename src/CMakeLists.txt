@@ -11,6 +11,20 @@
 #
 # See docs/ARCHITECTURE.md.
 
+# ------------------------------------------------------------------ version (docs/INSTALLERS.md "Release checks")
+# The version users see (About, splash, CFBundleShortVersionString, installers, plug-ins) is project() in the top-level
+# CMakeLists.txt. Release builds may pass -DSONORA_APP_VERSION; the installers workflow refuses a tag that differs from
+# project(). Empty = project(), re-read at every configure, so a version bump reaches existing build folders too.
+set(SONORA_APP_VERSION "" CACHE STRING "Version shown to users (empty = the project() version)")
+# Build folders configured before 0.1.4 cached the project() version itself here and kept "0.1.0" after every bump.
+if (SONORA_APP_VERSION STREQUAL "0.1.0" AND NOT PROJECT_VERSION STREQUAL "0.1.0")
+    set_property(CACHE SONORA_APP_VERSION PROPERTY VALUE "")
+endif()
+if (NOT SONORA_APP_VERSION)
+    set(SONORA_APP_VERSION "${PROJECT_VERSION}") # a normal variable shadows the empty cache entry in this folder
+endif()
+message(STATUS "Sonora version ${SONORA_APP_VERSION}")
+
 # ------------------------------------------------------------------ platform
 if(APPLE)
     add_library(sonora_platform STATIC platform/HttpClientMac.mm platform/SecretStoreMac.mm)
@@ -104,6 +118,8 @@ add_library(sonora_engine STATIC
     devices/native/WavetableEffects.cpp
     devices/native/LfoShaper.cpp
     devices/native/CurveLfo.cpp
+    devices/native/Hush.cpp
+    devices/native/HushCurve.cpp
     devices/native/Compressor.cpp
     devices/native/Limiter.cpp
     devices/native/Bands.cpp
@@ -215,6 +231,7 @@ add_library(sonora_ui STATIC
     ui/views/NativeEditors.cpp
     ui/views/DeviceFace.cpp
     ui/views/ReferenceFace.cpp
+    ui/views/AutoFilterFace.cpp
     ui/views/EffectFaces.cpp
     ui/views/ResynthEditor.cpp
     ui/views/CurveLfoEditor.cpp
@@ -226,6 +243,8 @@ add_library(sonora_ui STATIC
     ui/MidiClipEdits.cpp
     ui/GridModel.cpp
     ui/GridMenu.cpp
+    ui/Locators.cpp
+    ui/SetView.cpp
     ui/TrackMenu.cpp
     ui/Shortcuts.cpp
     ui/views/ClipControls.cpp
@@ -248,43 +267,33 @@ endif()
 target_link_libraries(sonora_ui PUBLIC sonora_engine sonora::skia)
 target_compile_options(sonora_ui PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
 
-# ------------------------------------------------------------------ Sonora Prism as a VST3 (PLG-11)
-# A plug-in needs JUCE compiled with its JucePlugin_* configuration, and sonora_juce is the app's. So the plug-in's
+# ------------------------------------------------------------------ native devices as VST3s (PLG-11 Prism, PLG-12 Curve LFO)
+# A plug-in needs JUCE compiled with its JucePlugin_* configuration, and sonora_juce is the app's. So each plug-in's
 # shared-code library compiles JUCE again and the core/engine/ui sources with it (the linker keeps only what the
-# instrument and its editor use). Build: cmake --build build --target SonoraPrism_VST3.
-option(SONORA_BUILD_PRISM_VST3 "Build Sonora Prism as a VST3 instrument" ${APPLE})
-if (SONORA_BUILD_PRISM_VST3)
-    # Same version as the app (SONORA_APP_VERSION below; release builds pass it with -D). Installers read it back.
-    set(_sonoraPrismVersion "${PROJECT_VERSION}")
-    if (SONORA_APP_VERSION)
-        set(_sonoraPrismVersion "${SONORA_APP_VERSION}")
-    endif()
-    juce_add_plugin(SonoraPrism
-        PRODUCT_NAME "Sonora Prism"
+# device and its editor use). Build: cmake --build build --target SonoraPrism_VST3 (or SonoraCurveLfo_VST3).
+# Same version as the app (SONORA_APP_VERSION, set at the top of this file). Installers read it back.
+set(_sonoraPluginVersion "${SONORA_APP_VERSION}")
+# sonora_add_native_vst3(<target> METAL_VIEW <ObjC class> <juce_add_plugin arguments...> SOURCES <files...>)
+function(sonora_add_native_vst3 target)
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "METAL_VIEW" "SOURCES")
+    juce_add_plugin(${target}
         COMPANY_NAME "Sonora"
-        BUNDLE_ID "org.sonora.prism"
-        VERSION ${_sonoraPrismVersion}
+        VERSION ${_sonoraPluginVersion}
         PLUGIN_MANUFACTURER_CODE Snra
-        PLUGIN_CODE SnPr
         FORMATS VST3
-        IS_SYNTH TRUE
-        NEEDS_MIDI_INPUT TRUE
-        VST3_CATEGORIES Instrument Synth
-        COPY_PLUGIN_AFTER_BUILD FALSE)
+        COPY_PLUGIN_AFTER_BUILD FALSE
+        ${ARG_UNPARSED_ARGUMENTS})
     get_target_property(_sonoraCoreSources sonora_core SOURCES)
     get_target_property(_sonoraEngineSources sonora_engine SOURCES)
     get_target_property(_sonoraUiSources sonora_ui SOURCES)
-    target_sources(SonoraPrism PRIVATE
-        plugin/WavetablePlugin.cpp
-        plugin/WavetablePluginEditor.cpp
-        ${_sonoraCoreSources} ${_sonoraEngineSources} ${_sonoraUiSources})
-    target_include_directories(SonoraPrism PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_sources(${target} PRIVATE ${ARG_SOURCES} ${_sonoraCoreSources} ${_sonoraEngineSources} ${_sonoraUiSources})
+    target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     get_target_property(_sonoraJuceDefinitions sonora_juce COMPILE_DEFINITIONS)
-    target_compile_definitions(SonoraPrism PUBLIC
+    target_compile_definitions(${target} PUBLIC
         ${_sonoraJuceDefinitions}
         JUCE_VST3_CAN_REPLACE_VST2=0
-        SONORA_METAL_VIEW_CLASS=SonoraPrismMetalView) # Sonora.app may load this bundle: one ObjC class name each
-    target_link_libraries(SonoraPrism
+        SONORA_METAL_VIEW_CLASS=${ARG_METAL_VIEW}) # Sonora.app may load these bundles: one ObjC class name each
+    target_link_libraries(${target}
         PRIVATE
             juce::juce_audio_utils
             juce::juce_dsp
@@ -295,25 +304,62 @@ if (SONORA_BUILD_PRISM_VST3)
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)
     if (APPLE)
-        target_link_libraries(SonoraPrism PRIVATE "-framework Security")
+        target_link_libraries(${target} PRIVATE "-framework Security")
     elseif (WIN32)
-        target_link_libraries(SonoraPrism PRIVATE bcrypt)
+        target_link_libraries(${target} PRIVATE bcrypt)
     endif()
-    if (APPLE)
-        set_property(SOURCE gfx/MetalLayerView.mm APPEND PROPERTY COMPILE_OPTIONS -fobjc-arc) # not JUCE's own .mm files
-    endif()
-    set_target_properties(SonoraPrism SonoraPrism_VST3 PROPERTIES
+    set_target_properties(${target} ${target}_VST3 PROPERTIES
         C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN TRUE)
     if (APPLE) # only the VST3 entry points: the bundle's copies of JUCE, Skia, FLAC... stay private to it
-        target_link_options(SonoraPrism_VST3 PRIVATE
+        target_link_options(${target}_VST3 PRIVATE
             "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/plugin/vst3_exports.txt")
     endif()
+endfunction()
+
+option(SONORA_BUILD_PRISM_VST3 "Build Sonora Prism as a VST3 instrument" ${APPLE})
+option(SONORA_BUILD_CURVE_LFO_VST3 "Build Sonora Curve LFO as a VST3 effect" ${APPLE})
+option(SONORA_BUILD_HUSH_VST3 "Build Sonora Hush (resonance suppressor) as a VST3 effect" ${APPLE})
+if (APPLE AND (SONORA_BUILD_PRISM_VST3 OR SONORA_BUILD_CURVE_LFO_VST3 OR SONORA_BUILD_HUSH_VST3))
+    set_property(SOURCE gfx/MetalLayerView.mm APPEND PROPERTY COMPILE_OPTIONS -fobjc-arc) # not JUCE's own .mm files
+endif()
+if (SONORA_BUILD_PRISM_VST3)
+    sonora_add_native_vst3(SonoraPrism
+        METAL_VIEW SonoraPrismMetalView
+        PRODUCT_NAME "Sonora Prism"
+        BUNDLE_ID "org.sonora.prism"
+        PLUGIN_CODE SnPr
+        IS_SYNTH TRUE
+        NEEDS_MIDI_INPUT TRUE
+        VST3_CATEGORIES Instrument Synth
+        SOURCES plugin/WavetablePlugin.cpp plugin/WavetablePluginEditor.cpp)
+endif()
+if (SONORA_BUILD_CURVE_LFO_VST3)
+    sonora_add_native_vst3(SonoraCurveLfo
+        METAL_VIEW SonoraCurveLfoMetalView
+        PRODUCT_NAME "Sonora Curve LFO"
+        BUNDLE_ID "org.sonora.curvelfo"
+        PLUGIN_CODE SnCl
+        IS_SYNTH FALSE
+        NEEDS_MIDI_INPUT TRUE
+        NEEDS_MIDI_OUTPUT TRUE
+        VST3_CATEGORIES Fx Modulation Filter
+        SOURCES plugin/CurveLfoPlugin.cpp plugin/CurveLfoPluginEditor.cpp)
+endif()
+if (SONORA_BUILD_HUSH_VST3)
+    sonora_add_native_vst3(SonoraHush
+        METAL_VIEW SonoraHushMetalView
+        PRODUCT_NAME "Sonora Hush"
+        BUNDLE_ID "org.sonora.hush"
+        PLUGIN_CODE SnHs
+        IS_SYNTH FALSE
+        NEEDS_MIDI_INPUT FALSE
+        VST3_CATEGORIES Fx Dynamics EQ
+        SOURCES plugin/HushPlugin.cpp plugin/HushPluginEditor.cpp)
 endif()
 
 # ------------------------------------------------------------------ app
 # COM-4 release identity and updates (docs/UPDATES.md). scripts/release/make_release.sh sets these; a plain developer build
 # keeps updates off (empty feed/key) so it never offers to replace itself.
-set(SONORA_APP_VERSION "${PROJECT_VERSION}" CACHE STRING "CFBundleShortVersionString shown to users")
 set(SONORA_APP_BUILD "" CACHE STRING "CFBundleVersion, the value Sparkle compares (empty = SONORA_APP_VERSION)")
 set(SONORA_UPDATE_CHANNEL "stable" CACHE STRING "stable (stable + beta items in one feed) or nightly (separate app and feed)")
 set_property(CACHE SONORA_UPDATE_CHANNEL PROPERTY STRINGS stable nightly)
@@ -366,6 +412,10 @@ endif()
 string(APPEND _sonoraPlist "
 </dict></plist>")
 
+# JUCE turns ICON_BIG/ICON_SMALL into AppIcon.icns (macOS) / icon.ico (Windows) while configuring, so a new icon from
+# tools/brand_render must re-run the configure step (UI-51c).
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/resources/brand/icon-1024.png" "${CMAKE_SOURCE_DIR}/resources/brand/icon-256.png")
 juce_add_gui_app(Sonora
     PRODUCT_NAME "${_sonoraProduct}"
     COMPANY_NAME "Sonora"

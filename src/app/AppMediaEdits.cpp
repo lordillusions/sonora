@@ -118,7 +118,8 @@ void AppController::consolidateSelection()
                 const auto file = folder.getChildFile(juce::String(index) + ".wav");
                 result.error = engine::writeCroppedWav(rendered.sample->audio, rendered.sample->sampleRate, 0, rendered.sample->audio.getNumSamples(), file);
                 if (! result.error.empty()) { folder.deleteRecursively(); return result; }
-                clip = renderedClip(song, file, rendered.sample->sampleRate, rendered.sample->audio.getNumSamples(), track.colorIndex, range.start);
+                clip = renderedClip(song, file, rendered.sample->sampleRate, rendered.sample->audio.getNumSamples(),
+                                    model::consolidatedColor(song, index, range.start, range.end), range.start);
                 clip.name = track.name;
                 clip.envelopes = model::consolidatedEnvelopes(song, index, range.start, range.end);
                 clip.warped = true; clip.warpMode = model::WarpMode::Complex;

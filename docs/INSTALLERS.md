@@ -7,6 +7,8 @@ Sparkle on macOS ([UPDATES.md](UPDATES.md)); Windows and Linux have no updater y
 |---|---|---|---|
 | macOS arm64 | `Sonora-<v>.dmg` | `Sonora.app` next to an Applications link (drag to install) | `packaging/macos/make_dmg.sh`, called by `scripts/release/make_release.sh` |
 | macOS arm64 | `Sonora-Prism-VST3-<v>.pkg` | `Sonora Prism.vst3` in `/Library/Audio/Plug-Ins/VST3` (all users) or `~/Library/Audio/Plug-Ins/VST3` ("Install for me only") | `packaging/macos/make_vst3_pkg.sh` (PLG-11c) |
+| macOS arm64 | `Sonora-Curve-LFO-VST3-<v>.pkg` | `Sonora Curve LFO.vst3` (drawn-curve modulation effect), same folders | `packaging/macos/make_vst3_pkg.sh` (PLG-12b) |
+| macOS arm64 | `Sonora-Hush-VST3-<v>.pkg` | `Sonora Hush.vst3` (resonance suppressor effect), same folders | `packaging/macos/make_vst3_pkg.sh` (PLG-14) |
 | Windows x64 | `Sonora-<v>-windows-x64-setup.exe` | `Program Files\Sonora` (or per user), Start menu entry, `.als` "Open with" entry | `packaging/windows/sonora.iss` (Inno Setup 6) |
 | Linux x64 | `Sonora-<v>-x86_64.AppImage` | nothing: one self-contained file (`chmod +x`, run) | `packaging/linux/make_packages.sh` |
 | Linux x64 | `sonora_<v>_amd64.deb` | `/opt/sonora`, `/usr/bin/sonora`, desktop entry, icon, `.als` MIME type | `packaging/linux/make_packages.sh` |
@@ -14,6 +16,27 @@ Sparkle on macOS ([UPDATES.md](UPDATES.md)); Windows and Linux have no updater y
 Every package keeps the app's folder layout: the executable, `sonora_plugin_scanner` and `Resources/` side by side
 (`PluginHost::scannerExecutable` and Help > User Guide look next to the executable). Each output folder also gets a
 `.sha256` file.
+
+## Release checks
+
+These run on every release, and a release is not done until they pass.
+
+- **One version.** `project(Sonora VERSION x.y.z)` in the top-level `CMakeLists.txt` is the version users see: About,
+  the splash, `CFBundleShortVersionString`, the installers and every plug-in (Sonora Hush shows it under its wordmark).
+  Bump it before tagging `vx.y.z`; the installers workflow refuses a tag that differs. Existing build folders pick a bump
+  up at the next configure (`SONORA_APP_VERSION` is empty unless a release passes it).
+- **Every plug-in ships and is on the website.** `scripts/release/check_release_ready.sh x.y.z` fails unless each
+  `sonora_add_native_vst3(... PRODUCT_NAME "Sonora X")` in `src/CMakeLists.txt` is built and packaged by the workflow as
+  `Sonora-X-VST3-<v>.pkg` plus the stable `Sonora-X-VST3-macOS.pkg`, and `site/download.html` has its card (`id="x"`),
+  download link and screenshot `site/assets/img/plugin-x.webp`. CI runs it before building a tag. A new plug-in therefore
+  needs all of those in the same change.
+- **No dead download buttons.** The release job fails if any `releases/latest/download/<name>` link in `site/*.html` has
+  no matching file in the release.
+- **After publishing:** `scripts/release/check_downloads.sh --version x.y.z` checks the release is Latest, the live site
+  links the same files as `site/`, and every link answers HTTP 200 with the asset's exact size.
+- **First launch:** the builds are not signed by Apple or Microsoft yet. `site/download.html#first-launch` explains the
+  Gatekeeper (macOS 15+: System Settings > Privacy & Security > Open Anyway) and SmartScreen steps; keep it until COM-4b
+  and COM-4m ship signed builds, and test a download on a Mac with Gatekeeper on.
 
 ## Building them
 
@@ -54,6 +77,18 @@ relocatable and not version checked, so the package always writes its bundle to 
 takes the app's version (`SONORA_APP_VERSION`); the package identifier is `org.sonora.wavetable.pkg`. To remove it:
 delete `Sonora Prism.vst3` from the folder, then `pkgutil --forget org.sonora.wavetable.pkg` (with `sudo` for the
 all-users install).
+
+**Sonora Hush VST3 package (macOS)** — the same script on the `SonoraHush_VST3` target (PLG-14). It reads the bundle's
+`moduleinfo.json`, so the pages say "effect" instead of "instrument":
+
+```bash
+cmake --build build-release-ui --target SonoraHush_VST3
+packaging/macos/make_vst3_pkg.sh "build-release-ui/src/SonoraHush_artefacts/Release/VST3/Sonora Hush.vst3" \
+    dist/installers/Sonora-Hush-VST3-0.2.0.pkg   # plus the three signing options for a release
+```
+
+The package identifier is `org.sonora.hush.pkg`. To remove it, delete `Sonora Hush.vst3` and run
+`pkgutil --forget org.sonora.hush.pkg`.
 
 **Linux, locally in Docker** (x64 runs emulated on Apple silicon, so a clean Release build is slow):
 

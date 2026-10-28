@@ -9,6 +9,8 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <cmath>
+#include <set>
 #include <mutex>
 
 namespace sonora::io
@@ -64,6 +66,28 @@ bool boolean(const XmlElement* e, const char* path, bool fallback = false)
     if (const auto* c = at(e, path); c != nullptr && c->hasAttribute("Value"))
         return c->getStringAttribute("Value").equalsIgnoreCase("true");
     return fallback;
+}
+
+// UI-57: the view state (main view, Arrangement zoom/scroll, Session scroll, detail view). Scroll positions are stored
+// negated (a content offset); a zoom that is not a positive number keeps the default.
+void readView(const XmlElement& liveSet, model::Song::View& view)
+{
+    const auto point = [](const XmlElement* e, int& x, int& y) {
+        if (e == nullptr) return;
+        x = -e->getIntAttribute("X", 0);
+        y = -e->getIntAttribute("Y", 0);
+    };
+    if (const auto* navigator = liveSet.getChildByName("SequencerNavigator"))
+    {
+        view.present = true;
+        if (const double zoom = num(navigator, "BeatTimeHelper/CurrentZoom", 0.0); zoom > 0.0 && std::isfinite(zoom))
+            view.beatsPerPixel = zoom;
+        point(navigator->getChildByName("ScrollerPos"), view.arrangementScrollX, view.arrangementScrollY);
+    }
+    point(liveSet.getChildByName("SessionScrollPos"), view.sessionScrollX, view.sessionScrollY);
+    view.sessionVisible = integer(&liveSet, "SelectedDocumentViewInMainWindow", 0) == 1;
+    view.clipDetailOpen = boolean(&liveSet, "ViewStateMainWindowClipDetailOpen", false);
+    view.deviceDetailOpen = boolean(&liveSet, "ViewStateMainWindowDeviceDetailOpen", true);
 }
 
 // <ScaleInformation>: Live 12 writes <Root/> and a scale index in <Name/>; Live 11 wrote <RootNote/> and the scale's
@@ -662,6 +686,10 @@ Track readTrack(const XmlElement* x, TrackKind kind, std::vector<std::string>& w
     if (boolean(x, "TrackDelay/IsValueSampleBased", false))
         t.trackDelayMs = 0.0; // sample-based delays are not converted (no sample rate here); rare
     t.mixer = readMixer(at(chain, "Mixer"));
+    t.sessionWidth = integer(chain, "Mixer/ViewStateSessionTrackWidth", 0);
+    if (const auto* lanes = at(chain, "AutomationLanes/AutomationLanes"))
+        if (const auto* first = lanes->getFirstChildElement())
+            t.laneHeight = integer(first, "LaneHeight", 0);
     t.devices = readDevices(at(chain, "DeviceChain/Devices"), warnings);
     t.automation = readEnvelopes(at(x, "AutomationEnvelopes/Envelopes"));
 
@@ -850,8 +878,28 @@ AlsLoadResult parseAls(const XmlElement& root, const std::string& sourcePath)
         }
 
     if (const auto* locators = at(liveSet, "Locators/Locators"))
+    {
+        std::set<int> ids;
         for (const auto* lx : locators->getChildWithTagNameIterator("Locator"))
-            song->locators.push_back({num(lx, "Time"), str(lx, "Name").toStdString()});
+        {
+            Locator l;
+            l.time = num(lx, "Time");
+            l.name = str(lx, "Name").toStdString();
+            l.annotation = str(lx, "Annotation").toStdString();
+            l.isSongStart = boolean(lx, "IsSongStart", false);
+            l.id = lx->getIntAttribute("Id", -1);
+            if (l.id < 0 || ! ids.insert(l.id).second) l.id = -1; // renumbered below; the writer keeps ids unique
+            song->locators.push_back(std::move(l));
+        }
+        int next = ids.empty() ? 0 : *ids.rbegin() + 1;
+        for (auto& l : song->locators) if (l.id < 0) l.id = next++;
+        // UI-3b: Sonora's per-locator colours, keyed by Locator Id.
+        if (const auto* colours = liveSet->getChildByName("SonoraLocators"); colours && colours->getIntAttribute("Version") == 1)
+            for (const auto* cx : colours->getChildWithTagNameIterator("Locator"))
+                for (auto& l : song->locators)
+                    if (l.id == cx->getIntAttribute("Id", -2)) l.colorIndex = std::clamp(cx->getIntAttribute("Color", -1), -1, 69);
+        std::stable_sort(song->locators.begin(), song->locators.end(), [](const Locator& a, const Locator& b) { return a.time < b.time; });
+    }
 
     song->globalQuantisation = integer(liveSet, "GlobalQuantisation", 4);
     readScale(liveSet, song->scaleRoot, song->scaleName);
@@ -875,6 +923,7 @@ AlsLoadResult parseAls(const XmlElement& root, const std::string& sourcePath)
         song->loopLength = num(tr, "LoopLength", 16.0);
         song->currentTime = num(tr, "CurrentTime", 0.0);
     }
+    readView(*liveSet, song->view);
 
     // De-duplicate warnings, keep a count.
     std::sort(song->warnings.begin(), song->warnings.end());

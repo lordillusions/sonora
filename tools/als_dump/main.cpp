@@ -353,7 +353,7 @@ int main(int argc, char** argv)
                         history.perform(*a.song, model::setSessionClip(*a.song, (int) track, 1, clip));
                         a.song->tracks[track].name = "Sonora Keys";
                         a.song->scenes[1].name = "Sonora Scene";
-                        a.song->locators = {{4, "Sonora Marker"}};
+                        a.song->locators = {{.time = 4, .name = "Sonora Marker"}};
                         model::AutomationEnvelope env;
                         size_t automationTrack = track;
                         for (size_t i = 0; i < a.song->tracks.size(); ++i)

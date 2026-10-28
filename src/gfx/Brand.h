@@ -103,6 +103,12 @@ constexpr int busyCursorSize = 32;
 constexpr int busyCursorHotSpot = 4;
 void drawBusyCursor(SkCanvas& canvas, double timeSeconds);
 
+// Scrub cursor (the Arrangement ruler's play-from-here area): a small speaker, black with a white rim, sound waves to
+// its right. Logical size scrubCursorSize; the hot spot is the speaker's centre, so the click plays from under it.
+constexpr int scrubCursorSize = 24;
+constexpr int scrubCursorHotSpotX = 8, scrubCursorHotSpotY = 12;
+void drawScrubCursor(SkCanvas& canvas);
+
 // SVG documents for the website and the repository (resources/brand).
 std::string markSvg(bool onIcon);
 std::string wordmarkSvg(SkColor color);

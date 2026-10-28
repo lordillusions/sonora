@@ -973,6 +973,13 @@ void patchTrackMixerAndDevices(XmlElement* x, const model::Track& t)
     if (auto* unfolded = child(x, "TrackUnfolded")) // a group opened or closed in Sonora
         if (unfolded->getStringAttribute("Value").equalsIgnoreCase("true") == t.folded)
             setValueAttr(unfolded, t.folded ? "false" : "true");
+    if (t.laneHeight > 0) // UI-57 view state
+        if (auto* lanes = at(x, "DeviceChain/AutomationLanes/AutomationLanes"))
+            if (auto* first = lanes->getFirstChildElement())
+                if (auto* height = child(first, "LaneHeight"); height && height->getIntAttribute("Value") != t.laneHeight)
+                    setNumber(height, t.laneHeight);
+    if (auto* width = at(x, "DeviceChain/Mixer/ViewStateSessionTrackWidth"); width && t.sessionWidth > 0 && width->getIntAttribute("Value") != t.sessionWidth)
+        setNumber(width, t.sessionWidth);
     if (t.kind != model::TrackKind::Main)
         if (auto* parent = child(x, "TrackGroupId"))
             if (parent->getIntAttribute("Value", -1) != t.groupId)
@@ -1227,7 +1234,7 @@ std::vector<ClipPlan> planSessionClips(XmlElement* x, const model::Track& track,
     return plans;
 }
 
-void patchScenesAndLocators(XmlElement& liveSet, const model::Song& song)
+std::vector<std::pair<int, int>> patchScenesAndLocators(XmlElement& liveSet, const model::Song& song)
 {
     auto ensure = [](XmlElement* parent, const char* name) {
         auto* e = child(parent, name);
@@ -1259,30 +1266,73 @@ void patchScenesAndLocators(XmlElement& liveSet, const model::Song& song)
         }
         for (size_t i = song.scenes.size(); i < old.size(); ++i) scenes->removeChildElement(old[i], true);
     }
+    // Locators are matched to their file elements by Id (UI-3b), so deleting or moving one never hands its XML
+    // (mapping, unknown children) to another. Elements are re-ordered by time, as the reference writes them.
+    std::vector<std::pair<int, int>> colours;
     auto* holder = child(&liveSet, "Locators");
     if (! holder && ! song.locators.empty()) holder = liveSet.createNewChildElement("Locators");
     auto* locators = holder ? child(holder, "Locators") : nullptr;
     if (! locators && holder && ! song.locators.empty()) locators = holder->createNewChildElement("Locators");
     if (locators)
     {
-        std::vector<XmlElement*> old;
-        for (auto* e : locators->getChildWithTagNameIterator("Locator")) old.push_back(e);
+        std::map<int, XmlElement*> old;
+        std::vector<XmlElement*> unmatched;
         int nextLocatorId = 0;
-        for (const auto* e : old) nextLocatorId = std::max(nextLocatorId, e->getIntAttribute("Id", -1) + 1);
-        for (size_t i = 0; i < song.locators.size(); ++i)
+        for (auto* e : locators->getChildWithTagNameIterator("Locator"))
         {
-            const auto& locator = song.locators[i];
-            auto* e = i < old.size() ? old[i] : locators->createNewChildElement("Locator");
-            if (i >= old.size())
+            const int id = e->getIntAttribute("Id", -1);
+            if (id < 0 || ! old.emplace(id, e).second) unmatched.push_back(e);
+            nextLocatorId = std::max(nextLocatorId, id + 1);
+        }
+        for (const auto& locator : song.locators) nextLocatorId = std::max(nextLocatorId, locator.id + 1);
+        std::vector<XmlElement*> ordered;
+        for (const auto& locator : song.locators)
+        {
+            XmlElement* e = nullptr;
+            if (const auto found = old.find(locator.id); locator.id >= 0 && found != old.end())
             {
-                e->setAttribute("Id", nextLocatorId++);
+                e = found->second;
+                old.erase(found);
+                locators->removeChildElement(e, false);
+            }
+            else
+            {
+                e = new XmlElement("Locator");
+                e->setAttribute("Id", locator.id >= 0 && ! old.count(locator.id) ? locator.id : nextLocatorId++);
                 e->createNewChildElement("LomId")->setAttribute("Value", 0);
-                e->createNewChildElement("IsSongStart")->setAttribute("Value", "false");
+                e->createNewChildElement("Time");
+                e->createNewChildElement("Name");
+                e->createNewChildElement("Annotation");
+                e->createNewChildElement("IsSongStart");
             }
             setNumber(ensure(e, "Time"), locator.time);
             setValueAttr(ensure(e, "Name"), juce::String::fromUTF8(locator.name.c_str()));
+            if (child(e, "Annotation") || ! locator.annotation.empty())
+                setValueAttr(ensure(e, "Annotation"), juce::String::fromUTF8(locator.annotation.c_str()));
+            setValueAttr(ensure(e, "IsSongStart"), locator.isSongStart ? "true" : "false");
+            if (locator.colorIndex >= 0) colours.emplace_back(e->getIntAttribute("Id"), locator.colorIndex);
+            ordered.push_back(e);
         }
-        for (size_t i = song.locators.size(); i < old.size(); ++i) locators->removeChildElement(old[i], true);
+        for (auto& [id, e] : old) locators->removeChildElement(e, true);
+        for (auto* e : unmatched) locators->removeChildElement(e, true);
+        for (auto* e : ordered) locators->addChildElement(e);
+    }
+    return colours;
+}
+
+// Locator colours are a Sonora extension: one <SonoraLocators> as the last child of LiveSet, which the reference
+// ignores (docs/ALS_FORMAT.md). Written only when a locator has a colour.
+void writeLocatorColours(XmlElement& liveSet, const std::vector<std::pair<int, int>>& colours)
+{
+    liveSet.deleteAllChildElementsWithTagName("SonoraLocators");
+    if (colours.empty()) return;
+    auto* sonora = liveSet.createNewChildElement("SonoraLocators");
+    sonora->setAttribute("Version", 1);
+    for (const auto& [id, colour] : colours)
+    {
+        auto* e = sonora->createNewChildElement("Locator");
+        e->setAttribute("Id", id);
+        e->setAttribute("Color", colour);
     }
 }
 
@@ -1390,6 +1440,52 @@ void patchTakeLanes(XmlElement& trackXml, const model::Track& track, AlsSaveResu
 }
 } // namespace
 
+namespace
+{
+// UI-57: the view state goes back into the elements it was read from; a set without them keeps none.
+void patchView(XmlElement& liveSet, const model::Song::View& view)
+{
+    const auto point = [](XmlElement* e, int x, int y) {
+        if (e == nullptr) return;
+        if (e->getIntAttribute("X") != -x) e->setAttribute("X", -x);
+        if (e->getIntAttribute("Y") != -y) e->setAttribute("Y", -y);
+    };
+    if (auto* navigator = child(&liveSet, "SequencerNavigator"))
+    {
+        if (auto* zoom = at(navigator, "BeatTimeHelper/CurrentZoom"); zoom && view.beatsPerPixel > 0.0
+            && std::fabs(zoom->getDoubleAttribute("Value") - view.beatsPerPixel) > 1e-12 * std::max(1.0, view.beatsPerPixel))
+            zoom->setAttribute("Value", num(view.beatsPerPixel));
+        point(child(navigator, "ScrollerPos"), view.arrangementScrollX, view.arrangementScrollY);
+    }
+    point(child(&liveSet, "SessionScrollPos"), view.sessionScrollX, view.sessionScrollY);
+    if (auto* selected = child(&liveSet, "SelectedDocumentViewInMainWindow"); selected && (selected->getIntAttribute("Value") == 1) != view.sessionVisible)
+        setNumber(selected, view.sessionVisible ? 1 : 0);
+    setValueAttr(child(&liveSet, "ViewStateMainWindowClipDetailOpen"), view.clipDetailOpen ? "true" : "false");
+    setValueAttr(child(&liveSet, "ViewStateMainWindowDeviceDetailOpen"), view.deviceDetailOpen ? "true" : "false");
+}
+
+bool holdsTag(const XmlElement& e, const char* tag)
+{
+    if (e.hasTagName(tag)) return true;
+    for (auto* c : e.getChildIterator())
+        if (holdsTag(*c, tag)) return true;
+    return false;
+}
+
+// The reference parses device XML with the schema the header declares and rejects a 12.4 class (the Auto Filter,
+// AutoFilter2) under an older header, so a Live 12 set that holds one is written with the 12.4 header parity_probe's sets
+// open with (docs/PARITY.md). Live 11 headers are left alone: the browser inserts the legacy device there
+// (model::insertedDeviceTag).
+void raiseSchemaForNewDevices(XmlElement& root)
+{
+    const auto minor = root.getStringAttribute("MinorVersion");
+    if (! minor.startsWith("12.0_") || minor.fromFirstOccurrenceOf("_", false, false).getIntValue() >= 12402) return;
+    if (! holdsTag(root, "AutoFilter2")) return;
+    root.setAttribute("MinorVersion", "12.0_12402");
+    root.setAttribute("SchemaChangeCount", "1");
+}
+} // namespace
+
 AlsSaveResult patchAlsDom(const model::Song& song, XmlElement& root)
 {
     AlsSaveResult r;
@@ -1448,7 +1544,7 @@ AlsSaveResult patchAlsDom(const model::Song& song, XmlElement& root)
             applyClipPlan(plan, r);
     }
 
-    patchScenesAndLocators(*liveSet, song);
+    const auto locatorColours = patchScenesAndLocators(*liveSet, song);
     if (song.pointeeIdsAllocated)
     {
         if (auto* next = child(liveSet, "NextPointeeId"))
@@ -1506,6 +1602,9 @@ AlsSaveResult patchAlsDom(const model::Song& song, XmlElement& root)
             }
         }
     }
+    patchView(*liveSet, song.view);
+    writeLocatorColours(*liveSet, locatorColours); // last, after every other LiveSet child
+    raiseSchemaForNewDevices(root);
     r.ok = true;
     return r;
 }

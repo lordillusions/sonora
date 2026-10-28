@@ -67,6 +67,13 @@ template<class T> std::optional<T> maybe(const juce::var& value, const char* nam
     return read(value, name);
 }
 
+std::string text(const juce::var& value, const char* name)
+{
+    if (! value[name].isString()) invalid(std::string("Expected a string: ") + name);
+    return value[name].toString().toStdString();
+}
+int color(const juce::var& value) { return static_cast<int>(integer(value, "color", -1, 1000)); }
+
 float realF(const juce::var& value, const char* name) { return static_cast<float>(number(value, name)); }
 double real(const juce::var& value, const char* name) { return number(value, name); }
 int pitch(const juce::var& value, const char* name) { return static_cast<int>(integer(value, name, -1000000, 1000000)); }
@@ -186,6 +193,22 @@ struct Encoder
         }
         out.set("updates", updates);
     }
+    void operator()(const ops::AddLocator& op)
+    {
+        out.set("beat", op.beat);
+        if (op.name) out.set("name", juce::String::fromUTF8(op.name->c_str()));
+        if (op.color >= 0) out.set("color", op.color);
+    }
+    void operator()(const ops::UpdateLocator& op)
+    {
+        out.set("locatorId", op.locatorId);
+        if (op.beat) out.set("beat", *op.beat);
+        if (op.name) out.set("name", juce::String::fromUTF8(op.name->c_str()));
+        if (op.infoText) out.set("infoText", juce::String::fromUTF8(op.infoText->c_str()));
+        if (op.color) out.set("color", *op.color);
+        if (op.songStart) out.set("songStart", *op.songStart);
+    }
+    void operator()(const ops::DeleteLocator& op) { out.set("locatorId", op.locatorId); }
     void operator()(const ops::DeleteNotes& op)
     {
         write(out, op.clip);
@@ -285,6 +308,32 @@ Op decode(const juce::var& value)
         ops::DeleteNotes op{readClip(value), {}};
         for (const auto& item : array(value, "noteKeys")) op.keys.push_back(noteKey(Object().set("k", item).var(), "k"));
         return {op};
+    }
+    if (type == "locator.add")
+    {
+        allow(value, {"type", "beat", "name", "color"});
+        ops::AddLocator op;
+        op.beat = number(value, "beat");
+        op.name = maybe<std::string>(value, "name", text);
+        if (value.hasProperty("color")) op.color = color(value);
+        return {op};
+    }
+    if (type == "locator.update")
+    {
+        allow(value, {"type", "locatorId", "beat", "name", "infoText", "color", "songStart"});
+        ops::UpdateLocator op;
+        op.locatorId = id(value, "locatorId");
+        op.beat = maybe<double>(value, "beat", real);
+        op.name = maybe<std::string>(value, "name", text);
+        op.infoText = maybe<std::string>(value, "infoText", text);
+        if (value.hasProperty("color")) op.color = color(value);
+        op.songStart = maybe<bool>(value, "songStart", boolean);
+        return {op};
+    }
+    if (type == "locator.delete")
+    {
+        allow(value, {"type", "locatorId"});
+        return {ops::DeleteLocator{id(value, "locatorId")}};
     }
     throw OpError("unsupported_operation", "Unsupported edit type: " + type.toStdString());
 }

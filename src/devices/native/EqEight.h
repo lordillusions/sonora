@@ -5,11 +5,12 @@
 //   0 LowCut48, 1 LowCut12, 2 LowShelf, 3 Bell, 4 Notch, 5 HighShelf, 6 HighCut12, 7 HighCut48
 // Implemented: Stereo / Left-Right / Mid-Side modes (band set A processes the left or mid channel,
 // set B the right or side channel), 8 bands, Global Gain, Scale, Adaptive Q.
-// Not yet: oversampling ("Precision"), the spectrum analyzer (ROADMAP DEV-2b). Curves are RBJ
+// Not yet: oversampling ("Precision", ROADMAP DEV-2b). Curves are RBJ
 // approximations, not Live-identical; Adaptive Q is a guess at Live's curve.
 
 #include "devices/NativeDevice.h"
 #include "devices/native/Biquad.h"
+#include "dsp/AudioDisplayTap.h"
 
 #include <array>
 
@@ -67,6 +68,9 @@ public:
     // `setB` selects the second band set (right / side channel).
     double responseAt(double freq, bool setB = false) const;
 
+    // Post-EQ, post-output-gain stereo signal; a single visible face consumes this on the message thread.
+    dsp::AudioDisplayTap& displayTap() { return displayTap_; }
+
 private:
     struct Band
     {
@@ -85,6 +89,7 @@ private:
     std::array<Band, kBands> bands_{};  // set A
     std::array<Band, kBands> bandsB_{}; // set B
     juce::SmoothedValue<float> outGain_;
+    dsp::AudioDisplayTap displayTap_;
 };
 
 } // namespace sonora::devices

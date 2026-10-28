@@ -164,8 +164,15 @@ juce::var snapshot(const State& state)
             tracks.add(object({{"trackId", track.id}, {"name", track.name}, {"gainLinear", gain}, {"authoredGainLinear", track.mixer.volume},
                                {"clips", clips}, {"sessionClips", sessionClips}, {"takeClips", takeClips}, {"devices", devices}}));
         }
+    juce::Array<juce::var> locators;
+    if (state.song)
+        for (const auto& locator : state.song->locators)
+            locators.add(object({{"locatorId", locator.id}, {"name", juce::String::fromUTF8(locator.name.c_str())}, {"beat", locator.time},
+                                 {"color", locator.colorIndex}, {"songStart", locator.isSongStart},
+                                 {"infoText", juce::String::fromUTF8(locator.annotation.c_str())}}));
     return object({{"documentId", state.documentId}, {"revision", state.revision}, {"busy", state.busy},
-                   {"tempo", state.liveTempo > 0 ? state.liveTempo : (state.song ? state.song->tempo : 0.0)}, {"tracks", tracks}});
+                   {"tempo", state.liveTempo > 0 ? state.liveTempo : (state.song ? state.song->tempo : 0.0)}, {"tracks", tracks},
+                   {"locators", locators}});
 }
 } // namespace
 
@@ -208,7 +215,8 @@ juce::var ControlService::execute(const juce::var& request)
             return result("observed", object({{"operations", juce::var(juce::StringArray{
                 "project.inspect", "capabilities.get", "clips.get", "devices.parameters", "edits.apply",
                 "devices.parameters.set", "devices.catalog", "devices.insert", "devices.remove", "workflow.serum_supersaw", "history.undo"})}, {"promptMode", "client-provided reasoning; optional configured native LLM"},
-                {"editTypes", juce::var(juce::StringArray{"tempo.set", "track.set_gain", "clip.duplicate", "notes.add", "notes.update", "notes.delete", "notes.replace"})},
+                {"editTypes", juce::var(juce::StringArray{"tempo.set", "track.set_gain", "clip.duplicate", "notes.add", "notes.update", "notes.delete", "notes.replace",
+                                                          "locator.add", "locator.update", "locator.delete"})},
                 {"limits", "Top-level native/rack/VST3 controls and device insertion/removal; parameter writes rebuild processor; Arrangement/Session/take notes; no save/export commands yet"}}));
         const auto target = request["target"];
         fields(target, {"instanceId", "documentId"});
@@ -487,7 +495,8 @@ juce::var ControlService::dispatch(const juce::String& operation, const juce::va
                 const auto type = item["type"].toString();
                 if (! item.getDynamicObject()) throw std::runtime_error("Expected an object");
                 if (type != "tempo.set" && type != "track.set_gain" && type != "clip.duplicate" && type != "notes.add"
-                    && type != "notes.update" && type != "notes.delete" && type != "notes.replace")
+                    && type != "notes.update" && type != "notes.delete" && type != "notes.replace"
+                    && type != "locator.add" && type != "locator.update" && type != "locator.delete")
                     return failure("unsupported_operation", "Unsupported edit type: " + type.toStdString());
                 auto part = model::opToCommand(staged, model::opFromJson(noteKeysForIndices(staged, item)));
                 part.apply(staged); parts.push_back(std::move(part));
@@ -495,6 +504,15 @@ juce::var ControlService::dispatch(const juce::String& operation, const juce::va
         }
         catch (const model::OpError& error) { return failure(error.code, error.what()); }
         command = model::compose("Agent edit", std::move(parts));
+        // UI-3b: handles of locators this batch created, in creation order (ids only grow).
+        juce::Array<juce::var> created;
+        for (const auto& locator : staged.locators)
+            if (! model::findLocator(*before.song, locator.id)) created.add(locator.id);
+        if (! created.isEmpty())
+        {
+            std::sort(created.begin(), created.end(), [](const juce::var& a, const juce::var& b) { return static_cast<int>(a) < static_cast<int>(b); });
+            report = object({{"locatorIds", created}});
+        }
     }
     else return failure("unsupported_operation", "Unsupported operation: " + operation.toStdString());
     ApplyResult applied;

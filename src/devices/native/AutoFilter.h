@@ -68,7 +68,8 @@ private:
 //   Output = linear gain, Dry/Wet linear. LFO and envelope depth: 7.6 octaves per unit (sine LFO starts at phase 0).
 // Approximations (not yet measured exactly): DJ control mapping (HP/LP corner 20 Hz * 2^(9.2 |c|)), Comb (normalised
 // feedback comb, delay 1 / (2 f), feedback 0.5 (1 + Res)), Vowel (band-pass), synced LFO rates, circuits other than
-// Clean (Clean is used; Drive = 26 dB x Drive of input gain, measured), envelope detector shape.
+// SVF (SVF is used for every circuit; Drive = 26 dB x Drive of input gain, measured), envelope detector shape.
+// Ranges follow the reference's default preset (Output 0..1, LFO 0.1..60 Hz / 0.1..200 s, Attack <= 0.1 s, Release <= 3 s).
 class AutoFilter2 final : public NativeDevice
 {
 public:

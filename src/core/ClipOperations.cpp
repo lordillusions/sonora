@@ -136,6 +136,16 @@ std::vector<AutomationEnvelope> consolidatedEnvelopes(const Song& song, int inde
     return output;
 }
 
+int consolidatedColor(const Song& song, int index, double start, double end)
+{
+    if (index < 0 || index >= (int) song.tracks.size()) return 0;
+    const auto& track = song.tracks[(size_t) index];
+    const Clip* first = nullptr;
+    for (const auto& clip : track.arrangementClips)
+        if (clip.currentStart < end && clip.currentEnd > start && (! first || clip.currentStart < first->currentStart)) first = &clip;
+    return first ? first->colorIndex : track.colorIndex;
+}
+
 Clip consolidatedMidi(const Song& song, int index, double start, double end)
 {
     Clip out;
@@ -144,7 +154,7 @@ Clip consolidatedMidi(const Song& song, int index, double start, double end)
     out.resetSourceMarkers = true; out.currentStart = out.time = start; out.currentEnd = end;
     out.loop = {0, end - start, 0, true};
     if (index < 0 || index >= (int) song.tracks.size() || end <= start) return out;
-    out.colorIndex = song.tracks[(size_t) index].colorIndex;
+    out.colorIndex = consolidatedColor(song, index, start, end);
     int nextId = 0;
     for (const auto& clip : song.tracks[(size_t) index].arrangementClips)
     {

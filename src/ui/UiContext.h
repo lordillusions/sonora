@@ -306,6 +306,7 @@ struct UiContext
     }
     double arrangementCursor = -1; // insertion position, independent of the moving playback cursor
     float scrollTracksY = 0.0f;  // vertical scroll (both views)
+    float sessionScrollX = 0.0f, sessionScrollY = 0.0f; // Session grid: track columns / scene rows (saved with the set, UI-57)
     std::string statusText = "Ready";
     std::vector<std::string> buildLog;
     // UI-51: work the user waits for (opening a set, starting plug-ins, scans). While a task is open the status bar shows
@@ -422,13 +423,20 @@ struct UiContext
     }
 
     // ---- browser (UI-6)
+    // UI-54: advance after publishing projectFiles, browserPlugins, browserFiles or folder children.
+    // Message-thread only; the browser retains its derived rows/tags until the source changes.
+    uint64_t browserContentRevision = 0;
     struct BrowserFile { std::string path; bool directory = false; };
     std::vector<BrowserFile> browserFiles;
     std::map<std::string, std::vector<BrowserFile>> browserFolderChildren;
     std::vector<std::string> browserPlaces;
     std::string browserFolder;
     bool browserLoading = false;
-    std::function<void(const std::string&)> openBrowserFolder, expandBrowserFolder, previewSample;
+    // UI-6b: every file and folder below browserSearchRoot (recursive), read on a worker for searching a folder.
+    std::string browserSearchRoot;
+    std::vector<BrowserFile> browserSearchFiles;
+    bool browserSearchLoading = false;
+    std::function<void(const std::string&)> openBrowserFolder, expandBrowserFolder, indexBrowserFolder, previewSample;
     std::function<void()> addBrowserFolder;
     std::function<void()> insertMidiClip, toggleFullScreen;
 
@@ -440,10 +448,15 @@ struct UiContext
     bool monitorScopeTrigger = true;
     bool clipEnvelopesVisible = false;
     bool sampleFollow = false; // audio Clip view "Follow": the sample editor scrolls with the playhead
+    // UI-53: Arrangement "Follow" (Playback menu, Cmd+Shift+F; on by default like the reference). Scrolling sideways while
+    // playing pauses it; clicking the scrub area or starting playback resumes it.
+    bool followPlayhead = true;
+    bool followPaused = false;
     int clipEnvelopeController = -1; // MIDI semantic index, independent of XML target IDs
     int selectedClipTrack = -1; // track index (== ControlBank index for tracks), -1 == none
     int selectedClipUid = -1;
     int selectedTakeLane = -1; // stable lane ID, independent of Session scene numbering
+    int selectedLocator = -1;  // model::Locator::id of the selected Arrangement locator (UI-3b); the Set button reads "Del"
     std::vector<int> unfoldedTakeTracks; // local lane visibility, indexed by track
     std::vector<float> sessionColumnWidths; // per Session column (tracks, returns, main); 0 = default width
     std::vector<float> laneHeights;         // per Arrangement track; 0 = default height (UI only)

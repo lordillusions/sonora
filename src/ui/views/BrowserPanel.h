@@ -3,6 +3,7 @@
 
 #include "ui/Widget.h"
 #include "ui/BrowserTags.h"
+#include <array>
 #include <set>
 
 namespace sonora::ui
@@ -19,8 +20,11 @@ public:
     void mouseUp(const MouseEvent&) override { pendingDrag_.reset(); }
     bool mouseWheel(const MouseEvent& e) override;
     bool keyPressed(const KeyEvent& k) override;
+    void tick() override;
     void focusSearch();
     void focusContent() { keyboardFocused_ = true; searchFocused_ = tagEditing_ = false; repaint(); }
+    // UI-6b: the text caret of the search / new-tag field is drawn now (it blinks while either field has the focus).
+    bool caretVisible() const;
     // Row rectangles in this panel's coordinates (hit-testing, tests): sidebar entry / filtered list row.
     Rect sidebarRowBounds(int index) const;
     Rect listRowBounds(int index) const;
@@ -59,7 +63,20 @@ private:
         BrowserTags::Tags tags{}, suggestedTags{};
     };
     static const std::vector<Category>& categories();
-    std::vector<Item> items(bool filtered = true, bool grouped = true) const;
+    const std::vector<Item>& items(bool filtered = true, bool grouped = true) const;
+    std::vector<Item> buildItems(bool filtered, bool grouped) const;
+    struct ItemsKey
+    {
+        uint64_t contentRevision = 0, tagsRevision = 0;
+        int category = -1;
+        bool folderMode = false;
+        std::string query, folder;
+        BrowserTags::Tags filters;
+        std::set<std::string> groups, folders;
+    };
+    mutable std::optional<ItemsKey> itemsKey_;
+    mutable std::array<std::optional<std::vector<Item>>, 4> itemsCache_;
+    mutable std::optional<std::set<std::string>> facetGroups_;
     std::vector<std::pair<std::string, Rect>> filterGroups() const;
     std::vector<Rect> filterChips() const;
     float filtersHeight() const;
@@ -71,6 +88,7 @@ private:
     void showItemMenu(Item item);
     void selectCategory(int index);
     void navigate(const std::string& path);
+    void restartCaret();
     Rect sidebarArea() const;
     Rect listArea() const;
     std::vector<Rect> sidebarRows() const;
@@ -85,6 +103,8 @@ private:
     BrowserTags::Tags filters_;
     std::set<std::string> expandedGroups_, expandedFolders_;
     std::optional<BrowserDrag> pendingDrag_;
+    uint32_t caretEpoch_ = 0;
+    bool caretShown_ = false;
     float dragStartX_ = 0, dragStartY_ = 0;
 };
 

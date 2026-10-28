@@ -5,6 +5,7 @@
 #include "io/als/AlsTemplates.h"
 #include "ui/GridMenu.h"
 #include "ui/TrackMenu.h"
+#include "ui/widgets/Fader.h"
 #include "engine/EngineGraph.h"
 #include "engine/Transport.h"
 #include "ui/widgets/Buttons.h"
@@ -223,6 +224,42 @@ TEST_CASE("arrangement split: Cmd E uses the clicked insertion cursor and a mult
     CHECK(rig.song->tracks[0].arrangementClips.size() == 1);
 }
 
+TEST_CASE("silenced in the mix: switched-off, deactivated and solo-muted tracks; own solo wins (ENG-7)")
+{
+    MenuRig rig;
+    rig.ctx.controls = std::make_shared<engine::ControlBank>((size_t) rig.ctx.numControlTracks());
+    auto& bank = *rig.ctx.controls; auto& song = *rig.song;
+    REQUIRE(rig.ctx.numTracks() >= 2);
+    for (auto& track : song.tracks) track.groupId = -1;
+    auto silenced = [&](int i) { return ui::trackSilencedInMix(rig.ctx, i); };
+    CHECK(! silenced(0)); CHECK(! silenced(1));
+    bank[0].active.store(false);
+    CHECK(silenced(0)); CHECK(! silenced(1));
+    bank[0].solo.store(true); // the reported case: number button off, S on — it plays, the others do not
+    CHECK(! silenced(0)); CHECK(silenced(1));
+    for (auto view : {ui::MainView::Arrangement, ui::MainView::Session})
+    {
+        rig.ctx.mainView = view; rig.root->layout();
+        auto activator = [&](int index) {
+            ui::TextButton* result = nullptr;
+            std::function<void(ui::Widget&)> visit = [&](ui::Widget& widget) {
+                if (auto* button = dynamic_cast<ui::TextButton*>(&widget); button && button->midiTarget
+                    && button->midiTarget->kind == midi::ControlTarget::Kind::TrackActivator && button->midiTarget->track == index) result = button;
+                for (const auto& child : widget.children()) visit(*child);
+            };
+            visit(*rig.root);
+            REQUIRE(result); REQUIRE(result->isSoloMuted); return result;
+        };
+        CHECK(activator(1)->isSoloMuted()); // lit activator, left out by track 0's solo: drawn white
+        CHECK(! activator(0)->isSoloMuted());
+    }
+    CHECK(ui::Fader::meterColour(0.3f, true) == SkColorSetRGB(0x76, 0x76, 0x76)); // muted: grey at any level
+    CHECK(ui::Fader::meterColour(0.3f, false) == SkColorSetRGB(0x00, 0xf7, 0x58));
+    song.tracks[0].deactivated = true; // TRK-1: never plays
+    CHECK(silenced(0));
+    CHECK(! silenced(rig.ctx.numTracks())); // returns are not greyed
+}
+
 TEST_CASE("solo buttons: exclusive clicks command additive and the selected-track keyboard action agree")
 {
     for (auto view : {ui::MainView::Arrangement, ui::MainView::Session})
@@ -277,7 +314,7 @@ TEST_CASE("arrangement A key: shows the automation lane of the selected track on
     CHECK(! rig.ctx.automationVisible); CHECK_NEAR(height(1), plain1, 1e-3);
 }
 
-TEST_CASE("arrangement loop brace: resize cursor on its ends, move cursor on its body (UI-45)")
+TEST_CASE("arrangement loop brace: resize cursor on its ends, move cursor on its body (UI-45), speaker cursor on the scrub area")
 {
     MenuRig rig; rig.ctx.mainView = ui::MainView::Arrangement; rig.ctx.pixelsPerBeat = 20; rig.ctx.scrollBeats = 0;
     engine::Transport transport; transport.setLoop(true, 4, 8); transport.beginBlock();
@@ -286,7 +323,37 @@ TEST_CASE("arrangement loop brace: resize cursor on its ends, move cursor on its
     CHECK(rig.arrangement->cursorAt(4 * 20 + 1, y) == ui::Cursor::ResizeHorizontal);
     CHECK(rig.arrangement->cursorAt(12 * 20 - 1, y) == ui::Cursor::ResizeHorizontal);
     CHECK(rig.arrangement->cursorAt(8 * 20, y) == ui::Cursor::Move);
-    CHECK(rig.arrangement->cursorAt(8 * 20, 10) == ui::Cursor::Default); // the numbers row scrubs
+    CHECK(rig.arrangement->cursorAt(8 * 20, 24) == ui::Cursor::Scrub); // the numbers row scrubs: speaker cursor
+    CHECK(rig.arrangement->cursorAt(8 * 20, 8) == ui::Cursor::Default); // the overview strip above it
+    CHECK(rig.arrangement->cursorAt(20 * 20, y) == ui::Cursor::Scrub);  // the brace strip outside the brace too
+    CHECK(rig.arrangement->cursorAt(8 * 20, rig.ctx.theme.metrics.arrangementRulerHeight + 30) != ui::Cursor::Scrub);
+}
+
+TEST_CASE("arrangement Follow: scrolling away while playing pauses it; the scrub area or a new start resumes it (UI-53)")
+{
+    MenuRig rig; rig.ctx.mainView = ui::MainView::Arrangement; rig.ctx.pixelsPerBeat = 20; rig.ctx.scrollBeats = 0;
+    engine::Transport transport; rig.ctx.transport = &transport; rig.root->layout();
+    auto playAt = [&](double beat) { transport.seekNow(beat); transport.play(); transport.beginBlock(); };
+    auto moveTo = [&](double beat) { transport.seekNow(beat); transport.beginBlock(); rig.arrangement->tick(); };
+    CHECK(rig.ctx.followPlayhead); // on by default, like the reference
+    playAt(0); rig.arrangement->tick(); REQUIRE(transport.isPlaying());
+    moveTo(400); CHECK(rig.ctx.scrollBeats > 300); // the view follows the playhead out of view
+
+    ui::MouseEvent wheel; wheel.x = 100; wheel.y = rig.ctx.theme.metrics.arrangementRulerHeight + 20; wheel.shift = true; wheel.wheelDeltaY = 1.0f;
+    rig.arrangement->mouseWheel(wheel); // Shift+wheel: scroll back to look at something else
+    CHECK(rig.ctx.followPaused);
+    const double looked = rig.ctx.scrollBeats;
+    moveTo(800); CHECK_NEAR(rig.ctx.scrollBeats, looked, 1e-9); // no pulling back to the playhead
+
+    ui::MouseEvent click; click.x = 100; click.y = 24; // the scrub area
+    rig.arrangement->mouseDown(click); rig.arrangement->mouseUp(click);
+    CHECK(! rig.ctx.followPaused);
+
+    rig.ctx.followPaused = true; transport.stopNow(); transport.beginBlock(); rig.arrangement->tick();
+    playAt(0); rig.arrangement->tick(); CHECK(! rig.ctx.followPaused); // a new start resumes it
+
+    rig.ctx.followPlayhead = false; rig.ctx.scrollBeats = 0;
+    moveTo(900); CHECK_NEAR(rig.ctx.scrollBeats, 0.0, 1e-9); // Follow off: the view stays where it is
 }
 
 TEST_CASE("bounce to new track: an Arrangement time selection on the track limits the range")

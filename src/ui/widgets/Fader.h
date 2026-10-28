@@ -13,6 +13,9 @@ public:
     std::function<float()> getGain;      // linear
     std::function<void(float)> setGain;  // linear
     std::function<float()> getPeakL, getPeakR;
+    std::function<bool()> isMuted; // ENG-7: the mix leaves the track out; the meter keeps moving, drawn grey (Live)
+
+    static SkColor meterColour(float level, bool muted); // shared with the Arrangement header meter
 
     void paint(SkCanvas& c, const Theme& t) override;
     void mouseDown(const MouseEvent& e) override;

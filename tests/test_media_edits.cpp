@@ -87,6 +87,17 @@ TEST_CASE("media edits: MIDI consolidation preserves gaps loops trimmed notes an
     auto reload = io::loadAls(rig.folder.getChildFile("Consolidated.als")); REQUIRE(reload);
     CHECK(reload.song->tracks[0].arrangementClips[1].notes.size() == 5);
 }
+TEST_CASE("media edits: consolidation keeps the colour of the clips it merges on each track")
+{
+    MediaRig rig; model::Clip first; REQUIRE(model::makeEmptyMidiClip(*rig.song, 4, 4, first));
+    rig.song->tracks[0].colorIndex = 3; first.colorIndex = 17;
+    model::insertClip(0, first, "Add").apply(*rig.song);
+    auto later = model::movedClip(first, 10); later.colorIndex = 25;
+    model::insertClip(0, later, "Add").apply(*rig.song);
+    CHECK(model::consolidatedMidi(*rig.song, 0, 0, 16).colorIndex == 17); // the earliest clip's, not the track's
+    CHECK(model::consolidatedColor(*rig.song, 0, 9, 16) == 25);
+    CHECK(model::consolidatedColor(*rig.song, 0, 20, 24) == 3); // nothing covered: the track's
+}
 TEST_CASE("media edits: audio consolidation renders gain fades and silence between clips")
 {
     MediaRig rig; auto clip = rig.audio(0); clip.gain = 0.5; clip.fadeOut = 0.5;

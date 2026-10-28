@@ -61,3 +61,7 @@ endif()
 add_executable(collab_probe collab_probe/main.cpp)
 target_link_libraries(collab_probe PRIVATE sonora_collab)
 target_compile_definitions(collab_probe PRIVATE SONORA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+# PLG-14: render any effect plug-in over a WAV with named parameter settings (black-box measurements, A/B renders).
+add_executable(fx_render fx_render/main.cpp)
+target_link_libraries(fx_render PRIVATE sonora_juce)

@@ -16,6 +16,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 
 #include <memory>
+#include <optional>
 
 class SkCanvas;
 
@@ -72,6 +73,7 @@ private:
     float lastZoom_ = 1.0f;
     int64_t framesRendered_ = 0;
     std::vector<juce::MouseCursor> busyCursors_; // rendered on first use
+    std::optional<juce::MouseCursor> scrubCursor_; // rendered on first use
     int busyFrame_ = -1;                         // shown busy frame, -1 when the normal cursor is set
 };
 
@@ -81,11 +83,12 @@ bool renderToPng(ui::RootWidget& root, int width, int height, float scale, const
 
 // Renders `frames` frames off-screen (CPU) and returns the time of each phase in milliseconds, summed over the frames.
 // `beforeFrame(i)` runs before every frame (change zoom / scroll there). Used by `ui_snapshot --bench`.
+// Optional warmupFrames run with index 0 and are excluded from the totals.
 struct FrameTimes
 {
     double tickMs = 0, layoutMs = 0, paintMs = 0, worstFrameMs = 0;
     int frames = 0;
 };
-FrameTimes benchmarkFrames(ui::RootWidget& root, int width, int height, float scale, int frames, const std::function<void(int)>& beforeFrame);
+FrameTimes benchmarkFrames(ui::RootWidget& root, int width, int height, float scale, int frames, const std::function<void(int)>& beforeFrame, int warmupFrames = 0);
 
 } // namespace sonora::gfx

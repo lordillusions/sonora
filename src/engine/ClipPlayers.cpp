@@ -143,7 +143,8 @@ void renderMidiClip(const PreparedClip& clip, const BlockSegment& seg, juce::Mid
         return juce::jlimit(0, seg.numSamples - 1, (int) std::floor((beat - seg.startBeats) * seg.samplesPerBeat + 1e-8))
                + seg.sampleOffset;
     };
-    auto inSeg = [&](double beat) { return beat >= seg.startBeats && beat < seg.endBeats(); };
+    const double from = seg.startBeats - seg.lead; // toSample() puts the lead's events on the first sample
+    auto inSeg = [&](double beat) { return beat >= from && beat < seg.endBeats(); };
 
     // A sub-sample epsilon avoids delayed jumps from cancellation in saved content offsets.
     if (! clip.midiControllers.empty())
@@ -185,7 +186,7 @@ void renderMidiClip(const PreparedClip& clip, const BlockSegment& seg, juce::Mid
         // Iterate the occurrences that could touch [seg.start - noteLen, seg.end).
         double k0 = 0.0;
         if (repeats)
-            k0 = std::max(0.0, std::floor((seg.startBeats - clip.currentStart - first - noteLen) / loopLen));
+            k0 = std::max(0.0, std::floor((from - clip.currentStart - first - noteLen) / loopLen));
         for (double k = k0;; k += 1.0)
         {
             const double on = clip.currentStart + first + (repeats ? k * loopLen : 0.0);

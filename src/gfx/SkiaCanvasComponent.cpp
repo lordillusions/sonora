@@ -219,6 +219,15 @@ void SkiaCanvasComponent::updateCursor()
         case ui::Cursor::ResizeHorizontal: setMouseCursor(juce::MouseCursor::LeftRightResizeCursor); break;
         case ui::Cursor::ResizeVertical: setMouseCursor(juce::MouseCursor::UpDownResizeCursor); break;
         case ui::Cursor::Move: setMouseCursor(juce::MouseCursor::DraggingHandCursor); break;
+        case ui::Cursor::Scrub:
+            if (! scrubCursor_)
+            {
+                constexpr int px = gfx::brand::scrubCursorSize * 2;
+                const auto image = gfx::brand::renderImage(px, px, 2.0f, [](SkCanvas& c) { gfx::brand::drawScrubCursor(c); });
+                scrubCursor_.emplace(juce::ScaledImage(image, 2.0), juce::Point<int>(gfx::brand::scrubCursorHotSpotX, gfx::brand::scrubCursorHotSpotY));
+            }
+            setMouseCursor(*scrubCursor_);
+            break;
         case ui::Cursor::Default: setMouseCursor(juce::MouseCursor::NormalCursor); break;
     }
     if (wasBusy && isMouseOver()) juce::Desktop::getInstance().getMainMouseSource().forceMouseCursorUpdate();
@@ -329,7 +338,7 @@ bool renderToPng(ui::RootWidget& root, int width, int height, float scale, const
     return out.isValid() && SkPngEncoder::Encode(&out, pixmap, {});
 }
 
-FrameTimes benchmarkFrames(ui::RootWidget& root, int width, int height, float scale, int frames, const std::function<void(int)>& beforeFrame)
+FrameTimes benchmarkFrames(ui::RootWidget& root, int width, int height, float scale, int frames, const std::function<void(int)>& beforeFrame, int warmupFrames)
 {
     FrameTimes times;
     const int pw = (int) std::lround((float) width * scale), ph = (int) std::lround((float) height * scale);
@@ -339,10 +348,10 @@ FrameTimes benchmarkFrames(ui::RootWidget& root, int width, int height, float sc
     const float zoom = std::clamp(root.context().uiZoom, 0.5f, 3.0f);
     const ui::Rect logical{0, 0, (float) width / zoom, (float) height / zoom};
     auto now = [] { return juce::Time::getMillisecondCounterHiRes(); };
-    for (int i = 0; i < frames; ++i)
+    for (int i = -std::max(0, warmupFrames); i < frames; ++i)
     {
         if (beforeFrame)
-            beforeFrame(i);
+            beforeFrame(std::max(0, i));
         const double t0 = now();
         root.setBounds(logical);
         root.tickTree();
@@ -355,6 +364,7 @@ FrameTimes benchmarkFrames(ui::RootWidget& root, int width, int height, float sc
         root.paintTree(*canvas, root.context().theme);
         canvas->restore();
         const double t3 = now();
+        if (i < 0) continue;
         times.tickMs += t1 - t0;
         times.layoutMs += t2 - t1;
         times.paintMs += t3 - t2;

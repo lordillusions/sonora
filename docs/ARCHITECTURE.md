@@ -43,6 +43,18 @@ and per-OS source files picked in `src/CMakeLists.txt` (`MetalLayerView.mm` vs `
 `AssistantDock.mm` vs `AssistantDockPortable.cpp`, ...). Linux and Windows render the Skia canvas on the CPU. Keep
 `#if __APPLE__`/`_WIN32` inside those files. Seam table, build commands and per-platform gaps: [PLATFORMS.md](PLATFORMS.md).
 
+**EQ Eight display (DEV-2b).** Its processor owns a fixed `dsp::AudioDisplayTap` SPSC queue (8192 stereo frames,
+lock-free atomic indices/peaks). Audio captures post-EQ/output-gain samples only while a 250 ms visibility lease is renewed;
+full queues drop samples. A single face consumes it with `dsp::DeviceSpectrum` on the message thread at ~30 Hz, running
+separate L/R FFTs to avoid mono cancellation. Silence skips FFT/repaint and hidden faces stop renewing the lease.
+Reset/sample-rate generations invalidate stale display history without resetting indices under a concurrent reader.
+No FFT, locks or allocation enter `EqEight::process()`. The response path is cached independently of animated audio.
+
+**Chain meters (UI-55).** Every `DeviceProcessor` has an `OutputMeter` (atomic per-channel peak and RMS). Whoever runs
+`process()` — `AudioEngine::processNode` for a track's chain, `RackProcessor` for a chain inside a rack — measures the
+first `n` samples right after it; values keep the loudest block until the message thread `take`s them. `DetailView`
+reads them on tick for the visible boxes, decays them (`meterDecay`) and paints the meter in the gap after each box.
+
 ## 2. Data flow when opening a set
 
 ```
@@ -389,6 +401,12 @@ Live 12 draws its whole UI itself with **Skia**. Sonora does the same:
   the existing DeviceBox MIDI/macro tagging callback; structural sample edits use `UiContext::editDevice` and may
   synchronously destroy the face. Rack macro/pad/chain editing remains in DeviceBox/NativeDevicePanel.
 - Off-screen rendering for tests/tools: `gfx::renderToPng`.
+- UI-54: `BrowserPanel` retains derived rows and facet names across paints. The key includes category, search,
+  filters, expanded folders/groups, `BrowserTags::revision()` and `UiContext::browserContentRevision`. Publishers
+  of project/plugin/folder listings must increment the latter after each message-thread update, even when the
+  item count is unchanged. Geometry is calculated with the current size/font; event handlers retain owned item
+  copies across callbacks that can invalidate the cache. `Widget::paintTree` skips empty canvas clips before
+  invoking paint or visiting descendants, using the actual transform so the device overview still draws them.
 
 Plugin editor windows are normal JUCE `DocumentWindow`s (native plugin views can't live inside Skia).
 

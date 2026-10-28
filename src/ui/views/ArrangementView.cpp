@@ -8,7 +8,9 @@
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
 #include "ui/GridMenu.h"
+#include "ui/Locators.h"
 #include "ui/TrackMenu.h"
+#include "gfx/Fonts.h"
 
 #include "engine/EngineGraph.h"
 #include "engine/Transport.h"
@@ -90,6 +92,7 @@ public:
         activator_->midiTarget = midi::ControlTarget{midi::ControlTarget::Kind::TrackActivator, controlIndex, 0, 0, {}};
         activator_->isOn = [this] { auto* c = controls(); return c ? c->active.load() : true; };
         activator_->onClick = [this] { if (auto* c = controls()) c->active.store(! c->active.load()); };
+        activator_->isSoloMuted = [this] { const auto* t = ctx().trackAt(index_); return t && ! t->deactivated && trackSilencedInMix(ctx(), index_); };
         solo_ = add<TextButton>("S", TextButton::Style::Solo);
         solo_->midiTarget = midi::ControlTarget{midi::ControlTarget::Kind::TrackSolo, controlIndex, 0, 0, {}};
         solo_->isOn = [this] { auto* c = controls(); return c && c->solo.load(); };
@@ -281,6 +284,7 @@ public:
         {
             const float mh = std::max(6.0f, h - 6);
             const float half = (kMeterW - 4) * 0.5f;
+            const bool muted = ! isReturn_ && trackSilencedInMix(ctx(), index_);
             for (int ch = 0; ch < 2; ++ch)
             {
                 const Rect bar{meterX_ + 2 + (float) ch * (half + 0.5f), 3, half, mh};
@@ -289,7 +293,7 @@ public:
                 const float pos = Fader::gainToPosition(level);
                 if (pos > 0)
                     paint::fill(c, {bar.x, bar.bottom() - bar.h * pos, bar.w, bar.h * pos},
-                                level >= 1.0f ? SkColorSetRGB(0xff, 0x0a, 0x0a) : level > 0.5f ? SkColorSetRGB(0xff, 0xd1, 0x00) : SkColorSetRGB(0x00, 0xf7, 0x58));
+                                Fader::meterColour(level, muted));
             }
         }
         paint::fill(c, {0, h - kHeaderSep, width(), kHeaderSep}, line);
@@ -826,6 +830,7 @@ void ArrangementView::rebuild()
     if (builtFor_ != ctx().song)
     {
         takeRange_ = {}; ctx().arrangementSelection = {}; ctx().arrangementCursor = -1; renaming_ = false;
+        ctx().selectedLocator = renameLocator_ = locatorDrag_.id = -1; // locator ids belong to the previous document
         heightOptimized_ = widthOptimized_ = draggingWaveformZoom_ = editingWaveformZoom_ = false;
     }
     regionDrag_ = {};
@@ -891,12 +896,15 @@ void ArrangementView::tick()
         return;
     }
     const double pos = ctx().transport ? ctx().transport->positionBeats() : 0.0;
+    const bool playing = ctx().transport && ctx().transport->isPlaying();
+    if (playing && ! wasPlaying_) ctx().followPaused = false; // starting playback resumes Follow
+    wasPlaying_ = playing;
     if (std::abs(pos - lastPlayhead_) * ctx().pixelsPerBeat >= 0.5)
     {
         lastPlayhead_ = pos;
-        // Follow the playhead (Live's "Follow" behaviour) when it leaves the view.
+        // Follow the playhead (Live's "Follow" behaviour) when it leaves the view, unless the user scrolled away.
         const float px = beatToX(pos);
-        if (ctx().transport && ctx().transport->isPlaying() && (px > timelineArea().w - 20 || px < 0))
+        if (playing && ctx().followPlayhead && ! ctx().followPaused && (px > timelineArea().w - 20 || px < 0))
             ctx().scrollBeats = std::max(0.0, pos - 2.0);
         repaint();
     }
@@ -1088,14 +1096,8 @@ void ArrangementView::paint(SkCanvas& c, const Theme& t)
             paint::line(c, bx + 0.5f, mark.level == 0 ? 23.0f : mark.level == 1 ? 26.0f : 28.0f, bx + 0.5f, 31,
                         paint::withAlpha(t.color("ArrangementRulerMarkings"), 160));
     }
-    for (const auto& loc : x.song->locators)
-    {
-        const float lx = beatToX(loc.time);
-        paint::playTriangle(c, {lx - 3, 34, 7, 8}, t.color("ControlForeground"));
-        if (! loc.name.empty())
-            paint::text(c, loc.name, {lx + 6, 31, 160, 14}, t.color("ControlForeground"), m.smallFontSize);
-    }
     c.restore();
+    paintLocators(c, t);
     paint::fill(c, {0, ruler.bottom() - 1, area.w, 1}, t.color("SurfaceArea"));
 
     // ---- footer: time ruler in minutes:seconds
@@ -1140,6 +1142,7 @@ void ArrangementView::paint(SkCanvas& c, const Theme& t)
         paint::text(c, waveformZoomText_ + (waveformTextSelected_ ? "" : "|"), zoomBox, t.color("ControlForeground"), m.smallFontSize, Align::Centre);
     }
     paint::fill(c, {area.w, 0, 2, m.arrangementRulerHeight}, t.color("SurfaceBackground"));
+    paintLocatorButtons(c, t);
     c.save(); c.clipRect({area.w, area.y, width(), height()});
     for (const auto& lane : lanes_) if (lane.takeLaneId >= 0 && lane.y + lane.h > area.y && lane.y < height())
     {
@@ -1162,6 +1165,129 @@ void ArrangementView::paint(SkCanvas& c, const Theme& t)
         paint::line(c, header.x, header.bottom() - 0.5f, header.right(), header.bottom() - 0.5f, t.color("ControlContrastFrame"));
     }
     c.restore();
+}
+
+Rect ArrangementView::locatorButtonBounds(LocatorButton which) const
+{
+    // Measured from the reference: Set (pill) on the bar-number row, the two round arrows below it.
+    const float x0 = timelineArea().w + 4;
+    switch (which)
+    {
+        case LocatorButton::Set: return {x0, 18, 25, 13};
+        case LocatorButton::Previous: return {x0, 33, 12, 12};
+        case LocatorButton::Next: return {x0 + 13, 33, 12, 12};
+    }
+    return {};
+}
+
+Rect ArrangementView::locatorBounds(const model::Locator& locator) const
+{
+    const auto& m = ctx().theme.metrics;
+    const bool editing = renaming_ && renameLocator_ == locator.id;
+    const auto& label = editing ? renameText_ : locator.name;
+    const float labelWidth = label.empty() && ! editing ? 0.0f : std::min(160.0f, gfx::measureText(label, m.smallFontSize) + (editing ? 12.0f : 6.0f));
+    const float lx = beatToX(locator.time);
+    return {lx - 1, 33, 9 + labelWidth, 13};
+}
+
+int ArrangementView::locatorAt(float x, float y) const
+{
+    const auto* song = ctx().song;
+    if (! song || x >= timelineArea().w || y < 31 || y >= ctx().theme.metrics.arrangementRulerHeight) return -1;
+    // Later locators draw on top, so they win the hit test.
+    for (auto it = song->locators.rbegin(); it != song->locators.rend(); ++it)
+    {
+        const auto bounds = locatorBounds(*it);
+        if (Rect{bounds.x - 2, 31, bounds.w + 2, ctx().theme.metrics.arrangementRulerHeight - 31}.contains(x, y)) return it->id;
+    }
+    return -1;
+}
+
+void ArrangementView::paintLocators(SkCanvas& c, const Theme& t)
+{
+    const auto& x = ctx();
+    const auto& m = t.metrics;
+    c.save();
+    c.clipRect(Rect{0, 16, timelineArea().w, m.arrangementRulerHeight - 16}.sk());
+    for (const auto& stored : x.song->locators)
+    {
+        auto locator = stored;
+        if (locatorDrag_.id == locator.id && locatorDrag_.moved) locator.time = locatorDrag_.preview;
+        const auto bounds = locatorBounds(locator);
+        if (bounds.right() < 0 || bounds.x > timelineArea().w) continue;
+        const bool selected = x.selectedLocator == locator.id;
+        const bool editing = renaming_ && renameLocator_ == locator.id;
+        const SkColor ink = t.color("ArrangementRulerMarkings");
+        const SkColor colour = locator.colorIndex >= 0 ? Theme::paletteColor(locator.colorIndex) : t.color("ControlTextBack");
+        // The name sits on the ruler colour (or the locator's colour) so it stays readable over ticks and the brace.
+        const Rect label{bounds.x + 9, bounds.y, bounds.w - 9, bounds.h};
+        if (label.w > 0)
+        {
+            const SkColor back = editing ? t.color("ControlTextBack") : selected ? t.color("SelectionBackground")
+                               : locator.colorIndex >= 0 ? colour : t.color("SurfaceBackground");
+            paint::fill(c, label, back);
+            const auto text = editing ? renameText_ + "|" : locator.name;
+            paint::text(c, text, {label.x + 2, label.y, label.w - 3, label.h},
+                        locator.colorIndex >= 0 && ! selected && ! editing ? paint::contrastText(back) : t.color("ControlForeground"), m.smallFontSize);
+        }
+        // Outlined triangle pointing right, its vertical side on the locator's time; filled dark when selected.
+        const float lx = beatToX(locator.time);
+        SkPath triangle;
+        triangle.moveTo(lx, bounds.y + 2); triangle.lineTo(lx + 7, bounds.y + 6.5f); triangle.lineTo(lx, bounds.y + 11); triangle.close();
+        SkPaint fill; fill.setAntiAlias(true); fill.setColor(selected ? ink : colour);
+        c.drawPath(triangle, fill);
+        SkPaint outline; outline.setAntiAlias(true); outline.setStyle(SkPaint::kStroke_Style); outline.setStrokeWidth(1); outline.setColor(ink);
+        c.drawPath(triangle, outline);
+        if (locator.isSongStart) paint::line(c, lx + 0.5f, 16, lx + 0.5f, bounds.y + 2, ink);
+    }
+    c.restore();
+}
+
+void ArrangementView::paintLocatorButtons(SkCanvas& c, const Theme& t)
+{
+    const auto& x = ctx();
+    const SkColor ink = t.color("ControlForeground"), frame = t.color("ControlContrastFrame");
+    SkPaint stroke; stroke.setAntiAlias(true); stroke.setStyle(SkPaint::kStroke_Style); stroke.setStrokeWidth(1); stroke.setColor(frame);
+    const auto set = locatorButtonBounds(LocatorButton::Set);
+    paint::fillRounded(c, set, set.h * 0.5f, t.color("ControlBackground"));
+    c.drawRoundRect(set.reduced(0.5f).sk(), set.h * 0.5f, set.h * 0.5f, stroke);
+    const bool remove = x.song && model::findLocator(*x.song, x.selectedLocator);
+    paint::text(c, remove ? "Del" : "Set", set, ink, t.metrics.smallFontSize, Align::Centre);
+    for (const auto which : {LocatorButton::Previous, LocatorButton::Next})
+    {
+        const auto r = locatorButtonBounds(which);
+        SkPaint fill; fill.setAntiAlias(true); fill.setColor(t.color("ControlBackground"));
+        c.drawOval(r.sk(), fill);
+        c.drawOval(r.reduced(0.5f).sk(), stroke);
+        const float cx = r.x + r.w * 0.5f, cy = r.y + r.h * 0.5f, d = which == LocatorButton::Next ? 1.0f : -1.0f;
+        SkPath arrow; // a small filled arrow, like the reference's previous/next locator buttons
+        arrow.moveTo(cx + 3.0f * d, cy); arrow.lineTo(cx, cy - 3.0f); arrow.lineTo(cx, cy - 1.0f); arrow.lineTo(cx - 3.0f * d, cy - 1.0f);
+        arrow.lineTo(cx - 3.0f * d, cy + 1.0f); arrow.lineTo(cx, cy + 1.0f); arrow.lineTo(cx, cy + 3.0f); arrow.close();
+        SkPaint ink2; ink2.setAntiAlias(true); ink2.setColor(ink);
+        c.drawPath(arrow, ink2);
+    }
+}
+
+void ArrangementView::beginLocatorText(int id, bool info)
+{
+    const auto* locator = ctx().song ? model::findLocator(*ctx().song, id) : nullptr;
+    if (! locator) return;
+    ctx().selectedLocator = id;
+    renaming_ = renameSelection_ = true;
+    renameLocator_ = id; renameLocatorInfo_ = info; renameTrack_ = renameLane_ = -1;
+    renameText_ = info ? locator->annotation : locator->name;
+    repaint();
+}
+
+void ArrangementView::commitLocatorText()
+{
+    renaming_ = false;
+    const int id = std::exchange(renameLocator_, -1);
+    model::ops::UpdateLocator op;
+    op.locatorId = id;
+    if (renameLocatorInfo_) op.infoText = renameText_; else op.name = renameText_;
+    if (ctx().song && model::findLocator(*ctx().song, id)) applyLocatorOp(ctx(), {op});
+    repaint();
 }
 
 void ArrangementView::paintOverChildren(SkCanvas& c, const Theme& t)
@@ -1459,9 +1585,13 @@ ui::DragMode ArrangementView::clipEdgeAt(const Lane* lane, float x, float y, flo
 
 Cursor ArrangementView::cursorAt(float x, float y) const
 {
+    if (locatorDrag_.id >= 0 || locatorAt(x, y) >= 0) return Cursor::Default; // UI-3b: locators are picked, not scrubbed
     // The loop brace: its ends resize (the resize cursor shows it), its body moves it.
     if (const auto zone = loopDrag_ != LoopDrag::None ? loopDrag_ : loopZoneAt(x, y); zone != LoopDrag::None)
         return zone == LoopDrag::Move ? Cursor::Move : Cursor::ResizeHorizontal;
+    // UI-52: the rest of the ruler is the scrub area (click plays from there): Live's speaker cursor.
+    if (draggingRuler_ || (y < ctx().theme.metrics.arrangementRulerHeight && x < timelineArea().w && ! overviewRect().reduced(-1).contains(x, y)))
+        return Cursor::Scrub;
     model::ClipLocation location;
     float x0 = 0, x1 = 0;
     ui::DragMode mode;
@@ -1540,6 +1670,16 @@ void ArrangementView::mouseDown(const MouseEvent& e)
     loopDrag_ = LoopDrag::None;
     selectingTime_ = false;
     const auto* hitLane = laneAt(e.y);
+    if (renaming_ && renameLocator_ >= 0 && locatorAt(e.x, e.y) != renameLocator_) commitLocatorText();
+    if (e.x >= timelineArea().w && e.y < m.arrangementRulerHeight && ! e.right)
+    {
+        // UI-3b: Set / Del, previous and next locator.
+        if (locatorButtonBounds(LocatorButton::Set).reduced(-1).contains(e.x, e.y)) setOrDeleteLocator(x);
+        else if (locatorButtonBounds(LocatorButton::Previous).reduced(-1).contains(e.x, e.y)) jumpToAdjacentLocator(x, -1);
+        else if (locatorButtonBounds(LocatorButton::Next).reduced(-1).contains(e.x, e.y)) jumpToAdjacentLocator(x, 1);
+        repaint();
+        return;
+    }
     if (e.x >= timelineArea().w)
     {
         if (hitLane && hitLane->takeLaneId >= 0 && x.song && x.applyEdit)
@@ -1570,6 +1710,23 @@ void ArrangementView::mouseDown(const MouseEvent& e)
         scrollToOverview(e.x);
         return;
     }
+    if (const int id = e.y < m.arrangementRulerHeight ? locatorAt(e.x, e.y) : -1; id >= 0)
+    {
+        // UI-3b: a click selects the locator and jumps there (quantised while playing); a double-click plays from it.
+        const auto* locator = model::findLocator(*x.song, id);
+        x.selectedLocator = id;
+        x.selectedClipTrack = x.selectedClipUid = x.selectedClipScene = -1;
+        if (e.clicks >= 2 && x.transport && ! x.transport->isPlaying())
+        {
+            x.arrangementCursor = locator->time;
+            x.transport->setPosition(locator->time);
+            x.transport->play();
+        }
+        else if (e.clicks < 2) jumpTo(x, locator->time);
+        locatorDrag_ = {id, false, e.x, locator->time, locator->time};
+        repaint();
+        return;
+    }
     if (e.y < m.arrangementRulerHeight)
     {
         // The loop brace occupies the bottom strip of the ruler: drag its body to move it, its ends to resize.
@@ -1585,6 +1742,7 @@ void ArrangementView::mouseDown(const MouseEvent& e)
         else
         {
             // The scrub area: click to play from that position, drag to move it (like Live).
+            x.selectedLocator = -1;
             draggingRuler_ = true;
             scrub(e, true);
         }
@@ -1592,6 +1750,7 @@ void ArrangementView::mouseDown(const MouseEvent& e)
         return;
     }
 
+    x.selectedLocator = -1;
     // Shift extends from the first clicked clip, including both endpoints and all time/tracks between them.
     if (e.shift && e.clicks < 2 && x.song && hitLane && hitLane->takeLaneId < 0)
     {
@@ -1788,6 +1947,7 @@ void ArrangementView::scrub(const MouseEvent& e, bool start)
         return;
     x.arrangementCursor = std::max(0.0, ui::snapToGrid(xToBeat(e.x), snapUnit(e)));
     x.transport->setPosition(x.arrangementCursor);
+    x.followPaused = false; // clicking the scrub area resumes Follow
     if (start && x.song != nullptr && ! x.transport->isPlaying() && ! x.transport->isCountingIn())
         x.transport->play();
     repaint();
@@ -1878,6 +2038,18 @@ std::vector<MenuAction> ArrangementView::gridContextActions(const MouseEvent& e)
 void ArrangementView::showContextMenu(const MouseEvent& e)
 {
     auto& x = ctx();
+    if (x.song && e.y < x.theme.metrics.arrangementRulerHeight && ! overviewRect().reduced(-1).contains(e.x, e.y))
+    {
+        // UI-3b: the scrub strip's menus: a locator's own, or Add Locator at the clicked (snapped) position.
+        if (const int id = locatorAt(e.x, e.y); id >= 0)
+        {
+            x.selectedLocator = id; repaint();
+            showLocatorContextMenu(x, id, [this, id] { if (Widget::isAlive(this)) beginLocatorText(id, false); },
+                                   [this, id] { if (Widget::isAlive(this)) beginLocatorText(id, true); });
+        }
+        else showScrubAreaContextMenu(x, std::max(0.0, ui::snapToGrid(xToBeat(e.x), snapUnit(e))));
+        return;
+    }
     const auto& range = x.arrangementSelection;
     const int lane = laneTrackAt(e.y);
     const bool inRange = range.active && range.end > range.start && lane >= range.firstTrack && lane <= range.lastTrack
@@ -1903,6 +2075,7 @@ void ArrangementView::scrollToOverview(float px)
     const auto r = overviewRect();
     const double beat = (px - r.x) / r.w * overviewBeats();
     x.scrollBeats = std::max(0.0, beat - timelineArea().w / x.pixelsPerBeat * 0.5);
+    if (x.transport && x.transport->isPlaying()) x.followPaused = true; // UI-53: the user looks elsewhere
     layout();
     repaint();
 }
@@ -1943,6 +2116,14 @@ void ArrangementView::mouseDrag(const MouseEvent& e)
     if (draggingOverview_)
     {
         scrollToOverview(e.x);
+        return;
+    }
+    if (locatorDrag_.id >= 0)
+    {
+        if (std::abs(e.x - locatorDrag_.startX) > 3) locatorDrag_.moved = true;
+        if (locatorDrag_.moved)
+            locatorDrag_.preview = std::max(0.0, ui::snapToGrid(locatorDrag_.before + (e.x - locatorDrag_.startX) / x.pixelsPerBeat, snapUnit(e)));
+        repaint();
         return;
     }
     if (draggingRuler_ && x.transport)
@@ -2037,6 +2218,18 @@ void ArrangementView::mouseUp(const MouseEvent& e)
     }
     takeRange_.selecting = false;
     auto& x = ctx();
+    if (const auto locator = std::exchange(locatorDrag_, {}); locator.id >= 0)
+    {
+        if (locator.moved && std::abs(locator.preview - locator.before) > 1e-9)
+        {
+            model::ops::UpdateLocator op;
+            op.locatorId = locator.id;
+            op.beat = locator.preview;
+            applyLocatorOp(x, {op});
+        }
+        repaint();
+        return;
+    }
     if (regionDrag_.active)
     {
         mouseDrag(e); // validate the release position even when no final drag event arrived
@@ -2118,7 +2311,8 @@ bool ArrangementView::keyPressed(const KeyEvent& k)
     }
     if (renaming_)
     {
-        if (k.keyCode == juce::KeyPress::escapeKey) { renaming_ = false; repaint(); return true; }
+        if (k.keyCode == juce::KeyPress::escapeKey) { renaming_ = false; renameLocator_ = -1; repaint(); return true; }
+        if (k.keyCode == juce::KeyPress::returnKey && renameLocator_ >= 0) { commitLocatorText(); return true; }
         if (k.keyCode == juce::KeyPress::returnKey)
         {
             renaming_ = false;
@@ -2134,6 +2328,29 @@ bool ArrangementView::keyPressed(const KeyEvent& k)
         else if (k.textChar >= 32 && ! k.cmd && ! k.alt)
         { if (renameSelection_) renameText_.clear(); renameText_ += juce::String::charToString((juce::juce_wchar) k.textChar).toStdString(); renameSelection_ = false; }
         repaint(); return true;
+    }
+    if (x.song && model::findLocator(*x.song, x.selectedLocator) && visible)
+    {
+        // UI-3b: the selected locator: Delete, Left/Right nudge by the grid, Cmd+R rename, Escape deselects.
+        const int id = x.selectedLocator;
+        const auto* locator = model::findLocator(*x.song, id);
+        if (! k.cmd && ! k.alt && ! k.ctrl && ! k.shift && (k.keyCode == juce::KeyPress::deleteKey || k.keyCode == juce::KeyPress::backspaceKey))
+        {
+            if (applyLocatorOp(x, {model::ops::DeleteLocator{id}})) x.selectedLocator = -1;
+            repaint(); return true;
+        }
+        if (! k.cmd && ! k.alt && ! k.ctrl && (k.keyCode == juce::KeyPress::leftKey || k.keyCode == juce::KeyPress::rightKey))
+        {
+            const double step = std::max(1e-6, gridBeats()), at = locator->time / step;
+            const double target = k.keyCode == juce::KeyPress::rightKey ? (std::floor(at + 1e-9) + 1) * step : (std::ceil(at - 1e-9) - 1) * step;
+            model::ops::UpdateLocator op;
+            op.locatorId = id;
+            op.beat = std::max(0.0, target);
+            if (std::abs(*op.beat - locator->time) > 1e-9) applyLocatorOp(x, {op});
+            repaint(); return true;
+        }
+        if (k.cmd && ! k.alt && (k.textChar == 'r' || k.textChar == 'R')) { beginLocatorText(id, false); return true; }
+        if (k.keyCode == juce::KeyPress::escapeKey) { x.selectedLocator = -1; repaint(); return true; }
     }
     if (! k.cmd && k.alt && ! k.ctrl && (k.keyCode == '+' || k.keyCode == '=' || k.keyCode == '-' || k.textChar == '+' || k.textChar == '-' || k.textChar == '='))
     {
@@ -2231,6 +2448,22 @@ bool ArrangementView::keyPressed(const KeyEvent& k)
         repaint(); return true;
     }
 
+    const auto& range = x.arrangementSelection;
+    if (range.active && range.end > range.start && x.selectedTakeLane < 0
+        && ! k.cmd && ! k.alt && ! k.ctrl && ! k.shift && (k.keyCode == juce::KeyPress::deleteKey || k.keyCode == juce::KeyPress::backspaceKey))
+    {
+        // A time selection (dragged, or Shift-clicked across clips and tracks) deletes everything it covers, cutting the clips
+        // that cross its edges, instead of only the last clicked clip.
+        if (x.recording || x.recordingRequested) { x.statusText = "Finish recording before deleting"; return true; }
+        auto command = model::deleteArrangementRegion(*x.song, range.firstTrack, range.lastTrack, range.start, range.end);
+        if (command.apply)
+        {
+            x.applyEdit(std::move(command));
+            x.selectedClipTrack = x.selectedClipUid = -1;
+        }
+        repaint();
+        return true;
+    }
     if (hasSelection && ! k.cmd && ! k.alt && ! k.ctrl && ! k.shift && (k.keyCode == juce::KeyPress::deleteKey || k.keyCode == juce::KeyPress::backspaceKey))
     {
         x.applyEdit(model::deleteClip(*x.song, x.selectedClipLocation()));
@@ -2294,6 +2527,7 @@ bool ArrangementView::mouseWheel(const MouseEvent& e)
     const float dx = horizontal ? (std::fabs(e.wheelDeltaX) > std::fabs(e.wheelDeltaY) ? e.wheelDeltaX : e.wheelDeltaY) : e.wheelDeltaX;
     const float dy = horizontal ? 0.0f : e.wheelDeltaY;
     x.scrollBeats = std::max(0.0, x.scrollBeats - dx * kWheelPixels / x.pixelsPerBeat);
+    if (std::fabs(dx) > 1e-8f && x.transport && x.transport->isPlaying()) x.followPaused = true; // UI-53: scrolled away
     float total = 0;
     for (const auto& l : lanes_)
         total += l.h;

@@ -129,6 +129,9 @@ TEST_CASE("track state: a deactivated track is built without clips or devices an
     CHECK(node.deactivated); CHECK(node.clips.empty()); CHECK(node.devices.empty()); CHECK(node.processorForModelDevice.empty());
     for (char has : node.hasSessionClip) CHECK(has == 0);
     CHECK(! engine::isTrackAudible(*graph, *graph->controls, node, false));
+    (*graph->controls)[(size_t) node.controlIndex].solo.store(true);
+    CHECK(! engine::isTrackAudible(*graph, *graph->controls, node, true)); // solo does not wake a deactivated track
+    (*graph->controls)[(size_t) node.controlIndex].solo.store(false);
     CHECK(node.sendEnabled.size() == s.tracks[(size_t) index].mixer.sends.size());
     // the model keeps everything for reactivation
     CHECK(s.tracks[(size_t) index].devices.size() == deviceCount); CHECK(s.tracks[(size_t) index].arrangementClips.size() == 1);

@@ -1,4 +1,6 @@
 #include "app/AppController.h"
+#include "ui/Locators.h"
+#include "ui/SetView.h"
 #include "app/CollabPort.h"
 #include "app/PromptWindow.h"
 #include "engine/TempoAnalysis.h"
@@ -57,7 +59,8 @@ public:
           plugin_(&plugin), onClose_(std::move(onClose))
     {
         setUsingNativeTitleBar(true);
-        juce::AudioProcessorEditor* editor = plugin.hasEditor() ? plugin.createEditorAndMakeActive() : nullptr;
+        // Not plugin.hasEditor(): for a VST3 that builds and drops a view first, which silences some plugins (PLG-13).
+        juce::AudioProcessorEditor* editor = plugin.createEditorAndMakeActive();
         if (editor == nullptr)
             editor = new juce::GenericAudioProcessorEditor(plugin);
         setContentOwned(editor, true);
@@ -206,6 +209,7 @@ AppController::AppController() : engine_(host_, midi_)
     ui_.peaks = [this](const model::Clip& clip) { return song_ ? peaks_.request(*song_, clip) : nullptr; };
     ui_.openBrowserFolder = [this](const std::string& path) { openBrowserFolder(path); };
     ui_.expandBrowserFolder = [this](const std::string& path) { readBrowserFolder(path, false); };
+    ui_.indexBrowserFolder = [this](const std::string& path) { indexBrowserFolder(path); };
     ui_.addBrowserFolder = [this] { addBrowserFolder(); };
     ui_.previewSample = [this](const std::string& path) { engine_.previewSample(path); };
     ui_.dropBrowserItem = [this](const ui::BrowserDrag& item, int track, double beat, int scene) {
@@ -588,6 +592,7 @@ void AppController::openFile(const juce::File& file)
 void AppController::renameSelection()
 {
     if (! song_ || ui_.recording || ui_.recordingRequested || exporting_ || editingDevices_ || syncingModel_) return;
+    if (model::findLocator(*song_, ui_.selectedLocator)) { editLocatorText(false); return; }
     const auto location = ui_.selectedClipLocation();
     const auto* clip = ui_.selectedClip();
     const auto* track = ui_.trackAt(ui_.selectedTrack);
@@ -615,6 +620,29 @@ void AppController::renameSelection()
         }
         else if (const auto* current = ui_.trackAt(index); current && current->id == id)
             applyEdit(model::renameTrack(*song_, index, name));
+    }), true);
+}
+
+void AppController::editLocatorText(bool infoText)
+{
+    if (! song_ || ui_.recording || ui_.recordingRequested || exporting_ || editingDevices_ || syncingModel_) return;
+    const auto* locator = model::findLocator(*song_, ui_.selectedLocator);
+    if (! locator) return;
+    // UI-3b: Edit > Rename / Edit Info Text on a selected locator; the edit is the op the ruler and the control API use.
+    const int generation = documentGeneration_, locatorId = locator->id;
+    auto* dialog = new juce::AlertWindow(infoText ? "Edit Info Text" : "Rename", infoText ? "Locator info text" : "Locator name",
+                                         juce::MessageBoxIconType::NoIcon);
+    dialog->addTextEditor("text", juce::String::fromUTF8((infoText ? locator->annotation : locator->name).c_str()));
+    dialog->addButton("OK", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+    dialog->enterModalState(true, juce::ModalCallbackFunction::create([this, alive = std::weak_ptr<bool>(alive_), dialog, generation, locatorId, infoText](int result) {
+        const auto lifetime = alive.lock();
+        if (! lifetime || ! *lifetime || result != 1 || generation != documentGeneration_ || ! song_) return;
+        model::ops::UpdateLocator op;
+        op.locatorId = locatorId;
+        const auto text = dialog->getTextEditorContents("text").trim().toStdString();
+        if (infoText) op.infoText = text; else op.name = text;
+        ui::applyLocatorOp(ui_, {op});
     }), true);
 }
 
@@ -793,6 +821,7 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     ui_.sessionTrackSelection = false;
     ui_.scrollBeats = 0;
     ui_.scrollTracksY = 0;
+    ui::applySetView(ui_); // main view, zoom, scroll, heights and widths as the set was saved (UI-57)
     deviceOrder_ = midi::deviceOrder(*song_);
     loadMappingsForSong();
     ui_.statusText = juce::File(song_->sourcePath).getFileName().toStdString() + " loaded (" + song_->creator + ", "
@@ -1423,8 +1452,55 @@ void AppController::openBrowserFolder(const std::string& path)
     ui_.browserFolder = path;
     ui_.browserFiles.clear();
     ui_.browserFolderChildren.clear();
+    ++*browserSearchGeneration_;
+    ui_.browserSearchRoot.clear();
+    ui_.browserSearchFiles.clear();
+    ui_.browserSearchLoading = false;
+    ++ui_.browserContentRevision;
     ui_.browserLoading = true;
     readBrowserFolder(path, true);
+}
+
+// UI-6b: searching a folder also finds what its subfolders hold, like the reference. Each new search re-reads the
+// tree on a worker, so files added since the last search show up; a newer scan or another folder stops this one.
+void AppController::indexBrowserFolder(const std::string& path)
+{
+    const int generation = ++*browserSearchGeneration_;
+    ui_.browserSearchRoot = path;
+    ui_.browserSearchFiles.clear();
+    ui_.browserSearchLoading = true;
+    ++ui_.browserContentRevision;
+    pool_.addJob([this, path, generation, current = browserSearchGeneration_, alive = std::weak_ptr<bool>(alive_)] {
+        constexpr size_t kMaxEntries = 200000;
+        struct Found { juce::String name; ui::UiContext::BrowserFile file; };
+        std::vector<Found> found;
+        const juce::File folder(juce::String::fromUTF8(path.c_str()));
+        for (const auto& entry : juce::RangedDirectoryIterator(folder, true, "*",
+                 juce::File::findFilesAndDirectories | juce::File::ignoreHiddenFiles, juce::File::FollowSymlinks::noCycles))
+        {
+            if (current->load() != generation) return;
+            const auto& file = entry.getFile();
+            if (entry.isDirectory() || file.hasFileExtension("als") || engine::isAudioFile(file))
+                found.push_back({file.getFileName(), {file.getFullPathName().toStdString(), entry.isDirectory()}});
+            if (found.size() >= kMaxEntries) break;
+        }
+        std::sort(found.begin(), found.end(), [](const Found& a, const Found& b) {
+            if (a.file.directory != b.file.directory) return a.file.directory;
+            const int names = a.name.compareNatural(b.name);
+            return names != 0 ? names < 0 : a.file.path < b.file.path;
+        });
+        std::vector<ui::UiContext::BrowserFile> files;
+        files.reserve(found.size());
+        for (auto& entry : found) files.push_back(std::move(entry.file));
+        juce::MessageManager::callAsync([this, alive, current, generation, entries = std::move(files)]() mutable {
+            if (alive.expired() || current->load() != generation) return;
+            ui_.browserSearchFiles = std::move(entries);
+            ui_.browserSearchLoading = false;
+            ++ui_.browserContentRevision;
+            if (ui_.requestRepaint) ui_.requestRepaint();
+        });
+    });
+    if (ui_.requestRepaint) ui_.requestRepaint();
 }
 
 void AppController::readBrowserFolder(const std::string& path, bool root)
@@ -1448,6 +1524,7 @@ void AppController::readBrowserFolder(const std::string& path, bool root)
             if (alive.expired() || generation != browserGeneration_) return;
             if (root) { ui_.browserFiles = std::move(entries); ui_.browserLoading = false; }
             else ui_.browserFolderChildren[path] = std::move(entries);
+            ++ui_.browserContentRevision;
             if (ui_.requestRepaint) ui_.requestRepaint();
         });
     });
@@ -1798,6 +1875,7 @@ bool AppController::writeSet(const juce::File& destination, const io::AlsSaveOpt
     if (editingDevices_ || syncingModel_) { ui_.statusText = "Wait until the device operation has finished"; return false; }
     syncModelFromEngine();
     song_->inKey = ui_.scaleHighlight; // Scale Mode is a view toggle; the set stores it as <InKey> (UI-30b)
+    ui::captureSetView(ui_, *song_);
     const auto result = io::saveAls(*song_, destination, options);
     bool ok = result.ok;
     if (! result.ok)
@@ -2231,6 +2309,7 @@ void AppController::saveCopy()
                               if (editingDevices_ || syncingModel_) { ui_.statusText = "Wait until the device operation has finished"; return; }
                               syncModelFromEngine();
                               song_->inKey = ui_.scaleHighlight;
+                              ui::captureSetView(ui_, *song_);
                               io::AlsSaveOptions options;
                               options.portableReferences = true;
                               options.copyProjectSamples = true;
@@ -2308,6 +2387,7 @@ void AppController::findProjectsInBackground()
             if (alive.expired())
                 return;
             ui_.projectFiles = std::move(files);
+            ++ui_.browserContentRevision;
             if (ui_.requestRepaint)
                 ui_.requestRepaint();
         });
@@ -2328,6 +2408,7 @@ void AppController::refreshPluginNames()
     }
     std::sort(ui_.pluginNames.begin(), ui_.pluginNames.end());
     std::sort(ui_.browserPlugins.begin(), ui_.browserPlugins.end(), [](const auto& a, const auto& b) { return a.label < b.label; });
+    ++ui_.browserContentRevision;
 }
 
 void AppController::editDevice(int trackIndex, int index, const std::function<void(model::Device&)>& edit, const std::string& label)
@@ -2522,6 +2603,13 @@ void AppController::importWavetablePreset(int trackIndex, int index, const std::
 
 void AppController::dropDeviceItem(const ui::BrowserDrag& item, int trackIndex, int index, int chainIndex, int zoneIndex, int childIndex)
 {
+    if (const auto tag = model::insertedDeviceTag(item.value, song_ ? song_->schemaVersion : std::string());
+        item.kind == ui::BrowserDrag::Kind::NativeDevice && tag != item.value)
+    {
+        auto older = item; // a Live 11 set keeps the legacy device (model::insertedDeviceTag)
+        older.value = std::string(tag);
+        return dropDeviceItem(older, trackIndex, index, chainIndex, zoneIndex, childIndex);
+    }
     if (! song_ || editingDevices_ || syncingModel_) return;
     auto* track = model::trackAt(*song_, trackIndex);
     if (! track || index < 0 || (size_t) index >= track->devices.size()) return;
@@ -2637,6 +2725,13 @@ void AppController::dropDeviceItem(const ui::BrowserDrag& item, int trackIndex, 
 
 void AppController::dropBrowserItem(const ui::BrowserDrag& item, int trackIndex, double beat, int scene)
 {
+    if (const auto tag = model::insertedDeviceTag(item.value, song_ ? song_->schemaVersion : std::string());
+        item.kind == ui::BrowserDrag::Kind::NativeDevice && tag != item.value)
+    {
+        auto older = item; // a Live 11 set keeps the legacy device (model::insertedDeviceTag)
+        older.value = std::string(tag);
+        return dropBrowserItem(older, trackIndex, beat, scene);
+    }
     if (! song_ || editingDevices_ || syncingModel_) return;
     const int dropGeneration = documentGeneration_;
     if (ui_.recording) { ui_.statusText = "Finish recording before dropping browser items"; return; }

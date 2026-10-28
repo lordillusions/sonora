@@ -106,7 +106,8 @@ tests. A native assistant screenshot complements `ui_snapshot`, which only rende
 ## MIDI and generic VST3 workflow
 
 Ask the agent to inspect the project and clip, then use `sonora_edits_apply` with `notes.add`, `notes.update`,
-`notes.delete` or `notes.replace`. `sonora_clip_get` returns revision-scoped note indices and supports paging;
+`notes.delete` or `notes.replace`. Arrangement locators (markers) use `locator.add`, `locator.update` and `locator.delete`
+with the `locatorId`s that inspect lists (see CONTROL_API.md "Arrangement locators"). `sonora_clip_get` returns revision-scoped note indices and supports paging;
 `scene`/`laneId` select Session/take clips. Each batch is one undo step.
 
 For a plugin, inspect `sonora_parameters_get`, choose exact writable ID/name pairs and call `sonora_parameters_set`

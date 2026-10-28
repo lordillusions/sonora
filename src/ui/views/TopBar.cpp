@@ -1,4 +1,5 @@
 #include "ui/views/TopBar.h"
+#include "ui/Locators.h"
 #include "ui/views/CollabPanel.h"
 
 #include "engine/Transport.h"
@@ -57,7 +58,7 @@ TopBar::TopBar()
     play_ = add<IconButton>(IconButton::Icon::Play);
     play_->midiTarget = midi::ControlTarget{midi::ControlTarget::Kind::TransportPlay, 0, 0, 0, {}};
     play_->isOn = [this] { return ctx().transport && (ctx().transport->isPlaying() || ctx().transport->isCountingIn()); };
-    play_->onClick = [this] { if (ctx().transport) ctx().transport->play(); };
+    play_->onClick = [this] { startPlayback(ctx()); };
 
     stop_ = add<IconButton>(IconButton::Icon::Stop);
     stop_->midiTarget = midi::ControlTarget{midi::ControlTarget::Kind::TransportStop, 0, 0, 0, {}};

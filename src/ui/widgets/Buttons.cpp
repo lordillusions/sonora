@@ -49,6 +49,11 @@ void TextButton::paint(SkCanvas& c, const Theme& t)
     }
 
     const bool dimmed = style_ == Style::Activator && ! on;
+    if (style_ == Style::Activator && on && ! pressed_ && isSoloMuted && isSoloMuted())
+    {
+        ctl::toggle(c, t, r, label_, true, t.color("ControlDisabled"), true, true);
+        return;
+    }
     ctl::toggle(c, t, r, style_ == Style::Arm && label_.empty() ? std::string_view{} : std::string_view{label_}, on, onColour,
                 ! dimmed && enabled, style_ == Style::Activator);
     if (style_ == Style::Arm && label_.empty())

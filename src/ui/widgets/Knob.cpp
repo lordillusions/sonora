@@ -156,7 +156,7 @@ void Knob::paint(SkCanvas& c, const Theme& t)
         const SkColor ink = t.color(enabled ? "ControlForeground" : "TextDisabled"), cyan = t.color("RangeDefault");
         const float size = fontSize > 0 ? fontSize : t.metrics.smallFontSize;
         if (showLabel) paint::text(c, label_, {r.x, r.y, r.w, 14 * q}, ink, size, Align::Centre);
-        const float stroke = 3 * q, d = 33 * q; // stroke centre line
+        const float stroke = deviceStroke * q, d = (36 - deviceStroke) * q; // outside 36 across; d = stroke centre line
         const float cx = r.centreX(), cy = r.y + 31.5f * q + shift;
         const SkRect oval = SkRect::MakeXYWH(cx - d / 2, cy - d / 2, d, d);
         SkPaint pen;

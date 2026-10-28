@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Download · Sonora DAW</title>
-<meta name="description" content="Download the Sonora alpha for macOS (Apple silicon), the Sonora Prism VST3, and early alpha builds for Windows and Linux.">
+<meta name="description" content="Download the Sonora alpha for macOS (Apple silicon), early alpha builds for Windows and Linux, and the free Sonora Prism, Curve LFO and Hush VST3 plug-ins.">
 <link rel="canonical" href="https://sonoradaw.com/download.html">
 <meta name="theme-color" content="#0b0b0c">
 <meta name="color-scheme" content="dark">
@@ -12,7 +12,7 @@
 <meta property="og:site_name" content="Sonora DAW">
 <meta property="og:url" content="https://sonoradaw.com/download.html">
 <meta property="og:title" content="Download · Sonora DAW">
-<meta property="og:description" content="Download the Sonora alpha for macOS (Apple silicon), the Sonora Prism VST3, and early alpha builds for Windows and Linux.">
+<meta property="og:description" content="Download the Sonora alpha for macOS (Apple silicon), early alpha builds for Windows and Linux, and the free Sonora Prism, Curve LFO and Hush VST3 plug-ins.">
 <meta property="og:image" content="https://sonoradaw.com/assets/img/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -101,14 +101,14 @@
       <div class="card dl-card" data-os="mac">
         <span class="tag">macOS · Apple silicon · Alpha</span>
         <h3>Sonora for Mac</h3>
-        <p>The main version. Open the disk image and drag Sonora to Applications. Updates itself from then on.</p>
+        <p>The main version. Open the disk image and drag Sonora to Applications. The first time, macOS asks you to allow it: see <a href="#first-launch">first launch</a>.</p>
         <p class="file">Sonora-macOS.dmg</p>
         <a class="btn btn-ghost btn-small" href="https://github.com/lordillusions/sonora/releases/latest/download/Sonora-macOS.dmg">Download for Mac</a>
       </div>
       <div class="card dl-card" data-os="windows">
         <span class="tag">Windows x64 · Early alpha</span>
         <h3>Sonora for Windows</h3>
-        <p>An early build, much less tested than the Mac version. No automatic updates yet, and Windows will warn about an unknown publisher.</p>
+        <p>An early build, much less tested than the Mac version. No automatic updates yet, and Windows warns about an unknown publisher: see <a href="#first-launch">first launch</a>.</p>
         <p class="file">Sonora-Windows-x64-setup.exe</p>
         <a class="btn btn-ghost btn-small" href="https://github.com/lordillusions/sonora/releases/latest/download/Sonora-Windows-x64-setup.exe">Download for Windows</a>
       </div>
@@ -120,26 +120,86 @@
         <div class="btn-row"><a class="btn btn-ghost btn-small" href="https://github.com/lordillusions/sonora/releases/latest/download/Sonora-Linux-x86_64.AppImage">AppImage</a><a class="btn btn-ghost btn-small" href="https://github.com/lordillusions/sonora/releases/latest/download/Sonora-Linux-amd64.deb">.deb</a></div>
       </div>
     </div>
-    <p class="table-note">Alpha builds may not be signed by Apple or Microsoft yet. If macOS says it can't check the app, Control-click Sonora in Applications and choose Open. Only download Sonora from this site or from <a href="https://github.com/lordillusions/sonora/releases">its GitHub repository</a>.</p>
+    <p class="table-note">Alpha builds aren't signed by Apple or Microsoft yet, so the first launch needs one extra step: <a href="#first-launch">here's how</a>. Only download Sonora from this site or from <a href="https://github.com/lordillusions/sonora/releases">its GitHub repository</a>.</p>
   </div>
 </section>
 
-<section id="prism">
+<section id="plugins">
   <div class="wrap">
     <div class="section-head">
       <span class="eyebrow">Also free</span>
-      <h2>Sonora Prism for other DAWs</h2>
-      <p class="lede">Prism is already inside Sonora. If you also want it in another music program, install the VST3 plug-in.</p>
+      <h2>Sonora plug-ins for other DAWs</h2>
+      <p class="lede">Free VST3 plug-ins for any DAW that loads VST3 on a Mac. Prism and Curve LFO are also built into Sonora; Hush is a plug-in only. Each installer puts the plug-in in the VST3 folder, for all users or just for you. Then rescan plug-ins in your DAW and look for the vendor Sonora.</p>
     </div>
-    <div class="grid">
-      <div class="card dl-card">
-        <span class="tag">macOS · Apple silicon · VST3 · Alpha</span>
-        <h3>Sonora Prism plug-in</h3>
-        <p>A powerful wavetable synth as a VST3 plug-in. Installs for all users or just for you, then rescan plug-ins in your host.</p>
+    <div class="grid grid-3">
+      <div class="card dl-card" id="prism">
+        <figure class="shot"><img src="assets/img/plugin-prism.webp" width="1440" height="900" alt="Sonora Prism: three wavetable oscillators with 3D wavetable views, sub, noise, two filters, macros, envelope and LFO editors, voice settings and a keyboard." loading="lazy"></figure>
+        <span class="tag">Instrument · VST3 · macOS Apple silicon</span>
+        <h3>Sonora Prism</h3>
+        <p>A wavetable synth. Three oscillators that morph through their wavetables, with sub and noise, two filters, envelopes and LFOs you can draw, eight macros, and up to 32 voices with unison. Comes with its own presets.</p>
         <p class="file">Sonora-Prism-VST3-macOS.pkg</p>
-        <a class="btn btn-ghost btn-small" href="https://github.com/lordillusions/sonora/releases/latest/download/Sonora-Prism-VST3-macOS.pkg">Download the plug-in</a>
+        <a class="btn btn-ghost btn-small" href="https://github.com/lordillusions/sonora/releases/latest/download/Sonora-Prism-VST3-macOS.pkg">Download Prism</a>
+      </div>
+      <div class="card dl-card" id="curve-lfo">
+        <figure class="shot"><img src="assets/img/plugin-curve-lfo.webp" width="2284" height="616" alt="Sonora Curve LFO: a drawn curve that modulates volume, pan, filter cutoff and resonance, with sync, swing and depth controls." loading="lazy"></figure>
+        <span class="tag">Audio effect · VST3 · macOS Apple silicon</span>
+        <h3>Sonora Curve LFO</h3>
+        <p>Draw a curve and let it move the sound: volume, pan, filter cutoff and resonance, in time with your DAW's tempo. Use it for sidechain-style pumping, gates, filter sweeps and rhythmic movement. MIDI notes can restart the curve.</p>
+        <p class="file">Sonora-Curve-LFO-VST3-macOS.pkg</p>
+        <a class="btn btn-ghost btn-small" href="https://github.com/lordillusions/sonora/releases/latest/download/Sonora-Curve-LFO-VST3-macOS.pkg">Download Curve LFO</a>
+      </div>
+      <div class="card dl-card" id="hush">
+        <figure class="shot"><img src="assets/img/plugin-hush.webp" width="1800" height="1064" alt="Sonora Hush: the spectrum with the reduction it applies, a depth curve with band nodes, soft and hard modes, Depth, Detail, Attack and Release knobs, and bypass, delta and mix." loading="lazy"></figure>
+        <span class="tag">Audio effect · VST3 · macOS Apple silicon</span>
+        <h3>Sonora Hush</h3>
+        <p>A dynamic resonance suppressor. Hush finds harsh resonances and build-ups as they happen and turns down only those frequencies, only while they ring. Smooth out vocals, guitars, cymbals and full mixes, with a curve to shape where it works, sidechain, mid/side and a delta mode to hear what it removes.</p>
+        <p class="file">Sonora-Hush-VST3-macOS.pkg</p>
+        <a class="btn btn-ghost btn-small" href="https://github.com/lordillusions/sonora/releases/latest/download/Sonora-Hush-VST3-macOS.pkg">Download Hush</a>
       </div>
     </div>
+    <p class="table-note">The plug-ins are alpha too, and macOS asks you to allow each installer the first time (<a href="#first-launch">first launch</a>). Windows and Linux versions of the plug-ins aren't available yet.</p>
+  </div>
+</section>
+
+<section id="first-launch">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">First launch</span>
+      <h2>Opening it the first time</h2>
+      <p class="lede">Sonora isn't signed by Apple or Microsoft yet, so your computer warns you the first time you open it. This is expected. You only do it once per download.</p>
+    </div>
+    <div class="grid grid-3">
+      <div class="card">
+        <span class="tag">macOS 15 Sequoia and later</span>
+        <h3>Mac: "Sonora Not Opened"</h3>
+        <ol>
+          <li>Open Sonora (or the plug-in installer). macOS says Apple could not verify it. Click <strong>Done</strong>, not Move to Trash.</li>
+          <li>Open <strong>System Settings &rsaquo; Privacy &amp; Security</strong> and scroll down to Security.</li>
+          <li>Next to "Sonora was blocked", click <strong>Open Anyway</strong> and enter your password.</li>
+          <li>Open Sonora again and click <strong>Open</strong>.</li>
+        </ol>
+        <p class="small faint">On macOS 13 and 14: Control-click Sonora in Applications, choose Open, then Open again.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Windows 10 and 11</span>
+        <h3>Windows: "Windows protected your PC"</h3>
+        <ol>
+          <li>Run <code>Sonora-Windows-x64-setup.exe</code>. SmartScreen shows a blue window.</li>
+          <li>Click <strong>More info</strong>.</li>
+          <li>Click <strong>Run anyway</strong> and follow the installer.</li>
+        </ol>
+        <p class="small faint">If your browser blocks the download itself, choose Keep in its downloads list.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Linux x64</span>
+        <h3>Linux</h3>
+        <ol>
+          <li>AppImage: make it executable with <code>chmod +x Sonora-Linux-x86_64.AppImage</code>, then run it.</li>
+          <li>Debian or Ubuntu: <code>sudo apt install ./Sonora-Linux-amd64.deb</code>, then start Sonora from your apps.</li>
+        </ol>
+      </div>
+    </div>
+    <p class="table-note">Still stuck? Tell us what you saw (a screenshot helps) in <a href="https://github.com/lordillusions/sonora/issues">GitHub Issues</a>.</p>
   </div>
 </section>
 
@@ -175,7 +235,7 @@
       <div>
         <span class="eyebrow">Updates</span>
         <h2>Updates that wait for the music.</h2>
-        <p class="muted">On the Mac, Sonora updates itself with Sparkle, the open-source updater many Mac apps use. Updates are hosted on GitHub Releases.</p>
+        <p class="muted">On the Mac, Sonora will update itself with Sparkle, the open-source updater many Mac apps use. It switches on with the first signed release. Until then, download each new version from this page: the buttons always fetch the latest, and Help &rsaquo; About Sonora shows the version you have.</p>
         <ul>
           <li><strong>Small downloads.</strong> Delta updates download only what changed since your version. If a delta is missing or doesn't apply, Sonora downloads the full update instead.</li>
           <li><strong>Never mid-take.</strong> Sonora won't restart for an update while it's playing, recording or exporting.</li>

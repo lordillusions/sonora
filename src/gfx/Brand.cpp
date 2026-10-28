@@ -64,19 +64,14 @@ SkPath line(float x0, float y0, float x1, float y1)
     return b.detach();
 }
 
-SkPath superellipse(const SkRect& r, float exponent)
+// The app icon tile: the macOS icon grid's rounded square (corner radius 185.4 on an 824 body). macOS 26 shows an
+// icon whose outline differs from this shape shrunk inside a grey tile, so the tile must match it (a superellipse
+// did not; checked with NSWorkspace iconForFile, UI-51c).
+SkPath iconTile(const SkRect& r)
 {
+    const float radius = r.width() * 185.4f / 824.0f;
     SkPathBuilder b;
-    const int n = 256;
-    const float cx = r.centerX(), cy = r.centerY(), a = r.width() / 2, h = r.height() / 2;
-    for (int i = 0; i < n; ++i)
-    {
-        const float t = 2 * pi * (float) i / (float) n, c = std::cos(t), s = std::sin(t);
-        const float px = cx + a * std::copysign(std::pow(std::fabs(c), 2.0f / exponent), c);
-        const float py = cy + h * std::copysign(std::pow(std::fabs(s), 2.0f / exponent), s);
-        if (i == 0) b.moveTo(px, py); else b.lineTo(px, py);
-    }
-    b.close();
+    b.addRRect(SkRRect::MakeRectXY(r, radius, radius));
     return b.detach();
 }
 
@@ -248,7 +243,7 @@ void drawAppIcon(SkCanvas& canvas, float size)
 {
     const float k = size / 1024.0f;
     const SkRect body = SkRect::MakeXYWH(100 * k, 100 * k, 824 * k, 824 * k);
-    const auto shape = superellipse(body, 5.0f);
+    const auto shape = iconTile(body);
 
     // Soft shadow under the tile (part of the macOS icon grid).
     SkPaint shadow;
@@ -658,6 +653,35 @@ void drawBusyCursor(SkCanvas& canvas, double timeSeconds)
     drawActivity(canvas, badge.makeInset(3.2f, 3.0f), timeSeconds, SK_ColorWHITE);
 }
 
+void drawScrubCursor(SkCanvas& canvas)
+{
+    const float cy = (float) scrubCursorHotSpotY;
+    SkPathBuilder b; // box with the cone opening to the right
+    b.moveTo(3.0f, cy - 3.2f).lineTo(7.0f, cy - 3.2f).lineTo(11.6f, cy - 7.4f).lineTo(11.6f, cy + 7.4f)
+        .lineTo(7.0f, cy + 3.2f).lineTo(3.0f, cy + 3.2f).close();
+    const auto speaker = b.detach();
+    SkPathBuilder w; // two sound waves
+    w.addArc(SkRect::MakeLTRB(9.6f, cy - 4.4f, 18.4f, cy + 4.4f), -50, 100);
+    w.addArc(SkRect::MakeLTRB(9.2f, cy - 8.4f, 22.0f, cy + 8.4f), -50, 100);
+    const auto waves = w.detach();
+
+    SkPaint p;
+    p.setAntiAlias(true);
+    p.setStyle(SkPaint::kStroke_Style);
+    p.setStrokeJoin(SkPaint::kRound_Join);
+    p.setStrokeCap(SkPaint::kRound_Cap);
+    p.setColor(SK_ColorWHITE);
+    p.setStrokeWidth(2.2f);
+    canvas.drawPath(speaker, p);
+    p.setStrokeWidth(3.6f);
+    canvas.drawPath(waves, p);
+    p.setColor(SkColorSetRGB(0x10, 0x10, 0x10));
+    p.setStrokeWidth(1.5f);
+    canvas.drawPath(waves, p);
+    p.setStyle(SkPaint::kFill_Style);
+    canvas.drawPath(speaker, p);
+}
+
 std::string markSvg(bool onIcon)
 {
     if (! onIcon)
@@ -668,7 +692,7 @@ std::string markSvg(bool onIcon)
         return std::string("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"") + viewBox + "\">\n" + pathsSvg(strokes, "currentColor")
                + "</svg>\n";
     }
-    // App-icon tile as a vector (for the website): superellipse tile with the S.
+    // App-icon tile as a vector (for the website): the icon-grid rounded square with the S.
     const SkRect body = SkRect::MakeXYWH(0, 0, 824, 824);
     const float h = 470;
     const auto strokes = markStrokes(SkRect::MakeXYWH(412 - h * markAspect / 2, 412 - h / 2, h * markAspect, h));
@@ -680,7 +704,7 @@ std::string markSvg(bool onIcon)
              "<stop offset=\"0\" stop-color=\"#ffffff\"/><stop offset=\"1\" stop-color=\"#b8b8b8\"/></linearGradient>\n"
              "  </defs>\n"
              "  <path fill=\"url(#tile)\" d=\""
-           + std::string(SkParsePath::ToSVGString(superellipse(body, 5.0f)).c_str()) + "\"/>\n" + pathsSvg(strokes, "url(#ink)")
+           + std::string(SkParsePath::ToSVGString(iconTile(body)).c_str()) + "\"/>\n" + pathsSvg(strokes, "url(#ink)")
            + "</svg>\n";
 }
 

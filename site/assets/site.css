@@ -184,6 +184,8 @@ section + section { border-top: 1px solid var(--line); }
 .card p, .card li { color: var(--text-muted); font-size: 15px; }
 .card p:last-child { margin-bottom: 0; }
 .card ul { padding-left: 18px; margin: 0; }
+.card ol { padding-left: 20px; margin: 0 0 12px; }
+.card ol li { margin-bottom: 6px; }
 .card .tag { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 10px; }
 
 /* Tables */
@@ -279,6 +281,10 @@ details > div { padding: 0 0 18px; color: var(--text-muted); max-width: 48em; }
 /* Download cards */
 .dl-card { display: flex; flex-direction: column; }
 .dl-card .btn { margin-top: auto; align-self: flex-start; }
+.dl-card .shot { margin: 0 0 18px; }
+/* Plug-in cards: one frame for every screenshot (a click opens the whole picture in the lightbox). */
+.dl-card .shot img { aspect-ratio: 16 / 10; object-fit: cover; object-position: left center; }
+#curve-lfo .shot img { object-position: 58% center; } /* the graph, not the knobs */
 .dl-card .file { font-family: var(--font-mono); font-size: 13px; color: var(--text-faint); margin-bottom: 14px; word-break: break-all; }
 .dl-card.main { border-color: var(--line-strong); background: linear-gradient(180deg, #1a1a1d, var(--bg-raised)); }
 

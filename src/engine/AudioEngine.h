@@ -172,6 +172,7 @@ private:
     std::array<int, 64> inputPhysicalChannels_{}; // callback index -> physical index, filled in aboutToStart
     int numPhysicalInputs_ = 0;
     int blockSize_ = 512;
+    double wrapLead_ = 0.0, wrapLeadAt_ = -1.0; // audio thread: a loop wrap on the last block end carries its lead over
     juce::MidiBuffer liveMidi_;
     midi::InputBlock inputMidiBlock_;
     Metronome metronome_;

@@ -51,8 +51,9 @@ launch. Idempotency is not crash-proof exactly-once persistence.
 Inspection/capability discovery does not require an envelope target. Other queries do. A local socket is already bound
 to the enabled document, and changing documents revokes that endpoint. The MCP adapter additionally checks returned identities.
 
-Supported edit types are `tempo.set {bpm: 20..999}`, `track.set_gain {trackId, gainDb: -90..6}` and
-`clip.duplicate {trackId, clipId, destinationBeat: 0..1000000}`. Gain is absolute dB, not a relative change. An agent asked
+Supported edit types are `tempo.set {bpm: 20..999}`, `track.set_gain {trackId, gainDb: -90..6}`,
+`clip.duplicate {trackId, clipId, destinationBeat: 0..1000000}`, the note commands below and the locator commands
+(see "Arrangement locators"). Gain is absolute dB, not a relative change. An agent asked
 to lower a track by 3 dB must read its current gain and calculate the absolute target. Gain updates participate in
 history, live engine controls and save state; tracks with authored volume automation are rejected for this operation.
 
@@ -66,6 +67,22 @@ The public note API still uses `noteIndex`; the service translates indices to pe
 song. A `trackId` that no longer exists reports `target_replaced` for every edit type (previously some returned
 `invalid_request`). The op vocabulary also contains `track.rename`, `track.set_color`, `loop.set`, `clip.move` and
 `clip.delete`; they are not exposed through this API until schemas/MCP tools are added (AGT-7).
+
+### Arrangement locators (UI-3b)
+
+`project.inspect` lists `locators` (sorted by time): `locatorId` (the file's Locator `Id`, stable across edits and saves of
+the same document), `name`, `beat` (quarter notes), `color` (palette index 0–69, -1 = default locator colour; a Sonora
+extension saved as `<SonoraLocators>`), `songStart` and `infoText`. `edits.apply` accepts:
+
+- `locator.add {beat: 0..1000000, name?: ≤256 bytes, color?: -1..69}` — unnamed locators are numbered like the Set
+  button's ("1", "2"…). Only one locator per beat: adding onto an existing one is `invalid_request`. The receipt's
+  `data.locatorIds` lists the new IDs in creation order.
+- `locator.update {locatorId, beat?, name?, infoText?: ≤4096 bytes, color?, songStart?}` — at least one field. Moving onto
+  another locator's beat is rejected; `songStart: true` clears it on every other locator.
+- `locator.delete {locatorId}`.
+
+An unknown `locatorId` is `target_replaced`. A batch is one undo step like any other edit. The Arrangement's Set/Del button,
+ruler gestures and menus build the same `model::Op`s through `ui/Locators.cpp`.
 
 All edits are rejected while recording/draining or during export/device state work. Track CRUD beyond the recipe,
 save/export tools, dry-run prepare/commit, durable jobs, nested plugin targets and remote access remain future work.
@@ -113,7 +130,7 @@ Removal captures current live state before deleting the device. Undo restores it
 save; redo removes it again. Source XML/unknown content and source media ownership remain with the existing model/writer.
 Plugin loading/state work is still in-process and may interrupt voices or block on a faulty third-party plugin.
 
-MCP 0.3 exposes `sonora_devices_catalog`, `sonora_devices_insert`, `sonora_devices_remove` and the extended
+MCP 0.4 (locator commands in `sonora_edits_apply`) also exposes `sonora_devices_catalog`, `sonora_devices_insert`, `sonora_devices_remove` and the extended
 `sonora_parameters_get/set`. The configured native LLM has the identical operations through its document-bound adapter.
 Reload the MCP bridge and use the rebuilt application to load the new tool/service versions.
 

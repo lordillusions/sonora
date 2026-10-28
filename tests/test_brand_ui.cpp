@@ -65,6 +65,9 @@ TEST_CASE("brand: icon and busy cursor draw opaque pixels where expected")
     const auto cursor = gfx::brand::renderImage(64, 64, 2.0f, [](SkCanvas& c) { gfx::brand::drawBusyCursor(c, 0.3); });
     CHECK(cursor.getPixelAt(gfx::brand::busyCursorHotSpot * 2 + 2, gfx::brand::busyCursorHotSpot * 2 + 6).getAlpha() == 255); // arrow
     CHECK(cursor.getPixelAt(63, 0).getAlpha() == 0);
+    const auto scrub = gfx::brand::renderImage(48, 48, 2.0f, [](SkCanvas& c) { gfx::brand::drawScrubCursor(c); });
+    CHECK(scrub.getPixelAt(gfx::brand::scrubCursorHotSpotX * 2, gfx::brand::scrubCursorHotSpotY * 2).getAlpha() == 255); // speaker body
+    CHECK(scrub.getPixelAt(0, 0).getAlpha() == 0);
 }
 
 TEST_CASE("brand: save prompt buttons sit inside the panel like a macOS alert (UI-44)")

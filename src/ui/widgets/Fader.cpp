@@ -40,6 +40,12 @@ void Fader::tick()
     }
 }
 
+SkColor Fader::meterColour(float level, bool muted)
+{
+    if (muted) return SkColorSetRGB(0x76, 0x76, 0x76); // sampled from the reference's meter on a solo-muted track
+    return level >= 1.0f ? SkColorSetRGB(0xff, 0x0a, 0x0a) : level > 0.5f ? SkColorSetRGB(0xff, 0xd1, 0x00) : SkColorSetRGB(0x00, 0xf7, 0x58);
+}
+
 namespace
 {
 constexpr float kHandleW = 11.5f, kMeterW = 12.0f, kHandleH = 13.0f;
@@ -56,15 +62,13 @@ void Fader::paint(SkCanvas& c, const Theme& t)
     paint::fill(c, meter, t.color("MeterBackground"));
     paint::fill(c, {meter.centreX() - 0.5f, meter.y, 1, meter.h}, t.color("DisplayBackground"));
 
+    const bool muted = isMuted && isMuted();
     auto bar = [&](float level, Rect area) {
         const float pos = gainToPosition(level);
         if (pos <= 0)
             return;
         Rect lit{area.x, area.bottom() - area.h * pos, area.w, area.h * pos};
-        const SkColor col = level >= 1.0f ? SkColorSetRGB(0xff, 0x0a, 0x0a)
-                            : level > 0.5f ? SkColorSetRGB(0xff, 0xd1, 0x00)
-                                           : SkColorSetRGB(0x00, 0xf7, 0x58);
-        paint::fill(c, lit, col);
+        paint::fill(c, lit, meterColour(level, muted));
     };
     const float half = (meter.w - 1) * 0.5f;
     bar(shownL_, {meter.x, meter.y, half, meter.h});

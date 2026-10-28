@@ -52,7 +52,9 @@ public:
     void reset();
     void push(const float* left, const float* right, int numSamples); // mono sum into the window
     // Analyses the newest window. `seconds` = time since the previous call (drives the release smoothing).
-    void analyze(double seconds);
+    // peakCurve preserves narrow tones in each logarithmic display cell (device displays);
+    // the default retains the Monitor's 1/6-octave average.
+    void analyze(double seconds, bool peakCurve = false);
 
     const std::array<float, kBars>& bars() const { return bars_; }          // dB, smoothed (fast attack, slow release)
     const std::array<float, kBars>& barPeaks() const { return barPeaks_; }  // dB, peak hold

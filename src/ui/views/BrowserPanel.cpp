@@ -94,7 +94,7 @@ Rect BrowserPanel::addTagBounds() const
 
 BrowserTags::Tags BrowserPanel::selectedTags() const
 {
-    const auto entries = items();
+    const auto& entries = items();
     return selectedItem_ >= 0 && (size_t) selectedItem_ < entries.size() ? entries[(size_t) selectedItem_].tags : BrowserTags::Tags{};
 }
 
@@ -117,14 +117,18 @@ Rect BrowserPanel::tagChipBounds(int index) const
 std::vector<std::pair<std::string, Rect>> BrowserPanel::filterGroups() const
 {
     if (! filtersVisible_) return {};
-    std::set<std::string> groups;
-    for (const auto& item : items(false, false))
-        for (const auto& tag : item.tags) groups.insert(tag.group);
-    for (const auto& tag : filters_) groups.insert(tag.group);
+    const auto& entries = items(false, false); // validates the cache before reading its facets
+    if (! facetGroups_)
+    {
+        facetGroups_.emplace();
+        for (const auto& item : entries)
+            for (const auto& tag : item.tags) facetGroups_->insert(tag.group);
+        for (const auto& tag : filters_) facetGroups_->insert(tag.group);
+    }
     std::vector<std::pair<std::string, Rect>> result;
     const float left = sidebarArea().right() + 5;
     float x = left, y = kSearch + 3;
-    for (const auto& group : groups)
+    for (const auto& group : *facetGroups_)
     {
         const float w = std::min(std::max(20.0f, width() - left - 5), gfx::measureText(group, ctx().theme.metrics.fontSize) + 23);
         if (x > left && x + w > width() - 4) { x = left; y += kFacet; }
@@ -240,6 +244,7 @@ void BrowserPanel::beginTagEntry()
     if (selectedItem_ < 0 || (size_t) selectedItem_ >= entries.size() || entries[(size_t) selectedItem_].key.empty()) return;
     tagEditing_ = keyboardFocused_ = true;
     searchFocused_ = false; tagText_.clear();
+    restartCaret();
     for (auto* ancestor = parent(); ancestor; ancestor = ancestor->parent())
         if (auto* root = dynamic_cast<RootWidget*>(ancestor)) root->setKeyboardFocus(this);
     repaint();
@@ -301,10 +306,33 @@ Rect BrowserPanel::listRowBounds(int index) const
     return {list.x, list.y + 2 + (float) index * kRow - scroll_, list.w, kRow};
 }
 
-std::vector<BrowserPanel::Item> BrowserPanel::items(bool filtered, bool groupRows) const
+const std::vector<BrowserPanel::Item>& BrowserPanel::items(bool filtered, bool groupRows) const
+{
+    const auto& context = ctx();
+    // UI-54: paint, facet layout and hit testing share the same derived rows. Validate cheap
+    // inputs without copying them on a cache hit; scroll, selection and canvas size do not change rows.
+    if (! itemsKey_ || itemsKey_->contentRevision != context.browserContentRevision
+        || itemsKey_->tagsRevision != context.browserTags.revision() || itemsKey_->category != selectedCategory_
+        || itemsKey_->folderMode != folderMode_ || itemsKey_->query != query_ || itemsKey_->folder != context.browserFolder
+        || itemsKey_->filters != filters_ || itemsKey_->groups != expandedGroups_ || itemsKey_->folders != expandedFolders_)
+    {
+        itemsKey_ = ItemsKey{context.browserContentRevision, context.browserTags.revision(), selectedCategory_, folderMode_,
+                             query_, context.browserFolder, filters_, expandedGroups_, expandedFolders_};
+        for (auto& entry : itemsCache_) entry.reset();
+        facetGroups_.reset();
+    }
+    auto& cached = itemsCache_[(filtered ? 2u : 0u) + (groupRows ? 1u : 0u)];
+    if (! cached) cached = buildItems(filtered, groupRows);
+    return *cached;
+}
+
+std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool groupRows) const
 {
     const auto& context = ctx();
     std::vector<Item> result;
+    // UI-6b: a search in a folder lists matches from every subfolder once the recursive index of that folder is in.
+    const bool indexed = folderMode_ && ! query_.empty() && ! context.browserSearchLoading
+                         && ! context.browserSearchRoot.empty() && context.browserSearchRoot == context.browserFolder;
     if (folderMode_)
     {
         std::function<void(const std::vector<UiContext::BrowserFile>&, int, const std::string&)> append;
@@ -322,7 +350,18 @@ std::vector<BrowserPanel::Item> BrowserPanel::items(bool filtered, bool groupRow
                     append(children->second, depth + 1, file.path);
             }
         };
-        append(context.browserFiles, 0, {});
+        if (indexed)
+        {
+            // Pre-filter by name (or by user tags, which the query also matches) so large trees stay cheap.
+            const auto query = juce::String::fromUTF8(query_.c_str());
+            std::vector<UiContext::BrowserFile> matches;
+            for (const auto& file : context.browserSearchFiles)
+                if (juce::File(file.path).getFileName().containsIgnoreCase(query) || context.browserTags.hasChanges("file:" + file.path))
+                    matches.push_back(file);
+            append(matches, 0, {});
+        }
+        else
+            append(context.browserFiles, 0, {});
     }
     else if (selectedCategory_ == 6)
     {
@@ -351,7 +390,7 @@ std::vector<BrowserPanel::Item> BrowserPanel::items(bool filtered, bool groupRow
         entries.insert(entries.end(), model::maxForLiveReplacements().begin(), model::maxForLiveReplacements().end());
         for (const auto& entry : entries)
         {
-            if (! entry.implemented || entry.role != role || entry.xmlTag == "AutoFilter2") continue;
+            if (! entry.implemented || entry.role != role || entry.xmlTag == "AutoFilter") continue; // one Auto Filter: the 12.4 device
             if (selectedCategory_ == 2 && entry.xmlTag != "DrumGroupDevice" && entry.xmlTag != "SonoraImpulse") continue;
             const std::string name(entry.displayName), tag(entry.xmlTag);
             result.push_back({name, {}, false, false, BrowserDrag{BrowserDrag::Kind::NativeDevice, tag, name},
@@ -385,6 +424,7 @@ std::vector<BrowserPanel::Item> BrowserPanel::items(bool filtered, bool groupRow
                 if (item.drag->value == "SonoraVector") alias = " Wavetable";
                 else if (item.drag->value == "SonoraFm") alias = " Operator";
             }
+            if (indexed && item.depth > 0) return false; // the contents of an opened result folder
             for (const auto& tag : item.tags) alias += " " + tag.value;
             return ! juce::String::fromUTF8((item.label + " " + item.group + alias).c_str()).containsIgnoreCase(query);
         }), result.end());
@@ -561,6 +601,11 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
         paint::stroke(canvas, row, searchFocused_ ? theme.color("SelectionFrame") : theme.color("SurfaceArea"));
         paint::text(canvas, query_.empty() ? "Search (Cmd + F)" : query_, row.reduced(6, 0),
                     query_.empty() ? theme.color("TextDisabled") : fg, theme.metrics.fontSize);
+        if (searchFocused_ && caretVisible())
+        {
+            const float caret = std::min(row.right() - 3, row.x + 6 + gfx::measureText(query_, theme.metrics.fontSize) + 1);
+            paint::line(canvas, caret, row.y + 4, caret, row.bottom() - 4, fg);
+        }
         ctl::framed(canvas, theme, filter, theme.color(filtersVisible_ ? "ChosenDefault" : "ControlTextBack"));
         for (int i = 0; i < 3; ++i)
         {
@@ -616,7 +661,7 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
         paint::text(canvas, "Name", head.reduced(8, 0), theme.color("TreeColumnHeadForeground"), theme.metrics.fontSize, Align::Left, true);
         ctl::triangle(canvas, head.right() - 30, head.centreY(), 7, 5, ctl::Dir::Up, theme.color("TreeColumnHeadControl") );
     }
-    const auto entries = items();
+    const auto& entries = items();
     canvas.save();
     canvas.clipRect(list.sk());
     float y = list.y + 2 - scroll_;
@@ -643,7 +688,11 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
                     theme.metrics.fontSize, Align::Left, item.heading);
     }
     if (entries.empty())
-        paint::text(canvas, ctx().browserLoading && folderMode_ ? "Loading..." : "No results", {list.x + 8, list.y, list.w - 12, 30}, theme.color("TextDisabled"), theme.metrics.fontSize);
+    {
+        const char* note = ctx().browserLoading && folderMode_ ? "Loading..."
+                           : folderMode_ && ! query_.empty() && ctx().browserSearchLoading ? "Searching..." : "No results";
+        paint::text(canvas, note, {list.x + 8, list.y, list.w - 12, 30}, theme.color("TextDisabled"), theme.metrics.fontSize);
+    }
     canvas.restore();
 
     const auto tagsRow = tagFooter();
@@ -656,6 +705,11 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
         const Rect field{tagsRow.x + 35, tagsRow.y + 3, std::max(0.0f, tagsRow.w - 39), tagsRow.h - 6};
         ctl::framed(canvas, theme, field, theme.color("ControlTextBack"));
         paint::text(canvas, tagText_.empty() ? "New tag (Enter to add)" : tagText_, field.reduced(4, 0), fg, theme.metrics.fontSize);
+        if (caretVisible())
+        {
+            const float caret = std::min(field.right() - 3, field.x + 4 + gfx::measureText(tagText_, theme.metrics.fontSize) + 1);
+            paint::line(canvas, caret, field.y + 3, caret, field.bottom() - 3, fg);
+        }
     }
     else
     {
@@ -794,6 +848,7 @@ void BrowserPanel::mouseDown(const MouseEvent& event)
     keyboardFocused_ = true;
     if (! tagFooter().contains(event.x, event.y)) tagEditing_ = false;
     searchFocused_ = event.y < kSearch && event.x >= 47 && event.x < width() - 27;
+    if (searchFocused_) restartCaret();
     if (event.y < kSearch)
     {
         if (event.x >= width() - 27)
@@ -895,10 +950,32 @@ void BrowserPanel::mouseDoubleClick(const MouseEvent& event)
         activate(entries[(size_t) selectedItem_]);
 }
 
+void BrowserPanel::restartCaret()
+{
+    caretEpoch_ = juce::Time::getMillisecondCounter();
+    caretShown_ = true;
+}
+
+bool BrowserPanel::caretVisible() const
+{
+    return (juce::Time::getMillisecondCounter() - caretEpoch_) / 530 % 2 == 0;
+}
+
+void BrowserPanel::tick()
+{
+    // Blink the caret, and (re)index the shown folder while a search is typed in it (UI-6b).
+    if ((searchFocused_ || tagEditing_) && caretVisible() != caretShown_) { caretShown_ = ! caretShown_; repaint(); }
+    const auto& context = ctx();
+    if (folderMode_ && ! query_.empty() && context.indexBrowserFolder && ! context.browserFolder.empty()
+        && context.browserSearchRoot != context.browserFolder)
+        context.indexBrowserFolder(context.browserFolder);
+}
+
 void BrowserPanel::focusSearch()
 {
     ctx().browserVisible = true;
     tagEditing_ = false;
+    restartCaret();
     searchFocused_ = keyboardFocused_ = true;
     for (auto* ancestor = parent(); ancestor; ancestor = ancestor->parent())
         if (auto* root = dynamic_cast<RootWidget*>(ancestor)) root->setKeyboardFocus(this);
@@ -929,6 +1006,7 @@ bool BrowserPanel::keyPressed(const KeyEvent& key)
     if (! keyboardFocused_) return false;
     if (tagEditing_)
     {
+        restartCaret();
         if (key.keyCode == juce::KeyPress::escapeKey) tagEditing_ = false;
         else if (key.keyCode == juce::KeyPress::returnKey)
         {
@@ -972,10 +1050,14 @@ bool BrowserPanel::keyPressed(const KeyEvent& key)
     }
     if (searchFocused_ && ! key.cmd && ! key.alt)
     {
+        const bool starting = query_.empty();
+        restartCaret();
         if (key.keyCode == juce::KeyPress::backspaceKey) paint::popLastCodePoint(query_);
         else if (key.textChar >= 32 && key.textChar != 127) query_ += juce::String::charToString((juce::juce_wchar) key.textChar).toStdString();
         else if (key.keyCode == juce::KeyPress::returnKey) searchFocused_ = false;
         else return false;
+        // A new search re-reads the folder tree so it also finds files added since the last one.
+        if (starting && ! query_.empty() && folderMode_ && ctx().indexBrowserFolder) ctx().indexBrowserFolder(ctx().browserFolder);
         selectedItem_ = -1;
         scroll_ = 0;
         repaint();

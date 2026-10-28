@@ -411,6 +411,7 @@ void AudioEngine::renderTrackClips(TrackNode& node, TrackControls& c, const Bloc
         {
             const auto& clip = node.sessionClips[(size_t) part];
             if (inhibitMonitoring) inhibitInput(clip, seg, partLaunch, ! recorder_.hasOverdubPreview(node.controlIndex, part, clip.probabilitySeed));
+            // No lead: the session clock is continuous across Arrangement wraps.
             const BlockSegment shifted{seg.sampleOffset, seg.numSamples, seg.startBeats - partLaunch, seg.samplesPerBeat};
             if (clip.kind == model::Clip::Kind::Midi)
             {
@@ -468,10 +469,11 @@ void AudioEngine::renderTrackClips(TrackNode& node, TrackControls& c, const Bloc
                 slot = TrackControls::kNoSlot;
             }
         }
-        renderPlayback({seg.sampleOffset, first - seg.sampleOffset, seg.startBeats, seg.samplesPerBeat}, part, partLaunch, arrangementActive);
+        auto leadAt = [&](int offset) { return offset == seg.sampleOffset ? seg.lead : 0.0; }; // first non-empty piece
+        renderPlayback({seg.sampleOffset, first - seg.sampleOffset, seg.startBeats, seg.samplesPerBeat, seg.lead}, part, partLaunch, arrangementActive);
         if (overdubbing)
         {
-            renderPlayback({first, last - first, seg.startBeats + (first - seg.sampleOffset) / seg.samplesPerBeat, seg.samplesPerBeat}, part, partLaunch, arrangementActive, false);
+            renderPlayback({first, last - first, seg.startBeats + (first - seg.sampleOffset) / seg.samplesPerBeat, seg.samplesPerBeat, leadAt(first)}, part, partLaunch, arrangementActive, false);
             if (baseMonitor) std::fill(mask.begin() + first, mask.begin() + last, 1);
         }
         const bool inputWasAudible = baseMonitor && (first > 0 ? mask[(size_t) first - 1] != 0 : node.inputMonitored);
@@ -479,7 +481,7 @@ void AudioEngine::renderTrackClips(TrackNode& node, TrackControls& c, const Bloc
             for (int channel = 1; channel <= 16; ++channel)
                 node.midi.addEvent(juce::MidiMessage::allNotesOff(channel), first);
         if (! recorder_.audioSessionRecording(node.controlIndex) || overdubbing)
-            renderPlayback({last, end - last, seg.startBeats + (last - seg.sampleOffset) / seg.samplesPerBeat, seg.samplesPerBeat}, part, partLaunch, arrangementActive);
+            renderPlayback({last, end - last, seg.startBeats + (last - seg.sampleOffset) / seg.samplesPerBeat, seg.samplesPerBeat, leadAt(last)}, part, partLaunch, arrangementActive);
         advanceSession();
     };
 
@@ -503,7 +505,7 @@ void AudioEngine::renderTrackClips(TrackNode& node, TrackControls& c, const Bloc
                 { boundary = cursor + remaining; launching = false; }
             }
             const double position = seg.startBeats + (cursor - seg.sampleOffset) / seg.samplesPerBeat;
-            renderPart({cursor, boundary - cursor, position, seg.samplesPerBeat}, slot, launchBeat,
+            renderPart({cursor, boundary - cursor, position, seg.samplesPerBeat, cursor == seg.sampleOffset ? seg.lead : 0.0}, slot, launchBeat,
                        c.arrangementOn.load(std::memory_order_relaxed));
             if (boundary == end) break;
 
@@ -692,6 +694,7 @@ void AudioEngine::processNode(TrackNode& node, const TrackControls& ctl, int n, 
         d->setHostInfo(host);
         const float inMag = debugCheckDevices ? std::max(view.getMagnitude(0, 0, n), view.getMagnitude(1, 0, n)) : 0.0f;
         d->process(view, node.midi);
+        d->outputMeter.measure(view, n); // UI-55 chain meter after this device
         if (debugCheckDevices) // diagnostics only: not for production use on the audio thread
         {
             const float m = std::max(view.getMagnitude(0, 0, n), view.getMagnitude(1, 0, n));
@@ -798,13 +801,17 @@ void AudioEngine::renderBlock(float* const* outputs, int numOutputs, int numSamp
         const bool looping = transport_.loopEnabled() && bs.position <= loopEnd + 1e-9;
         int offset = bs.playOffset;
         double beat = bs.position;
-        if (looping && beat >= loopEnd - 1e-9) beat = loopStart;
+        // The previous block ended on a wrap: its lead belongs to this block's first segment.
+        const bool resumes = ! (bs.position < wrapLeadAt_) && ! (wrapLeadAt_ < bs.position); // exact: our own advanceTo()
+        double lead = ! bs.jumped && resumes ? wrapLead_ : 0.0;
+        if (looping && beat >= loopEnd - 1e-9) { beat = loopStart; lead = 0; }
         while (offset < numSamples && numSegs < maxSegments)
         {
             int count = numSamples - offset;
             if (looping)
                 count = (int) std::ceil(std::clamp((loopEnd - beat) * samplesPerBeat - 1e-8, 1.0, (double) count));
-            segs[numSegs] = {offset, count, beat, samplesPerBeat};
+            segs[numSegs] = {offset, count, beat, samplesPerBeat, lead};
+            lead = 0;
             offset += count; beat += count / samplesPerBeat;
             if (looping && beat >= loopEnd - 1e-9)
             {
@@ -813,13 +820,16 @@ void AudioEngine::renderBlock(float* const* outputs, int numOutputs, int numSamp
                 double phase = std::fmod(std::max(0.0, beat - loopEnd), span);
                 if (phase < 1e-9 || span - phase < 1e-9) phase = 0; // modulo can round an exact boundary to span
                 beat = loopStart + phase;
+                lead = phase; // the overshoot past the loop end: events in [loopStart, beat) go on the wrap sample
             }
             ++numSegs;
         }
         endPos = beat;
+        wrapLead_ = lead; wrapLeadAt_ = endPos;
         if (offset < numSamples) { recorder_.requestStop(); transport_.stop(); } // capacity guard, no allocation/logging
     }
 
+    if (! bs.playing) wrapLead_ = 0;
     recorder_.prepareBlock(segs, numSegs, bs.playing, bs.jumped);
 
     if (auto* clock = clockOut_.load(std::memory_order_relaxed))
@@ -957,6 +967,7 @@ void AudioEngine::renderBlock(float* const* outputs, int numOutputs, int numSamp
             node.trackDelay.processInPlace(view, numSamples);
         }
 
+        // The meter keeps measuring a muted track; the UI draws it grey while the mix leaves the track out (Live).
         c.peakL.store(node.buffer.getMagnitude(0, 0, numSamples), std::memory_order_relaxed);
         c.peakR.store(node.buffer.getMagnitude(1, 0, numSamples), std::memory_order_relaxed);
 
@@ -1002,12 +1013,13 @@ void AudioEngine::renderBlock(float* const* outputs, int numOutputs, int numSamp
         processNode(node, c, numSamples, host);
         c.peakL.store(node.buffer.getMagnitude(0, 0, numSamples), std::memory_order_relaxed);
         c.peakR.store(node.buffer.getMagnitude(1, 0, numSamples), std::memory_order_relaxed);
+        const bool returnOn = c.active.load(std::memory_order_relaxed) || c.solo.load(std::memory_order_relaxed); // solo wins, as on tracks
         const int stemSlot = offlineStemSlot_ != nullptr ? (*offlineStemSlot_)[(size_t) idx] : -1;
         if (stemSlot >= 0 && ! offlinePreMixer_)
         {
             auto& stem = offlineStemBuffers_[(size_t) stemSlot];
             stem.clear(0, numSamples);
-            if (c.active.load(std::memory_order_relaxed))
+            if (returnOn)
             {
                 node.outDelay.addDelayed(node.buffer, stem, numSamples, 1.0f);
                 for (int ch = 0; ch < 2; ++ch)
@@ -1016,7 +1028,7 @@ void AudioEngine::renderBlock(float* const* outputs, int numOutputs, int numSamp
             else
                 node.outDelay.pushSilence(numSamples);
         }
-        else if (c.active.load(std::memory_order_relaxed))
+        else if (returnOn)
             node.outDelay.addDelayed(node.buffer, main.buffer, numSamples, 1.0f);
         else
             node.outDelay.pushSilence(numSamples);

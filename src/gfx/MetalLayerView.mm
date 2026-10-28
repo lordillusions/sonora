@@ -147,7 +147,7 @@ bool MetalRenderer::render(int width, int height, float scale, const std::functi
     return true;
 }
 
-GpuFrameTimes benchmarkMetalOffscreen(int pw, int ph, int frames, const std::function<void(SkCanvas&, int)>& draw)
+GpuFrameTimes benchmarkMetalOffscreen(int pw, int ph, int frames, const std::function<void(SkCanvas&, int)>& draw, int warmupFrames)
 {
     GpuFrameTimes times;
     @autoreleasepool
@@ -169,19 +169,20 @@ GpuFrameTimes benchmarkMetalOffscreen(int pw, int ph, int frames, const std::fun
         if (surface == nullptr)
             return times;
         auto now = [] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); };
-        for (int i = 0; i < frames; ++i)
+        for (int i = -std::max(0, warmupFrames); i < frames; ++i)
         {
             @autoreleasepool
             {
                 const double t0 = now();
                 auto* canvas = surface->getCanvas();
                 canvas->save();
-                draw(*canvas, i);
+                draw(*canvas, std::max(0, i));
                 canvas->restore();
                 context->flushAndSubmit(surface.get(), GrSyncCpu::kNo);
                 const double t1 = now();
                 context->submit(GrSyncCpu::kYes);
                 const double t2 = now();
+                if (i < 0) continue; // UI-54: exclude first-use sample decoding and shader compilation.
                 times.cpuMs += t1 - t0;
                 times.worstCpuMs = std::max(times.worstCpuMs, t1 - t0);
                 times.gpuWaitMs += t2 - t1;

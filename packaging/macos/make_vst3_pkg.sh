@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# PLG-11c: macOS installer package for the Sonora Prism VST3 (docs/INSTALLERS.md).
+# PLG-11c/PLG-14: macOS installer package for a Sonora VST3, e.g. Sonora Prism or Sonora Hush (docs/INSTALLERS.md).
 #
-#   packaging/macos/make_vst3_pkg.sh <Sonora Prism.vst3> <out.pkg>
+#   packaging/macos/make_vst3_pkg.sh <Sonora X.vst3> <out.pkg>
 #       [--sign-identity "Developer ID Application: ..."] [--installer-identity "Developer ID Installer: ..."]
 #       [--notary-profile P]
 #
@@ -34,6 +34,11 @@ PLIST="$BUNDLE/Contents/Info.plist"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
 PKG_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST").pkg"
 [ "$(lipo -archs "$BUNDLE/Contents/MacOS/$NAME")" = "arm64" ] || fail "expected an arm64-only bundle (the prebuilt Skia is arm64)"
+# Instrument or effect, for the installer's wording: the bundle's moduleinfo.json lists the VST3 sub-categories.
+KIND="plug-in"
+if [ -f "$BUNDLE/Contents/Resources/moduleinfo.json" ]; then
+    if grep -q '"Instrument' "$BUNDLE/Contents/Resources/moduleinfo.json"; then KIND="instrument"; else KIND="effect"; fi
+fi
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/sonora-vst3-pkg.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 
@@ -62,7 +67,7 @@ cp "$ROOT/LICENSE" "$STAGE/resources/LICENSE.txt"
 cat > "$STAGE/resources/welcome.html" <<EOF
 <html><body style="font-family: -apple-system, sans-serif; font-size: 13px">
 <h3>$NAME $VERSION</h3>
-<p>Installs the $NAME instrument as a VST3 plug-in for Apple silicon Macs (macOS 13 or later).</p>
+<p>Installs the $NAME $KIND as a VST3 plug-in for Apple silicon Macs (macOS 13 or later).</p>
 <p>Choose <b>Install for all users</b> (/Library/Audio/Plug-Ins/VST3) or <b>Install for me only</b>
 (~/Library/Audio/Plug-Ins/VST3) on the destination step.</p>
 </body></html>
@@ -70,7 +75,7 @@ EOF
 cat > "$STAGE/resources/conclusion.html" <<EOF
 <html><body style="font-family: -apple-system, sans-serif; font-size: 13px">
 <h3>$NAME is installed</h3>
-<p>Rescan plug-ins in your host (or restart it), then load <b>$NAME</b> from its VST3 instruments (vendor Sonora).</p>
+<p>Rescan plug-ins in your host (or restart it), then load <b>$NAME</b> from its VST3 ${KIND}s (vendor Sonora).</p>
 <p>To remove it, delete <code>$NAME.vst3</code> from the VST3 folder above.</p>
 </body></html>
 EOF

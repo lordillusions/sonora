@@ -215,8 +215,9 @@ struct GraphBuildResult
 };
 
 // Whether a track/group contributes to its output given the solo/activator state (ENG-7).
-// A track plays when its activator is on and, if anything is soloed, it or one of its parent
-// groups is soloed. Groups always pass (their children decide whether there is signal).
+// A soloed track plays, even with its activator off. Otherwise a track plays when its activator is on and,
+// if anything is soloed, one of its parent groups is soloed. Groups with their activator on always pass (their
+// children decide whether there is signal). A TRK-1 deactivated track never plays.
 // Returns and main are not affected by solo here. Audio thread safe.
 bool isTrackAudible(const EngineGraph& graph, const ControlBank& controls, const TrackNode& node, bool anySolo);
 

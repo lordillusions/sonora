@@ -66,11 +66,23 @@ struct AddNotes { ClipRef clip; std::vector<MidiNote> notes; };
 struct UpdateNotes { ClipRef clip; std::vector<NoteUpdate> updates; };
 struct DeleteNotes { ClipRef clip; std::vector<uint32_t> keys; };
 struct ReplaceNotes { ClipRef clip; std::vector<MidiNote> notes; };
+// Locators (UI-3b), addressed by Locator::id. A new locator takes the next free id of the song it applies to, so
+// every replica allocates the same one. Unnamed locators are numbered like the Set button's.
+struct AddLocator { Beats beat = 0.0; std::optional<std::string> name; int color = -1; };
+struct UpdateLocator
+{
+    int locatorId = -1;
+    std::optional<Beats> beat;
+    std::optional<std::string> name, infoText;
+    std::optional<int> color; // -1 = theme colour
+    std::optional<bool> songStart;
+};
+struct DeleteLocator { int locatorId = -1; };
 } // namespace ops
 
 using OpPayload = std::variant<ops::SetTempo, ops::SetTrackGain, ops::RenameTrack, ops::SetTrackColor, ops::SetLoop,
                                ops::MoveClip, ops::DuplicateClip, ops::DeleteClip, ops::AddNotes, ops::UpdateNotes,
-                               ops::DeleteNotes, ops::ReplaceNotes>;
+                               ops::DeleteNotes, ops::ReplaceNotes, ops::AddLocator, ops::UpdateLocator, ops::DeleteLocator>;
 
 struct Op
 {

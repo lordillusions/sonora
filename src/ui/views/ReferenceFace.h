@@ -38,8 +38,10 @@ public:
         static Law power(float low, float high, float exponent); // norm = ((v - low) / (high - low))^exponent
     };
 
-    // `originX` / `originY`: capture position of the device's left edge and of the top of its body.
-    ReferenceFace(devices::DeviceProcessor* processor, float captureWidth, float originX, float originY, Tag tag);
+    // `originX` / `originY`: capture position of the device's left edge and of the top of its body. `captureBody`: the
+    // body height in that capture (a capture at another zoom than kBodyHeight; text and corners keep their sizes).
+    ReferenceFace(devices::DeviceProcessor* processor, float captureWidth, float originX, float originY, Tag tag,
+                  float captureBody = kBodyHeight);
     devices::DeviceProcessor* processor() const { return processor_; }
     float preferredWidth(float bodyHeight) const; // width of the face for a body of that height
     virtual Rect graphBounds() const { return {}; } // the face's main display, local coordinates
@@ -47,11 +49,12 @@ public:
     void tick() override;
 
     // Canvas units per capture pixel, and a capture box (absolute capture coordinates) in local coordinates.
-    float unit() const { return (height() > 0 ? height() : kDefaultBody) / kBodyHeight; }
+    float unit() const { return (height() > 0 ? height() : kDefaultBody) / captureBody_; }
+    float zoom() const { return captureBody_ / kBodyHeight; } // capture px per kBodyHeight-capture px
     Rect at(float x0, float y0, float x1, float y1) const;
     float column(float x) const; // capture x -> local x, after any folded columns
-    float text() const { return kText * unit(); }
-    float header() const { return kHeader * unit(); }
+    float text() const { return kText * zoom() * unit(); }
+    float header() const { return kHeader * zoom() * unit(); }
 
     // Default value text: three significant digits with the parameter's unit ("80.0 Hz", "1.00 kHz", "30.0 ms").
     static std::string significant(float value);
@@ -72,8 +75,9 @@ protected:
     Widget* chooser(int parameter, float x0, float y0, float x1, float y1, IconPainter icon = {});
     Widget* chooser(std::function<int()> parameter, float x0, float y0, float x1, float y1, IconPainter icon = {});
     // A label and a cyan value on a dark display ("Thresh 0.00 dB"); drag or wheel to change, choices open a menu.
+    // `chosen`: the value in the amber of chosen settings (Auto Filter's display bar).
     Widget* displayValue(int parameter, std::string label, float x0, float y0, float x1, float y1, Law law, Format format = {},
-                         bool menuMark = false);
+                         bool menuMark = false, bool chosen = false);
     // Shows a placed widget only while `when` is true (re-evaluated every layout).
     void showWhen(Widget* widget, std::function<bool()> when);
     void place(Widget* widget, float x0, float y0, float x1, float y1);
@@ -93,7 +97,7 @@ protected:
     void led(SkCanvas&, const Theme&, float cx, float cy, float radius, bool lit) const;
 
     devices::DeviceProcessor* processor_;
-    float captureWidth_, originX_, originY_;
+    float captureWidth_, originX_, originY_, captureBody_;
     float collapseFrom_ = 0, collapseTo_ = 0;
     bool collapsed_ = false;
     bool animated_ = false; // repaint on every tick (meters, histories)
@@ -114,4 +118,6 @@ void titleIcon(SkCanvas&, TitleIcon, float cx, float cy, float diameter, SkColor
 
 // The reference-matched face for this processor, added to `parent`, or nullptr when the device has none.
 ReferenceFace* addReferenceFace(Widget& parent, const model::Device&, devices::DeviceProcessor*, ReferenceFace::Tag tag);
+// Auto Filter (`AutoFilter2`) face, AutoFilterFace.cpp; nullptr for any other processor.
+ReferenceFace* addAutoFilterFace(Widget& parent, devices::DeviceProcessor*, ReferenceFace::Tag tag);
 } // namespace sonora::ui

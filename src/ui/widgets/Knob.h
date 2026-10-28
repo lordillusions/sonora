@@ -42,6 +42,7 @@ public:
     float fontSize = 0; // Ring: label / value size (0 == the theme's small font size)
     float marker = -1; // Ring / Device: normalized origin of the value arc, marked by a triangle; < 0 = arc from the start
     bool markerTriangle = true; // Device: draw the triangle above the ring (the reference's EQ gain), or only start the arc there
+    float deviceStroke = 3.0f; // Device: ring thickness in knob units (Auto Filter's large Freq knob is thinner: 2.45)
     std::function<void()> onLabelClick; // Ring: a click on the label (e.g. Width <-> Mid/Side) instead of a drag
     void setLabel(std::string label) { label_ = std::move(label); }
     bool showLabel = true;

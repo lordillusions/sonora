@@ -498,8 +498,21 @@ Create > Insert Audio Track (Cmd+T) / Insert MIDI Track (Shift+Cmd+T) inserts af
 group. Selecting a folded group inserts inside it and unfolds it in the same undo step. Create > Import Audio File uses
 the browser sample-import path, creating an audio track when needed; that track and the subsequent clip are separate
 history entries. Insert Empty MIDI Clip also works in an empty selected Session slot. Rename (Cmd+R) targets the selected
-clip or track. Add Locator uses the current transport position. Track insertion, names, locators and global launch
-quantization are undoable and saved. Locator IDs remain unique when imported IDs are not ordinal.
+clip or track (or the selected locator). Track insertion, names, locators and global launch quantization are undoable
+and saved. Locator IDs remain unique when imported IDs are not ordinal.
+
+Locators (UI-3b, `ui/Locators.*`, drawn by `ArrangementView`): the scrub strip under the bar numbers shows each locator as
+an outlined right-pointing triangle at its time with its name; a selected one is filled dark with a selection-colour
+label; a coloured one (Sonora extension, right-click > palette) fills triangle and label with the palette colour. Above
+the track headers: **Set** (adds at the insert marker / start of the time selection while stopped, at the play position
+rounded to the launch quantisation while playing; reads **Del** and deletes while a locator is selected) and the round
+previous/next buttons (jump to the previous/next locator, then the Arrangement start/end; while playing the jump happens
+at the next launch-quantisation boundary). Click a locator to select it and jump there, double-click to play from it,
+drag to move (grid snap, Cmd/Alt free), Left/Right nudge by the grid, Delete removes, Cmd+R renames in place, Escape
+deselects. Right-click: Loop to Next Locator, Set Song Start Time Here (Play/Space from stopped then starts there), Rename,
+Edit Info Text, Delete, Default Locator Color and the palette; the empty strip offers Add Locator at the clicked position.
+Create > Add Locator / Delete Locator is the Set button's command; Edit > Rename and Edit Info Text open a dialog. Every
+edit is a `model::Op` (`locator.add/update/delete`), the same path the control API uses.
 
 Session title clicks select tracks with a blue header: Shift selects a range and Cmd adds/removes tracks. Modifier-clicking
 slot bodies can select tracks too; launch-button clicks retain their recording/launch behavior. Header clicks clear stale

@@ -2801,6 +2801,23 @@ TEST_CASE("session clock: clips advance and hold notes across short Arrangement 
     rig.run(22050); CHECK((*rig.eng.controls())[0].playingSlot.load() == 1);
 }
 
+TEST_CASE("arrangement loop: the note on the loop start plays on every pass when the loop end falls between samples")
+{
+    // Pass lengths in samples: one wraps inside a block, the other always on a block end (the next block starts a
+    // fraction of a sample after the loop start).
+    for (const double passSamples : {11025.37, 21 * 512 - 0.4})
+    {
+        LaunchRig rig;
+        rig.eng.transport().setLoop(true, 1, passSamples / LaunchRig::kSamplesPerBeat);
+        rig.eng.transport().setPosition(1); rig.eng.transport().play();
+        rig.run((long long) (10.5 * passSamples));
+        const auto ons = rig.rec[0]->noteOns(72);
+        REQUIRE(ons.size() == 11);
+        for (size_t pass = 0; pass < ons.size(); ++pass)
+            CHECK(std::abs((double) ons[pass] - (double) pass * passSamples) <= 1.0);
+    }
+}
+
 TEST_CASE("session recording: quantised start stop held input and cancellation use exact sample ranges")
 {
     auto loaded = io::loadAls(juce::File(SONORA_TEST_FIXTURES).getChildFile("recording_set.xml")); REQUIRE(loaded);
@@ -3284,4 +3301,44 @@ TEST_CASE("MPE playback: overlapping notes use independent member channels with 
     CHECK(prepared.expressionOverflow); CHECK(prepared.expressionChannels.back() == 1);
     bool overflow = false; midi.clear(); engine::renderMidiClip(prepared, {0, 10000, 0, 10000}, midi, false, &overflow);
     CHECK(midi.data.size() <= engine::midiControllerByteLimit); CHECK(overflow);
+}
+
+TEST_CASE("solo: a soloed track plays even with its activator off; muted tracks keep a moving meter (ENG-7)")
+{
+    juce::ScopedJuceInitialiser_GUI juce; // AudioEngine owns a juce::Timer
+    plugins::PluginHost host;
+    midi::MidiManager midi;
+    auto r = io::loadAls(juce::File(SONORA_TEST_FIXTURES).getChildFile("minimal_set.xml"));
+    REQUIRE(r);
+    r.song->tracks[0].automation.clear(); // the fixture's activator lane would switch the track back on while playing
+    auto render = [&](bool active, bool solo, bool returnSolo = false) {
+        engine::AudioEngine engine(host, midi);
+        engine.loadSong(*r.song);
+        auto controls = engine.controls();
+        (*controls)[0].active.store(active);
+        (*controls)[0].solo.store(solo);
+        (*controls)[1].solo.store(returnSolo); // the return: another solo leaves track 0 out
+        engine.transport().setPosition(0.0);
+        engine.transport().play();
+        std::vector<float> l(512), rr(512);
+        float* out[2] = {l.data(), rr.data()};
+        float peak = 0, meter = 0;
+        for (int block = 0; block < 400; ++block)
+        {
+            engine.renderBlock(out, 2, 512);
+            for (int i = 0; i < 512; ++i) peak = std::max({peak, std::abs(l[(size_t) i]), std::abs(rr[(size_t) i])});
+            meter = std::max({meter, (*controls)[0].peakL.load(), (*controls)[0].peakR.load()});
+        }
+        return std::pair{peak, meter};
+    };
+    CHECK(render(true, false).first > 0.001f); CHECK(render(true, false).second > 0.001f);
+    CHECK(render(true, true).first > 0.001f);
+    const auto [soloPeak, soloMeter] = render(false, true); // its own solo wins over the activator
+    CHECK(soloPeak > 0.001f); CHECK(soloMeter > 0.001f);
+    const auto [offPeak, offMeter] = render(false, false);
+    CHECK(offPeak == 0.0f);
+    CHECK(offMeter > 0.001f); // the meter keeps moving (the UI draws it grey, as the reference does)
+    const auto [outPeak, outMeter] = render(true, false, true); // left out by another solo
+    CHECK(outMeter > 0.001f);
+    (void) outPeak; // the soloed return carries the track's send, so the Main output is not checked here
 }

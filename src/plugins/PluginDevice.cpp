@@ -156,7 +156,10 @@ void PluginDevice::setParameter(int index, float value)
 
 bool PluginDevice::hasEditor() const
 {
-    return instance_->hasEditor();
+    // PLG-13: never ask the instance. JUCE's VST3 wrapper answers by creating and releasing the plugin's editor view: ~0.2 s
+    // for Splice Sounds Listener, which also outputs silence from then on (its whole track went quiet). The editor window
+    // falls back to a generic editor when the plugin has none.
+    return true;
 }
 
 } // namespace sonora::plugins

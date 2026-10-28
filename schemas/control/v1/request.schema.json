@@ -609,6 +609,77 @@
               }
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "beat"
+          ],
+          "properties": {
+            "type": {
+              "const": "locator.add"
+            },
+            "beat": {
+              "$ref": "#/$defs/beat"
+            },
+            "name": {
+              "$ref": "#/$defs/locatorName"
+            },
+            "color": {
+              "$ref": "#/$defs/locatorColor"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 3,
+          "required": [
+            "type",
+            "locatorId"
+          ],
+          "properties": {
+            "type": {
+              "const": "locator.update"
+            },
+            "locatorId": {
+              "$ref": "#/$defs/id"
+            },
+            "beat": {
+              "$ref": "#/$defs/beat"
+            },
+            "name": {
+              "$ref": "#/$defs/locatorName"
+            },
+            "infoText": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "color": {
+              "$ref": "#/$defs/locatorColor"
+            },
+            "songStart": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "locatorId"
+          ],
+          "properties": {
+            "type": {
+              "const": "locator.delete"
+            },
+            "locatorId": {
+              "$ref": "#/$defs/id"
+            }
+          }
         }
       ]
     },
@@ -834,6 +905,16 @@
         "trackId",
         "catalogId"
       ]
+    },
+    "locatorColor": {
+      "type": "integer",
+      "minimum": -1,
+      "maximum": 69,
+      "description": "Palette index 0-69; -1 = default locator colour"
+    },
+    "locatorName": {
+      "type": "string",
+      "maxLength": 256
     }
   }
 }

@@ -12,5 +12,5 @@ MetalRenderer::~MetalRenderer() = default;
 bool MetalRenderer::isValid() const { return false; }
 void* MetalRenderer::nativeView() const { return nullptr; }
 bool MetalRenderer::render(int, int, float, const std::function<void(SkCanvas&)>&) { return false; }
-GpuFrameTimes benchmarkMetalOffscreen(int, int, int, const std::function<void(SkCanvas&, int)>&) { return {}; } // ok == false
+GpuFrameTimes benchmarkMetalOffscreen(int, int, int, const std::function<void(SkCanvas&, int)>&, int) { return {}; } // ok == false
 } // namespace sonora::gfx

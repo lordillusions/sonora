@@ -10,7 +10,11 @@
 // double-click on an empty MIDI lane creates a 4-beat clip, Cmd+Shift+M inserts one at the playhead.
 // Every change is an undoable model::EditCommand applied through UiContext::applyEdit.
 // A toggles automation lanes (UI-5). Audio clips use cached waveforms (UI-4).
-// TODO(UI-3b): multi-selection, split/consolidate and locator editing.
+// Locators (UI-3b) sit in the ruler's scrub strip: click selects and jumps (quantised while playing), double-click plays
+// from there, drag moves (grid snap, Cmd/Alt free), Delete removes, Left/Right nudge by the grid, Cmd+R renames,
+// right-click opens the locator menu (or Add Locator on the empty strip). Set / Del, previous and next sit above the
+// track headers. Edits go through ui/Locators (model::Op, the control API's path).
+// TODO(UI-3c): multi-selection of locators, Lock Envelopes.
 
 #include "ui/ClipEditing.h"
 #include "ui/UiContext.h"
@@ -54,6 +58,12 @@ public:
         int takeLaneId = -1; // stable lane ID; -1 is the main lane
     };
     const std::vector<Lane>& lanes() const { return lanes_; }
+
+    // UI-3b: the locator controls above the track headers and the locators drawn in the ruler (view coordinates).
+    enum class LocatorButton { Set, Previous, Next };
+    Rect locatorButtonBounds(LocatorButton) const;
+    Rect locatorBounds(const model::Locator&) const; // triangle plus name label
+    int locatorAt(float x, float y) const;           // locator id under the point, -1 for none
 
 private:
     void rebuild();
@@ -137,6 +147,20 @@ private:
     } takeRange_;
     bool renaming_ = false, renameSelection_ = false;
     int renameTrack_ = -1, renameLane_ = -1;
+    // UI-3b: the text editor in the ruler (a locator's name or info text) and a locator being dragged.
+    int renameLocator_ = -1;
+    bool renameLocatorInfo_ = false;
+    void beginLocatorText(int id, bool info);
+    void commitLocatorText();
+    struct LocatorDrag
+    {
+        int id = -1;
+        bool moved = false;
+        float startX = 0;
+        double before = 0, preview = 0;
+    } locatorDrag_;
+    void paintLocators(SkCanvas& c, const Theme& t);
+    void paintLocatorButtons(SkCanvas& c, const Theme& t);
     std::string renameText_;
     const Lane* laneAt(float y) const;
     const std::vector<model::Clip>* laneClips(const Lane&) const;
@@ -147,6 +171,7 @@ private:
     std::vector<Widget*> headers_;
     std::vector<Widget*> automationEditors_;
     double lastPlayhead_ = -1;
+    bool wasPlaying_ = false; // UI-53: a playback start resumes Follow
     int hoverUid_ = -1, hoverTrack_ = -1; // clip under the pointer: its fade handles show
     // Fade handle of an audio clip under (x, y), if any: FadeIn / FadeOut.
     bool fadeHandleAt(const model::Clip& clip, const model::ClipLocation& location, float clipX0, float clipX1, float x, float y, ui::DragMode& mode) const;

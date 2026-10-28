@@ -94,6 +94,10 @@ const parameterWrite = z.union([
   z.object({ ...parameterIdentity, normalized: z.number().min(0).max(1) }).strict(),
   z.object({ ...parameterIdentity, value: z.number().min(-1e12).max(1e12) }).strict()
 ]);
+// UI-3b: Arrangement locators (markers), addressed by locatorId from project.inspect.
+const beat = z.number().min(0).max(1000000);
+const locatorName = z.string().max(256);
+const locatorColor = z.number().int().min(-1).max(69).describe('Palette index 0–69; -1 = default locator colour');
 const command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('tempo.set'), bpm: z.number().min(20).max(999) }).strict(),
   z.object({ type: z.literal('track.set_gain'), trackId: id, gainDb: z.number().min(-90).max(6) }).strict(),
@@ -101,10 +105,15 @@ const command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('notes.add'), ...location, notes: z.array(note).min(1).max(4096) }).strict(),
   z.object({ type: z.literal('notes.replace'), ...location, notes: z.array(note).max(4096) }).strict(),
   z.object({ type: z.literal('notes.update'), ...location, updates: z.array(update).min(1).max(4096) }).strict(),
-  z.object({ type: z.literal('notes.delete'), ...location, noteIndices: z.array(id).min(1).max(4096) }).strict()
+  z.object({ type: z.literal('notes.delete'), ...location, noteIndices: z.array(id).min(1).max(4096) }).strict(),
+  z.object({ type: z.literal('locator.add'), beat, name: locatorName.optional(), color: locatorColor.optional() }).strict(),
+  z.object({ type: z.literal('locator.update'), locatorId: id, beat: beat.optional(), name: locatorName.optional(),
+    infoText: z.string().max(4096).optional(), color: locatorColor.optional(), songStart: z.boolean().optional() }).strict()
+    .refine(value => Object.keys(value).length > 2, 'Specify a changed locator field'),
+  z.object({ type: z.literal('locator.delete'), locatorId: id }).strict()
 ]);
 function createServer() {
-  const server = new McpServer({ name: 'sonora', version: '0.3.0' });
+  const server = new McpServer({ name: 'sonora', version: '0.4.0' });
   server.registerResource('control-guide', 'sonora://docs/control-v1', { mimeType: 'text/markdown' }, async uri => ({
     contents: [{ uri: uri.href, mimeType: 'text/markdown', text: await fs.readFile(new URL('../../docs/agent/CONTROL_API.md', import.meta.url), 'utf8') }]
   }));
@@ -138,7 +147,7 @@ function createServer() {
     attached = candidate;
     return result;
   });
-  tool('sonora_project_inspect', 'Read revision, tracks, Arrangement/Session/take clip handles and top-level devices before editing.', {}, () => call('project.inspect'), true);
+  tool('sonora_project_inspect', 'Read revision, tracks, Arrangement/Session/take clip handles, top-level devices and Arrangement locators before editing.', {}, () => call('project.inspect'), true);
   tool('sonora_capabilities_get', 'Read implemented operations and explicit limitations.', {}, () => call('capabilities.get'), true);
   tool('sonora_clip_get', 'Read MIDI notes with revision-scoped noteIndex handles and paging. Default Arrangement; scene selects Session, laneId selects take (never both). Times are clip-content quarter-note beats.', {
     ...location, offset: id.optional(), limit: z.number().int().min(1).max(4096).optional()
@@ -149,7 +158,7 @@ function createServer() {
   tool('sonora_parameters_set', 'Set 1–128 exact native/rack/VST3 parameter ID/name pairs. Supply exactly one of normalized (0–1) or native value (advertised units); VST3 accepts normalized only. Requires writable descriptors; rejects authored automation. Prepares and reload-verifies opaque state before one undoable commit. Rebuilds the affected processor (may interrupt voices/close editor); use the returned NEW deviceId. Does not save the project.', {
     ...mutation, trackId: id, deviceId: id, parameters: z.array(parameterWrite).min(1).max(128)
   }, ({ expectedRevision, idempotencyKey, ...args }) => call('devices.parameters.set', args, { expectedRevision, idempotencyKey }));
-  tool('sonora_edits_apply', 'Apply a staged batch as one undo step: tempo, gain, clip duplicate or notes.add/update/delete/replace. Inspect notes first; noteIndex refers to current sorted notes and changes after each command. scene/laneId select Session/take. Replace is whole-content replacement (empty clears); add/update preserve other notes. Automated gain is rejected.', {
+  tool('sonora_edits_apply', 'Apply a staged batch as one undo step: tempo, gain, clip duplicate, notes.add/update/delete/replace or Arrangement locators (locator.add/update/delete). Inspect notes first; noteIndex refers to current sorted notes and changes after each command. scene/laneId select Session/take. Replace is whole-content replacement (empty clears); add/update preserve other notes. Automated gain is rejected. Locators use quarter-note beats and locatorId from inspect (locators[]); locator.add returns data.locatorIds; one locator per beat; songStart is exclusive; color is a palette index (-1 default).', {
     ...mutation, commands: z.array(command).min(1).max(32)
   }, ({ commands, ...guard }) => call('edits.apply', { commands }, guard));
   tool('sonora_devices_catalog', 'List insertable implemented native devices and scanned VST3 plugins. Select exact catalogId, no file paths. No installation or scanning.', {

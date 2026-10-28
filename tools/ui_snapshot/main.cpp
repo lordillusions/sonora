@@ -1,12 +1,14 @@
 // ui_snapshot — renders the full Sonora UI off-screen (Skia raster) to a PNG.
 // The quickest way for a human or an LLM to check visual changes without launching the app.
 //
-//   ui_snapshot out.png [set.als] [--session] [--track N] [--size 1440x900] [--scale 2] [--bench N [--gpu]]
+//   ui_snapshot out.png [set.als] [--session] [--set-view] [--track N] [--size 1440x900] [--scale 2] [--bench N [--gpu]]
 //                       [--theme "/path/Live Theme.ask"] [--no-browser] [--no-detail]
 //                       [--prefs plugins|midi|display|audio|keys|updates] [--zoom 1.25] [--midimap|--keymap] [--clip TRACK] [--scene N] [--count-in N]
 //                       [--floating-wavetables] [--wavetable-window] [--waveform-zoom FACTOR]
 //                       [--wavetable-browser] [--wavetable-preset NAME] [--wavetable-search TEXT]
 //                       [--collab share|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N]
+//                       [--bench N [--gpu] [--warmup N] [--no-sweep|--device-sweep]]
+// Benchmarks exclude 20 warm-up frames by default; --warmup 0 includes first-use work.
 //
 // --play-at plays the transport from that song beat, or with --clip/--scene from that many beats into the Session clip,
 // so playheads (Arrangement, piano roll, sample editor) show.
@@ -41,6 +43,7 @@
 #include "midi/MappingStore.h"
 #include "midi/MidiManager.h"
 #include "plugins/PluginHost.h"
+#include "ui/SetView.h"
 #include "ui/Shortcuts.h"
 #include "ui/views/MainLayout.h"
 #include "ui/views/ArrangementView.h"
@@ -101,7 +104,8 @@ bool openWavetableBrowser(ui::RootWidget& root, ui::UiContext& ctx, const std::s
 int main(int argc, char** argv)
 {
     int benchFrames = 0, monitorView = -1;
-    bool benchGpu = false, benchSweep = true;
+    bool benchGpu = false, benchSweep = true, benchDevices = false;
+    int benchWarmup = 20;
     bool wavetableWindow = false, wavetableBrowser = false;
     std::string wavetablePreset, wavetableSearch;
     bool trackMenu = false, arrangementMenu = false;
@@ -152,6 +156,7 @@ int main(int argc, char** argv)
     std::string browserQuery;
     ui::BrowserTags::Tags browserFilters;
     std::vector<int> selectedTracks;
+    bool setView = false;
     struct RecordingState { int track = -1, scene = -1, phase = 0; };
     std::vector<RecordingState> recordingStates;
 
@@ -164,6 +169,7 @@ int main(int argc, char** argv)
         else if (a == "--fold-scale") { ctx.scaleFold = ctx.scaleHighlight = true; }
         else if (a == "--session")
             ctx.mainView = ui::MainView::Session;
+        else if (a == "--set-view") setView = true; // UI-57: the view the set was saved with (like the app)
         else if (a == "--mpe") ctx.clipMpeVisible = true;
         else if (a == "--midi-tool") midiTool = std::stoi(next());
         else if (a == "--fold-notes") ctx.noteFold = true;
@@ -301,6 +307,10 @@ int main(int argc, char** argv)
             ctx.uiZoom = std::stof(next());
         else if (a == "--bench") // time N frames through a horizontal zoom sweep instead of writing a picture
             benchFrames = std::stoi(next());
+        else if (a == "--warmup") // exclude sample decoding / first-use shaders from steady-state timings
+            benchWarmup = std::max(0, std::stoi(next()));
+        else if (a == "--device-sweep") // navigate the bottom chain instead of zooming the Arrangement
+            benchDevices = true;
         else if (a == "--gpu") // with --bench: render through Skia/Metal off-screen like the app, not the CPU raster
             benchGpu = true;
         else if (a == "--no-sweep") // with --bench: keep the starting zoom/scroll (a repaint during playback)
@@ -391,6 +401,7 @@ int main(int argc, char** argv)
     ctx.controls = graph.graph->controls;
     ctx.graph = graph.graph.get();
     ctx.buildLog = graph.log;
+    if (setView) ui::applySetView(ctx);
     if (trackMenu)
     {
         ctx.applyEdit = [](model::EditCommand) {};
@@ -572,6 +583,15 @@ int main(int argc, char** argv)
             for (const auto& file : juce::File(path).findChildFiles(juce::File::findFilesAndDirectories, false))
                 if (file.isDirectory() || file.hasFileExtension("als") || sonora::engine::isAudioFile(file))
                     ctx.browserFiles.push_back({file.getFullPathName().toStdString(), file.isDirectory()});
+            ++ctx.browserContentRevision;
+        };
+        ctx.indexBrowserFolder = [&](const std::string& path) {
+            ctx.browserSearchRoot = path;
+            ctx.browserSearchFiles.clear();
+            for (const auto& file : juce::File(path).findChildFiles(juce::File::findFilesAndDirectories | juce::File::ignoreHiddenFiles, true))
+                if (file.isDirectory() || file.hasFileExtension("als") || sonora::engine::isAudioFile(file))
+                    ctx.browserSearchFiles.push_back({file.getFullPathName().toStdString(), file.isDirectory()});
+            ++ctx.browserContentRevision;
         };
     }
     engine::MasterMonitor monitor;
@@ -695,7 +715,15 @@ int main(int argc, char** argv)
             }
     if (! browserFolder.empty())
         for (auto& child : root.children())
-            if (auto* browser = dynamic_cast<ui::BrowserPanel*>(child.get())) browser->showFolder(browserFolder);
+            if (auto* browser = dynamic_cast<ui::BrowserPanel*>(child.get()))
+            {
+                browser->showFolder(browserFolder);
+                if (! browserQuery.empty() && browserCategory < 0) // UI-6b: a folder search covers its subfolders
+                {
+                    browser->focusSearch();
+                    for (const auto ch : browserQuery) { ui::KeyEvent key; key.textChar = (uint32_t) (unsigned char) ch; browser->keyPressed(key); }
+                }
+            }
     for (auto& child : root.children())
         if (auto* browser = dynamic_cast<ui::BrowserPanel*>(child.get()))
             for (const auto& filter : browserFilters) browser->toggleTagFilter(filter);
@@ -744,8 +772,16 @@ int main(int argc, char** argv)
     }
     if (benchFrames > 0)
     {
+        std::printf("warmup: %d frames (excluded)\n", benchWarmup);
         const double basePpb = ctx.pixelsPerBeat, baseScroll = ctx.scrollBeats;
         auto sweep = [&](int i) {
+            if (benchDevices)
+            {
+                for (const auto& child : root.children())
+                    if (auto* detail = dynamic_cast<ui::DetailView*>(child.get()))
+                        detail->navigateOverview((float) (0.5 + 0.5 * std::sin((double) i * 0.05)));
+                return;
+            }
             if (! benchSweep)
                 return;
             // zoom in and out between 0.5x and 8x of the starting zoom, scrolling a little each frame
@@ -765,7 +801,7 @@ int main(int argc, char** argv)
                                                               root.setBounds(logical);
                                                               canvas.scale(scale * zoom, scale * zoom);
                                                               root.paintTree(canvas, root.context().theme);
-                                                          });
+                                                          }, benchWarmup);
             if (! gpu.ok)
             {
                 std::fprintf(stderr, "error: no Metal device\n");
@@ -776,7 +812,7 @@ int main(int argc, char** argv)
                         gpu.cpuMs / n, gpu.worstCpuMs, gpu.gpuWaitMs / n);
             return 0;
         }
-        const auto times = gfx::benchmarkFrames(root, width, height, scale, benchFrames, sweep);
+        const auto times = gfx::benchmarkFrames(root, width, height, scale, benchFrames, sweep, benchWarmup);
         const double n = std::max(1, times.frames);
         std::printf("bench %d frames: %.2f ms/frame (tick %.2f, layout %.2f, paint %.2f), worst %.2f ms\n", times.frames,
                     (times.tickMs + times.layoutMs + times.paintMs) / n, times.tickMs / n, times.layoutMs / n, times.paintMs / n, times.worstFrameMs);

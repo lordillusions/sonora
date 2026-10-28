@@ -68,6 +68,42 @@ int main(int argc, char** argv)
         if (! saved.ok) std::fprintf(stderr, "%s\n", saved.message.c_str());
         return stored && isolated && noFileKey && removed ? 0 : 41;
     }
+    // UI-3b: locators through the shared service: add/update/delete batches, guarded undo, colour and ids saved/reloaded.
+    const auto verifyLocators = [&](const model::Song& edited) -> int {
+        const auto file = folder.getChildFile("Locators.als");
+        if (! io::saveAls(edited, file).ok) return 60;
+        auto reloaded = io::loadAls(file); if (! reloaded) return 61;
+        const auto& before = edited.locators; const auto& after = reloaded.song->locators;
+        if (before.size() != after.size() || before.empty()) return 62;
+        for (size_t i = 0; i < before.size(); ++i)
+            if (before[i].id != after[i].id || before[i].name != after[i].name || std::abs(before[i].time - after[i].time) > 1e-9
+                || before[i].colorIndex != after[i].colorIndex || before[i].isSongStart != after[i].isSongStart) return 63;
+        std::printf("PASS: locators saved and reloaded (%zu; ids, names, beats, colours, song start)\n%s\n", after.size(), file.getFullPathName().toRawUTF8());
+        return 0;
+    };
+    if (args.contains("--locators"))
+    {
+        const auto edit = [&](juce::Array<juce::var> commands, const char* key) {
+            return service.execute(control::object({{"apiVersion", "1.0"}, {"operation", "edits.apply"},
+                {"arguments", control::object({{"commands", commands}})},
+                {"target", control::object({{"instanceId", service.instanceId()}, {"documentId", document}})},
+                {"expectedRevision", service.inspect()["revision"]}, {"idempotencyKey", key}}));
+        };
+        const auto added = edit({control::object({{"type", "locator.add"}, {"beat", 16}, {"name", "Drop"}, {"color", 14}}),
+                                 control::object({{"type", "locator.add"}, {"beat", 0}, {"name", "Intro"}})}, "locators-add");
+        if (! static_cast<bool>(added["ok"]) || added["data"]["locatorIds"].size() != 2) { std::fprintf(stderr, "%s\n", juce::JSON::toString(added).toRawUTF8()); return 50; }
+        const int drop = added["data"]["locatorIds"][0], intro = added["data"]["locatorIds"][1];
+        const auto changed = edit({control::object({{"type", "locator.update"}, {"locatorId", drop}, {"beat", 32}, {"songStart", true}}),
+                                   control::object({{"type", "locator.update"}, {"locatorId", intro}, {"color", 3}})}, "locators-update");
+        if (! static_cast<bool>(changed["ok"])) return 51;
+        const auto removed = edit({control::object({{"type", "locator.delete"}, {"locatorId", intro}})}, "locators-delete");
+        if (! static_cast<bool>(removed["ok"]) || song->locators.size() != 1) return 52;
+        if (! static_cast<bool>(service.submit("undo")["ok"]) || song->locators.size() != 2 || song->locators[0].colorIndex != 3) return 53;
+        const auto listed = service.inspect()["data"]["locators"];
+        if (listed.size() != 2 || static_cast<int>(listed[1]["locatorId"]) != drop || ! static_cast<bool>(listed[1]["songStart"])) return 54;
+        std::printf("PASS: locator add/update/delete batches and guarded undo through the control service\n");
+        return verifyLocators(*song);
+    }
     if (args.contains("--serve"))
     {
         control::LocalEndpoint endpoint;
@@ -90,6 +126,11 @@ int main(int argc, char** argv)
             const int volume = plugin->findParameterByHostId(0, "Main Vol");
             if (volume < 0 || std::abs(plugin->getParameter(volume) - .27f) > 1e-5f) return 48;
             std::printf("PASS: MCP native and generic VST3 insertion/removal/edit/undo saved and reloaded\n");
+        }
+        if (args.contains("--verify-locators-on-exit"))
+        {
+            if (song->locators.size() != 2 || song->locators[1].name != "Chorus" || song->locators[1].colorIndex != 22) return 64;
+            if (const int failed = verifyLocators(*song)) return failed;
         }
         if (args.contains("--verify-edits-on-exit"))
         {

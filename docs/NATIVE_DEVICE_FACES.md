@@ -16,9 +16,10 @@ Reference images were inspected outside the repository; no vendor artwork, prese
 | Redux (DEV-20) | Quantization illustration, Rate/Jitter/Bits/Shape, pre/post filters and post octave, DC shift and Dry/Wet. |
 | Tuner (DEV-20) | Live monophonic pitch, needle/target/strobe and history, Hz/cents, adjustable reference and right-click spelling. |
 | Gate / Auto Pan (DEV-20) | Transfer/gain-reduction and paired LFO displays with actual detector, timing, floor, flip/listen/lookahead and stereo rate/phase controls respectively. |
-| EQ Eight (UI-42) | Live 12 capture match: selected band's Freq / Gain / Q column, ±15 dB display (10 Hz–22 kHz, decade grid, cyan response, amber handles of the enabled bands), eight band cells (type chooser with band glyphs, on switch + number), Mode / Edit L-R or M-S / Adapt. Q / Scale / Output column. Drag a handle (Alt: Q), double-click switches a band off. |
+| EQ Eight (UI-42) | Live 12 capture match: selected band's Freq / Gain / Q column, ±15 dB display (10 Hz–22 kHz, decade grid, cyan response, amber handles of the enabled bands), eight band cells (type chooser with band glyphs, on switch + number), Mode / Edit L-R or M-S / Adapt. Q / Scale / Output column. Drag a handle (Alt: Q), double-click switches a band off. DEV-2b adds a gray live output spectrum behind the response and an active analyzer toggle; the output level is the chain meter after the device (UI-55). |
 | EQ Three (UI-42) | Live 12 capture match: band LEDs (not metered yet), GainLow/Mid/Hi with a dB law (-inf at the bottom, 0 dB at 0.9), L/M/H kills, FreqLow / FreqHi, 24 / 48 slope. |
 | Compressor (UI-42) | Live 12 capture match: foldable sidechain strip (section folded by default; its filter is disabled until DEV-7b), Ratio (Expand shows the expansion ratio) / Attack / Release / Auto, display with Thresh and Out values, GR / Output legend, activity view (input, gain reduction, output history; drag the threshold line) and transfer view, Knee / Look. / Env. footer, Makeup, Peak / RMS / Expand, Dry/Wet. |
+| Auto Filter (UI-43b) | `AutoFilter2` matched to a 914 × 382 capture (a retina zoom: body 342 px, `ReferenceFace` `captureBody`): folded sidechain strip (disabled, DEV-9c), large Freq knob (DJ knob for type DJ), type chooser with filter glyphs, 12 / 24 (a Morph box for type Morph), Res; response display (20 Hz–20 kHz, 196 px per decade, ±24 dB, the processor's own stage laws) with an amber frequency / resonance handle; a display bar for the last-touched modulator (LFO: Phase, stereo phase, offset, quantisation drawn disabled; Envelope: Attack / Release, Hold / S&H disabled); LFO Amt, Rate (Hz / time / synced by Mode), Wave glyphs, Morph (disabled), Mode; Envelope; Drive, circuit (SVF / DFM / MS2 / PRD), Clip, Output, Dry/Wet. |
 | Limiter (UI-42) | Live 12 capture match: Input / Maximize, Release / Auto, Ceiling meters (per-channel output) and GR meters on the written 0–24 scale with the draggable ceiling pointer, ceiling value and Link, stepped Lookahead, Mode and Routing. Maximize, Soft Clip, True Peak and M/S are disabled (DEV-12c). |
 | Sonora Vector | Compact wavetable instrument: oscillator tabs and generated waveform stack, filter curve and controls, amp envelope/LFO tabs, sub/volume/pan. Drag stack position, filter cutoff/resonance or amp decay/sustain. |
 | Sonora Impulse | Eight named sample slots across the top, click to select/audition. Start/tune/drive/filter/decay/pan/gain below, master at right. Drop onto any slot, including an empty slot eight; storage stays sparse. |
@@ -46,11 +47,34 @@ body under the title band and asks it for its width (`preferredWidth(bodyHeight)
   Reverb: the full parameter set). Hot-swap and preset saving are not implemented (status-bar notice, UI-42b).
 - Text: 14.4 capture px regular, 15.6 bold, the Utility fit. The reference font is not shipped; macOS draws SF Pro, Linux DejaVu.
 
+A capture at another zoom passes its body height as `captureBody` (Auto Filter: 342); text sizes and panel corners keep
+their physical size, so `kText` stays the 239-px value.
+
 Matching a new device: get a capture of the reference device in the default light theme, measure boxes in its pixels (a
 zoomed crop with a pixel ruler helps), write the face, render `ui_snapshot` with `--scale 239/<body height at scale 1>` and put
 the capture over the render to review. Add the "reference faces" test
 cases for reachability and gestures. ROADMAP UI-43 lists the existing devices still waiting for a capture; DEV-25–29 the
 devices Sonora does not have yet.
+
+## EQ Eight spectrum (DEV-2b, 2026-10-26)
+
+Measured from a 1008 × 392 reference crop: spectrum inside the existing plot. The narrow stereo output rails
+first drawn at x685/689 (face width 684) were removed the same day: every device's output level is now the chain meter
+in the gap after it (UI-55), so the face is back to 675 capture pixels. The screenshot remains
+outside the repository; all rendering is authored Skia geometry and theme colors.
+
+The display reads **post-filter, post-output-gain, decoded L/R** audio. Each channel gets a 4096-point Hann FFT;
+the filled envelope takes the stronger channel in each of 256 log-frequency cells (20 Hz–20 kHz, -90..0 dBFS).
+This avoids cancellation of antiphase stereo. The ±15 dB labels still describe the **filter response**, not spectrum level.
+`DeviceSpectrum` still tracks L/R peaks with hold (tested in `EQ display:`), but nothing draws them now.
+Bypass/stopped processing fades the display to silence. The analyzer switch hides the spectrum and stops FFT work. Its state is local to the face
+and is not a saved/automatable audio parameter. Audition and expanded view remain UI-42b.
+
+`dsp/AudioDisplayTap` is a fixed 8192-frame stereo SPSC queue plus atomic peaks. The callback only captures samples
+and peaks; overflow drops samples rather than waiting. A visible face renews a 250 ms capture lease; hidden/destroyed
+faces stop renewing it. `dsp/DeviceSpectrum` drains and analyzes on the message thread, at the face's ~30 Hz tick.
+Silence avoids FFTs/repaints; returning after a long gap or reprepare discards stale data. The EQ response path is cached
+by size, selected set, sample rate and all parameter values, so spectrum animation never redesigns unchanged filters.
 
 ## New audio implementations
 

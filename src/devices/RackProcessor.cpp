@@ -211,7 +211,10 @@ void RackProcessor::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& m
 
         juce::AudioBuffer<float> view(scratch_.getArrayOfWritePointers(), 2, n);
         for (auto& d : chain.devices)
+        {
             d->process(view, chainMidi_[ci]);
+            d->outputMeter.measure(view, n);
+        }
         chain.alignDelay.processInPlace(scratch_, n);
 
         const float gl = chain.volume * juce::jmin(1.0f, 1.0f - chain.pan);

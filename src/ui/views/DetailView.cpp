@@ -28,9 +28,11 @@
 #include "engine/EngineGraph.h"
 #include "plugins/PluginDevice.h"
 #include "ui/Controls.h"
+#include "ui/MeterBallistics.h"
 #include "ui/Painter.h"
 #include "ui/UiContext.h"
 #include "ui/widgets/Buttons.h"
+#include "ui/widgets/Fader.h"
 #include "ui/widgets/Knob.h"
 #include "ui/widgets/Splitter.h"
 
@@ -488,6 +490,23 @@ public:
     }
 
     bool isMidiEffect() const { return model::deviceRole(model_) == model::DeviceRole::MidiEffect; }
+
+    // UI-55: takes the device's output level for the meter in the gap after this box (DetailView paints it).
+    bool tickMeter()
+    {
+        if (proc_ == nullptr) return false;
+        const auto peak = proc_->outputMeter.takePeak(), rms = proc_->outputMeter.takeRms();
+        bool changed = false;
+        for (size_t ch = 0; ch < 2; ++ch)
+        {
+            const float p = meterDecay(peak[ch], meterPeak_[ch]), r = meterDecay(rms[ch], meterRms_[ch]);
+            changed = changed || std::abs(p - meterPeak_[ch]) > 0.0f || std::abs(r - meterRms_[ch]) > 0.0f;
+            meterPeak_[ch] = p; meterRms_[ch] = r;
+        }
+        return changed;
+    }
+    const std::array<float, 2>& meterPeak() const { return meterPeak_; }
+    const std::array<float, 2>& meterRms() const { return meterRms_; }
     IconButton* wavetableFloatButton() const { return wavetableFloat_; }
 
     // Floating <-> docked for this Wavetable instance. The chain rebuilds on the next layout (placement revision), so
@@ -761,11 +780,14 @@ public:
 
         if (proc_ == nullptr && ! pluginPanel_)
         {
-            std::string why = model_.kind == model::DeviceKind::MaxForLive ? "Max for Live is not supported"
+            const auto* track = ctx().trackAt(trackIndex_);
+            const bool deactivated = track && track->deactivated; // TRK-1: no processors are built, the device itself is fine
+            std::string why = deactivated ? "Track deactivated"
+                              : model_.kind == model::DeviceKind::MaxForLive ? "Max for Live is not supported"
                               : model_.plugin ? "Plugin not found / failed to load"
                                               : "Not implemented yet";
             paint::text(c, why, r.reduced(8, 0).withHeight(40), t.color("TextDisabled"), t.metrics.fontSize);
-            paint::text(c, model_.type, r.reduced(8, 0).translated(0, 22).withHeight(40), t.color("TextDisabled"),
+            paint::text(c, deactivated ? "Activate Track to load it" : model_.type, r.reduced(8, 0).translated(0, 22).withHeight(40), t.color("TextDisabled"),
                         t.metrics.smallFontSize);
         }
         else if (auto* rack = dynamic_cast<devices::RackProcessor*>(proc_); rack && ! nativePanel_)
@@ -823,7 +845,38 @@ private:
     std::string shapeSignature_;
     std::vector<Knob*> knobs_;
     std::vector<TextButton*> toggles_;
+    std::array<float, 2> meterPeak_{}, meterRms_{}; // UI-55: decaying chain-meter levels
 };
+
+// UI-55: the gap after every device is a stereo level meter of that device's output, as in the reference (from a
+// capture: two thin rails centred in the gap over the middle of the body, RMS solid, the peak above it dimmed with a
+// brighter cap, 0 dB mark near the top). Scale and colours are the mixer meter's (Fader).
+Rect chainMeterRect(const Rect& box, const Rect& body)
+{
+    return {box.right() + kDeviceGap * 0.5f - 2.25f, body.y + body.h * 0.2f, 4.5f, body.h * 0.57f};
+}
+
+void paintChainMeter(SkCanvas& c, const Theme& t, const Rect& r, const std::array<float, 2>& peak, const std::array<float, 2>& rms)
+{
+    const auto background = t.color("MeterBackground");
+    const float bar = (r.w - 1.5f) * 0.5f;
+    for (size_t ch = 0; ch < 2; ++ch)
+    {
+        const Rect rail{r.x + (float) ch * (bar + 1.5f), r.y, bar, r.h};
+        paint::fill(c, rail, background);
+        const auto height = [&](float gain) { return rail.h * Fader::gainToPosition(gain); };
+        if (const float h = height(peak[ch]); h > 0)
+        {
+            const auto colour = Fader::meterColour(peak[ch], false);
+            paint::fill(c, {rail.x, rail.bottom() - h, rail.w, h}, paint::mix(colour, background, 0.4f));
+            paint::fill(c, {rail.x, rail.bottom() - h, rail.w, std::min(h, 1.0f)}, paint::mix(colour, background, 0.15f));
+        }
+        if (const float h = height(rms[ch]); h > 0)
+            paint::fill(c, {rail.x, rail.bottom() - h, rail.w, h}, Fader::meterColour(rms[ch], false));
+        const float zero = rail.bottom() - height(1.0f);
+        paint::line(c, rail.x, zero, rail.right(), zero, paint::withAlpha(t.color("ControlDisabled"), 180), 0.6f);
+    }
+}
 } // namespace
 
 // UI-27: a Sonora Prism shows a stub in the chain while its editor floats in its own window.
@@ -1029,6 +1082,19 @@ void DetailView::tick()
         layout();
         repaint();
     }
+    if (x.detailTab == DetailTab::Devices)
+    {
+        bool metersChanged = false;
+        for (auto* box : boxes_)
+            metersChanged = static_cast<DeviceBox*>(box)->tickMeter() || metersChanged;
+        if (metersChanged) repaint();
+    }
+}
+
+Rect DetailView::chainMeterBounds(int box) const
+{
+    if (box < 0 || box >= (int) boxes_.size()) return {};
+    return chainMeterRect(boxes_[(size_t) box]->bounds(), {3, 3, width() - 6, height() - 6 - (scrollbarVisible() ? 7.0f : 0.0f)});
 }
 
 void DetailView::mouseDrag(const MouseEvent& e)
@@ -1124,11 +1190,8 @@ void DetailView::paint(SkCanvas& c, const Theme& t)
             for (int i = 0; i < 21; ++i) c.drawCircle(4 - scrollX_, body.centreY() - 50 + (float) i * 5, 1.3f, rail);
         for (auto* box : boxes_)
         {
-            const float cx = box->bounds().right() + 2.5f;
-            const float top = body.y + body.h * 0.2f, bottom = body.y + body.h * 0.77f;
-            paint::line(c, cx, top, cx, bottom, t.color("ControlContrastFrame"), 1.2f);
-            paint::line(c, cx + 2, top, cx + 2, bottom, t.color("ControlContrastFrame"), 1.2f);
-            paint::line(c, cx - 0.5f, top + 11, cx + 2.5f, top + 11, t.color("SurfaceBackground"), 0.6f);
+            const auto* device = static_cast<DeviceBox*>(box);
+            paintChainMeter(c, t, chainMeterRect(box->bounds(), body), device->meterPeak(), device->meterRms());
         }
         const float end = kChainStart + chainWidth() - scrollX_;
         Rect drop{end, body.y, std::max(0.0f, width() - end - 3), body.h};

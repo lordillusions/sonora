@@ -24,6 +24,36 @@ void toggleTrackSolo(UiContext& ctx, int index, bool additive)
     if (ctx.requestRepaint) ctx.requestRepaint();
 }
 
+bool trackSilencedInMix(const UiContext& ctx, int index)
+{
+    if (! ctx.song || ! ctx.controls || index < 0 || index >= ctx.numTracks() || (size_t) index >= ctx.controls->size())
+        return false;
+    const auto& tracks = ctx.song->tracks;
+    const auto& controls = *ctx.controls;
+    if (tracks[(size_t) index].deactivated)
+        return true;
+    bool anySolo = false;
+    for (size_t i = 0; i < controls.size(); ++i) anySolo |= controls[i].solo.load();
+    if (anySolo && controls[(size_t) index].solo.load())
+        return false; // its own solo wins over the activator
+    if (! controls[(size_t) index].active.load())
+        return true;
+    if (! anySolo)
+        return false;
+    auto indexOf = [&tracks](int id) {
+        for (size_t i = 0; i < tracks.size(); ++i) if (tracks[i].id == id) return (int) i;
+        return -1;
+    };
+    for (int p = indexOf(tracks[(size_t) index].groupId); p >= 0; p = indexOf(tracks[(size_t) p].groupId))
+        if (controls[(size_t) p].solo.load()) return false; // a soloed parent group
+    if (tracks[(size_t) index].kind != model::TrackKind::Group)
+        return true;
+    for (size_t i = 0; i < tracks.size() && i < controls.size(); ++i) // a group carries a soloed member
+        for (int p = indexOf(tracks[i].groupId); p >= 0; p = indexOf(tracks[(size_t) p].groupId))
+            if (p == index && controls[i].solo.load() && ! tracks[i].deactivated) return false;
+    return true;
+}
+
 void splitArrangementSelection(UiContext& ctx)
 {
     if (! ctx.song || ! ctx.applyEdit || ctx.mainView != MainView::Arrangement || ctx.clipEditorFocused
@@ -46,6 +76,7 @@ void appendActions(juce::PopupMenu& menu, const std::vector<MenuAction>& actions
         if (action.label.empty()) { menu.addSeparator(); continue; }
         juce::PopupMenu::Item item(juce::String(action.label));
         item.isEnabled = action.enabled;
+        item.isTicked = action.ticked;
         item.shortcutKeyDescription = juce::String(action.shortcut);
         item.action = action.run;
         menu.addItem(std::move(item));
@@ -100,6 +131,11 @@ private:
     std::function<void(int)> pick_;
 };
 } // namespace
+
+void addColorGrid(juce::PopupMenu& menu, int selected, float zoom, std::function<void(int)> pick, const char* title)
+{
+    menu.addCustomItem(10000, std::make_unique<TrackColorGrid>(selected, zoom, std::move(pick)), nullptr, title);
+}
 
 void showControlContextMenu(Widget& owner, UiContext& ctx, std::function<void()> reset)
 {

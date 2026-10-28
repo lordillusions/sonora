@@ -131,7 +131,7 @@ float SpectrumAnalyzer::magnitudeAt(double hz) const
     return db_[i] + (db_[i + 1] - db_[i]) * f;
 }
 
-void SpectrumAnalyzer::analyze(double seconds)
+void SpectrumAnalyzer::analyze(double seconds, bool peakCurve)
 {
     for (int i = 0; i < kFftSize; ++i)
         work_[(size_t) i] = {ring_[(size_t) ((ringPos_ + i) % kFftSize)] * window_[(size_t) i], 0.0f};
@@ -173,6 +173,19 @@ void SpectrumAnalyzer::analyze(double seconds)
     for (int p = 0; p < kCurvePoints; ++p)
     {
         const double f = curveFrequency(p);
+        if (peakCurve)
+        {
+            const double halfCell = std::pow(kHighHz / kLowHz, 0.5 / (kCurvePoints - 1));
+            const int k0 = (int) std::ceil(f / halfCell * kFftSize / sampleRate_);
+            const int k1 = (int) std::floor(f * halfCell * kFftSize / sampleRate_);
+            float level = kFloorDb;
+            for (int k = std::max(1, k0); k <= std::min(k1, kFftSize / 2); ++k)
+                level = std::max(level, db_[(size_t) k]);
+            if (k1 < k0) level = magnitudeAt(f);
+            auto& c = curve_[(size_t) p];
+            c = level > c ? c + (level - c) * 0.6f : std::max(level, c - release);
+            continue;
+        }
         double power = 0.0;
         int n = 0;
         for (int j = -2; j <= 2; ++j) // +-1/12 octave

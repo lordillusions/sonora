@@ -426,6 +426,11 @@ struct Track
     std::shared_ptr<const std::string> sourceXml;
     double trackDelayMs = 0.0;                    // <TrackDelay> (positive = later)
     bool folded = false;
+    // UI-57 view state as the set stores it: the Arrangement lane height in the reference's points (<AutomationLane
+    // Id="0"><LaneHeight>, 17-point steps) and the Session column width (<Mixer><ViewStateSessionTrackWidth>). 0 = not in
+    // the file. Written back on save; not undoable.
+    int laneHeight = 0;
+    int sessionWidth = 0;
     std::string inputRouting; // AudioInputRouting or MidiInputRouting Target, according to track kind
     std::string inputUpperDisplay, inputLowerDisplay;
     int monitoring = 1; // MainSequencer/MonitoringEnum: 0 In, 1 Auto, 2 Off
@@ -463,10 +468,16 @@ struct Scene
     std::optional<double> tempo;
 };
 
+// An Arrangement locator (<Locators/Locators/Locator>, UI-3b). `id` is the file's Locator Id: stable across edits and
+// the handle the control API uses; -1 only on locators built in code, the writer then allocates one.
 struct Locator
 {
     Beats time = 0.0;
     std::string name;
+    int id = -1;
+    std::string annotation;  // the reference's "Info Text"
+    bool isSongStart = false; // "Set Song Start Time Here"
+    int colorIndex = -1;      // Sonora extension (<SonoraLocators>): palette index 0..69, -1 = theme colour
 };
 
 struct Song
@@ -505,6 +516,18 @@ struct Song
     bool punchIn = false, punchOut = false;
     bool punchInPresent = false, punchOutPresent = false, punchEdited = false;
     Beats currentTime = 0.0;
+    // UI-57: how the set was being looked at, in the reference's own elements, so it reopens as it was left (in Sonora
+    // and in the reference). Pixel values are points of the reference's layout; the file stores scroll positions negated.
+    // The app fills this from the UI just before saving; it is not undoable and not part of collab operations.
+    struct View
+    {
+        bool present = false;                          // the set has a <SequencerNavigator>
+        bool sessionVisible = false;                   // <SelectedDocumentViewInMainWindow>: 0 Arrangement, 1 Session
+        double beatsPerPixel = 0.254945054945054927;   // <SequencerNavigator/BeatTimeHelper/CurrentZoom>
+        int arrangementScrollX = 0, arrangementScrollY = 0; // <SequencerNavigator/ScrollerPos X Y>, content offset
+        int sessionScrollX = 0, sessionScrollY = 0;         // <SessionScrollPos X Y>, content offset
+        bool clipDetailOpen = false, deviceDetailOpen = true; // <ViewStateMainWindowClipDetailOpen / ...DeviceDetailOpen>
+    } view;
     // Session launch quantisation (<GlobalQuantisation>): 0 none, 1 8 bars, 2 4 bars, 3 2 bars, 4 1 bar,
     // 5 1/2, 6 1/2T, 7 1/4, 8 1/4T, 9 1/8, 10 1/8T, 11 1/16, 12 1/16T, 13 1/32.
     int globalQuantisation = 4;

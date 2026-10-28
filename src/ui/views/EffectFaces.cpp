@@ -10,6 +10,7 @@
 #include "devices/native/EqEight.h"
 #include "devices/native/Limiter.h"
 #include "dsp/Dsp.h"
+#include "dsp/DeviceSpectrum.h"
 #include "gfx/Fonts.h"
 #include "ui/Controls.h"
 #include "ui/UiContext.h"
@@ -101,7 +102,14 @@ public:
         }
         // Right column.
         inertButton("", false, 614, 41, 643, 58, "Band audition is not implemented yet (UI-42b)");
-        inertButton("", false, 649, 41, 678, 58, "The spectrum analyzer is not implemented yet (DEV-2b)");
+        auto* spectrum = button("", 649, 41, 678, 58, [this]
+        {
+            spectrumOn_ = ! spectrumOn_;
+            display_.update(eq_->displayTap(), 0, spectrumOn_);
+            repaint();
+        });
+        spectrum->isOn = [this] { return spectrumOn_; };
+        spectrum->tooltip = "Output spectrum (stronger L/R channel)";
         chooser(E::kMode, 614, 80, 678, 98);
         edit_ = button("L", 614, 120, 678, 137, [this] { setB_ = ! setB_; retag(); repaint(); });
         edit_->isEnabled = [this] { return mode() != 0; };
@@ -119,6 +127,18 @@ public:
         repaint();
     }
     Rect graphBounds() const override { return at(83, 33, 607, 220); }
+
+    void tick() override
+    {
+        auto clip = boundsInRoot().sk();
+        for (auto* widget = this->parent(); widget != nullptr; widget = widget->parent())
+            if (! widget->visible || ! clip.intersect(widget->boundsInRoot().sk())) { lastTick_ = 0; return; }
+        const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        if (lastTick_ > 0 && now - lastTick_ < 0.030) return;
+        const bool changed = display_.update(eq_->displayTap(), lastTick_ > 0 ? now - lastTick_ : 1.0, spectrumOn_);
+        lastTick_ = now;
+        if (changed) repaint();
+    }
 
     void paint(SkCanvas& c, const Theme& t) override
     {
@@ -214,7 +234,7 @@ private:
     }
     void paintSwitchGlyphs(SkCanvas& c, const Theme& t) const
     {
-        // Headphones and spectrum glyphs on the two disabled buttons.
+        // Audition remains unavailable; the spectrum button is live (DEV-2b).
         const auto ink = t.color("TextDisabled");
         const float u = unit();
         SkPaint pen;
@@ -232,14 +252,47 @@ private:
         for (int i = 0; i < 7; ++i)
         {
             const float h = bars.h * 0.55f * heights[i];
-            paint::fill(c, {bars.x + bars.w * 0.2f + (float) i * bars.w * 0.09f, bars.y + bars.h * 0.78f - h, 1.6f * u, h}, ink);
+            paint::fill(c, {bars.x + bars.w * 0.2f + (float) i * bars.w * 0.09f, bars.y + bars.h * 0.78f - h, 1.6f * u, h}, t.color("ControlForeground"));
         }
+    }
+    void updateResponse(Rect r)
+    {
+        std::array<float, E::kSetB + E::kBands * E::PerBand> parameters{};
+        for (size_t i = 0; i < parameters.size(); ++i) parameters[i] = eq_->getParameter((int) i);
+        const auto rate = eq_->displayTap().sampleRate();
+        if (juce::exactlyEqual(responseWidth_, r.w) && juce::exactlyEqual(responseHeight_, r.h) && responseSetB_ == setB_
+            && juce::exactlyEqual(responseRate_, rate) && responseParameters_ == parameters) return;
+        responseWidth_ = r.w; responseHeight_ = r.h; responseSetB_ = setB_; responseRate_ = rate;
+        responseParameters_ = parameters;
+        SkPathBuilder curve;
+        for (float x = 0; x <= r.w; x += 1.0f)
+        {
+            const double hz = 10.0 * std::pow(2200.0, x / r.w);
+            const float db = (float) juce::Decibels::gainToDecibels(eq_->responseAt(hz, setB_), -60.0);
+            const float y = std::clamp(r.centreY() - db * dbPixels(), r.y, r.bottom());
+            if (x <= 0) curve.moveTo(r.x + x, y); else curve.lineTo(r.x + x, y);
+        }
+        response_ = curve.detach();
     }
     void paintDisplay(SkCanvas& c, const Theme& t)
     {
         displayPanel(c, t, 83, 33, 607, 220);
         const auto r = graphBounds();
         const float u = unit(), zero = r.centreY();
+        if (spectrumOn_)
+        {
+            SkPathBuilder spectrum;
+            spectrum.moveTo(r.x, r.bottom());
+            const auto& values = display_.curve();
+            for (size_t i = 0; i < values.size(); ++i)
+            {
+                const float level = std::clamp((values[i] - dsp::SpectrumAnalyzer::kFloorDb) / -dsp::SpectrumAnalyzer::kFloorDb, 0.0f, 1.0f);
+                spectrum.lineTo(freqX(dsp::SpectrumAnalyzer::curveFrequency((int) i)), r.bottom() - r.h * level);
+            }
+            spectrum.lineTo(r.right(), r.bottom()); spectrum.close();
+            SkPaint fill; fill.setAntiAlias(true); fill.setColor(gridInk(t, 105));
+            c.drawPath(spectrum.detach(), fill);
+        }
         // Grid: every 6 dB, frequency lines per decade step (decades stronger), labels inside the display.
         const float gridLeft = at(118, 0, 118, 0).x;
         for (int db = -12; db <= 12; db += 6)
@@ -261,14 +314,7 @@ private:
             paint::text(c, name, {freqX(hz) - 20 * u, at(0, 205, 0, 219).y, 40 * u, 14 * u}, scale, text(), Align::Centre);
 
         // Response, then the handles of the enabled bands (selected one filled).
-        SkPathBuilder curve;
-        for (float x = 0; x <= r.w; x += 1.0f)
-        {
-            const double hz = 10.0 * std::pow(2200.0, x / r.w);
-            const float db = (float) juce::Decibels::gainToDecibels(eq_->responseAt(hz, setB_), -60.0);
-            const float y = std::clamp(zero - db * dbPixels(), r.y, r.bottom());
-            if (x <= 0) curve.moveTo(r.x + x, y); else curve.lineTo(r.x + x, y);
-        }
+        updateResponse(r);
         SkPaint pen;
         pen.setAntiAlias(true);
         pen.setStyle(SkPaint::kStroke_Style);
@@ -276,7 +322,7 @@ private:
         pen.setColor(t.color("RangeDefault"));
         c.save();
         c.clipRect(r.sk());
-        c.drawPath(curve.detach(), pen);
+        c.drawPath(response_, pen);
         const auto amber = t.color("ChosenDefault");
         for (int b = 0; b < E::kBands; ++b)
         {
@@ -304,6 +350,12 @@ private:
     int band_ = 2, dragBand_ = -1;
     bool setB_ = false;
     float startY_ = 0, startQ_ = 1;
+    dsp::DeviceSpectrum display_;
+    bool spectrumOn_ = true, responseSetB_ = false;
+    double lastTick_ = 0, responseRate_ = 0;
+    float responseWidth_ = -1, responseHeight_ = -1;
+    std::array<float, E::kSetB + E::kBands * E::PerBand> responseParameters_{};
+    SkPath response_;
 };
 
 // ================================================================ EQ Three
@@ -859,6 +911,7 @@ private:
 
 ReferenceFace* addReferenceFace(Widget& parent, const model::Device& model, devices::DeviceProcessor* processor, ReferenceFace::Tag tag)
 {
+    if (auto* face = addAutoFilterFace(parent, processor, tag)) return face;
     if (auto* eq = dynamic_cast<devices::EqEight*>(processor)) return parent.add<EqEightFace>(eq, std::move(tag));
     if (auto* eq = dynamic_cast<devices::EqThree*>(processor)) return parent.add<EqThreeFace>(eq, std::move(tag));
     if (auto* compressor = dynamic_cast<devices::Compressor*>(processor)) return parent.add<CompressorFace>(compressor, model, std::move(tag));

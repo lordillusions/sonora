@@ -67,6 +67,10 @@ struct BlockSegment
     int numSamples = 0;
     double startBeats = 0.0;
     double samplesPerBeat = 1.0;
+    // Beats before startBeats whose events still land on the first sample. Set after an Arrangement loop wrap: the
+    // segment that reached the loop end overshoots it by a fraction of a sample, so this one starts that fraction
+    // after the loop start, and a note exactly on the loop start would otherwise fall between the two.
+    double lead = 0.0;
 
     double endBeats() const { return startBeats + numSamples / samplesPerBeat; }
 };

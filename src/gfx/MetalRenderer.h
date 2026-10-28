@@ -33,12 +33,13 @@ private:
 // `ui_snapshot --bench N --gpu`: renders `frames` frames of pw x ph device pixels into an off-screen Metal surface through
 // the same Skia Ganesh backend as the app. cpuMs is what the message thread spends per frame (recording + flush, as in
 // MetalRenderer::render, which does not wait for the GPU); gpuWaitMs is the extra time until the GPU finished.
+// warmupFrames are drawn with index 0 through the same context, but excluded from the totals.
 struct GpuFrameTimes
 {
     double cpuMs = 0, worstCpuMs = 0, gpuWaitMs = 0;
     int frames = 0;
     bool ok = false;
 };
-GpuFrameTimes benchmarkMetalOffscreen(int pw, int ph, int frames, const std::function<void(SkCanvas&, int)>& draw);
+GpuFrameTimes benchmarkMetalOffscreen(int pw, int ph, int frames, const std::function<void(SkCanvas&, int)>& draw, int warmupFrames = 0);
 
 } // namespace sonora::gfx

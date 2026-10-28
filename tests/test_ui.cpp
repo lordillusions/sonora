@@ -18,10 +18,43 @@
 #include "ui/widgets/Buttons.h"
 #include "ui/widgets/Fader.h"
 #include "ui/widgets/Knob.h"
+#include "include/core/SkSurface.h"
 
 #include <juce_core/juce_core.h>
 
 using namespace sonora;
+
+TEST_CASE("widget painting: clipped subtrees skip drawing but remain live in a scaled overview")
+{
+    struct PaintCounter : ui::Widget
+    {
+        int paints = 0, overlays = 0, ticks = 0;
+        void paint(SkCanvas&, const ui::Theme&) override { ++paints; }
+        void paintOverChildren(SkCanvas&, const ui::Theme&) override { ++overlays; }
+        void tick() override { ++ticks; }
+    };
+    ui::Widget viewport;
+    viewport.setBounds({0, 0, 100, 60});
+    auto* partial = viewport.add<PaintCounter>(); partial->setBounds({90, 0, 20, 20});
+    auto* outside = viewport.add<PaintCounter>(); outside->setBounds({140, 0, 20, 20});
+    auto* nested = outside->add<PaintCounter>(); nested->setBounds({0, 0, 10, 10});
+    const auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(100, 60));
+    REQUIRE(surface);
+    const ui::Theme theme;
+    auto& canvas = *surface->getCanvas();
+    viewport.paintTree(canvas, theme);
+    CHECK(partial->paints == 1); CHECK(partial->overlays == 1);
+    CHECK(outside->paints == 0); CHECK(outside->overlays == 0); CHECK(nested->paints == 0);
+    viewport.tickTree(); CHECK(outside->ticks == 1); CHECK(nested->ticks == 1);
+    // The device overview paints the same widgets through a different transform and clip.
+    canvas.save(); canvas.scale(0.25f, 0.25f);
+    outside->paintTree(canvas, theme);
+    canvas.restore();
+    CHECK(outside->paints == 1); CHECK(outside->overlays == 1); CHECK(nested->paints == 1);
+    outside->setBounds({20, 0, 20, 20});
+    viewport.paintTree(canvas, theme);
+    CHECK(outside->paints == 2); CHECK(nested->paints == 2);
+}
 
 namespace
 {
@@ -261,6 +294,75 @@ TEST_CASE("arrangement editing: select, move, resize, delete, duplicate and undo
     CHECK(song.tracks[1].arrangementClips.size() == 2);
 }
 
+TEST_CASE("arrangement editing: Delete removes every selected clip across tracks and only the selected part of a half-selected clip")
+{
+    auto loaded = io::loadAls(juce::File(SONORA_TEST_FIXTURES).getChildFile("two_tracks.xml"));
+    REQUIRE(loaded);
+    model::Song song = *loaded.song;
+    model::EditHistory history;
+    ui::UiContext ctx;
+    ctx.song = &song;
+    ctx.ioVisible = false;
+    ctx.browserVisible = false;
+    ctx.detailVisible = false;
+    ctx.mainView = ui::MainView::Arrangement;
+    ctx.pixelsPerBeat = 14.0;
+    ctx.applyEdit = [&](model::EditCommand c) { history.perform(song, std::move(c)); };
+    ctx.undo = [&] { history.undo(song); };
+    // Track 0: clips at 4..12 and 14..22; track 1 (an empty MIDI track in the fixture): a copy at 4..12.
+    const int first = song.tracks[0].arrangementClips[0].uid;
+    model::duplicateClip(song, 0, first, 14).apply(song);
+    model::copyClipToTrack(song, 0, first, 1, 4).apply(song);
+    REQUIRE(song.tracks[0].arrangementClips.size() == 2); REQUIRE(song.tracks[1].arrangementClips.size() == 1);
+
+    ui::MainLayout root(ctx);
+    root.setBounds({0, 0, 1200, 700});
+    root.layout();
+    const float laneTop = ctx.theme.metrics.controlBarHeight + ctx.theme.metrics.arrangementRulerHeight;
+    const float lane0 = laneTop + 30, lane1 = laneTop + ctx.theme.metrics.arrangementLaneHeight + 20;
+    auto mouse = [&](double beat, float y, bool shift = false) {
+        ui::MouseEvent e;
+        e.x = ctx.theme.metrics.outerMargin + (float) (beat * ctx.pixelsPerBeat); e.y = y; e.shift = shift;
+        return e;
+    };
+    auto drag = [&](double from, float fromY, double to, float toY) {
+        root.dispatchMouseDown(mouse(40, lane0)); root.dispatchMouseUp(mouse(40, lane0)); // drops the previous selection
+        REQUIRE(! ctx.arrangementSelection.active);
+        root.dispatchMouseDown(mouse(from, fromY)); root.dispatchMouseDrag(mouse(to, toY)); root.dispatchMouseUp(mouse(to, toY));
+    };
+    auto span = [&](int track, size_t i) { const auto& c = song.tracks[(size_t) track].arrangementClips[i]; return std::make_pair(c.currentStart, c.currentEnd); };
+    ui::KeyEvent del; del.keyCode = juce::KeyPress::backspaceKey;
+
+    // Click one clip, Shift+click a clip on the other track: Delete removes both, not only the last one clicked.
+    root.dispatchMouseDown(mouse(8, lane0)); root.dispatchMouseUp(mouse(8, lane0));
+    root.dispatchMouseDown(mouse(8, lane1, true)); root.dispatchMouseUp(mouse(8, lane1, true));
+    REQUIRE(ctx.arrangementSelection.active);
+    root.dispatchKey(del);
+    REQUIRE(song.tracks[0].arrangementClips.size() == 1); CHECK_NEAR(span(0, 0).first, 14, 1e-9);
+    CHECK(song.tracks[1].arrangementClips.empty());
+    REQUIRE(history.undo(song)); CHECK(song.tracks[0].arrangementClips.size() == 2); CHECK(song.tracks[1].arrangementClips.size() == 1);
+
+    // A time selection dragged over two clips of one track: the whole clips it covers go, the half-covered ones are cut.
+    drag(6, lane0, 16, lane0);
+    root.dispatchKey(del);
+    REQUIRE(song.tracks[0].arrangementClips.size() == 2);
+    CHECK_NEAR(span(0, 0).second, 6, 1e-9); CHECK_NEAR(span(0, 1).first, 16, 1e-9); CHECK_NEAR(span(0, 1).second, 22, 1e-9);
+    CHECK(song.tracks[1].arrangementClips.size() == 1);
+    REQUIRE(history.undo(song));
+
+    // A time selection across both tracks inside the clips: each loses only the selected beats.
+    drag(6, lane0, 8, lane1);
+    REQUIRE(ctx.arrangementSelection.firstTrack == 0); REQUIRE(ctx.arrangementSelection.lastTrack == 1);
+    root.dispatchKey(del);
+    REQUIRE(song.tracks[0].arrangementClips.size() == 3); REQUIRE(song.tracks[1].arrangementClips.size() == 2);
+    for (int track : {0, 1})
+    {
+        CHECK_NEAR(span(track, 0).first, 4, 1e-9); CHECK_NEAR(span(track, 0).second, 6, 1e-9);
+        CHECK_NEAR(span(track, 1).first, 8, 1e-9); CHECK_NEAR(span(track, 1).second, 12, 1e-9);
+    }
+    REQUIRE(history.undo(song)); CHECK(! history.canUndo());
+}
+
 TEST_CASE("piano roll: select, move, resize, add, velocity, transpose and delete notes through real input events")
 {
     auto loaded = io::loadAls(juce::File(SONORA_TEST_FIXTURES).getChildFile("two_tracks.xml"));
@@ -476,6 +578,65 @@ TEST_CASE("browser: filtering keeps file identities, folder navigation, preview 
     automation.textChar = 'a';
     root.dispatchKey(automation);
     CHECK(ctx.automationVisible);
+}
+
+TEST_CASE("browser: a folder search finds files in subfolders and shows a caret (UI-6b)")
+{
+    ui::UiContext ctx;
+    ctx.detailVisible = false;
+    ctx.browserPlaces = {"/tmp/Samples"};
+    ctx.browserFiles = {{"/tmp/Samples/Deep", true}, {"/tmp/Samples/Hats", true}, {"/tmp/Samples/kick.wav", false}};
+    ctx.openBrowserFolder = [&](const std::string& path) { ctx.browserFolder = path; ctx.browserSearchRoot.clear(); };
+    std::vector<std::string> indexed;
+    ctx.indexBrowserFolder = [&](const std::string& path) {
+        indexed.push_back(path);
+        ctx.browserSearchRoot = path; ctx.browserSearchFiles.clear(); ctx.browserSearchLoading = true; ++ctx.browserContentRevision;
+    };
+    std::string previewed;
+    ctx.previewSample = [&](const std::string& path) { previewed = path; };
+    ui::MainLayout root(ctx);
+    root.setBounds({0, 0, 1200, 700});
+    root.layout();
+    ui::BrowserPanel* browser = nullptr;
+    for (const auto& child : root.children()) if (! browser) browser = dynamic_cast<ui::BrowserPanel*>(child.get());
+    REQUIRE(browser);
+    auto at = [&](ui::Rect r) { ui::MouseEvent e; e.x = browser->boundsInRoot().x + r.centreX(); e.y = browser->boundsInRoot().y + r.centreY(); return e; };
+    auto click = [&](ui::MouseEvent e) { root.dispatchMouseDown(e); root.dispatchMouseUp(e); };
+    click(at(browser->sidebarRowBounds(13)));
+    REQUIRE(ctx.browserFolder == "/tmp/Samples");
+    ui::KeyEvent find;
+    find.cmd = true; find.textChar = 'f';
+    root.dispatchKey(find);
+    CHECK(browser->caretVisible());
+    for (auto ch : std::string("hat")) { ui::KeyEvent key; key.textChar = (uint32_t) ch; root.dispatchKey(key); }
+    CHECK(browser->caretVisible()); // typing restarts the blink with the caret shown
+    REQUIRE(indexed.size() == 1); // only the first character starts a scan
+    CHECK(indexed[0] == "/tmp/Samples");
+    // The scan arrives: matches from every depth, nothing from outside the query.
+    ctx.browserSearchFiles = {{"/tmp/Samples/Deep", true}, {"/tmp/Samples/Hats", true}, {"/tmp/Samples/Deep/Deeper/hat_909.wav", false},
+                              {"/tmp/Samples/Hats/Closed Hat.wav", false}, {"/tmp/Samples/kick.wav", false}};
+    ctx.browserSearchLoading = false;
+    ++ctx.browserContentRevision;
+    click(at(browser->listRowBounds(1)));
+    CHECK(previewed == "/tmp/Samples/Deep/Deeper/hat_909.wav");
+    click(at(browser->listRowBounds(2)));
+    CHECK(previewed == "/tmp/Samples/Hats/Closed Hat.wav");
+    previewed.clear();
+    click(at(browser->listRowBounds(3)));
+    CHECK(previewed.empty()); // kick.wav does not match: only Hats, hat_909 and Closed Hat are listed
+    // Clearing the query and searching again re-reads the tree; another folder is indexed on the next tick.
+    root.dispatchKey(find);
+    ui::KeyEvent back;
+    back.keyCode = juce::KeyPress::backspaceKey;
+    for (int i = 0; i < 3; ++i) root.dispatchKey(back);
+    ui::KeyEvent h; h.textChar = 'h'; root.dispatchKey(h);
+    CHECK(indexed.size() == 2);
+    ctx.browserFolder = "/tmp/Other";
+    browser->tick();
+    REQUIRE(indexed.size() == 3);
+    CHECK(indexed[2] == "/tmp/Other");
+    browser->tick();
+    CHECK(indexed.size() == 3);
 }
 
 TEST_CASE("browser: real drag events route stable filtered items and Escape cancels")
@@ -1850,6 +2011,88 @@ TEST_CASE("device overview: drag navigates chain and wheel clamps to its ends")
     e.wheelDeltaY = 20;
     root.dispatchMouseWheel(e);
     CHECK_NEAR(detail->children()[0]->bounds().x, start, 0.001);
+}
+
+#include <juce_graphics/juce_graphics.h>
+#include <limits>
+
+TEST_CASE("chain meters: device output level keeps the loudest block per channel until the UI takes it")
+{
+    devices::OutputMeter meter;
+    juce::AudioBuffer<float> loud(2, 256), quiet(2, 256), mono(1, 64), bad(2, 32);
+    for (int i = 0; i < 256; ++i)
+    {
+        loud.setSample(0, i, i % 2 ? 0.5f : -0.5f); loud.setSample(1, i, 0.25f);
+        quiet.setSample(0, i, 0.01f); quiet.setSample(1, i, -0.01f);
+    }
+    meter.measure(loud, 256); meter.measure(quiet, 256);
+    auto peak = meter.takePeak(), rms = meter.takeRms();
+    CHECK_NEAR(peak[0], 0.5, 1e-6); CHECK_NEAR(peak[1], 0.25, 1e-6);
+    CHECK_NEAR(rms[0], 0.5, 1e-5); CHECK_NEAR(rms[1], 0.25, 1e-5);
+    peak = meter.takePeak(); CHECK_NEAR(peak[0], 0, 1e-9); CHECK_NEAR(peak[1], 0, 1e-9);
+    meter.measure(loud, 128); // only the first n samples count
+    CHECK_NEAR(meter.takeRms()[0], 0.5, 1e-5);
+    CHECK_NEAR(meter.takePeak()[0], 0.5, 1e-6);
+    mono.clear(); mono.setSample(0, 10, -0.3f);
+    meter.measure(mono, 64);
+    peak = meter.takePeak(); CHECK_NEAR(peak[0], 0.3, 1e-6); CHECK_NEAR(peak[1], 0.3, 1e-6);
+    bad.clear(); bad.setSample(0, 3, std::numeric_limits<float>::quiet_NaN()); bad.setSample(1, 3, 0.2f);
+    meter.measure(bad, 32);
+    peak = meter.takePeak(); CHECK_NEAR(peak[0], 0, 1e-9); CHECK_NEAR(peak[1], 0.2, 1e-6);
+}
+
+TEST_CASE("chain meters: the gap after each device meters its output and falls back to silence")
+{
+    model::Song song; model::Track track; track.kind = model::TrackKind::Audio;
+    for (const auto* type : {"Delay", "StereoGain"})
+    {
+        auto device = devices::nativeDeviceModel(type); device.id = (int) track.devices.size() + 1;
+        track.devices.push_back(std::move(device));
+    }
+    song.tracks.push_back(track);
+    engine::SampleCache samples; devices::BuildContext build;
+    auto graph = engine::buildGraph(song, build, samples);
+    REQUIRE(graph.graph);
+    auto* first = graph.graph->nodes[0].processorForModelDevice[0];
+    REQUIRE(first);
+    ui::UiContext context; context.song = &song; context.graph = graph.graph.get(); context.browserVisible = false;
+    ui::MainLayout root(context); root.setBounds({0, 0, 1440, 800});
+    ui::DetailView* detail = nullptr;
+    for (auto& child : root.children()) if (auto* d = dynamic_cast<ui::DetailView*>(child.get())) detail = d;
+    REQUIRE(detail); REQUIRE(detail->children().size() == 2);
+    const auto box0 = detail->children()[0]->bounds(), box1 = detail->children()[1]->bounds();
+    const auto meter = detail->chainMeterBounds(0);
+    CHECK(meter.x > box0.right()); CHECK(meter.right() < box1.x);
+    CHECK_NEAR(meter.centreX(), (box0.right() + box1.x) * 0.5f, 0.01);
+    CHECK(meter.y > box0.y + 20); CHECK(meter.bottom() < box0.bottom() - 20);
+    CHECK(detail->chainMeterBounds(2).isEmpty());
+
+    juce::AudioBuffer<float> audio(2, 512);
+    for (int i = 0; i < 512; ++i) { audio.setSample(0, i, 0.3f); audio.setSample(1, i, -0.3f); }
+    first->outputMeter.measure(audio, 512);
+    root.tickTree();
+    const auto folder = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora-chain-meters");
+    REQUIRE(folder.createDirectory().wasOk());
+    const auto greenIn = [&](int box) {
+        const auto png = folder.getChildFile("chain-meters.png"); // left for review: the last render
+        REQUIRE(gfx::renderToPng(root, 1440, 800, 2, png.getFullPathName().toStdString()));
+        const auto image = juce::ImageFileFormat::loadFrom(png);
+        REQUIRE(image.isValid());
+        const auto r = detail->chainMeterBounds(box).translated(detail->boundsInRoot().x, detail->boundsInRoot().y);
+        int green = 0;
+        for (int y = (int) (r.y * 2); y < (int) (r.bottom() * 2); ++y)
+            for (int x = (int) (r.x * 2); x < (int) (r.right() * 2); ++x)
+            {
+                const auto pixel = image.getPixelAt(x, y);
+                if (pixel.getGreen() > 200 && pixel.getRed() < 60) ++green;
+            }
+        return green;
+    };
+    CHECK(greenIn(1) == 0); // the Utility after it saw no block
+    CHECK(greenIn(0) > 40); // -10 dB RMS lights both rails
+    REQUIRE(folder.getChildFile("chain-meters.png").copyFileTo(folder.getChildFile("chain-meters-lit.png")));
+    for (int i = 0; i < 200; ++i) root.tickTree();
+    CHECK(greenIn(0) == 0);
 }
 
 TEST_CASE("empty instrument slot: follows MIDI effects and disappears for instruments or audio tracks")

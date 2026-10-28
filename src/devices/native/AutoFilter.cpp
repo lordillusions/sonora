@@ -130,19 +130,22 @@ AutoFilter2::AutoFilter2() : NativeDevice([] {
     p[A::FilterType] = makeParam("Filter_Type", "Type", 0.0f, 7.0f, 0.0f, "", false,
                                  {"Lowpass", "Highpass", "Bandpass", "Notch", "Morph", "DJ", "Comb", "Vowel"});
     p[A::Slope] = makeParam("Filter_Slope", "Slope", 0.0f, 1.0f, 1.0f, "", false, {"12 dB", "24 dB"});
-    p[A::Circuit] = makeParam("Filter_Circuit", "Circuit", 0.0f, 4.0f, 0.0f, "", false, {"Clean", "OSR", "MS2", "SMP", "PRD"});
+    p[A::Circuit] = makeParam("Filter_Circuit", "Circuit", 0.0f, 3.0f, 0.0f, "", false, {"SVF", "DFM", "MS2", "PRD"});
     p[A::Drive] = makeParam("Filter_Drive", "Drive", 0.0f, 1.0f, 0.0f, "%");
     p[A::DjControl] = makeParam("Filter_DjControl", "DJ", -1.0f, 1.0f, 0.0f);
     p[A::LfoAmount] = makeParam("Lfo_Amount", "LFO Amt", 0.0f, 1.0f, 0.0f, "%");
-    p[A::LfoWaveform] = makeParam("Lfo_Waveform", "LFO Wave", 0.0f, 7.0f, 0.0f);
-    p[A::LfoTimeMode] = makeParam("Lfo_TimeMode", "LFO Mode", 0.0f, 5.0f, 0.0f);
-    p[A::LfoFrequency] = makeParam("Lfo_Frequency", "LFO Rate", 0.01f, 40.0f, 1.0f, "Hz");
-    p[A::LfoTime] = makeParam("Lfo_Time", "LFO Time", 0.025f, 100.0f, 1.0f, "s");
+    // Waveform names follow what dsp::ModLfo plays for each index (the reference's eighth shape plays Wander here).
+    p[A::LfoWaveform] = makeParam("Lfo_Waveform", "LFO Wave", 0.0f, 7.0f, 0.0f, "", false,
+                                  {"Sine", "Triangle", "Ramp Up", "Ramp Down", "Square", "S&H", "Wander"});
+    p[A::LfoTimeMode] = makeParam("Lfo_TimeMode", "LFO Mode", 0.0f, 5.0f, 0.0f, "", false,
+                                  {"Rate", "Time", "Synced", "Triplet", "Dotted", "Sixteenth"});
+    p[A::LfoFrequency] = makeParam("Lfo_Frequency", "LFO Rate", 0.1f, 60.0f, 1.0f, "Hz");
+    p[A::LfoTime] = makeParam("Lfo_Time", "LFO Time", 0.1f, 200.0f, 1.0f, "s");
     p[A::LfoSyncedRate] = makeParam("Lfo_SyncedRate", "LFO Sync", 0.25f, 64.0f, 4.0f);
     p[A::EnvAmount] = makeParam("Envelope_Amount", "Env Amt", -1.0f, 1.0f, 0.0f, "%");
-    p[A::EnvAttack] = makeParam("Envelope_Attack", "Attack", 0.0001f, 1.0f, 0.001f, "s");
-    p[A::EnvRelease] = makeParam("Envelope_Release", "Release", 0.001f, 10.0f, 0.25f, "s");
-    p[A::Output] = makeParam("Output", "Output", 0.0f, 4.0f, 1.0f, "lin");
+    p[A::EnvAttack] = makeParam("Envelope_Attack", "Attack", 0.0001f, 0.1f, 0.001f, "s");
+    p[A::EnvRelease] = makeParam("Envelope_Release", "Release", 0.001f, 3.0f, 0.25f, "s");
+    p[A::Output] = makeParam("Output", "Output", 0.0f, 1.0f, 1.0f, "lin");
     p[A::SoftClip] = makeParam("SoftClipOn", "Soft Clip", 0.0f, 1.0f, 0.0f, "", true);
     p[A::DryWet] = makeParam("DryWet", "Dry/Wet", 0.0f, 1.0f, 1.0f, "%");
     return p;

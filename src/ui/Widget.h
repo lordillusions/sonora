@@ -30,7 +30,8 @@ enum class Cursor
     Default,
     ResizeHorizontal, // left/right arrows: a vertical divider
     ResizeVertical,   // up/down arrows: a horizontal divider
-    Move              // a selected Arrangement region can be dragged as one block
+    Move,             // a selected Arrangement region can be dragged as one block
+    Scrub             // speaker: click to play from here (the Arrangement ruler's scrub area)
 };
 
 struct MouseEvent

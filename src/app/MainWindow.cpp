@@ -1,6 +1,7 @@
 #include "app/MainWindow.h"
 #include "util/Log.h"
 #include "ui/TrackMenu.h"
+#include "ui/Locators.h"
 #include "app/WindowChrome.h"
 #include "app/AboutWindow.h"
 
@@ -69,13 +70,13 @@ enum MenuIds
     CloseWindow, ClearRecent, RemoveUnavailable, AddFolder, ShowBackups, RevealBackups,
     SelectAll, ToggleClipActive, SoloTrack, ArmTrack, Quantize, QuantizeSettings, ApplyMidiTool,
     InsertAudioTrack, InsertMidiTrack, InsertReturnTrack, CaptureMidi, CaptureAudio, SeparateStems,
-    ContinuePlayback, ReturnToStart, SessionRecord, Metronome, BackToArrangement,
+    ContinuePlayback, ReturnToStart, SessionRecord, Metronome, BackToArrangement, FollowPlayhead,
     ToggleViews, ShowClip, ShowDevices, ToggleClipDevice, SearchBrowser,
     ToggleMixer, ToggleIo, ToggleSends, ToggleAutomation, HideGroupedTracks,
     ZoomUiIn, ZoomUiOut, ZoomUiReset, FullScreen, ComputerKeyboard, BrowserPreview, DrawMode, Overdub,
     SmallerQuant, LargerQuant, ToggleQuant,
     FocusControlBar, FocusBrowser, FocusSession, FocusArrangement, FocusClip, FocusDevices,
-    ReadManual, ImportAudio, Rename, AddLocator, ContentEditor, EnvelopeEditor, ExpressionEditor, ShowGroupedTrack, TripletLaunchQuant, InvertNotes,
+    ReadManual, ImportAudio, Rename, EditInfoText, AddLocator, ContentEditor, EnvelopeEditor, ExpressionEditor, ShowGroupedTrack, TripletLaunchQuant, InvertNotes,
     FoldNotes, FoldScale, HighlightScales, PianoPreview,
     InsertTakeLane, FreezeTrack, BounceTrack, BounceNew, ConsolidateClips, ConvertMelody, ConvertHarmony, ConvertDrums, SliceMidi, ResynthesizeClip,
     DeactivateTrack, HideTrack, ShowHiddenTracks, StripSilence, NextTransient, PreviousTransient,
@@ -382,6 +383,7 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         m.addItem(DuplicateClip, "Duplicate    (Cmd+D)", hasClip || (loaded && ui.mainView == ui::MainView::Arrangement && ui.arrangementSelection.active)
                   || (loaded && trackContext && ui.selectedTrack < ui.numTracks()));
         m.addItem(DeleteClip, "Delete    (Delete)", hasClip || ui.selectedDeviceId >= 0
+                  || (loaded && ui.mainView == ui::MainView::Arrangement && ui.arrangementSelection.active)
                   || (loaded && trackContext && ui.sessionTrackSelection && ui.selectedTrack >= 0
                       && ui.selectedTrack < ui.numTracks() + ui.numReturns()
                       && ! ui.recording && ! ui.recordingRequested));
@@ -401,8 +403,9 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         m.addItem(UngroupTracks, "Ungroup Tracks    (Shift+Cmd+G)", trackContext && track && track->kind == model::TrackKind::Group && ui.selectedTrack < ui.numTracks());
         unavailable(m, {"Compare: Switch to B", "Compare: Copy A to B", "Cut Time", "Copy Time", "Paste Time", "Duplicate Time", "Delete Time"});
         m.addItem(ApplyMidiTool, "Apply Transformation/Generator    (Cmd+Enter)", hasClip && toolReady);
-        m.addItem(Rename, "Rename    (Cmd+R)", hasClip || (track && track->kind != model::TrackKind::Main));
-        unavailable(m, {"Edit Info Text"});
+        m.addItem(Rename, "Rename    (Cmd+R)", hasClip || (track && track->kind != model::TrackKind::Main)
+                                                   || (ui.song && model::findLocator(*ui.song, ui.selectedLocator)));
+        m.addItem(EditInfoText, "Edit Info Text", ui.song && model::findLocator(*ui.song, ui.selectedLocator)); // UI-3b: locators
         m.addItem(SoloTrack, "Solo Track", ui.controls && track && ui.selectedTrack < ui.numTracks() + ui.numReturns());
         m.addItem(ArmTrack, "Arm Track", track && (track->kind == model::TrackKind::Midi || track->kind == model::TrackKind::Audio));
         const bool renderable = loaded && track && ui.selectedTrack >= 0 && ui.selectedTrack < ui.numTracks() && ! ui.recording && ! ui.recordingRequested;
@@ -448,7 +451,7 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         m.addItem(ResynthesizeClip, "Resynthesize to New MIDI Track", audio);
         m.addItem(ConvertDrums, "Convert Drums to New MIDI Track", audio);
         m.addItem(SeparateStems, "Separate Stems to New Audio Tracks", hasClip && ui.selectedClip()->kind == model::Clip::Kind::Audio);
-        m.addItem(AddLocator, "Add Locator", loaded);
+        m.addItem(AddLocator, ui.song && model::findLocator(*ui.song, ui.selectedLocator) ? "Delete Locator" : "Add Locator", loaded);
         unavailable(m, {"Add Time Signature Change"});
         m.addItem(ImportAudio, "Import Audio File...", loaded && ! ui.recording);
     }
@@ -459,7 +462,9 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         m.addItem(ContinuePlayback, "Continue Playback", loaded);
         unavailable(m, {"Play From Insert Marker"});
         m.addItem(ReturnToStart, "Return Play Position to 1.1.1", loaded);
-        unavailable(m, {"Move Insert Marker To Playhead", "Follow", "Start Transport With Record", "Start Transport With Tap Tempo", "Link Start Stop Sync"});
+        unavailable(m, {"Move Insert Marker To Playhead"});
+        m.addItem(FollowPlayhead, "Follow    (Cmd+Shift+F)", loaded, ui.followPlayhead);
+        unavailable(m, {"Start Transport With Record", "Start Transport With Tap Tempo", "Link Start Stop Sync"});
         m.addSeparator();
         m.addItem(Record, "Record to Arrangement    (F9)", loaded);
         unavailable(m, {"Arm Recording to Arrangement"});
@@ -700,7 +705,7 @@ void MainWindow::menuItemSelected(int itemId, int)
         case DeleteClip:
             if (! key(juce::KeyPress::deleteKey)) ui.deleteSelectedDevice();
             break;
-        case Play: if (ui.transport && ui.song) ui.transport->play(); break;
+        case Play: if (ui.transport && ui.song) ui::startPlayback(ui); break;
         case Stop: if (ui.transport) ui.transport->stop(); break;
         case Record: if (ui.toggleRecording) ui.toggleRecording(); break;
         case StopAllClips: if (ui.stopAllClips) ui.stopAllClips(); break;
@@ -792,10 +797,8 @@ void MainWindow::menuItemSelected(int itemId, int)
         case AddFolder: if (ui.addBrowserFolder) ui.addBrowserFolder(); break;
         case ImportAudio: app_.importAudioDialog(); break;
         case Rename: app_.renameSelection(); break;
-        case AddLocator:
-            if (ui.song && ui.applyEdit && ui.transport)
-                ui.applyEdit(model::addLocator(*ui.song, ui.transport->positionBeats(), std::to_string(ui.song->locators.size() + 1)));
-            break;
+        case EditInfoText: app_.editLocatorText(true); break;
+        case AddLocator: ui::setOrDeleteLocator(ui); break; // UI-3b: the Set / Del button's command
         case ShowBackups:
         case RevealBackups:
             if (ui.song)
@@ -839,6 +842,7 @@ void MainWindow::menuItemSelected(int itemId, int)
         case ReturnToStart: if (ui.transport) ui.transport->setPosition(0); break;
         case SessionRecord: if (ui.toggleSessionRecording) ui.toggleSessionRecording(); break;
         case Metronome: if (ui.transport) ui.transport->setMetronome(! ui.transport->metronomeOn()); break;
+        case FollowPlayhead: ui.followPlayhead = ! ui.followPlayhead; ui.followPaused = false; break;
         case BackToArrangement: if (ui.backToArrangement) ui.backToArrangement(); break;
         case ToggleViews: ui.mainView = ui.mainView == ui::MainView::Session ? ui::MainView::Arrangement : ui::MainView::Session; break;
         case ToggleClipDevice: ui.detailTab = ui.detailTab == ui::DetailTab::Devices ? ui::DetailTab::Clip : ui::DetailTab::Devices; ui.detailVisible = true; break;

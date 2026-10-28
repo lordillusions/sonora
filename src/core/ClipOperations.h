@@ -7,6 +7,8 @@ EditCommand replaceTrack(const Song&, int track, Track replacement, std::string 
 EditCommand replaceArrangementRange(const Song&, int track, double start, double end, Clip replacement);
 std::vector<AutomationEnvelope> consolidatedEnvelopes(const Song&, int track, double start, double end);
 Clip consolidatedMidi(const Song&, int track, double start, double end);
+// The colour a consolidated clip keeps: that of the earliest clip it covers on the track (the track's colour when none).
+int consolidatedColor(const Song&, int track, double start, double end);
 // Audible Arrangement bounds for the supplied track/group members; Session positions are independent.
 std::optional<std::pair<Beats, Beats>> arrangementClipSpan(const Song&, const std::vector<int>& tracks);
 // Frozen playback retains the editable original track and replaces only the engine's input/device chain.

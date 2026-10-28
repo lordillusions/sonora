@@ -49,6 +49,7 @@ public:
     void openFileDialog();
     void importAudioDialog();
     void renameSelection();
+    void editLocatorText(bool infoText); // UI-3b: the selected locator's name or info text
     void openPluginEditor(int track, int device);
     // UI-27: floating Sonora Prism editors. Must run synchronously whenever the model changes (see UiContext::modelChanged).
     void syncWavetableWindows();
@@ -275,8 +276,11 @@ private:
     void syncModelFromEngine();
     void openBrowserFolder(const std::string& path);
     void readBrowserFolder(const std::string& path, bool root);
+    void indexBrowserFolder(const std::string& path);
     void addBrowserFolder();
     int browserGeneration_ = 0; // message thread, rejects results after navigating elsewhere
+    // UI-6b: the running recursive search scan stops when this moves on (new scan or another folder).
+    std::shared_ptr<std::atomic<int>> browserSearchGeneration_ = std::make_shared<std::atomic<int>>(0);
     int documentGeneration_ = 0; // rejects sample drops after another set was opened
     void toggleRecording();
     void beginRecording();

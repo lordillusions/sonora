@@ -15,6 +15,7 @@
 #include "io/als/AlsReader.h"
 #include "platform/SecretStore.h"
 #include "plugins/PluginDevice.h"
+#include "ui/SetView.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -860,6 +861,7 @@ void AppController::saveCollabCopy()
             if (editingDevices_ || syncingModel_) { ui_.statusText = "Wait until the device operation has finished"; return; }
             syncModelFromEngine();
             auto copy = *song_;
+            ui::captureSetView(ui_, copy);
             // The template the writer patches: the host's file as it was sent.
             const auto source = collab::collabCacheDirectory().getChildFile("sets").getChildFile(
                 juce::String(crypto::toHex(crypto::sha256(collab_->sourceFile()))) + ".als");

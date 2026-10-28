@@ -132,6 +132,7 @@ public:
         fader_->setGain = [this](float g) { if (auto* c = controls()) c->volume.store(g); };
         fader_->getPeakL = [this] { auto* c = controls(); return c ? c->peakL.load() : 0.0f; };
         fader_->getPeakR = [this] { auto* c = controls(); return c ? c->peakR.load() : 0.0f; };
+        fader_->isMuted = [this] { return trackSilencedInMix(ctx(), index_); };
 
         if (! isMain)
         {
@@ -140,6 +141,7 @@ public:
             activator_->midiTarget = midi::ControlTarget{midi::ControlTarget::Kind::TrackActivator, controlIndex, 0, 0, {}};
             activator_->isOn = [this] { auto* c = controls(); return c ? c->active.load() : true; };
             activator_->onClick = [this] { if (auto* c = controls()) c->active.store(! c->active.load()); };
+            activator_->isSoloMuted = [this] { const auto* t = ctx().trackAt(index_); return t && ! t->deactivated && trackSilencedInMix(ctx(), index_); };
 
             solo_ = add<TextButton>("S", TextButton::Style::Solo);
             solo_->midiTarget = midi::ControlTarget{midi::ControlTarget::Kind::TrackSolo, controlIndex, 0, 0, {}};
@@ -445,7 +447,7 @@ float SessionView::columnX(int column) const
 {
     const int nTracks = ctx().numTracks(), nReturns = ctx().numReturns();
     if (column < nTracks)
-        return widthOf(0, column) - scrollX_;
+        return widthOf(0, column) - ctx().sessionScrollX;
     if (column == nTracks + nReturns)
         return width() - mainWidth();
     return width() - mainWidth() - widthOf(column, nTracks + nReturns);
@@ -511,7 +513,7 @@ void SessionView::layout()
     if (builtFor_ != ctx().song || builtStructure_ != ctx().trackStructure())
         rebuild();
     updateVisibleColumns();
-    scrollX_ = std::clamp(scrollX_, 0.0f, std::max(0.0f, widthOf(0, ctx().numTracks()) - tracksViewport()));
+    ctx().sessionScrollX = std::clamp(ctx().sessionScrollX, 0.0f, std::max(0.0f, widthOf(0, ctx().numTracks()) - tracksViewport()));
     const float mh = mixerHeight();
     for (size_t i = 0; i < mixerStrips_.size(); ++i)
     {
@@ -602,11 +604,11 @@ void SessionView::paint(SkCanvas& c, const Theme& t)
 
     // The empty area between the last track and the returns holds the drop hint on the selected scene row.
     {
-        const float gapX = std::min(widthOf(0, nTracks) - scrollX_, tracksViewport());
+        const float gapX = std::min(widthOf(0, nTracks) - ctx().sessionScrollX, tracksViewport());
         const float gapW = width() - mainWidth() - widthOf(nTracks, nTracks + nReturns) - gapX;
         if (gapW > 160 && nScenes > 0 && x.selectedSessionScene >= 0 && x.selectedSessionScene < nScenes)
         {
-            const float ry = m.sessionHeaderHeight + 1 + (float) x.selectedSessionScene * m.sessionSlotHeight - scrollY_;
+            const float ry = m.sessionHeaderHeight + 1 + (float) x.selectedSessionScene * m.sessionSlotHeight - ctx().sessionScrollY;
             const Rect row{gapX, ry, gapW, m.sessionSlotHeight - 1};
             paint::fill(c, row, t.color("SurfaceHighlight"));
             paint::text(c, "Drop Files and Devices Here", row, t.color("ControlForeground"), m.fontSize, Align::Centre);
@@ -680,7 +682,7 @@ void SessionView::paint(SkCanvas& c, const Theme& t)
         // Slots cannot paint over the pinned title when vertically scrolling.
         c.save();
         c.clipRect(SkRect::MakeXYWH(cx, m.sessionHeaderHeight + 1, cw - 2, std::max(0.0f, gridBottom - m.sessionHeaderHeight - 1)));
-        float y = m.sessionHeaderHeight + 1 - scrollY_;
+        float y = m.sessionHeaderHeight + 1 - ctx().sessionScrollY;
         for (int s = 0; s < nScenes; ++s, y += m.sessionSlotHeight)
         {
             if (y + m.sessionSlotHeight < m.sessionHeaderHeight || y > gridBottom)
@@ -811,7 +813,7 @@ std::optional<midi::ControlTarget> SessionView::mappingTargetAt(float x, float y
     const auto& context = ctx();
     if (! context.song || y < context.theme.metrics.sessionHeaderHeight + 1 || y >= gridBottom()) return std::nullopt;
     const int column = columnAt(x);
-    const int scene = (int) std::floor((y - context.theme.metrics.sessionHeaderHeight - 1 + scrollY_) / context.theme.metrics.sessionSlotHeight);
+    const int scene = (int) std::floor((y - context.theme.metrics.sessionHeaderHeight - 1 + ctx().sessionScrollY) / context.theme.metrics.sessionSlotHeight);
     if (scene < 0 || (size_t) scene >= context.song->scenes.size()) return std::nullopt;
     return midi::sessionClipTarget(*context.song, column, scene);
 }
@@ -884,7 +886,7 @@ std::optional<TrackDropTarget> SessionView::trackDropTarget(const MouseEvent& e)
     const int col = columnAt(e.x);
     if (col < 0)
     {
-        if (e.x >= widthOf(0, x.numTracks()) - scrollX_ && e.x < tracksViewport())
+        if (e.x >= widthOf(0, x.numTracks()) - ctx().sessionScrollX && e.x < tracksViewport())
             return TrackDropTarget{x.numTracks(), -1, {e.x, 0, 2, x.theme.metrics.sessionHeaderHeight}};
         return {};
     }
@@ -899,7 +901,7 @@ std::optional<TrackDropTarget> SessionView::trackDropTarget(const MouseEvent& e)
         ++before;
         while (before < x.numTracks() && descendantOf(before, col)) ++before;
     }
-    const float edge = position < 0.5f ? left : before < x.numTracks() ? columnX(before) : widthOf(0, x.numTracks()) - scrollX_;
+    const float edge = position < 0.5f ? left : before < x.numTracks() ? columnX(before) : widthOf(0, x.numTracks()) - ctx().sessionScrollX;
     return TrackDropTarget{before, track.groupId, {edge - 1, 0, 2, gridBottom()}};
 }
 
@@ -953,7 +955,7 @@ void SessionView::mouseDown(const MouseEvent& e)
     {
         if (e.y > m.sessionHeaderHeight && e.y < gridBottom() && x.song && col < x.numTracks())
         {
-            const int scene = (int) std::floor((e.y - m.sessionHeaderHeight - 1 + scrollY_) / m.sessionSlotHeight);
+            const int scene = (int) std::floor((e.y - m.sessionHeaderHeight - 1 + ctx().sessionScrollY) / m.sessionSlotHeight);
             if (scene >= 0 && (size_t) scene < x.song->scenes.size())
             {
                 x.selectedSessionScene = scene;
@@ -988,7 +990,7 @@ void SessionView::mouseDown(const MouseEvent& e)
     }
     else if (e.y > m.sessionHeaderHeight && e.y < gridBottom() && x.song != nullptr)
     {
-        const int scene = (int) std::floor((e.y - m.sessionHeaderHeight - 1 + scrollY_) / m.sessionSlotHeight);
+        const int scene = (int) std::floor((e.y - m.sessionHeaderHeight - 1 + ctx().sessionScrollY) / m.sessionSlotHeight);
         const int nScenes = (int) x.song->scenes.size();
         if (scene >= 0 && scene < nScenes) x.selectedSessionScene = scene;
         const bool isMain = col == x.numTracks() + x.numReturns();
@@ -1057,10 +1059,10 @@ bool SessionView::mouseWheel(const MouseEvent& e)
 {
     const auto& m = ctx().theme.metrics;
     const float maxX = std::max(0.0f, widthOf(0, ctx().numTracks()) - tracksViewport());
-    scrollX_ = std::clamp(scrollX_ - e.wheelDeltaX * kWheelPixels, 0.0f, maxX);
+    ctx().sessionScrollX = std::clamp(ctx().sessionScrollX - e.wheelDeltaX * kWheelPixels, 0.0f, maxX);
     const float rows = ctx().song ? (float) ctx().song->scenes.size() : 0.0f;
     const float maxY = std::max(0.0f, rows * m.sessionSlotHeight - (gridBottom() - m.sessionHeaderHeight));
-    scrollY_ = std::clamp(scrollY_ - e.wheelDeltaY * kWheelPixels, 0.0f, maxY);
+    ctx().sessionScrollY = std::clamp(ctx().sessionScrollY - e.wheelDeltaY * kWheelPixels, 0.0f, maxY);
     layout();
     repaint();
     return true;
@@ -1075,7 +1077,7 @@ bool SessionView::browserDrop(const BrowserDrag& payload, const MouseEvent& even
     {
         const auto& metrics = ctx().theme.metrics;
         if (event.y < metrics.sessionHeaderHeight || event.y >= gridBottom()) return false;
-        scene = std::max(0, (int) std::floor((event.y - metrics.sessionHeaderHeight - 1 + scrollY_) / metrics.sessionSlotHeight));
+        scene = std::max(0, (int) std::floor((event.y - metrics.sessionHeaderHeight - 1 + ctx().sessionScrollY) / metrics.sessionSlotHeight));
     }
     if (ctx().dropBrowserItem) ctx().dropBrowserItem(payload, track, 0, scene);
     return true;
@@ -1117,13 +1119,13 @@ bool SessionView::keyPressed(const KeyEvent& key)
         const auto selectedX = columnX(x.selectedTrack);
         if (x.selectedTrack < x.numTracks())
         {
-            if (selectedX < 0) scrollX_ = std::max(0.0f, scrollX_ + selectedX);
-            else if (selectedX + columnWidth(x.selectedTrack) > tracksViewport()) scrollX_ += selectedX + columnWidth(x.selectedTrack) - tracksViewport();
+            if (selectedX < 0) ctx().sessionScrollX = std::max(0.0f, ctx().sessionScrollX + selectedX);
+            else if (selectedX + columnWidth(x.selectedTrack) > tracksViewport()) ctx().sessionScrollX += selectedX + columnWidth(x.selectedTrack) - tracksViewport();
         }
         const float top = (float) x.selectedSessionScene * x.theme.metrics.sessionSlotHeight;
         const float view = gridBottom() - x.theme.metrics.sessionHeaderHeight - 1;
-        if (top < scrollY_) scrollY_ = top;
-        else if (top + x.theme.metrics.sessionSlotHeight > scrollY_ + view) scrollY_ = std::max(0.0f, top + x.theme.metrics.sessionSlotHeight - view);
+        if (top < ctx().sessionScrollY) ctx().sessionScrollY = top;
+        else if (top + x.theme.metrics.sessionSlotHeight > ctx().sessionScrollY + view) ctx().sessionScrollY = std::max(0.0f, top + x.theme.metrics.sessionSlotHeight - view);
         layout(); repaint(); return true;
     }
     if (! key.cmd && ! key.alt && key.keyCode == juce::KeyPress::escapeKey)

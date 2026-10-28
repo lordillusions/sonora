@@ -486,6 +486,42 @@ TEST_CASE("duplicate region: intersects source clips, overwrites destination, pr
     REQUIRE(history.redo(song)); CHECK(song.tracks[0].arrangementClips[1].uid == copyUid);
 }
 
+TEST_CASE("delete region: removes every selected clip on every selected track and cuts the clips it half covers")
+{
+    Song song = makeSong();
+    Track second = song.tracks[0]; second.id = 2;
+    for (auto& clip : second.arrangementClips) clip.uid += 10;
+    Track frozen = second; frozen.id = 3; frozen.frozen = true;
+    for (auto& clip : frozen.arrangementClips) clip.uid += 10;
+    Track outside = frozen; outside.id = 4; outside.frozen = false;
+    for (auto& clip : outside.arrangementClips) clip.uid += 10;
+    song.tracks.push_back(second); song.tracks.push_back(frozen); song.tracks.push_back(outside);
+    EditHistory history;
+    auto command = deleteArrangementRegion(song, 0, 2, 2, 10);
+    REQUIRE(command.apply); CHECK(command.tracks == std::vector<int>({0, 1}));
+    history.perform(song, std::move(command));
+    for (int index : {0, 1})
+    {
+        const auto& clips = song.tracks[(size_t) index].arrangementClips;
+        REQUIRE(clips.size() == 2);
+        CHECK_NEAR(clips[0].currentStart, 0, 1e-9); CHECK_NEAR(clips[0].currentEnd, 2, 1e-9);
+        CHECK_NEAR(clips[1].currentStart, 10, 1e-9); CHECK_NEAR(clips[1].currentEnd, 12, 1e-9);
+        CHECK_NEAR(clips[1].loop.startRelative, 2, 1e-9); // the tail keeps playing what it played before
+    }
+    CHECK(song.tracks[2].arrangementClips.size() == 3); // frozen
+    CHECK(song.tracks[3].arrangementClips.size() == 3); // not selected
+    REQUIRE(history.undo(song)); CHECK(! history.canUndo());
+    CHECK(song.tracks[0].arrangementClips.size() == 3); CHECK(song.tracks[1].arrangementClips.size() == 3);
+    CHECK_NEAR(song.tracks[0].arrangementClips[0].currentEnd, 4, 1e-9);
+    // A selection over empty time changes nothing.
+    CHECK(! deleteArrangementRegion(song, 0, 1, 20, 24).apply);
+    // One clip inside the selection is removed whole; a clip cut at only one edge keeps its uid.
+    history.perform(song, deleteArrangementRegion(song, 0, 0, 3, 8));
+    REQUIRE(song.tracks[0].arrangementClips.size() == 2);
+    CHECK(song.tracks[0].arrangementClips[0].uid == 100); CHECK_NEAR(song.tracks[0].arrangementClips[0].currentEnd, 3, 1e-9);
+    CHECK(song.tracks[0].arrangementClips[1].uid == 102);
+}
+
 TEST_CASE("duplicate region: gaps replace destination and unwarped content offsets stay in seconds")
 {
     Song song = makeSong(); song.tempo = 120;

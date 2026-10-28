@@ -216,3 +216,47 @@ test('MCP: discover insert edit remove native and generic VST3 devices with guar
   assert.equal(native.exitCode, 0, errors); assert.match(output, /PASS: MCP native and generic VST3 insertion/);
   await assert.rejects(fs.access(registry));
 });
+
+test('MCP: Arrangement locators add, update, delete, undo and persist through edits.apply', { timeout: 60000 }, async () => {
+  const native = spawn(probe, ['--serve', '--verify-locators-on-exit'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '', errors = '';
+  native.stdout.on('data', b => { output += b; }); native.stderr.on('data', b => { errors += b; });
+  const registry = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Startup timeout: ${errors}`)), 10000);
+    createInterface({ input: native.stdout }).once('line', line => { clearTimeout(timer); resolve(line); });
+    native.once('error', reject);
+  });
+  const entry = JSON.parse(await fs.readFile(registry, 'utf8')); const c = client();
+  try {
+    await initialize(c);
+    let current = await c.tool('sonora_session_attach', { instanceId: entry.instanceId, documentId: entry.documentId });
+    assert.deepEqual(current.data.locators, []);
+    const invalid = await c.request('tools/call', { name: 'sonora_edits_apply', arguments: { expectedRevision: current.revision,
+      idempotencyKey: 'bad-colour', commands: [{ type: 'locator.add', beat: 4, color: 70 }] } });
+    assert.ok(invalid.error || invalid.result?.isError);
+    const added = await c.tool('sonora_edits_apply', { expectedRevision: current.revision, idempotencyKey: 'add-locators', commands: [
+      { type: 'locator.add', beat: 16, name: 'Drop', color: 14 }, { type: 'locator.add', beat: 0, name: 'Intro' }] });
+    assert.equal(added.ok, true, JSON.stringify(added));
+    const [drop, intro] = added.data.locatorIds;
+    current = await c.tool('sonora_project_inspect');
+    assert.deepEqual(current.data.locators.map(l => [l.name, l.beat, l.color]), [['Intro', 0, -1], ['Drop', 16, 14]]);
+    const taken = await c.tool('sonora_edits_apply', { expectedRevision: current.revision, idempotencyKey: 'taken-beat',
+      commands: [{ type: 'locator.update', locatorId: intro, beat: 16 }] });
+    assert.equal(taken.error.code, 'invalid_request');
+    const changed = await c.tool('sonora_edits_apply', { expectedRevision: current.revision, idempotencyKey: 'edit-locators', commands: [
+      { type: 'locator.update', locatorId: drop, name: 'Chorus', beat: 32, color: 22, songStart: true },
+      { type: 'locator.delete', locatorId: intro }] });
+    assert.equal(changed.ok, true, JSON.stringify(changed));
+    assert.equal((await c.tool('sonora_project_inspect')).data.locators.length, 1);
+    const undone = await c.tool('sonora_history_undo', { expectedRevision: changed.revision, idempotencyKey: 'undo-locators',
+      undoToken: changed.data.undoToken });
+    assert.equal(undone.ok, true, JSON.stringify(undone));
+    const again = await c.tool('sonora_edits_apply', { expectedRevision: undone.revision, idempotencyKey: 'edit-again', commands: [
+      { type: 'locator.update', locatorId: drop, name: 'Chorus', color: 22 }] });
+    assert.equal(again.ok, true, JSON.stringify(again));
+  } finally {
+    await c.close(); if (native.exitCode === null) { const exit = once(native, 'exit'); native.kill('SIGTERM'); await exit; }
+  }
+  assert.equal(native.exitCode, 0, errors); assert.match(output, /PASS: locators saved and reloaded/);
+  await assert.rejects(fs.access(registry));
+});

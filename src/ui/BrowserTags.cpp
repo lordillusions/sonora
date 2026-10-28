@@ -51,6 +51,7 @@ bool BrowserTags::set(const std::string& key, BrowserTag tag, bool enabled)
     std::erase_if(erase, [&](const auto& value) { return same(value, tag); });
     if (contains(insert, tag)) return false;
     insert.push_back(std::move(tag));
+    ++revision_;
     return true;
 }
 
@@ -101,6 +102,7 @@ std::string BrowserTags::toJson() const
 void BrowserTags::loadJson(const std::string& json)
 {
     changes_.clear();
+    ++revision_;
     const auto data = juce::JSON::parse(juce::String(json));
     if (const auto* entries = data.getArray())
         for (const auto& entry : *entries)

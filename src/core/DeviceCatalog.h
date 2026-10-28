@@ -38,6 +38,11 @@ const CatalogEntry* findCatalogEntry(std::string_view xmlTag);
 std::span<const CatalogEntry> deviceCatalog();
 std::string_view deviceCategory(const CatalogEntry& entry);
 
+// The device a browser entry inserts into a set saved with `schemaVersion` (the header's MinorVersion): the browser's
+// Auto Filter is the reference's 12.4 device (AutoFilter2); a set from Live 11 gets the legacy AutoFilter instead, because
+// its header cannot be raised to 12.4 without skipping the reference's 11 -> 12 upgrade (AlsWriter raises 12.x headers).
+std::string_view insertedDeviceTag(std::string_view xmlTag, std::string_view schemaVersion);
+
 bool isRackTag(std::string_view xmlTag);
 bool isMaxForLiveTag(std::string_view xmlTag);
 // Max for Live patches Sonora replaces with a native device, keyed by the .amxd file name without extension

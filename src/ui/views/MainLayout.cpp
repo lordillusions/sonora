@@ -1,4 +1,5 @@
 #include "ui/views/MainLayout.h"
+#include "ui/Locators.h"
 
 #include "engine/Transport.h"
 #include "engine/EngineGraph.h"
@@ -468,6 +469,11 @@ bool MainLayout::keyPressed(const KeyEvent& k)
     {
         browser_->focusSearch();
     }
+    else if (k.cmd && k.shift && ! k.alt && ! k.ctrl && (k.textChar == 'f' || k.textChar == 'F' || k.keyCode == 'F'))
+    {
+        x.followPlayhead = ! x.followPlayhead; // UI-53: Playback > Follow
+        x.followPaused = false;
+    }
     else if (! k.cmd && ! k.alt && ! k.ctrl && (k.textChar == 'b' || k.textChar == 'B') && (! x.computerKeyboard || k.shift))
     {
         x.drawMode = ! x.drawMode; // Draw Mode, like the pencil button in the control bar
@@ -503,7 +509,11 @@ bool MainLayout::keyPressed(const KeyEvent& k)
         if (x.transport)
         {
             if (k.shift && ! k.cmd && ! k.alt) x.transport->play();
-            else if (! k.cmd && ! k.alt && ! k.ctrl) x.transport->togglePlay();
+            else if (! k.cmd && ! k.alt && ! k.ctrl)
+            {
+                if (x.transport->isPlaying() || x.transport->isCountingIn()) x.transport->stop();
+                else startPlayback(x); // UI-3b: from the song start locator when one is set
+            }
         }
     }
     else if (k.cmd && k.alt && (k.textChar == 'i' || k.textChar == 'I'))

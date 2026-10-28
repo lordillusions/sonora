@@ -9,12 +9,45 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include <array>
 #include <atomic>
+#include <cmath>
 #include <string>
 #include <vector>
 
 namespace sonora::devices
 {
+
+// UI-55: a device's output level, shown by the meter in the gap after it in the device chain (like the reference).
+// The engine measures every block after process(); each value keeps the loudest block until the UI takes it.
+struct OutputMeter
+{
+    std::array<std::atomic<float>, 2> peak{}, rms{};
+
+    // Audio thread: no allocation or locks. A mono buffer meters both sides.
+    void measure(const juce::AudioBuffer<float>& audio, int n) noexcept
+    {
+        if (n <= 0 || audio.getNumChannels() <= 0) return;
+        for (size_t ch = 0; ch < 2; ++ch)
+        {
+            const float* x = audio.getReadPointer(std::min((int) ch, audio.getNumChannels() - 1));
+            float top = 0.0f, sum = 0.0f;
+            for (int i = 0; i < n; ++i)
+            {
+                const float v = std::abs(x[i]);
+                top = v > top ? v : top;
+                sum += v * v;
+            }
+            if (! std::isfinite(top) || ! std::isfinite(sum)) continue;
+            const float level = std::sqrt(sum / (float) n);
+            if (top > peak[ch].load(std::memory_order_relaxed)) peak[ch].store(top, std::memory_order_relaxed);
+            if (level > rms[ch].load(std::memory_order_relaxed)) rms[ch].store(level, std::memory_order_relaxed);
+        }
+    }
+    // Message thread: the loudest peak / RMS since the last call, per channel.
+    std::array<float, 2> takePeak() noexcept { return {peak[0].exchange(0.0f), peak[1].exchange(0.0f)}; }
+    std::array<float, 2> takeRms() noexcept { return {rms[0].exchange(0.0f), rms[1].exchange(0.0f)}; }
+};
 
 struct ParameterInfo
 {
@@ -123,6 +156,8 @@ public:
 
     void setBypassed(bool b) { bypassed.store(b); }
     bool isBypassed() const { return bypassed.load(); }
+
+    OutputMeter outputMeter; // written by whoever runs process() (engine node or rack chain), read by the chain meters
 
 protected:
     std::atomic<bool> bypassed{false};

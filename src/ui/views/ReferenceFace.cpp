@@ -119,8 +119,9 @@ public:
 class DisplayValue final : public ValueField
 {
 public:
-    DisplayValue(P* p, int index, std::string label, ReferenceFace::Law law, ReferenceFace::Format format, std::function<float()> size, bool mark)
-        : ValueField(p, index, std::move(law), std::move(format), std::move(size)), label_(std::move(label)), mark_(mark) {}
+    DisplayValue(P* p, int index, std::string label, ReferenceFace::Law law, ReferenceFace::Format format, std::function<float()> size, bool mark,
+                 bool chosen)
+        : ValueField(p, index, std::move(law), std::move(format), std::move(size)), label_(std::move(label)), mark_(mark), chosen_(chosen) {}
     void paint(SkCanvas& c, const Theme& t) override
     {
         const float size = size_();
@@ -131,17 +132,18 @@ public:
             x = gfx::measureText(label_, size) + size * 0.4f;
         }
         const auto value = valueText();
-        paint::text(c, value, {x, 0, width() - x, height()}, t.color("RangeDefault"), size);
+        const auto ink = t.color(chosen_ ? "ChosenDefault" : "RangeDefault");
+        paint::text(c, value, {x, 0, width() - x, height()}, ink, size);
         if (mark_)
         {
             const float end = x + gfx::measureText(value, size) + size * 0.75f;
-            ctl::triangle(c, end, height() * 0.55f, size * 0.5f, size * 0.3f, ctl::Dir::Down, t.color("RangeDefault"));
+            ctl::triangle(c, end, height() * 0.55f, size * 0.5f, size * 0.3f, ctl::Dir::Down, ink);
         }
     }
 
 private:
     std::string label_;
-    bool mark_;
+    bool mark_, chosen_;
 };
 
 // Drop-down chooser: the light field with a down arrow, showing the choice or a glyph for it.
@@ -241,14 +243,14 @@ std::string ReferenceFace::formatted(int parameter) const
 }
 
 // ---------------------------------------------------------------- geometry
-ReferenceFace::ReferenceFace(devices::DeviceProcessor* processor, float captureWidth, float originX, float originY, Tag tag)
-    : processor_(processor), captureWidth_(captureWidth), originX_(originX), originY_(originY), tag_(std::move(tag))
+ReferenceFace::ReferenceFace(devices::DeviceProcessor* processor, float captureWidth, float originX, float originY, Tag tag, float captureBody)
+    : processor_(processor), captureWidth_(captureWidth), originX_(originX), originY_(originY), captureBody_(captureBody), tag_(std::move(tag))
 {
 }
 
 float ReferenceFace::preferredWidth(float bodyHeight) const
 {
-    return (captureWidth_ - (collapsed_ ? collapseTo_ - collapseFrom_ : 0.0f)) * bodyHeight / kBodyHeight;
+    return (captureWidth_ - (collapsed_ ? collapseTo_ - collapseFrom_ : 0.0f)) * bodyHeight / captureBody_;
 }
 
 float ReferenceFace::column(float x) const
@@ -408,9 +410,11 @@ Widget* ReferenceFace::chooser(std::function<int()> parameter, float x0, float y
     return widget;
 }
 
-Widget* ReferenceFace::displayValue(int parameter, std::string label, float x0, float y0, float x1, float y1, Law law, Format format, bool menuMark)
+Widget* ReferenceFace::displayValue(int parameter, std::string label, float x0, float y0, float x1, float y1, Law law, Format format, bool menuMark,
+                                    bool chosen)
 {
-    auto* widget = add<DisplayValue>(processor_, parameter, std::move(label), std::move(law), std::move(format), [this] { return text(); }, menuMark);
+    auto* widget = add<DisplayValue>(processor_, parameter, std::move(label), std::move(law), std::move(format), [this] { return text(); }, menuMark,
+                                     chosen);
     tag(widget, parameter);
     place(widget, x0, y0, x1, y1);
     return widget;
@@ -424,12 +428,12 @@ void ReferenceFace::fillBody(SkCanvas& c, const Theme& t, bool gutters) const
 
 void ReferenceFace::panel(SkCanvas& c, const Theme& t, float x0, float y0, float x1, float y1) const
 {
-    paint::fillRounded(c, at(x0, y0, x1, y1), 3 * unit(), t.color("SurfaceBackground"));
+    paint::fillRounded(c, at(x0, y0, x1, y1), 3 * zoom() * unit(), t.color("SurfaceBackground"));
 }
 
 void ReferenceFace::displayPanel(SkCanvas& c, const Theme& t, float x0, float y0, float x1, float y1) const
 {
-    paint::fillRounded(c, at(x0, y0, x1, y1), 4 * unit(), t.color("RetroDisplayBackground"));
+    paint::fillRounded(c, at(x0, y0, x1, y1), 4 * zoom() * unit(), t.color("RetroDisplayBackground"));
 }
 
 void ReferenceFace::label(SkCanvas& c, const Theme& t, std::string_view s, float x0, float y0, float x1, float y1, Align align, bool bold, SkColor ink) const

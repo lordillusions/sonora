@@ -62,8 +62,6 @@ private:
     const model::Song* builtFor_ = nullptr;
     uint64_t builtStructure_ = 0, builtFold_ = 0;
     std::vector<bool> visibleColumns_;
-    float scrollX_ = 0;
-    float scrollY_ = 0;
     std::vector<Widget*> mixerStrips_;
 };
 

@@ -102,7 +102,9 @@ TEST_CASE("op: every op type survives the wire form and doubles round-trip exact
         {model::ops::SetTrackColor{{12, 13}, 7}}, {model::ops::SetLoop{true, 8, 16}}, {model::ops::MoveClip{12, 1000123, 13, 20}},
         {model::ops::DuplicateClip{12, 1000123, 16}}, {model::ops::DeleteClip{{12, 1000124, 0, -1}}},
         {model::ops::AddNotes{clip, {note(60, 0.5, 0.25, 90)}}}, {model::ops::UpdateNotes{clip, {update}}},
-        {model::ops::DeleteNotes{{12, 1000123, -1, 4}, {1, 2}}}, {model::ops::ReplaceNotes{clip, {}}}};
+        {model::ops::DeleteNotes{{12, 1000123, -1, 4}, {1, 2}}}, {model::ops::ReplaceNotes{clip, {}}},
+        {model::ops::AddLocator{8.5, std::string("Verse \xc3\xa9"), 12}},
+        {model::ops::UpdateLocator{3, 1.0 / 3.0, std::string("Drop"), std::string("info"), 5, true}}, {model::ops::DeleteLocator{3}}};
     std::set<std::string> types;
     for (const auto& op : all)
     {

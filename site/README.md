@@ -9,7 +9,7 @@ The planned domain is **sonoradaw.com**: every page's canonical and Open Graph U
 | `index.html` | Home: hero, alpha notice, what Sonora is (not a copy, familiar on purpose, made for new music), producer requests, collaboration, AI and agents, included instruments, updates, who it's for / not for, CTA |
 | `features.html` | Everything that works today, by area, starting with collaboration, the assistant and the instruments |
 | `compatibility.html` | Platforms, plug-in formats, opening Live 12 sets (possible, not the main use), native device status, the checkable comparison with Live 12 |
-| `download.html` | Alpha warning, the four downloads (all link to GitHub Releases `latest`), requirements, updates (Sparkle deltas), channels, build from source |
+| `download.html` | Alpha warning, the downloads (all link to GitHub Releases `latest`), the VST3 plug-ins, first-launch steps, requirements, updates, channels, build from source |
 | `faq.html` | About, the alpha, Live sets and sound, instruments, collaboration, AI and privacy, license |
 | `about.html` | Why Sonora exists, the author's note, the author (with the CV link), how it's built |
 | `community.html` | Ways to help, how to write a bug report, Discussions, contributing code, conduct |
@@ -40,7 +40,12 @@ Then open <http://localhost:8794/>. Opening `site/index.html` directly from disk
 
 - **Downloads:** every button links to `https://github.com/lordillusions/sonora/releases/latest/download/<stable name>`
   (`Sonora-macOS.dmg`, `Sonora-Windows-x64-setup.exe`, `Sonora-Linux-x86_64.AppImage`, `Sonora-Linux-amd64.deb`,
-  `Sonora-Prism-VST3-macOS.pkg`): the installers workflow attaches these copies next to the versioned files. `site.js`
+  `Sonora-Prism-VST3-macOS.pkg`, `Sonora-Curve-LFO-VST3-macOS.pkg`, `Sonora-Hush-VST3-macOS.pkg`): the installers
+  workflow attaches these copies next to the versioned files, and refuses a release that lacks one the pages link to.
+- **Plug-ins:** every VST3 has a card in `download.html#plugins` (`id` = its name, screenshot `assets/img/plugin-<id>.webp`
+  rendered from the real editor). `scripts/release/check_release_ready.sh` fails a release without one.
+- **First launch:** `download.html#first-launch` has the Gatekeeper (macOS 15+: Open Anyway) and SmartScreen steps. Keep
+  it until the builds are signed. `site.js`
   reads the visitor's system from the browser (no request) and puts that card and button first.
 - **Alpha status:** the strip at the top of every page, the notice on `index.html` and `download.html`, and the
   "The alpha" group in `faq.html`. Change all of them together when the status changes.

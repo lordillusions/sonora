@@ -49,6 +49,7 @@ EqEight::EqEight() : NativeDevice(makeInfos()) {}
 void EqEight::prepare(double sampleRate, int)
 {
     sampleRate_ = sampleRate;
+    displayTap_.prepare(sampleRate);
     outGain_.reset(sampleRate, 0.02);
     reset();
     parametersChanged.store(true);
@@ -56,6 +57,7 @@ void EqEight::prepare(double sampleRate, int)
 
 void EqEight::reset()
 {
+    displayTap_.reset();
     for (auto* set : {&bands_, &bandsB_})
         for (auto& b : *set)
             for (auto& ch : b.state)
@@ -167,6 +169,7 @@ void EqEight::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
             r[i] = m - sd;
         }
     outGain_.applyGain(audio, n);
+    displayTap_.push(l, r, n);
 }
 
 double EqEight::responseAt(double freq, bool setB) const

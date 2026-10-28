@@ -16,7 +16,7 @@ Ableton/LiveSet
   Tracks/{AudioTrack|MidiTrack|GroupTrack|ReturnTrack}*        ✅ (display order)
   MainTrack            (Live 12; Live ≤ 11: MasterTrack)        ✅ both
   Scenes/Scene*        Name, Color, IsTempoEnabled, Tempo        ✅
-  Locators/Locators/Locator*  Time, Name                         ✅
+  Locators/Locators/Locator*  Id, Time, Name, Annotation, IsSongStart ✅ (UI-3b; KeyMidi and unknown children kept)
   Transport            LoopOn, LoopStart, LoopLength, CurrentTime, PunchIn, PunchOut ✅
 ```
 - Tempo: `MainTrack/DeviceChain/Mixer/Tempo/Manual` ✅
@@ -24,6 +24,27 @@ Ableton/LiveSet
   `value = (numerator-1) + 99*log2(denominator)` (201 = 4/4) ✅ `TimeUtils.h`
   The control-bar editor patches this manual value and a matching single pre-roll signature automation point, with undo.
   Multi-point signature automation is retained but not played or authored (ENG-11b); this editor changes the global meter.
+
+### View state (UI-57)
+
+Live saves how the set was being looked at; Sonora reads it into `Song::view` / `Track::laneHeight` / `sessionWidth`,
+opens the set that way (`ui/SetView`) and writes the UI's current values back into the same elements on save. Elements a
+set does not have are never created. Values derived from Live's own sets (templates, lessons, 18 real-world sets):
+
+| Element | Meaning |
+|---|---|
+| `SelectedDocumentViewInMainWindow` | 0 Arrangement, 1 Session (recording templates 0, lesson/empty sets 1) ✅ |
+| `SequencerNavigator/BeatTimeHelper/CurrentZoom` | Arrangement zoom in **beats per pixel** (default 0.254945 ≈ 3.9 px/beat) ✅ |
+| `SequencerNavigator/ScrollerPos@X,Y` | Arrangement scroll, pixels at that zoom, **negated** (X = −beat/zoom) ✅ |
+| `SequencerNavigator/ClientSize@X,Y` | Arrangement area size; passed through |
+| `SessionScrollPos@X,Y` | Session scroll (track columns / scene rows), negated pixels ✅ |
+| `ViewStateMainWindowClipDetailOpen` / `…DeviceDetailOpen` | detail view shows the clip / the devices; both false = closed ✅ |
+| track `DeviceChain/AutomationLanes/AutomationLanes/AutomationLane[0]/LaneHeight` | Arrangement lane height, 17-point steps (17, 34, 51, 68 default, 85…) ✅ |
+| track `TrackUnfolded` | false = folded: a single row (returns and Main are folded by default) ✅ |
+| track `DeviceChain/Mixer/ViewStateSessionTrackWidth` | Session column width (93 default; Live allows narrower than Sonora's 92) ✅ |
+
+Sonora's sizes include a 2-point separator Live's do not (Live 85 ↔ Sonora 87, 93 ↔ 95, from captures). A value the UI
+still shows as read (also when Sonora clamped it: narrow widths, zoom deeper than 2400 px/beat) is written back verbatim.
 
 ## Track (`AudioTrack`, `MidiTrack`, `GroupTrack`, `ReturnTrack`, `MainTrack`)
 
@@ -38,7 +59,7 @@ that undo removed from the model, including after saving a duplicated track, and
 | name | `Name/UserName` or `Name/EffectiveName` ✅ | Empty UserName sets `nameIsAutomatic`; EffectiveName is the cached name. Display ordinals follow current track order, including groups. Explicit names stay literal; leading `#` templates substitute the ordinal (repeated `#` pads with zeroes). Writer retains empty UserName for automatic names; untouched XML round-trips unchanged. |
 | colour | `Color` ✅ | index into 70-colour palette (`core/LiveColors.cpp`) |
 | group | `TrackGroupId` ✅ | -1 = top level |
-| folded | `TrackUnfolded` ✅ | group tracks |
+| folded | `TrackUnfolded` ✅ | group tracks (model); other tracks: Arrangement fold, view state (UI-57) |
 | volume | `DeviceChain/Mixer/Volume/Manual` ✅ | **linear gain**, 1 = 0 dB, max 1.99526 (+6 dB), 0.0003162 = -70 dB = "-inf" |
 | pan | `DeviceChain/Mixer/Pan/Manual` ✅ | -1..1 |
 | activator | `DeviceChain/Mixer/Speaker/Manual` ✅ | false = muted |
@@ -434,6 +455,12 @@ from the reference app drops them, so hidden/deactivated tracks come back as ord
 - `<SonoraTrack Version="1" Hidden="true" Deactivated="true" />` (last child of MidiTrack/AudioTrack/GroupTrack/ReturnTrack;
   written only when a flag is set, removed otherwise). The mixer, devices and clips stay exactly as authored.
 - `<SonoraAlias Group="N" />` (last child of MidiClip): clips sharing N share their notes in Sonora.
+- `<SonoraLocators Version="1"><Locator Id="N" Color="K" />…</SonoraLocators>` (UI-3b; last child of LiveSet, written only
+  when a locator has a colour): per-locator palette colour 0–69 keyed by the Locator's `Id`. The reference has no locator
+  colour (schema 12.0_12402 `CuePoint`: LomId, Time, Name, Annotation, Mapping/KeyMidi, IsSongStart), so saving from it
+  drops the colours. Locators are matched to their elements by `Id` (never by position), re-ordered by time, and a
+  duplicate or missing `Id` is renumbered on load; new ones get the next free `Id`. Not yet opened in the reference with
+  this element (the LiveSet-last-child rule above was).
 - Insert Return Track appends an authored `ReturnTrack`, one `TrackSendHolder` (Manual -inf, fresh AutomationTarget and
   ModulationTarget ids, `EnabledByUser` true on tracks and false on returns) per track, and a `SendPreBool Value="false"`.
   Returns only receive holders when their existing holders already match the return count (Sonora's own new sets author none).

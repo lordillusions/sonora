@@ -152,6 +152,9 @@ EditCommand duplicateArrangementRegion(const Song&, int firstTrack, int lastTrac
 bool canTransferArrangementRegion(const Song&, int firstTrack, int lastTrack, Beats start, Beats end, Beats at, int trackOffset = 0);
 EditCommand transferArrangementRegion(const Song&, int firstTrack, int lastTrack, Beats start, Beats end,
                                       Beats at, int trackOffset = 0, bool copy = false);
+// Delete with a time selection: removes the [start, end) part of every clip on the selected tracks (whole clips inside, the
+// covered part of clips that cross an edge; time does not move). Frozen tracks are left alone; empty when nothing changes.
+EditCommand deleteArrangementRegion(const Song&, int firstTrack, int lastTrack, Beats start, Beats end);
 // Copies a clip to another track (or the same one) at `at`; the original stays. Both must be arrangement tracks.
 EditCommand copyClipToTrack(const Song& song, int fromTrack, int uid, int toTrack, Beats at);
 // Moves a clip to another track at `at` (delete + insert as one undo step).
@@ -236,7 +239,14 @@ EditCommand setGlobalQuantisation(const Song& song, int value);
 EditCommand setScale(const Song& song, int root, int name);
 EditCommand setTrackColor(const Song&, const std::vector<int>& tracks, int color);
 EditCommand renameTrack(const Song& song, int track, std::string name);
-EditCommand addLocator(const Song& song, Beats time, std::string name);
+// Locators (UI-3b). The list stays sorted by time; locators are addressed by their stable id.
+int nextLocatorId(const Song& song);
+const Locator* findLocator(const Song& song, int id);
+std::string defaultLocatorName(const Song& song); // "1", "2"...: the count plus one, skipping names in use
+EditCommand addLocator(const Song& song, Beats time, std::string name, int colorIndex = -1);
+// Replaces locator `id` with `after` (its id is kept). Song start is exclusive: setting it clears the others.
+EditCommand changeLocator(const Song& song, int id, Locator after, std::string label);
+EditCommand deleteLocator(const Song& song, int id);
 EditCommand setLoop(const Song& song, bool on, Beats start, Beats length);
 EditCommand setPunch(const Song& song, bool in, bool out);
 

@@ -25,6 +25,8 @@ public:
     std::function<void(const MouseEvent&)> onClickWithModifiers;
 
     std::function<bool()> isEnabled;
+    // Activator style: on, but the track is left out by another track's solo — drawn unlit white, as the reference does.
+    std::function<bool()> isSoloMuted;
 
     void setLabel(std::string l) { label_ = std::move(l); }
     const std::string& label() const { return label_; }

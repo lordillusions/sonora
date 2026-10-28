@@ -1,5 +1,7 @@
 #include "TestFramework.h"
 #include "devices/DeviceFactory.h"
+#include "core/DeviceCatalog.h"
+#include "devices/native/AutoFilter.h"
 #include "devices/native/FmSynth.h"
 #include "devices/native/Compressor.h"
 #include "devices/native/VectorSynth.h"
@@ -377,19 +379,20 @@ ui::ReferenceFace* referenceFace(ui::RootWidget& root, const model::Device& mode
 }
 }
 
-TEST_CASE("device faces: Live 12 reference faces exist for EQ Eight, EQ Three, Compressor and Limiter only")
+TEST_CASE("device faces: Live 12 reference faces exist for EQ Eight, EQ Three, Compressor, Limiter and Auto Filter only")
 {
-    for (const auto* type : {"Eq8", "FilterEQ3", "Compressor2", "Limiter", "GlueCompressor", "Reverb", "SonoraFm"})
+    for (const auto* type : {"Eq8", "FilterEQ3", "Compressor2", "Limiter", "AutoFilter2", "AutoFilter", "GlueCompressor", "Reverb", "SonoraFm"})
     {
         auto model = devices::nativeDeviceModel(type); devices::BuildContext build; auto processor = devices::createDevice(model, build);
         REQUIRE(processor);
         ui::UiContext context; ui::RootWidget root(context);
         auto* face = ui::addReferenceFace(root, model, processor.get(), {});
         const std::string name = type;
-        CHECK((face != nullptr) == (name == "Eq8" || name == "FilterEQ3" || name == "Compressor2" || name == "Limiter"));
+        CHECK((face != nullptr) == (name == "Eq8" || name == "FilterEQ3" || name == "Compressor2" || name == "Limiter" || name == "AutoFilter2"));
         if (! face) continue;
         // Widths are the capture's device widths (Compressor with its sidechain section folded), scaled with the body.
-        const float expected = name == "Eq8" ? 675 : name == "FilterEQ3" ? 210 : name == "Compressor2" ? 574 : 397;
+        // Auto Filter's capture is at another zoom: 886 wide for a 342-px body (UI-43b).
+        const float expected = name == "Eq8" ? 675 : name == "FilterEQ3" ? 210 : name == "Compressor2" ? 574 : name == "Limiter" ? 397 : 886 * 239 / 342.0f;
         CHECK_NEAR(face->preferredWidth(239), expected, 0.01);
         CHECK_NEAR(face->preferredWidth(119.5f), expected / 2, 0.01);
     }
@@ -397,7 +400,7 @@ TEST_CASE("device faces: Live 12 reference faces exist for EQ Eight, EQ Three, C
 
 TEST_CASE("device faces: reference faces reach every shown parameter, inside the face, with MIDI targets")
 {
-    for (const auto* type : {"Eq8", "FilterEQ3", "Compressor2", "Limiter"})
+    for (const auto* type : {"Eq8", "FilterEQ3", "Compressor2", "Limiter", "AutoFilter2"})
     {
         auto model = devices::nativeDeviceModel(type); devices::BuildContext build; auto processor = devices::createDevice(model, build);
         ui::UiContext context; ui::RootWidget root(context);
@@ -442,8 +445,96 @@ TEST_CASE("device faces: reference faces reach every shown parameter, inside the
             compressor->setParameter(devices::Compressor::Model, 2); face->layout(); inspect(); // Expand: the expansion ratio
             compressor->setParameter(devices::Compressor::Model, 0); face->layout();
         }
+        if (auto* filter = dynamic_cast<devices::AutoFilter2*>(processor.get()))
+        {
+            using A = devices::AutoFilter2;
+            // Type Morph shows the morph amount, DJ its own knob; Mode reaches the time and synced rates; a press on the
+            // Envelope knob puts attack and release on the display bar.
+            for (float filterType : {4.0f, 5.0f, 0.0f}) { filter->setParameter(A::FilterType, filterType); face->layout(); inspect(); }
+            for (float mode : {1.0f, 2.0f, 0.0f}) { filter->setParameter(A::LfoTimeMode, mode); face->layout(); inspect(); }
+            for (const auto& child : face->children())
+                if (child->visible && child->midiTarget && child->midiTarget->param == filter->parameters()[A::EnvAmount].id)
+                { click(root, localEvent(child->boundsInRoot())); break; }
+            inspect();
+        }
         for (const auto& parameter : processor->parameters()) CHECK(seen.contains(parameter.id) || hidden.contains(parameter.id));
     }
+}
+
+TEST_CASE("device faces: Auto Filter display drags frequency and resonance; the bar follows the touched modulator (UI-43b)")
+{
+    using A = devices::AutoFilter2;
+    auto model = devices::nativeDeviceModel("AutoFilter2"); devices::BuildContext build; auto processor = devices::createDevice(model, build);
+    auto* filter = dynamic_cast<A*>(processor.get()); REQUIRE(filter);
+    ui::UiContext context; ui::RootWidget root(context);
+    auto* face = referenceFace(root, model, processor.get(), [&](auto* widget, int parameter) { tagControl(widget, parameter, processor.get()); });
+    const auto r = face->graphBounds();
+    // Measured axis: 20 Hz .. 20 kHz across the display (1 kHz at capture x 510.5 of 176..768); resonance 0 at the handle row.
+    const auto xOf = [&](float hz) { return r.x + r.w * (510.5f + 196.0f * std::log10(hz / 1000.0f) - 176.0f) / 592.0f; };
+    ui::MouseEvent e; e.x = xOf(1000); e.y = r.y + r.h * (202.5f - 40.0f) / 176.0f;
+    root.dispatchMouseDown(e); root.dispatchMouseUp(e);
+    CHECK_NEAR(filter->getParameter(A::Frequency), 1000, 10);
+    CHECK_NEAR(filter->getParameter(A::Resonance), 0, 0.01);
+    e.x = xOf(4000); e.y = r.y + r.h * (127.5f - 40.0f) / 176.0f; // half the travel up
+    root.dispatchMouseDown(e); root.dispatchMouseUp(e);
+    CHECK_NEAR(filter->getParameter(A::Frequency), 4000, 40);
+    CHECK_NEAR(filter->getParameter(A::Resonance), 0.5f, 0.01);
+    // The bar shows the LFO's settings until the Envelope knob is touched; then attack and release.
+    auto shown = [&](int parameter) {
+        for (const auto& child : face->children())
+            if (child->visible && child->midiTarget && child->midiTarget->param == filter->parameters()[(size_t) parameter].id) return child.get();
+        return (ui::Widget*) nullptr;
+    };
+    CHECK(shown(A::EnvAttack) == nullptr);
+    REQUIRE(shown(A::EnvAmount));
+    click(root, localEvent(shown(A::EnvAmount)->boundsInRoot()));
+    CHECK(shown(A::EnvAttack)); CHECK(shown(A::EnvRelease));
+    click(root, localEvent(shown(A::LfoAmount)->boundsInRoot()));
+    CHECK(shown(A::EnvAttack) == nullptr);
+    // Rate follows Mode; Clip and the 12 / 24 buttons edit the processor.
+    filter->setParameter(A::LfoTimeMode, 1); face->layout();
+    CHECK(shown(A::LfoTime)); CHECK(shown(A::LfoFrequency) == nullptr);
+    click(root, localEvent(shown(A::SoftClip)->boundsInRoot())); CHECK(filter->getParameter(A::SoftClip) > 0.5f);
+}
+
+TEST_CASE("device faces: the browser's Auto Filter is the 12.4 device; saving one raises a Live 12 header to 12.4 (UI-43b)")
+{
+    CHECK(model::insertedDeviceTag("AutoFilter2", "12.0_12120") == "AutoFilter2");
+    CHECK(model::insertedDeviceTag("AutoFilter2", "") == "AutoFilter2");
+    CHECK(model::insertedDeviceTag("AutoFilter2", "11.0_433") == "AutoFilter"); // Live 11 sets keep the legacy device
+    CHECK(model::insertedDeviceTag("Eq8", "11.0_433") == "Eq8");
+
+    const auto header = [](const juce::File& file) {
+        std::string unread;
+        auto dom = io::readAlsDom(file, unread);
+        return dom ? (dom->getStringAttribute("MinorVersion") + " " + dom->getStringAttribute("SchemaChangeCount")).toStdString() : std::string();
+    };
+    for (const char* minor : {"12.0_12120", "11.0_433"})
+        for (bool withFilter : {true, false})
+        {
+            io::NewSetOptions options; options.midiTracks = 1; options.audioTracks = 1; options.returnTracks = 0;
+            auto dom = io::createNewSetDom(options);
+            dom->setAttribute("MinorVersion", minor);
+            juce::TemporaryFile source(".als"), saved(".als");
+            std::string error; REQUIRE(io::writeAlsDom(*dom, source.getFile(), error));
+            auto loaded = io::loadAls(source.getFile()); REQUIRE(loaded); auto& song = *loaded.song;
+            const std::string type = withFilter ? std::string(model::insertedDeviceTag("AutoFilter2", song.schemaVersion)) : "Eq8";
+            auto device = devices::nativeDeviceModel(type); model::allocateDeviceIds(song, device);
+            device.sourceXml = std::make_shared<const std::string>(io::deviceTemplate(device));
+            song.tracks[1].devices.push_back(device);
+            REQUIRE(io::saveAls(song, saved.getFile(), {}).ok);
+            const bool raised = withFilter && std::string(minor) == "12.0_12120";
+            if (raised) // disposable review set for opening in the reference (like the face review sets above)
+            {
+                const auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora-device-faces");
+                REQUIRE(dir.createDirectory().wasOk());
+                REQUIRE(io::saveAls(song, dir.getChildFile("Auto Filter 12.4.als"), {}).ok);
+            }
+            CHECK(header(saved.getFile()) == (raised ? std::string("12.0_12402 1") : std::string(minor) + " 4"));
+            auto reopened = io::loadAls(saved.getFile()); REQUIRE(reopened);
+            REQUIRE(reopened.song->tracks[1].devices.size() == 1);
+            CHECK(reopened.song->tracks[1].devices[0].type == type);
+        }
 }
 
 TEST_CASE("device faces: EQ Eight display selects, drags and switches off bands; its controls follow the selection")
@@ -478,6 +569,61 @@ TEST_CASE("device faces: EQ Eight display selects, drags and switches off bands;
     CHECK_NEAR(eq->getParameter(E::bandParam(1, E::Freq)), 800 * std::pow(2200.0, 0.1), 2);
     const auto folder = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora-device-faces"); REQUIRE(folder.createDirectory().wasOk());
     REQUIRE(gfx::renderToPng(root, (int) face->width(), (int) face->height(), 2, folder.getChildFile("EqEight-reference.png").getFullPathName().toStdString()));
+}
+
+TEST_CASE("device faces: EQ Eight draws real audio spectrum, with a working analyzer switch")
+{
+    using E = devices::EqEight;
+    auto model = devices::nativeDeviceModel("Eq8"); devices::BuildContext build; auto processor = devices::createDevice(model, build);
+    auto* eq = dynamic_cast<E*>(processor.get()); REQUIRE(eq); eq->prepare(48000, 2048);
+    eq->setParameter(E::bandParam(0, E::On), 1); eq->setParameter(E::bandParam(0, E::Freq), 160);
+    ui::UiContext context; ui::RootWidget root(context);
+    auto* face = referenceFace(root, model, eq, {}, 239);
+    root.tickTree();
+    juce::AudioBuffer<float> audio(2, 2048); juce::MidiBuffer midi;
+    uint32_t random = 42;
+    for (int frame = 0; frame < 12; ++frame)
+    {
+        for (int i = 0; i < audio.getNumSamples(); ++i)
+        {
+            const double seconds = (frame * audio.getNumSamples() + i) / 48000.0;
+            random = random * 1664525u + 1013904223u;
+            float signal = ((float) (random >> 8) / 16777216.0f - 0.5f) * 0.06f;
+            for (int harmonic = 1; harmonic <= 32; ++harmonic)
+                signal += (float) (0.22 / harmonic * std::sin(6.283185307179586 * 173 * harmonic * seconds));
+            audio.setSample(0, i, signal); audio.setSample(1, i, -signal * 0.55f);
+        }
+        eq->process(audio, midi);
+        juce::Thread::sleep(35); root.tickTree();
+    }
+    const auto folder = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora-device-faces");
+    REQUIRE(folder.createDirectory().wasOk());
+    const auto on = folder.getChildFile("EqEight-spectrum.png"), off = folder.getChildFile("EqEight-spectrum-off.png");
+    REQUIRE(gfx::renderToPng(root, (int) face->width(), (int) face->height(), 2, on.getFullPathName().toStdString()));
+    float localX = 0, localY = 0;
+    auto* button = dynamic_cast<ui::TextButton*>(face->findAt(face->at(649, 41, 678, 58).centreX(),
+                                    face->at(649, 41, 678, 58).centreY(), localX, localY));
+    REQUIRE(button); REQUIRE(button->isOn); CHECK(button->isOn());
+    click(root, localEvent(button->boundsInRoot())); CHECK(! button->isOn());
+    REQUIRE(gfx::renderToPng(root, (int) face->width(), (int) face->height(), 2, off.getFullPathName().toStdString()));
+    const auto imageOn = juce::ImageFileFormat::loadFrom(on), imageOff = juce::ImageFileFormat::loadFrom(off);
+    REQUIRE(imageOn.isValid()); REQUIRE(imageOff.isValid());
+    const auto graph = face->graphBounds();
+    int changed = 0;
+    for (int y = (int) (graph.y * 2) + 4; y < (int) (graph.bottom() * 2) - 4; ++y)
+        for (int x = (int) (graph.x * 2) + 4; x < (int) (graph.right() * 2) - 4; ++x)
+            if (imageOn.getPixelAt(x, y) != imageOff.getPixelAt(x, y)) ++changed;
+    CHECK(changed > 10000); // filled spectrum is present behind the unchanged response and handles
+    // UI-55: the output level is the chain meter after the device, so the face has no meter of its own.
+    int green = 0;
+    for (int y = 0; y < imageOn.getHeight(); ++y)
+        for (int x = 0; x < imageOn.getWidth(); ++x)
+        {
+            const auto pixel = imageOn.getPixelAt(x, y);
+            if (pixel.getGreen() > 150 && pixel.getRed() < 80 && pixel.getBlue() < 140) ++green;
+        }
+    CHECK(green == 0);
+    click(root, localEvent(button->boundsInRoot())); CHECK(button->isOn());
 }
 
 TEST_CASE("device faces: Compressor threshold follows both display views and the sidechain section folds out")

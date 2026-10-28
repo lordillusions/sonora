@@ -234,6 +234,58 @@ EditCommand build(const Song& song, const ops::ReplaceNotes& op)
     return noteCommand(song, at, std::move(notes));
 }
 
+const Locator& locator(const Song& song, int id)
+{
+    if (id < 0 || id > maxId) invalid("Out of range: locatorId");
+    const auto* found = findLocator(song, id);
+    if (! found) throw OpError("target_replaced", "Locator ID no longer exists");
+    return *found;
+}
+
+void checkLocatorFields(const std::optional<std::string>& name, const std::optional<std::string>& infoText, std::optional<int> color)
+{
+    if (name && name->size() > 256) invalid("Locator name exceeds 256 bytes");
+    if (infoText && infoText->size() > 4096) invalid("Locator info text exceeds 4096 bytes");
+    if (color && (*color < -1 || *color >= 70)) invalid("Out of range: color");
+}
+
+void checkFreeBeat(const Song& song, Beats beat, int except)
+{
+    for (const auto& other : song.locators)
+        if (other.id != except && std::abs(other.time - beat) < 1e-9) invalid("A locator already exists at this beat");
+}
+
+EditCommand build(const Song& song, const ops::AddLocator& op)
+{
+    const Beats beat = bounded(op.beat, 0, maxBeat, "beat");
+    checkLocatorFields(op.name, {}, op.color);
+    checkFreeBeat(song, beat, -1);
+    return addLocator(song, beat, op.name ? *op.name : defaultLocatorName(song), op.color);
+}
+
+EditCommand build(const Song& song, const ops::UpdateLocator& op)
+{
+    auto after = locator(song, op.locatorId);
+    if (! (op.beat || op.name || op.infoText || op.color || op.songStart)) invalid("Locator update must contain a changed field");
+    checkLocatorFields(op.name, op.infoText, op.color);
+    if (op.beat) { after.time = bounded(*op.beat, 0, maxBeat, "beat"); checkFreeBeat(song, after.time, op.locatorId); }
+    if (op.name) after.name = *op.name;
+    if (op.infoText) after.annotation = *op.infoText;
+    if (op.color) after.colorIndex = *op.color;
+    if (op.songStart) after.isSongStart = *op.songStart;
+    const char* label = op.beat && ! (op.name || op.infoText || op.color || op.songStart) ? "Move Locator"
+                      : op.name && ! (op.beat || op.infoText || op.color || op.songStart) ? "Rename Locator"
+                      : op.color && ! (op.beat || op.name || op.infoText || op.songStart) ? "Change Locator Color"
+                                                                                           : "Edit Locator";
+    return changeLocator(song, op.locatorId, std::move(after), label);
+}
+
+EditCommand build(const Song& song, const ops::DeleteLocator& op)
+{
+    locator(song, op.locatorId);
+    return deleteLocator(song, op.locatorId);
+}
+
 // Runs the first apply of `command` under a scope, then restores the plain apply for undo/redo.
 template<class Before, class After>
 EditCommand wrapFirstApply(EditCommand command, Before before, After after)
@@ -259,7 +311,7 @@ const char* opType(const Op& op)
 {
     static constexpr const char* names[] = {"tempo.set", "track.set_gain", "track.rename", "track.set_color", "loop.set",
                                             "clip.move", "clip.duplicate", "clip.delete", "notes.add", "notes.update",
-                                            "notes.delete", "notes.replace"};
+                                            "notes.delete", "notes.replace", "locator.add", "locator.update", "locator.delete"};
     static_assert(std::size(names) == std::variant_size_v<OpPayload>);
     return names[op.payload.index()];
 }

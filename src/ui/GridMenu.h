@@ -19,6 +19,7 @@ struct MenuAction
     std::function<void()> run;
     bool enabled = true;
     std::string shortcut{};
+    bool ticked = false;
 };
 
 class GridChoiceTable final : public juce::PopupMenu::CustomComponent

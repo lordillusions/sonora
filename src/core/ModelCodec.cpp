@@ -557,6 +557,8 @@ template <class IO> void visitHeader(IO& io, Track& t)
     io.shared(t.sourceXml);
     io.v(t.trackDelayMs);
     io.v(t.folded);
+    io.live(t.laneHeight); // view state (UI-57): sent with the document, not a change
+    io.live(t.sessionWidth);
     io.v(t.inputRouting);
     io.v(t.inputUpperDisplay);
     io.v(t.inputLowerDisplay);
@@ -606,7 +608,9 @@ template <class IO> void visitSongHeader(IO& io, Song& s)
         io.v(scene.colorIndex);
         io.opt(scene.tempo, [&](double& tempo) { io.v(tempo); });
     }, 3);
-    io.vec(s.locators, [&](Locator& l) { io.v(l.time); io.v(l.name); }, 9);
+    io.vec(s.locators, [&](Locator& l) {
+        io.v(l.time); io.v(l.name); io.v(l.id); io.v(l.annotation); io.v(l.isSongStart); io.v(l.colorIndex);
+    }, 13);
     io.v(s.loopStart);
     io.v(s.loopLength);
     io.v(s.loopOn);
@@ -620,6 +624,16 @@ template <class IO> void visitSongHeader(IO& io, Song& s)
     io.v(s.scaleRoot);
     io.v(s.scaleName);
     io.v(s.inKey);
+    auto& view = s.view; // UI-57 view state: sent with the document, not a change
+    io.live(view.present);
+    io.live(view.sessionVisible);
+    io.live(view.beatsPerPixel);
+    io.live(view.arrangementScrollX);
+    io.live(view.arrangementScrollY);
+    io.live(view.sessionScrollX);
+    io.live(view.sessionScrollY);
+    io.live(view.clipDetailOpen);
+    io.live(view.deviceDetailOpen);
 }
 
 template <class IO> void visitDocument(IO& io, Song& s)
@@ -700,9 +714,9 @@ template <class F> void decodeWith(std::string_view bytes, F&& body)
 static_assert(sizeof(Clip) == 520, "model::Clip changed: update ModelCodec");
 static_assert(sizeof(Device) == 544, "model::Device changed: update ModelCodec");
 static_assert(sizeof(Device::Chain) == 120, "model::Device::Chain changed: update ModelCodec");
-static_assert(sizeof(Track) == 1136, "model::Track changed: update ModelCodec");
+static_assert(sizeof(Track) == 1144, "model::Track changed: update ModelCodec");
 static_assert(sizeof(Mixer) == 200, "model::Mixer changed: update ModelCodec");
-static_assert(sizeof(Song) == 1480, "model::Song changed: update ModelCodec");
+static_assert(sizeof(Song) == 1528, "model::Song changed: update ModelCodec");
 static_assert(sizeof(MidiNote) == 48, "model::MidiNote changed: update ModelCodec");
 static_assert(sizeof(SamplePart) == 232, "model::SamplePart changed: update ModelCodec");
 static_assert(sizeof(PluginInfo) == 160, "model::PluginInfo changed: update ModelCodec");

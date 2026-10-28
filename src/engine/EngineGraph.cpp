@@ -349,12 +349,17 @@ void initControls(TrackControls& c, const model::Track& t)
 
 bool isTrackAudible(const EngineGraph& graph, const ControlBank& controls, const TrackNode& node, bool anySolo)
 {
-    if (node.deactivated || ! controls[(size_t) node.controlIndex].active.load(std::memory_order_relaxed))
+    if (node.deactivated)
+        return false;
+    const auto& c = controls[(size_t) node.controlIndex];
+    if (anySolo && c.solo.load(std::memory_order_relaxed))
+        return true; // its own solo wins over a switched-off activator
+    if (! c.active.load(std::memory_order_relaxed))
         return false;
     if (! anySolo || node.kind == model::TrackKind::Group)
         return true;
 
-    bool soloed = controls[(size_t) node.controlIndex].solo.load(std::memory_order_relaxed);
+    bool soloed = false;
     for (int p = node.outputNode; ! soloed && p >= 0; p = graph.nodes[(size_t) p].outputNode)
         soloed = controls[(size_t) graph.nodes[(size_t) p].controlIndex].solo.load(std::memory_order_relaxed);
     return soloed;

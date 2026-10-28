@@ -6,7 +6,7 @@
 //   plugin_probe --decode-serum-state <state.bin>                       native state inspection without loading the plugin
 //   plugin_probe --inspect-file <plugin> [--output <report.json>] [--state-dir <directory>]
 //        [--set <hostId>=<normalised>] ... [--render-out <directory>] [--class-id <CID>]
-//        [--component-state <state.bin>] [--controller-state <state.bin>] [--editor]
+//        [--component-state <state.bin>] [--controller-state <state.bin>] [--editor-query] [--editor]
 //        [--note <0..127>] [--velocity <1..127>]
 //        [--stimulus sine|impulse|step|noise|gated|gatednoise] [--gate <highSamples>:<lowSamples>:<lowScale>] [--amplitude <0..1>] [--frequency <Hz>]
 //        [--right-scale <-1..1>] (0 isolates the left input)
@@ -136,6 +136,7 @@ struct InspectionOptions
     double gateScale = 0.1;
     bool editor = false;
     bool nativeInterfaces = false;
+    bool editorQuery = false; // time one hasEditor() before rendering (it builds the view; some plugins change afterwards)
     bool rawState = false; // --raw-state: hand Serum states to the plugin without the identity/version check (preset migration studies)
 };
 
@@ -912,6 +913,15 @@ juce::var inspectInstance(juce::AudioPluginInstance& instance, const juce::Plugi
     }
     for (size_t index = 0; index < overrides.size(); ++index)
         resolved[index]->setValueNotifyingHost(overrides[index].normalised);
+    // JUCE's VST3 wrapper answers hasEditor() by building and releasing the editor view: what a host pays each time it asks.
+    // Opt-in, because it changes some plugins: in the engine, Splice Sounds Listener outputs silence afterwards (PLG-13).
+    juce::var reportsEditor, editorQueryMs;
+    if (options.editorQuery)
+    {
+        const double editorQueryStart = juce::Time::getMillisecondCounterHiRes();
+        reportsEditor = instance.hasEditor();
+        editorQueryMs = juce::Time::getMillisecondCounterHiRes() - editorQueryStart;
+    }
     // Hosting wrappers can queue writes until processing; capture controlled state only after flushing.
     if (options.editor)
     {
@@ -1055,6 +1065,7 @@ juce::var inspectInstance(juce::AudioPluginInstance& instance, const juce::Plugi
                    {"manufacturer", description.manufacturerName}, {"version", description.version},
                    {"category", description.category}, {"identifier", description.fileOrIdentifier},
                    {"juceUniqueId", description.uniqueId}, {"instrument", description.isInstrument},
+                   {"hasEditor", reportsEditor}, {"hasEditorQueryMs", editorQueryMs},
                    {"vst3PlainControllerAvailable", plain.available()}, {"vst3Controller", plain.provenance()}, {"parameterGroups", groups},
                    {"parameterCount", parameters.size()}, {"parameters", parameters}, {"state", stateReport},
                    {"nativeInterfaces", options.nativeInterfaces ? inspectNativeInterfaces(instance) : juce::var()},
@@ -1149,6 +1160,7 @@ int inspectFile(const juce::String& path, const InspectionOptions& options)
     }
     if (options.editor) arguments.add("--editor");
     if (options.nativeInterfaces) arguments.add("--native-interfaces");
+    if (options.editorQuery) arguments.add("--editor-query");
     if (options.rawState) arguments.add("--raw-state");
     arguments.add("--note");
     arguments.add(juce::String(options.note));
@@ -1351,7 +1363,7 @@ static int runProbeCommand(int argc, char** argv)
 
     if (argc < 2)
     {
-        std::fprintf(stderr, "usage: plugin_probe [--data-folder <name>] --scan | --scan-file <plugin> | --list | --decode-serum-state <state.bin> | --inspect-file <plugin> [--output <json>] [--state-dir <dir>] [--render-out <dir>] [--class-id <CID>] [--component-state <bin>] [--controller-state <bin>] [--set <hostId>=<normalised>] ... [--note <0..127>] [--velocity <1..127>] [--stimulus sine|impulse|step|noise] [--amplitude <0..1>] [--frequency <Hz>] [--right-scale <-1..1>] [--midi-event <sample>:<channel-message-hex>] ... [--render-block-size <128|256|512|1024|2048>] [--render-samples <48000..480000>] [--preroll-samples <0..65536, block aligned>] [--settle-ms <0..30000>] [--playhead-jump <sample>:<delta-samples>] ... [--text-sweep <hostId>=<2..4097 points>] ... [--native-interfaces] [--raw-state] [--editor] | <set.als> [--render]\n");
+        std::fprintf(stderr, "usage: plugin_probe [--data-folder <name>] --scan | --scan-file <plugin> | --list | --decode-serum-state <state.bin> | --inspect-file <plugin> [--output <json>] [--state-dir <dir>] [--render-out <dir>] [--class-id <CID>] [--component-state <bin>] [--controller-state <bin>] [--set <hostId>=<normalised>] ... [--note <0..127>] [--velocity <1..127>] [--stimulus sine|impulse|step|noise] [--amplitude <0..1>] [--frequency <Hz>] [--right-scale <-1..1>] [--midi-event <sample>:<channel-message-hex>] ... [--render-block-size <128|256|512|1024|2048>] [--render-samples <48000..480000>] [--preroll-samples <0..65536, block aligned>] [--settle-ms <0..30000>] [--playhead-jump <sample>:<delta-samples>] ... [--text-sweep <hostId>=<2..4097 points>] ... [--native-interfaces] [--raw-state] [--editor-query] [--editor] | <set.als> [--render]\n");
         return 2;
     }
     const juce::String a = argv[1];
@@ -1371,6 +1383,12 @@ static int runProbeCommand(int argc, char** argv)
             {
                 if (options.editor) return 2;
                 options.editor = true;
+                continue;
+            }
+            if (option == "--editor-query")
+            {
+                if (options.editorQuery) return 2;
+                options.editorQuery = true;
                 continue;
             }
             if (option == "--native-interfaces")

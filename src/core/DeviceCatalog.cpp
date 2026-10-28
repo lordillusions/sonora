@@ -2,6 +2,7 @@
 #include "core/Model.h"
 
 #include <array>
+#include <charconv>
 
 namespace sonora::model
 {
@@ -152,6 +153,13 @@ std::string_view deviceCategory(const CatalogEntry& entry)
     if (tag == "Compressor2" || tag == "GlueCompressor" || tag == "Limiter" || tag == "MultibandDynamics" || tag == "Gate") return "Dynamics";
     if (tag == "SonoraLfo" || tag == "SonoraCurveLfo" || tag == "AutoPan" || tag == "AutoPan2") return "Modulation";
     return "Utilities";
+}
+
+std::string_view insertedDeviceTag(std::string_view tag, std::string_view schemaVersion)
+{
+    int major = 0; // "11.0_433" -> 11; an unknown or empty version counts as current
+    std::from_chars(schemaVersion.data(), schemaVersion.data() + schemaVersion.size(), major);
+    return tag == "AutoFilter2" && major > 0 && major < 12 ? std::string_view("AutoFilter") : tag;
 }
 
 bool isRackTag(std::string_view t)

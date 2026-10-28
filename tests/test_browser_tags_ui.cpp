@@ -208,3 +208,58 @@ TEST_CASE("browser tags: Cmd F leaves tag entry and searches without creating an
     rig.root->dispatchMouseDown(grab); rig.root->dispatchMouseDrag(drag);
     REQUIRE(rig.context.browserDrag); CHECK(rig.context.browserDrag->value == "fx3"); rig.root->dispatchMouseUp(drag);
 }
+
+TEST_CASE("browser cache: a same-size plugin refresh replaces rows facets and drag identity")
+{
+    BrowserRig rig;
+    rig.browser->toggleTagFilter({"Format", "VST3"});
+    rig.click(rig.browser->listRowBounds(1));
+    CHECK(ui::BrowserTags::matches(rig.browser->selectedTags(), {{"Creator", "Maker"}}));
+    // A scanner result may replace metadata without changing the number of entries.
+    rig.context.browserPlugins[0] = {"Alpha Synth", "replacement", "Maker", "VST3", true, "Sampler"};
+    ++rig.context.browserContentRevision;
+    CHECK(ui::BrowserTags::matches(rig.browser->selectedTags(), {{"Creator", "Maker"}, {"Device", "Sampler"}}));
+    auto down = rig.at(rig.browser->listRowBounds(1)), drag = down; drag.x += 20;
+    rig.root->dispatchMouseDown(down); rig.root->dispatchMouseDrag(drag);
+    REQUIRE(rig.context.browserDrag);
+    CHECK(rig.context.browserDrag->value == "replacement");
+    rig.root->dispatchMouseUp(drag);
+}
+
+TEST_CASE("browser cache: asynchronous folder publications refresh an already expanded subtree")
+{
+    BrowserRig rig;
+    rig.context.browserFiles = {{"/tmp/Tree/Folder", true}};
+    ++rig.context.browserContentRevision;
+    rig.browser->showFolder("/tmp/Tree");
+    rig.click(rig.browser->listRowBounds(0));
+    rig.key(juce::KeyPress::rightKey); // expand while its listing is still pending
+    CHECK(rig.browser->selectedTags().empty());
+    rig.context.browserFolderChildren["/tmp/Tree/Folder"] = {{"/tmp/Tree/Folder/first.wav", false}};
+    ++rig.context.browserContentRevision;
+    rig.click(rig.browser->listRowBounds(1));
+    CHECK(ui::BrowserTags::matches(rig.browser->selectedTags(), {{"Format", "WAV"}}));
+    rig.context.browserFolderChildren["/tmp/Tree/Folder"] = {{"/tmp/Tree/Folder/second.aif", false}};
+    ++rig.context.browserContentRevision;
+    CHECK(ui::BrowserTags::matches(rig.browser->selectedTags(), {{"Format", "AIF"}}));
+    rig.context.browserFiles.clear(); rig.context.browserFolderChildren.clear();
+    ++rig.context.browserContentRevision;
+    CHECK(rig.browser->selectedTags().empty());
+    CHECK(rig.browser->filterGroupBounds("Format").isEmpty());
+}
+
+TEST_CASE("browser cache: tag reload and reset invalidate existing rows and facets")
+{
+    BrowserRig rig;
+    rig.browser->toggleTagFilter({"Format", "VST3"});
+    rig.click(rig.browser->listRowBounds(1));
+    CHECK(! rig.browser->selectedTags().empty());
+    ui::BrowserTags stored;
+    stored.set("plugin:synth3", {"Custom", "Bright"}, true);
+    rig.context.browserTags.loadJson(stored.toJson());
+    CHECK(ui::BrowserTags::matches(rig.browser->selectedTags(), {{"Custom", "Bright"}}));
+    CHECK(! rig.browser->filterGroupBounds("Custom").isEmpty());
+    rig.context.browserTags.loadJson("[]");
+    CHECK(! ui::BrowserTags::matches(rig.browser->selectedTags(), {{"Custom", "Bright"}}));
+    CHECK(rig.browser->filterGroupBounds("Custom").isEmpty());
+}

@@ -391,7 +391,7 @@ TEST_CASE("als writer: session clips, scenes, locators and track names save and 
     song.scenes[1].name = "Renamed scene";
     song.scenes[1].tempo = 150;
     song.tracks[0].name = "Renamed track";
-    song.locators = {{4, "Intro"}, {12, "Drop"}};
+    song.locators = {{.time = 4, .name = "Intro"}, {.time = 12, .name = "Drop"}};
     juce::TemporaryFile saved(".als");
     REQUIRE(io::saveAls(song, saved.getFile()).ok);
     auto again = io::loadAls(saved.getFile());

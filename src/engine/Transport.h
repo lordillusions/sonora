@@ -47,9 +47,18 @@ public:
     }
     void seekNow(double beats)
     {
+        jumpAt_.store(-1.0);
         seekTarget_.store(beats);
         seekRequested_.store(true);
     }
+    // UI-3b: a locator jump quantised to the launch quantisation. While playing, the position moves to `target` at the
+    // first block that starts at or after `atBeat` (up to one block late); stopping or seeking cancels it.
+    void scheduleJump(double atBeat, double target)
+    {
+        jumpTarget_.store(target);
+        jumpAt_.store(std::max(0.0, atBeat));
+    }
+    double scheduledJumpTarget() const { return jumpAt_.load() >= 0.0 ? jumpTarget_.load() : -1.0; }
     void setTempo(double bpm) { tempo_.store(bpm < 20.0 ? 20.0 : bpm > 999.0 ? 999.0 : bpm); }
     void setLoop(bool on, double start, double length)
     {
@@ -124,6 +133,16 @@ public:
             b.playOffset = b.countInSamples;
             if (! isCountingIn()) playing_.store(true);
         }
+        if (const double at = jumpAt_.load(); at >= 0.0)
+        {
+            if (! playing_.load() || stopping) jumpAt_.store(-1.0);
+            else if (position_.load() >= at - 1e-9)
+            {
+                position_.store(jumpTarget_.load());
+                jumpAt_.store(-1.0);
+                b.jumped = true;
+            }
+        }
         b.playing = playing_.load();
         b.position = position_.load();
         return b;
@@ -137,6 +156,7 @@ private:
     std::atomic<bool> playing_{false};
     std::atomic<bool> playRequested_{false}, stopRequested_{false}, seekRequested_{false};
     std::atomic<double> position_{0.0}, seekTarget_{0.0};
+    std::atomic<double> jumpAt_{-1.0}, jumpTarget_{0.0};
     std::atomic<double> tempo_{120.0};
     std::atomic<bool> loopOn_{false};
     std::atomic<bool> metronome_{false};
