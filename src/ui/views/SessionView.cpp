@@ -664,7 +664,7 @@ void SessionView::paint(SkCanvas& c, const Theme& t)
         const auto toggle = groupToggleBounds(col);
         if (! toggle.isEmpty()) titleLabel.w = std::max(0.0f, toggle.x - titleLabel.x - 3);
         const auto titleInk = selected ? t.color("SelectionForeground") : paint::contrastText(trackColor);
-        if (auto& rename = ctx().trackRename; rename.trackId == track->id)
+        if (auto& rename = ctx().trackRename; rename.active() && rename.trackId == track->id)
         {
             // UI-58: Cmd+R edits the name in the title.
             const Rect field{title.x + 2, m.sessionHeaderHeight - 17, titleLabel.right() + 3 - (title.x + 2), 16};

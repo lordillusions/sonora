@@ -245,7 +245,7 @@ public:
             }
             else ctl::triangle(c, indent + 11, ringY + 6, 5, 4, collapsed() ? ctl::Dir::Right : ctl::Dir::Down, ink);
         }
-        if (auto& rename = ctx().trackRename; track && rename.trackId == track->id)
+        if (auto& rename = ctx().trackRename; track && rename.active() && rename.trackId == track->id)
         {
             // UI-58: Cmd+R edits the name right here.
             const Rect field{indent + 18, shortLane ? std::max(0.0f, (h - 15) * 0.5f) : 1.0f, kTitleW - indent - 20, 15};
@@ -549,6 +549,12 @@ void drawClip(SkCanvas& c, const Theme& t, const model::Clip& clip, const Rect& 
     const SkColor cc = Theme::paletteColor(clip.colorIndex);
     Rect header = r.withHeight(std::min(12.0f, r.h));
     Rect body{r.x, r.y + header.h, r.w, r.h - header.h};
+    // A deactivated clip shows through (faded colour, name and contents) inside a white frame.
+    if (clip.disabled)
+    {
+        const SkRect layer = r.sk();
+        c.saveLayerAlphaf(&layer, 0.38f);
+    }
     const auto bgc = t.color("SurfaceBackground");
     const bool lightTheme = 0.299f * SkColorGetR(bgc) + 0.587f * SkColorGetG(bgc) + 0.114f * SkColorGetB(bgc) > 128.0f;
     paint::fill(c, header, cc);
@@ -599,7 +605,13 @@ void drawClip(SkCanvas& c, const Theme& t, const model::Clip& clip, const Rect& 
             paint::line(c, r.x, body.centreY(), r.right(), body.centreY(), ink); // still loading
         drawFades(c, t, clip, r, body, pixelsPerBeat, ink, handles);
     }
-    paint::stroke(c, r, selected ? SkColorSetRGB(255, 255, 255) : t.color("ClipBorder"), selected ? 2.0f : 1.0f);
+    if (clip.disabled)
+    {
+        c.restore();
+        paint::stroke(c, r, SkColorSetRGB(255, 255, 255), selected ? 2.0f : 1.0f);
+    }
+    else
+        paint::stroke(c, r, selected ? SkColorSetRGB(255, 255, 255) : t.color("ClipBorder"), selected ? 2.0f : 1.0f);
     if (ghost)
         paint::fill(c, r, paint::withAlpha(SkColorSetRGB(255, 255, 255), 40)); // being dragged
 }

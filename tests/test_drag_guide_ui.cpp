@@ -7,6 +7,9 @@
 #include "ui/views/MainLayout.h"
 
 #include <juce_core/juce_core.h>
+#include <juce_graphics/juce_graphics.h>
+
+#include <cstdlib>
 
 using namespace sonora;
 
@@ -104,4 +107,38 @@ TEST_CASE("drag guide: real mouse drags snap by the end with Shift and the statu
     CHECK(gfx::renderToPng(root, 1200, 700, 2, dir.getChildFile("drag_guide_resize.png").getFullPathName().toStdString()));
     root.dispatchMouseUp(mouse(rightEdge + (float) (1.2 * ctx.pixelsPerBeat), laneTop + 6));
     CHECK_NEAR(song.tracks[0].arrangementClips[0].currentEnd, 18.0, 1e-9);
+}
+
+TEST_CASE("deactivated clip: faded in a white frame; Main shows no empty name field")
+{
+    auto loaded = io::loadAls(juce::File(SONORA_TEST_FIXTURES).getChildFile("two_tracks.xml"));
+    REQUIRE(loaded);
+    model::Song song = *loaded.song;
+    REQUIRE(! song.tracks[0].arrangementClips.empty());
+    ui::UiContext ctx;
+    ctx.song = &song;
+    ctx.ioVisible = ctx.browserVisible = ctx.detailVisible = false;
+    ctx.mainView = ui::MainView::Arrangement;
+    ctx.pixelsPerBeat = 14.0;
+    ui::MainLayout root(ctx);
+    root.setBounds({0, 0, 1200, 700});
+    root.layout();
+    const auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_tests");
+    dir.createDirectory();
+    const float laneTop = ctx.theme.metrics.controlBarHeight + ctx.theme.metrics.arrangementRulerHeight;
+    const int px = (int) (ctx.theme.metrics.outerMargin + 8.0 * ctx.pixelsPerBeat), py = (int) laneTop + 40;
+    auto pixelAt = [&](const char* name) {
+        const auto file = dir.getChildFile(name);
+        REQUIRE(gfx::renderToPng(root, 1200, 700, 1, file.getFullPathName().toStdString()));
+        return juce::ImageFileFormat::loadFrom(file).getPixelAt(px, py);
+    };
+    const auto active = pixelAt("clip_active.png");
+    song.tracks[0].arrangementClips[0].disabled = true;
+    root.repaint();
+    const auto faded = pixelAt("clip_deactivated.png");
+    const auto clipColour = ui::Theme::paletteColor(song.tracks[0].arrangementClips[0].colorIndex);
+    CHECK(std::abs((int) active.getGreen() - (int) SkColorGetG(clipColour)) <= 2); // drawn in its colour while active
+    const int change = std::abs((int) active.getRed() - (int) faded.getRed()) + std::abs((int) active.getGreen() - (int) faded.getGreen())
+                     + std::abs((int) active.getBlue() - (int) faded.getBlue());
+    CHECK(change > 60); // the lane shows through a deactivated clip
 }

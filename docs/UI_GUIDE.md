@@ -185,7 +185,8 @@ Cmd+F searches the selected category/current folder. Add Folder stores a custom 
 and the toolbar Up button changes the browser root to its parent. Selecting a sample auditions it when Preview is on; the footer toggle stops preview.
 While a clip is moved, resized, trimmed, stretched or a fade is dragged, a line runs from the edge being placed up into
 the ruler, where a tag shows its position (bar.beat.sixteenth). The status bar shows Start / End / Length of the dragged
-clip, the time selection or the selected Arrangement clip at its right end, like Live.
+clip, the time selection or the selected Arrangement clip at its right end, like Live. A deactivated clip (key 0, or Deactivate Clip in the clip
+menu) is drawn faded inside a white frame.
 
 Drag samples onto Audio-track Arrangement lanes (grid snap; Alt for free placement) or Session slots.
 Plug-ins are grouped in collapsible vendor folders with format icons; missing manufacturers appear under
