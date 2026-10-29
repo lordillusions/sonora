@@ -11,9 +11,11 @@ namespace sonora::collab
 {
 namespace
 {
-constexpr size_t maxAssetBacklog = 1u << 20;   // bytes queued on the assets channel before we wait
-constexpr size_t chunkWindow = 8;              // chunk requests in flight per download
-constexpr size_t parallelDownloads = 2;
+// COL-3c: the transport's send queue is first in, first out across channels, so asset bytes waiting there delay every
+// edit behind them (1 MiB was seconds over a long path). Keep it short; the SCTP send buffer below it is shared fairly.
+constexpr size_t maxAssetBacklog = 64u << 10;  // bytes queued on the assets channel before we wait
+constexpr uint64_t requestWindow = 2u << 20;   // chunk requests in flight per guest, all downloads together (> rate x RTT)
+constexpr size_t parallelDownloads = 8;        // small samples don't leave the window empty
 constexpr int64_t clockPeriodMs = 2000;
 constexpr int64_t presencePeriodMs = 50;
 constexpr int64_t maxSourceFileBytes = 512ll << 20;
@@ -81,17 +83,33 @@ std::unique_ptr<CollabSession> CollabSession::guest(Port& port, std::unique_ptr<
 
 // ------------------------------------------------------------------------------------------------ sending
 
+WireDictionary* CollabSession::wireFor(const PeerId& peer)
+{
+    if (! host_) return hostWire_.get();
+    auto* p = peerById(peer);
+    return p ? p->wire.get() : nullptr;
+}
+
 void CollabSession::send(const PeerId& peer, Channel channel, const Message& message)
 {
     if (! transport_) return;
-    auto bytes = encodeMessage(message);
+    auto* wire = wireFor(peer);
+    const auto before = wire ? wire->referencedBytes : 0;
+    auto bytes = encodeMessage(message, wire);
     stats_.bytesOut += bytes.size();
+    if (wire) stats_.referencedBytes += wire->referencedBytes - before;
     transport_->send(peer, channel, std::move(bytes));
 }
 
 void CollabSession::broadcast(Channel channel, const Message& message, const PeerId& except)
 {
     if (! transport_) return;
+    if (usesDictionary(message)) // each link has its own dictionary
+    {
+        for (const auto& [id, peer] : peers_)
+            if (peer->welcomed && id != except) send(id, channel, message);
+        return;
+    }
     const auto bytes = encodeMessage(message);
     for (const auto& [id, peer] : peers_)
         if (peer->welcomed && id != except)
@@ -163,11 +181,13 @@ void CollabSession::handle(const TransportEvent& e)
                 peer->peer = e.peer;
                 peer->safetyCode = e.safetyCode;
                 peer->connectedMs = now();
+                peer->wire = std::make_unique<WireDictionary>(wirePool_);
                 peers_[e.peer] = std::move(peer);
             }
             else
             {
                 hostSafetyCode_ = e.safetyCode;
+                hostWire_ = std::make_unique<WireDictionary>(wirePool_);
                 status_ = "Joining...";
                 HelloMsg hello;
                 hello.appVersion = options_.appVersion;
@@ -186,7 +206,9 @@ void CollabSession::handle(const TransportEvent& e)
         {
             stats_.bytesIn += e.data.size();
             Message message;
-            try { message = decodeMessage(e.data); }
+            auto* wire = wireFor(e.peer);
+            const auto before = wire ? wire->referencedBytes : 0;
+            try { message = decodeMessage(e.data, wire); }
             catch (const model::CodecError& error)
             {
                 ++stats_.dropped;
@@ -194,6 +216,7 @@ void CollabSession::handle(const TransportEvent& e)
                 else end(std::string("The host sent something this version of Sonora can't read (") + error.what() + ").");
                 return;
             }
+            if (wire) stats_.referencedBytes += wire->referencedBytes - before;
             if (host_)
             {
                 if (auto* peer = peerById(e.peer)) handleHost(*peer, std::move(message));
@@ -812,7 +835,10 @@ void CollabSession::snapshotInstalled()
 
 void CollabSession::requestAssets()
 {
-    while (downloads_.size() < parallelDownloads && ! wanted_.empty())
+    uint64_t inFlight = 0;
+    for (const auto& [hash, download] : downloads_)
+        inFlight += std::min(requested_[hash], download->entry().size) - download->written();
+    while (downloads_.size() < parallelDownloads && ! wanted_.empty() && inFlight < requestWindow)
     {
         const auto hash = wanted_.front();
         wanted_.pop_front();
@@ -835,12 +861,13 @@ void CollabSession::requestAssets()
     for (auto& [hash, download] : downloads_)
     {
         auto& next = requested_[hash];
-        while (next < download->entry().size && next - download->written() < chunkWindow * assetChunkBytes)
+        while (next < download->entry().size && inFlight < requestWindow)
         {
             AssetRequestMsg r;
             r.hash = hash;
             r.offset = next;
             send(hostPeer, Channel::Assets, r);
+            inFlight += std::min<uint64_t>(assetChunkBytes, download->entry().size - next);
             next += assetChunkBytes;
         }
     }

@@ -98,6 +98,21 @@ const parameterWrite = z.union([
 const beat = z.number().min(0).max(1000000);
 const locatorName = z.string().max(256);
 const locatorColor = z.number().int().min(-1).max(69).describe('Palette index 0–69; -1 = default locator colour');
+// AGT-7d: automation targets by name; points are song beats with a value in the target's units or gainDb (volume/send).
+const automationTarget = {
+  trackId: id,
+  target: z.enum(['volume', 'pan', 'activator', 'send', 'device']).optional()
+    .describe('volume/pan/activator (track on), send (with sendIndex = returnTracks[] order) or device (with deviceId and parameterId)'),
+  sendIndex: z.number().int().min(0).max(1000).optional(),
+  deviceId: id.optional(),
+  parameterId: z.string().min(1).max(1024).optional().describe('parameterId from sonora_parameters_get, or "on" for the device switch'),
+  targetId: id.optional().describe('Alternative to target: an automation targetId from inspect automation[]')
+};
+const automationPoint = z.object({
+  beat,
+  value: z.number().optional().describe('Volume/send: linear gain (1 = 0 dB, max 1.995 = +6 dB for volume). Pan -1..1. Activator/on: 0 or 1. Native parameter: its descriptor minimum..maximum. VST3: normalized 0..1'),
+  gainDb: z.number().min(-1000).max(6).optional().describe('Volume/send only; -70 dB or lower is silence')
+}).strict().refine(value => (value.value === undefined) !== (value.gainDb === undefined), 'Give value OR gainDb');
 const command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('tempo.set'), bpm: z.number().min(20).max(999) }).strict(),
   z.object({ type: z.literal('track.set_gain'), trackId: id, gainDb: z.number().min(-90).max(6) }).strict(),
@@ -110,10 +125,21 @@ const command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('locator.update'), locatorId: id, beat: beat.optional(), name: locatorName.optional(),
     infoText: z.string().max(4096).optional(), color: locatorColor.optional(), songStart: z.boolean().optional() }).strict()
     .refine(value => Object.keys(value).length > 2, 'Specify a changed locator field'),
-  z.object({ type: z.literal('locator.delete'), locatorId: id }).strict()
+  z.object({ type: z.literal('locator.delete'), locatorId: id }).strict(),
+  z.object({ type: z.literal('track.set_folded'), trackIds: z.array(id).max(1024).optional().describe('Group track IDs; omit for every group'),
+    folded: z.boolean() }).strict(),
+  z.object({ type: z.literal('clip.create'), trackId: id, startBeat: beat.optional(), scene: z.number().int().min(0).max(999).optional(),
+    lengthBeats: z.number().min(1 / 64).max(65536), name: z.string().max(256).optional(), notes: z.array(note).max(4096).optional() }).strict()
+    .refine(value => (value.startBeat === undefined) !== (value.scene === undefined), 'Give startBeat (Arrangement) OR scene (Session)'),
+  z.object({ type: z.literal('clip.copy'), trackId: id, clipId: id, toTrackId: id.optional(), destinationBeat: beat }).strict(),
+  z.object({ type: z.literal('clip.move'), trackId: id, clipId: id, toTrackId: id.optional(), startBeat: beat }).strict(),
+  z.object({ type: z.literal('clip.delete'), ...location }).strict(),
+  z.object({ type: z.literal('automation.set'), ...automationTarget, points: z.array(automationPoint).max(4096),
+    rangeStartBeat: beat.optional(), rangeEndBeat: beat.optional() }).strict(),
+  z.object({ type: z.literal('automation.clear'), ...automationTarget }).strict()
 ]);
 function createServer() {
-  const server = new McpServer({ name: 'sonora', version: '0.4.0' });
+  const server = new McpServer({ name: 'sonora', version: '0.5.0' });
   server.registerResource('control-guide', 'sonora://docs/control-v1', { mimeType: 'text/markdown' }, async uri => ({
     contents: [{ uri: uri.href, mimeType: 'text/markdown', text: await fs.readFile(new URL('../../docs/agent/CONTROL_API.md', import.meta.url), 'utf8') }]
   }));
@@ -147,7 +173,7 @@ function createServer() {
     attached = candidate;
     return result;
   });
-  tool('sonora_project_inspect', 'Read revision, tracks, Arrangement/Session/take clip handles, top-level devices and Arrangement locators before editing.', {}, () => call('project.inspect'), true);
+  tool('sonora_project_inspect', 'Read revision, tracks (kind audio/midi/group; groupId = parent group; groups list childTrackIds and folded, and hold no clips themselves: their content is on the child tracks), Arrangement/Session/take clip handles, top-level devices, automation lanes per track, returnTracks (send order) and Arrangement locators before editing.', {}, () => call('project.inspect'), true);
   tool('sonora_capabilities_get', 'Read implemented operations and explicit limitations.', {}, () => call('capabilities.get'), true);
   tool('sonora_clip_get', 'Read MIDI notes with revision-scoped noteIndex handles and paging. Default Arrangement; scene selects Session, laneId selects take (never both). Times are clip-content quarter-note beats.', {
     ...location, offset: id.optional(), limit: z.number().int().min(1).max(4096).optional()
@@ -158,7 +184,7 @@ function createServer() {
   tool('sonora_parameters_set', 'Set 1–128 exact native/rack/VST3 parameter ID/name pairs. Supply exactly one of normalized (0–1) or native value (advertised units); VST3 accepts normalized only. Requires writable descriptors; rejects authored automation. Prepares and reload-verifies opaque state before one undoable commit. Rebuilds the affected processor (may interrupt voices/close editor); use the returned NEW deviceId. Does not save the project.', {
     ...mutation, trackId: id, deviceId: id, parameters: z.array(parameterWrite).min(1).max(128)
   }, ({ expectedRevision, idempotencyKey, ...args }) => call('devices.parameters.set', args, { expectedRevision, idempotencyKey }));
-  tool('sonora_edits_apply', 'Apply a staged batch as one undo step: tempo, gain, clip duplicate, notes.add/update/delete/replace or Arrangement locators (locator.add/update/delete). Inspect notes first; noteIndex refers to current sorted notes and changes after each command. scene/laneId select Session/take. Replace is whole-content replacement (empty clears); add/update preserve other notes. Automated gain is rejected. Locators use quarter-note beats and locatorId from inspect (locators[]); locator.add returns data.locatorIds; one locator per beat; songStart is exclusive; color is a palette index (-1 default).', {
+  tool('sonora_edits_apply', 'Apply a staged batch as one undo step: tempo, gain, group folding, clip create/copy/move/duplicate/delete, automation, notes.add/update/delete/replace or Arrangement locators (locator.add/update/delete). Inspect notes first; noteIndex refers to current sorted notes and changes after each command. scene/laneId select Session/take. Replace is whole-content replacement (empty clears); add/update preserve other notes. Automated gain is rejected: write a volume envelope with automation.set instead. track.set_folded opens/closes groups (omit trackIds for all). clip.create makes a new MIDI clip (optional notes, clip-relative beats) on a MIDI track at startBeat or in an empty Session scene; clip.copy puts an existing Arrangement clip on another track of the same kind; both need a free region and return data.clips. automation.set writes a track envelope: target volume/pan/activator/send (+sendIndex)/device (+deviceId, parameterId from sonora_parameters_get, or "on"); points use song beats; without a range the lane becomes exactly the points, with rangeStartBeat/rangeEndBeat only that span is replaced and the previous value is pinned at both edges. Example kick filter-out over bars 65–72 in 4/4: target device, parameterId of the filter frequency, rangeStartBeat 256, rangeEndBeat 288, points [{beat:256,value:<open>},{beat:284,value:<closed>}]. automation.clear removes a lane. Locators use quarter-note beats and locatorId from inspect (locators[]); locator.add returns data.locatorIds; one locator per beat; songStart is exclusive; color is a palette index (-1 default).', {
     ...mutation, commands: z.array(command).min(1).max(32)
   }, ({ commands, ...guard }) => call('edits.apply', { commands }, guard));
   tool('sonora_devices_catalog', 'List insertable implemented native devices and scanned VST3 plugins. Select exact catalogId, no file paths. No installation or scanning.', {

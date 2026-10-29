@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <string>
 
 namespace sonora::ui
 {
@@ -55,8 +57,9 @@ inline DragMode hitZone(float xInClip, float clipWidthPx)
 }
 
 // The clip as it looks while dragged by `deltaBeats` from its original state. With `snap` the
-// moving edge lands on the grid (Move snaps the start, keeping the length).
-inline model::Clip dragClip(const model::Clip& original, DragMode mode, double deltaBeats, double grid, bool snap, double tempo)
+// moving edge lands on the grid (Move snaps the start, keeping the length; with `alignEnd` it snaps the end instead).
+inline model::Clip dragClip(const model::Clip& original, DragMode mode, double deltaBeats, double grid, bool snap, double tempo,
+                            bool alignEnd = false)
 {
     switch (mode)
     {
@@ -88,7 +91,9 @@ inline model::Clip dragClip(const model::Clip& original, DragMode mode, double d
         case DragMode::Move:
         {
             double start = original.currentStart + deltaBeats;
-            if (snap)
+            if (snap && alignEnd)
+                start = std::max(0.0, snapToGrid(original.currentEnd + deltaBeats, grid) - (original.currentEnd - original.currentStart));
+            else if (snap)
                 start = snapToGrid(start, grid);
             return model::movedClip(original, start);
         }
@@ -124,6 +129,47 @@ inline model::Clip dragClip(const model::Clip& original, DragMode mode, double d
         }
     }
     return original;
+}
+
+// The edge a drag places (the position the guide line and the ruler label show), -1 for the fade curve gestures.
+inline double dragGuideBeat(const model::Clip& preview, DragMode mode, bool alignEnd)
+{
+    switch (mode)
+    {
+        case DragMode::Move: return alignEnd ? preview.currentEnd : preview.currentStart;
+        case DragMode::ResizeEnd:
+        case DragMode::StretchEnd: return preview.currentEnd;
+        case DragMode::TrimStart:
+        case DragMode::StretchStart: return preview.currentStart;
+        case DragMode::FadeIn: return preview.currentStart + preview.fadeIn;
+        case DragMode::FadeOut: return preview.currentEnd - preview.fadeOut;
+        case DragMode::FadeInCurve:
+        case DragMode::FadeOutCurve: break;
+    }
+    return -1.0;
+}
+
+// "bar.beat.sixteenth" (1-based) of an Arrangement position, or "bars.beats.sixteenths" (0-based) of a length.
+inline std::string formatBarBeat(double beats, int numerator, int denominator, bool length)
+{
+    const double beatUnit = 4.0 / std::max(1, denominator), beatsPerBar = std::max(1, numerator) * beatUnit;
+    const bool negative = beats < -1e-9;
+    const double value = std::fabs(beats) + 1e-6; // 3.9999999 is still beat 4
+    const int bar = (int) std::floor(value / beatsPerBar);
+    const double inBar = value - bar * beatsPerBar;
+    const int beat = (int) std::floor(inBar / beatUnit);
+    const int sixteenth = (int) std::floor((inBar - beat * beatUnit) / 0.25);
+    const int base = length ? 0 : 1;
+    char text[48];
+    std::snprintf(text, sizeof(text), "%s%d.%d.%d", negative ? "-" : "", bar + base, beat + base, sixteenth + base);
+    return text;
+}
+
+// The status bar's range readout (Live): where a clip or time selection starts, ends and how long it is.
+inline std::string rangeStatusText(double start, double end, int numerator, int denominator)
+{
+    return "Start " + formatBarBeat(start, numerator, denominator, false) + "   End " + formatBarBeat(end, numerator, denominator, false)
+         + "   Length " + formatBarBeat(end - start, numerator, denominator, true);
 }
 
 } // namespace sonora::ui

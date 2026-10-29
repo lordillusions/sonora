@@ -236,7 +236,8 @@ jobs:
           pattern: installer-*
           path: dist
           merge-multiple: true
-      # sonoradaw.com links to releases/latest/download/<stable name>, so every release also carries version-free copies.
+      # sonoradaw.com links to this release's versioned files (set_version_links.py); older pages and READMEs link
+      # releases/latest/download/<stable name>, so every release also carries version-free copies.
       - name: Stable download names for the website
         env:
           VERSION: ${{ needs.version.outputs.version }}
@@ -253,7 +254,7 @@ jobs:
       - name: Every file the website links to is in this release
         run: |
           missing=0
-          for name in $(grep -oh 'releases/latest/download/[^"]*' src/site/*.html | sed 's|.*/||' | sort -u); do
+          for name in $(grep -ohE 'releases/(latest/download|download/v[0-9.]+)/[^"]*' src/site/*.html | sed 's|.*/||' | sort -u); do
             if [ -f "dist/$name" ]; then echo "ok $name ($(stat -c %s "dist/$name") bytes)"
             else echo "::error::site links to $name but the release has no such file"; missing=1; fi
           done

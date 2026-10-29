@@ -10,6 +10,7 @@
 #include "devices/native/WavetableEffects.h"
 #include "midi/ControlTarget.h"
 #include "ui/GridModel.h"
+#include "ui/InlineEdit.h"
 #include "ui/Rect.h"
 #include "ui/Theme.h"
 #include "ui/BrowserDrag.h"
@@ -119,6 +120,8 @@ struct CollabView
     std::vector<LanSession> lanSessions;
     std::vector<std::string> notices; // newest last
     std::string displayName, relayUrl;
+    bool relayIsDefault = true; // relayUrl is the project's server (the panel then names no address)
+    bool shareOnLan = false;    // the panel's choice before sharing: internet (default) or this Wi-Fi
     bool active() const { return state != State::None && state != State::Ended; }
 };
 
@@ -308,6 +311,20 @@ struct UiContext
     float scrollTracksY = 0.0f;  // vertical scroll (both views)
     float sessionScrollX = 0.0f, sessionScrollY = 0.0f; // Session grid: track columns / scene rows (saved with the set, UI-57)
     std::string statusText = "Ready";
+    // Start/end of a clip being dragged in the Arrangement; the status bar shows it instead of the selection while set.
+    std::optional<std::pair<double, double>> dragRange;
+    // The range the status bar reads out at its right (Live): a dragged clip, the time selection or the selected
+    // Arrangement clip; nullopt when nothing in Arrangement time is selected.
+    std::optional<std::pair<double, double>> statusRange() const
+    {
+        if (dragRange) return dragRange;
+        if (song == nullptr || mainView != MainView::Arrangement) return std::nullopt;
+        if (arrangementSelection.active && arrangementSelection.end - arrangementSelection.start > 1e-9)
+            return std::make_pair(arrangementSelection.start, arrangementSelection.end);
+        if (selectedClipScene < 0)
+            if (const auto* clip = selectedClip()) return std::make_pair(clip->currentStart, clip->currentEnd);
+        return std::nullopt;
+    }
     std::vector<std::string> buildLog;
     // UI-51: work the user waits for (opening a set, starting plug-ins, scans). While a task is open the status bar shows
     // the newest one with an activity indicator, the launch splash mirrors it and, unless the task runs in the background
@@ -529,6 +546,7 @@ struct UiContext
     std::function<void(bool midi)> insertTrack;
     std::function<void()> insertReturnTrack; // TRK-2: Option+Cmd+T
     std::function<void()> renameSelection;
+    TrackRename trackRename; // UI-58: the track name being edited in place
     std::function<void(const std::string&)> setWindowTitle;
     std::function<void()> layoutChanged; // a panel size was changed by dragging a divider (persisted by the app)
     std::function<bool()> canUndo, canRedo;
@@ -537,7 +555,7 @@ struct UiContext
     // ---- COL-5 collab sessions (File > Share Session / Join Session, the top bar's people button)
     bool collabOpen = false; // the Collaborate panel
     CollabView collab;
-    std::function<void(bool lan)> collabShare;            // host the open set on the local network or through the relay
+    std::function<void(bool lan)> collabShare;            // host the open set on this Wi-Fi or over the internet (relay)
     std::function<void()> collabJoinLink;                 // asks for an invite link, then joins
     std::function<void(const std::string& address)> collabJoinNearby; // a LAN session from the list: ask the host to let us in
     std::function<void()> collabLeave;                    // guests leave; the host ends the session

@@ -6,7 +6,8 @@
 // track, wheel = scroll, Cmd+wheel = time zoom, Option+wheel = track height, Shift+wheel = horizontal scroll.
 // Clip editing (UI-3): click selects, drag the title bar to move (also to another track of the same kind),
 // drag the body/empty lane to select time, Cmd+D duplicates that range including its gaps,
-// drag an edge to resize / trim, Alt disables snapping; Delete removes, Cmd+D duplicates,
+// drag an edge to resize / trim, Alt disables snapping (Shift while moving snaps the clip's end instead of its start; the
+// dragged edge draws a line up to the ruler, which shows its position); Delete removes, Cmd+D duplicates,
 // double-click on an empty MIDI lane creates a 4-beat clip, Cmd+Shift+M inserts one at the playhead.
 // Every change is an undoable model::EditCommand applied through UiContext::applyEdit.
 // A toggles automation lanes (UI-5). Audio clips use cached waveforms (UI-4).
@@ -34,6 +35,7 @@ public:
     void layout() override;
     std::vector<MenuAction> gridContextActions(const MouseEvent&);
     void zoomTimeSelection(bool back);
+    void zoomAllTrackHeights(double factor); // every track lane's height, keeping the selected track in view
     void paint(SkCanvas& c, const Theme& t) override;
     void paintOverChildren(SkCanvas& c, const Theme& t) override;
     void tick() override;
@@ -81,6 +83,7 @@ private:
     double overviewBeats() const;
     void paintOverview(SkCanvas& c, const Theme& t, const Rect& r);
     void paintCollaborators(SkCanvas& c, const Theme& t); // COL-5
+    void paintDragGuide(SkCanvas& c, const Theme& t);     // the dragged edge's line up to the ruler and its position
     void reportPointer(const MouseEvent& e);
     void scrollToOverview(float x);
     const model::Clip* clipAt(float x, float y, model::ClipLocation& location, float& clipX0, float& clipX1) const;
@@ -89,7 +92,7 @@ private:
     double beatsPerBar() const;
     double snapUnit(const MouseEvent& e) const; // grid to snap to, 0 when snapping is off or overridden with Cmd/Alt
     void zoomAt(float anchorX, double factor);
-    void zoomTrackHeight(double factor, float anchorY);
+    void zoomTrackHeight(double factor, float anchorY, bool allTracks = false); // allTracks: every lane, not the selection
     void scrub(const MouseEvent& e, bool start);
     void showContextMenu(const MouseEvent& e);
     void insertMidiClip(int track, double beat);
@@ -115,6 +118,7 @@ private:
     {
         bool active = false, moved = false;
         bool copy = false; // Option+drag of a clip body: the original stays and a copy is dropped at the preview
+        bool alignEnd = false; // Shift held while moving: the clip's end snaps to the grid instead of its start
         int track = -1, uid = -1, targetTrack = -1;
         ui::DragMode mode = ui::DragMode::Move;
         int laneId = -1;

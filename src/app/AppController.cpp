@@ -597,29 +597,24 @@ void AppController::renameSelection()
     const auto* clip = ui_.selectedClip();
     const auto* track = ui_.trackAt(ui_.selectedTrack);
     if (! clip && (! track || track->kind == model::TrackKind::Main)) return;
-    const int generation = documentGeneration_, index = ui_.selectedTrack, id = track ? track->id : -1;
-    auto* dialog = new juce::AlertWindow("Rename", clip ? "Clip name" : "Track name", juce::MessageBoxIconType::NoIcon);
-    auto editableName = clip ? clip->name : track->name;
-    if (! clip && track->nameIsAutomatic && index < ui_.numTracks())
+    if (! clip)
     {
-        const auto displayed = ui_.trackDisplayName(index);
-        editableName = "#" + displayed.substr(std::to_string(index + 1).size());
+        // UI-58: tracks are renamed in place, in the header that shows the name (Arrangement header, Session title).
+        ui::beginTrackRename(ui_, ui_.selectedTrack);
+        return;
     }
-    dialog->addTextEditor("name", juce::String::fromUTF8(editableName.c_str()));
+    const int generation = documentGeneration_;
+    auto* dialog = new juce::AlertWindow("Rename", "Clip name", juce::MessageBoxIconType::NoIcon);
+    dialog->addTextEditor("name", juce::String::fromUTF8(clip->name.c_str()));
     dialog->addButton("OK", 1, juce::KeyPress(juce::KeyPress::returnKey));
     dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
-    dialog->enterModalState(true, juce::ModalCallbackFunction::create([this, alive = std::weak_ptr<bool>(alive_), dialog, generation, location, index, id](int result) {
+    dialog->enterModalState(true, juce::ModalCallbackFunction::create([this, alive = std::weak_ptr<bool>(alive_), dialog, generation, location](int result) {
         const auto lifetime = alive.lock();
         if (! lifetime || ! *lifetime || result != 1 || generation != documentGeneration_ || ! song_) return;
         const auto name = dialog->getTextEditorContents("name").trim().toStdString();
         if (name.empty()) return;
-        if (location.uid >= 0)
-        {
-            if (const auto* current = model::findClip(*song_, location))
-            { auto changed = *current; changed.name = name; applyEdit(model::modifyClip(*song_, location, std::move(changed), "Rename Clip")); }
-        }
-        else if (const auto* current = ui_.trackAt(index); current && current->id == id)
-            applyEdit(model::renameTrack(*song_, index, name));
+        if (const auto* current = model::findClip(*song_, location))
+        { auto changed = *current; changed.name = name; applyEdit(model::modifyClip(*song_, location, std::move(changed), "Rename Clip")); }
     }), true);
 }
 
@@ -773,6 +768,7 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
         endCollabDocument();
     }
     ++documentGeneration_;
+    ui_.trackRename = {}; // track ids belong to the previous document
     controlEndpoint_.disable();
     controlDocumentId_ = juce::Uuid().toString().toStdString();
     closePluginWindows();

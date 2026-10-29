@@ -15,8 +15,11 @@ WebRTC peer connection to the host (libdatachannel, DTLS). Each connection has t
 | Live | `live` | unordered, no retransmits | presence, live values, clock pings |
 | Assets | `assets` | reliable, ordered | sample requests and chunks, guest uploads |
 
-Ops and Assets messages are framed: first byte 0 = whole message (≤ 60 KiB), 1 = first part (+ u32 total), 2 = middle,
-3 = last; at most 512 MiB per message. Live messages are never fragmented (larger ones are dropped).
+Ops and Assets messages are framed: first byte 0 = whole message (≤ 16 KiB with the byte), 1 = first part (+ u32 total),
+2 = middle, 3 = last; at most 512 MiB per message. Live messages are never fragmented (larger ones are dropped). Frames
+stay at 16 KiB (COL-3c): with larger SCTP messages a busy channel starved the others in libdatachannel/usrsctp (an edit
+waited until every queued sample chunk had arrived; measured with `collab_probe --bench`, 20 KiB starves, 16 KiB doesn't).
+Senders keep at most 64 KiB of assets in the data channel's own queue, which is first in, first out across channels.
 
 ## Meeting
 
@@ -46,13 +49,27 @@ A guest that isn't connected 30 s after starting gives up (`SONORA_COLLAB_CONNEC
 Binary, one type byte then fields (`core/ByteCodec.h`: varints, zigzag, little-endian exact doubles). Strict decoding:
 unknown type, truncation, trailing bytes or oversize fields drop the peer.
 
+**Packed** (protocol 2, COL-3c): a mode byte, then the fields as one byte string. Mode 0 = plain (bodies under 4 KiB,
+most edits); 1 = zlib-deflated (level 1), followed by the inflated size; 2 = deduplicated, then deflated, followed by
+the deduplicated size and the body size. Inflating or rebuilding must give exactly the stated size (≤ 512 MiB), or the
+peer is dropped.
+
+Mode 2 (bodies of 64 KiB and more): the body is cut into content-defined chunks (gear rolling hash, 4–64 KiB, ~20 KiB
+on average) and written as entries, each a chunk's bytes or the 64-bit key of a chunk that already crossed this link in
+either direction. Each side keeps, per link, the keys it sent and received (at most 256 MiB of chunks per direction,
+first come; no eviction) and one byte pool per session. Both ends make the same decisions because each direction sees
+the same chunks in the same order on Ops. A new link (reconnect) starts empty. Why: a track header or clip carries the
+source XML it was loaded from (megabytes with plugin state), and every rename or colour change used to send all of it.
+The 47-track test set: snapshot body 119 MB plain, 25 MB deflated, 16.7 MB deduplicated (+ the 8 MB .als, which is gzip
+already and goes as it is; 1.3 s on the host); 51 random edits sent 220 MB as references.
+
 | # | Message | Direction | Content |
 |---|---|---|---|
-| 0 | hello | guest → host | protocol 1, app version, name, rejoin author + token, last seq |
+| 0 | hello | guest → host | protocol 2, app version, name, rejoin author + token, last seq |
 | 1 | welcome | host → guest | your author id, role, participants, clip UID base, rejoin token, snapshot follows? |
-| 2 | snapshot | host → guest | seq, every object (full form) with its revision, document binding, the host's saved .als bytes, asset catalog, transport |
-| 3 | commit | host → all | seq, author, intent id (0: host/undo/redo), kind (edit/undo/redo), label, object states |
-| 4 | intent | guest → host | intent id, label, base revision per object (or "after my intent N"), object states |
+| 2 | snapshot | host → guest | seq, packed {every object (full form), revisions, document binding, asset catalog, transport}, set name, the host's saved .als bytes |
+| 3 | commit | host → all | seq, author, intent id (0: host/undo/redo), kind (edit/undo/redo), label, packed {object states} |
+| 4 | intent | guest → host | intent id, label, base revision per object (or "after my intent N"), packed {object states} |
 | 5 | reject | host → author | intent id, code (`conflict`, `invalid`, `not_allowed`, `depends_on_rejected`), message, who changed it first |
 | 6 | undo | guest → host | redo flag |
 | 7 | participants | host → all | id, name, role (Host/Editor/Listener), colour, connected |
@@ -85,8 +102,8 @@ song. The host re-encodes committed objects from its own song (the canonical for
 ## Samples (COL-4)
 
 The host hashes every sample its song references (SHA-256, worker thread) before sending snapshots, and new references
-after each commit (`asset-add`). Guests fetch missing hashes into `<app data>/CollabCache/<hash><ext>` (two downloads at
-once, eight 64 KiB chunks in flight each), verify the hash, then reload the clips and sampler zones that use them. A
+after each commit (`asset-add`). Guests fetch missing hashes into `<app data>/CollabCache/<hash><ext>` (up to eight
+downloads at once, 64 KiB chunks, 2 MiB of requests in flight in all: enough for a ~400 ms path), verify the hash, then reload the clips and sampler zones that use them. A
 guest resolves sample references only through the catalog (`io::setSamplePathOverride`), never through the host's paths.
 A guest's file drop uploads the file; the host stores it as `<project>/Samples/Collab/<name>` and performs the drop,
 attributed to the guest.

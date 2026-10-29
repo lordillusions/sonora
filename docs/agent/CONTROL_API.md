@@ -36,7 +36,7 @@ launch. Idempotency is not crash-proof exactly-once persistence.
 
 | Operation | Arguments | Behavior |
 | --- | --- | --- |
-| `project.inspect` | Empty | App/document IDs, revision, busy state, tempo, regular tracks, Arrangement, Session and take clip handles, and top-level devices. |
+| `project.inspect` | Empty | App/document IDs, revision, busy state, tempo, regular tracks (with `kind`, `groupId`, group `folded`/`childTrackIds` and `automation` lanes), `returnTracks`, Arrangement, Session and take clip handles, and top-level devices. |
 | `capabilities.get` | Empty | Actual operations, reasoning-client mode and limitations. |
 | `clips.get` | `trackId`, `clipId`, optional `scene` OR `laneId`, `offset`, `limit` | Paged notes with revision-scoped indices, total count, `hasMore` and loop bounds. Default limit 4096. |
 | `devices.parameters` | `trackId`, `deviceId` | Top-level native/rack/VST3 parameters with exact IDs/names, values, unit/range/choice metadata and `writable`. |
@@ -52,8 +52,9 @@ Inspection/capability discovery does not require an envelope target. Other queri
 to the enabled document, and changing documents revokes that endpoint. The MCP adapter additionally checks returned identities.
 
 Supported edit types are `tempo.set {bpm: 20..999}`, `track.set_gain {trackId, gainDb: -90..6}`,
-`clip.duplicate {trackId, clipId, destinationBeat: 0..1000000}`, the note commands below and the locator commands
-(see "Arrangement locators"). Gain is absolute dB, not a relative change. An agent asked
+`clip.duplicate {trackId, clipId, destinationBeat: 0..1000000}`, the note commands below, the locator commands
+(see "Arrangement locators") and the group, clip and automation commands of "Groups, clips and automation (AGT-7d)".
+Gain is absolute dB, not a relative change. An agent asked
 to lower a track by 3 dB must read its current gain and calculate the absolute target. Gain updates participate in
 history, live engine controls and save state; tracks with authored volume automation are rejected for this operation.
 
@@ -65,8 +66,59 @@ Implementation (COL-1, ADR 0009): every `edits.apply` command decodes to a `mode
 `core/OpJson.h`), the same serializable intent collab peers will exchange, and `opToCommand` builds the undoable command.
 The public note API still uses `noteIndex`; the service translates indices to per-clip note keys against the staged
 song. A `trackId` that no longer exists reports `target_replaced` for every edit type (previously some returned
-`invalid_request`). The op vocabulary also contains `track.rename`, `track.set_color`, `loop.set`, `clip.move` and
-`clip.delete`; they are not exposed through this API until schemas/MCP tools are added (AGT-7).
+`invalid_request`). The op vocabulary also contains `track.rename`, `track.set_color` and `loop.set`; they are not exposed through this
+API until schemas/MCP tools are added (AGT-7).
+
+### Groups, clips and automation (AGT-7d)
+
+**Groups.** Every inspected track has `kind` (`audio`, `midi`, `group`) and `groupId` (its parent group, -1 at top level).
+A group track holds no clips of its own: its content is on the tracks in its `childTrackIds` (nested groups appear there
+too). `folded` tells whether the group is closed in the views. `track.set_folded {trackIds?, folded}` opens or closes
+groups; omitting `trackIds` applies it to every group (collapse all / expand all). Only group IDs are accepted.
+
+**New and copied clips.** `clip.create {trackId, startBeat | scene, lengthBeats: 1/64..65536, name?, notes?}` makes a
+MIDI clip on a MIDI track, in the Arrangement at `startBeat` or in the empty Session slot `scene`. Notes use the same
+fields as `notes.add` and clip-relative beats. `clip.copy {trackId, clipId, toTrackId?, destinationBeat}` copies an
+Arrangement clip (audio or MIDI) to a track of the same kind, which is how an empty audio track gets content.
+`clip.move {trackId, clipId, toTrackId?, startBeat}` and `clip.delete {trackId, clipId, scene? | laneId?}` are exposed too.
+`clip.create` and `clip.copy` refuse an Arrangement region that any clip already overlaps (`region_occupied`); they never
+trim other clips. The receipt lists every clip the batch created in `data.clips` (`trackId`, `clipId`, beats or `scene`).
+Audio clips cannot be created from files through this API.
+
+**Automation.** Inspect lists each track's lanes in `automation[]`: `targetId`, `target` (`volume`, `pan`, `activator`,
+`send` with `sendIndex`, `device` with `deviceId`/`parameterId`, `tempo`, `midi`), `pointCount`, `stepped` and up to
+64 `points` (song beats; the pre-roll value is omitted). Return tracks list theirs under `returnTracks[]`, whose order is
+the `sendIndex` order.
+
+`automation.set {trackId, target, sendIndex?, deviceId?, parameterId?, points, rangeStartBeat?, rangeEndBeat?}` writes the
+track envelope of one target. `target` is `volume`, `pan`, `activator` (track on/off), `send` (+`sendIndex`) or `device`
+(+`deviceId` and `parameterId` from `devices.parameters`, or `"on"` for the device switch, also inside racks). `targetId`
+from inspect may replace `target`. Each point has a song `beat` and either `value` or `gainDb`:
+
+- volume and sends: `value` is linear gain (1 = 0 dB; volume up to 1.995 = +6 dB, sends up to 1), or use `gainDb`
+  (-70 dB and below is silence);
+- pan -1..1; activator and device on/off 0 or 1;
+- native device parameters: the descriptor's `minimum..maximum` in its own units (Hz for a filter frequency); switches and
+  choices automate as stepped lanes;
+- VST3 parameters: normalized 0..1, and only parameters the set already has an automation target for.
+
+Without a range the lane becomes exactly the given points (the value before the first point holds the first point's
+value). With `rangeStartBeat`/`rangeEndBeat` only points inside that span are replaced: points outside are kept and the
+lane's previous value is pinned at both edges unless a point sits exactly there, so the lane outside the range is
+unchanged. A new lane starts from the target's current manual value. `automation.clear {trackId, target...}` removes a
+lane. Automated volume makes `track.set_gain` return `automation_conflict`; automated device parameters are likewise
+rejected by `devices.parameters.set`.
+
+Example: filter the kick out over bars 65–72 of a 4/4 song (beats 256–288) with a native Auto Filter, then open it again:
+
+```json
+{"commands":[{"type":"automation.set","trackId":19,"target":"device","deviceId":31,"parameterId":"Filter_Frequency",
+  "rangeStartBeat":256,"rangeEndBeat":288,
+  "points":[{"beat":256,"value":20000},{"beat":287.9,"value":40},{"beat":288,"value":20000}]}]}
+```
+
+If the track has no filter yet, insert one first with `devices.insert` (`native:AutoFilter2`). A volume fade-out uses
+`"target":"volume"` with `gainDb` points.
 
 ### Arrangement locators (UI-3b)
 
@@ -130,7 +182,7 @@ Removal captures current live state before deleting the device. Undo restores it
 save; redo removes it again. Source XML/unknown content and source media ownership remain with the existing model/writer.
 Plugin loading/state work is still in-process and may interrupt voices or block on a faulty third-party plugin.
 
-MCP 0.4 (locator commands in `sonora_edits_apply`) also exposes `sonora_devices_catalog`, `sonora_devices_insert`, `sonora_devices_remove` and the extended
+MCP 0.5 adds the AGT-7d group, clip and automation commands to `sonora_edits_apply`; MCP 0.4 (locator commands) also exposes `sonora_devices_catalog`, `sonora_devices_insert`, `sonora_devices_remove` and the extended
 `sonora_parameters_get/set`. The configured native LLM has the identical operations through its document-bound adapter.
 Reload the MCP bridge and use the rebuilt application to load the new tool/service versions.
 

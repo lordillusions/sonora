@@ -10,9 +10,21 @@ namespace sonora::app
 namespace
 {
 PromptWindow* current = nullptr;
-}
+bool systemDialogOpen = false;
 
-bool PromptWindow::isShowing() { return current != nullptr; }
+#if ! JUCE_MAC
+// The window the dialog belongs to, so Windows keeps it above the app instead of somewhere behind it.
+juce::Component* dialogOwner()
+{
+    if (auto* active = juce::TopLevelWindow::getActiveTopLevelWindow()) return active;
+    for (int i = 0; i < juce::TopLevelWindow::getNumTopLevelWindows(); ++i)
+        if (auto* window = juce::TopLevelWindow::getTopLevelWindow(i); window != nullptr && window->isVisible()) return window;
+    return nullptr;
+}
+#endif
+} // namespace
+
+bool PromptWindow::isShowing() { return current != nullptr || systemDialogOpen; }
 bool PromptWindow::pressKey(const juce::KeyPress& key) { return current != nullptr && current->keyPressed(key); }
 
 bool PromptWindow::show(PromptOptions options, std::function<void(int)> done)
@@ -22,7 +34,26 @@ bool PromptWindow::show(PromptOptions options, std::function<void(int)> done)
         current->toFront(true);
         return false;
     }
+    if (systemDialogOpen) return false;
+#if ! JUCE_MAC
+    // COM-7k: Windows and Linux use the system dialog. The borderless prompt window never appeared on Windows: quitting
+    // with unsaved changes left the app modal behind an invisible prompt, so it looked frozen. Button indices are the
+    // same (the task dialog returns the index of the button pressed).
+    auto box = juce::MessageBoxOptions()
+                   .withIconType(juce::MessageBoxIconType::QuestionIcon)
+                   .withTitle(juce::String::fromUTF8(options.state.title.c_str()))
+                   .withMessage(juce::String::fromUTF8(options.state.message.c_str()))
+                   .withAssociatedComponent(dialogOwner());
+    for (const auto& button : options.state.buttons)
+        box = box.withButton(juce::String::fromUTF8(button.label.c_str()));
+    systemDialogOpen = true;
+    juce::NativeMessageBox::showAsync(box, [callback = std::move(done)](int button) {
+        systemDialogOpen = false;
+        if (callback) callback(button);
+    });
+#else
     current = new PromptWindow(std::move(options), std::move(done)); // owned by itself until finish()
+#endif
     return true;
 }
 

@@ -112,18 +112,25 @@ public:
     // Fitted constants (docs/HUSH.md "Calibration"). Public so tests and the calibration harness can read them.
     struct Tuning
     {
-        float softGain = 0.0957f, softCurve = 0.045f; // drive per depth unit, and its growth with depth
-        float hardGain = 0.06f, hardCurve = 0.045f, hardLevel = 0.23f, hardThreshold = -5.0f, hardThresholdSlope = 6.3f;
+        float softGain = 0.1301f, softCurve = 0.0464f; // drive per depth unit, and its growth with depth
+        float hardGain = 0.0602f, hardCurve = 0.045f, hardLevel = 0.1925f, hardThreshold = -5.441f, hardThresholdSlope = 6.3f;
         float knee = 9.0f;                             // compressive law R = K (sqrt(1 + 2u/K) - 1)
-        float envelopeRatio = 2.5f;                    // local envelope width / spread width
+        float envelopeRatio = 3.385f;                    // local envelope width / spread width
         float floorDb = -100.0f, floorRange = 80.0f;   // ignore bins this far under the loudest
-        float excessFloor = 8.0f;                      // dB of excess that plain noise shows anyway
+        float excessFloor = 7.359f;                      // dB of excess that plain noise shows anyway
+        float excessFloorSlope = 0.0678f;                 // dB the floor drops per depth step above 5 (rises below)
         float widthScale = 0.8f;                       // kernel width / measured notch width
         float widthComp = 0.5f;                        // 0..1: how much of the f^0.55 width growth is compensated
         float curveBoost = 1.0f, curveCut = 1.15f;     // drive dB per depth-curve dB (boosts, cuts)
         float curveSaturation = 10.0f;                 // drive at which a boost has half its effect
-        float temporalGain = 0.04f, temporalTime = 0.3f, temporalFloor = 12.0f, temporalFloorSlope = 5.0f; // envelope rise
+        float temporalGain = 0.0206f, temporalTime = 0.3f, temporalFloor = 3.629f, temporalFloorSlope = 8.298f; // envelope rise
+        float envelopePower = 0.4947f; // 0..1: local envelope as a dB mean (0) or a power mean (1); dense harmonics raise the latter
+        // Built-in frequency emphasis of the drive at emphasisHz (log-interpolated), relative to 1 kHz. These and the
+        // gains above were refitted on 2026-10-28 against the reference on real stems as well as test tones (docs/HUSH.md).
+        std::array<float, 17> emphasisGain{1.055f, 1.385f, 0.967f, 0.9535f, 0.9646f, 0.988f, 1.104f, 1.301f, 1.793f, 2.607f, 3.728f, 3.613f, 3.782f, 4.4f, 4.49f, 3.596f, 2.66f};
     };
+    static constexpr std::array<float, 17> emphasisHz{20, 50, 100, 200, 300, 500, 700, 1000, 1400, 2000, 2800, 4000,
+                                                      5600, 8000, 12000, 16000, 24000};
     static Tuning& tuning();
 
 private:
@@ -163,6 +170,7 @@ private:
     std::vector<float> analysisWindow_, synthWindow_, fftA_, fftB_, impulse_;
     std::array<std::vector<float>, 2> power_, excess_, spread_, level_, reduction_, smoothed_, gain_, spec_, slowEnvelope_;
     std::vector<double> prefix_;
+    std::vector<float> envPower_, envPowerMean_;
     std::vector<float> binHz_, attackCoef_, releaseCoef_, spreadBins_, widthComp_, emphasis_, curveWeight_[2], curveDb_[2], listenRegion_;
     std::array<bool, 2> flat_{true, true}, identity_{true, true};
 

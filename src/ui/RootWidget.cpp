@@ -24,6 +24,13 @@ MouseEvent localise(MouseEvent e, const Rect& originInRoot)
 void RootWidget::dispatchMouseDown(MouseEvent e)
 {
     hoverTicks_ = 0;
+    if (ctx_.trackRename.active())
+    {
+        // UI-58: a click in the name field keeps editing; anywhere else commits the name, then acts as usual.
+        if (ctx_.trackRename.bounds.contains(e.x, e.y)) { captured_ = nullptr; return; }
+        commitTrackRename(ctx_);
+        markDirty();
+    }
     ctx_.browserDrag.reset();
     ctx_.trackDrag.reset(); trackDrop_.reset(); movingTracks_ = false;
     downX_ = e.x; downY_ = e.y;
@@ -269,7 +276,7 @@ void RootWidget::setKeyboardFocus(Widget* widget)
 
 bool RootWidget::dispatchUserKey(const KeyEvent& k)
 {
-    bool typing = false;
+    bool typing = ctx_.trackRename.active();
     if (isAlive(keyboardFocus_))
         for (auto* w = keyboardFocus_; w != nullptr; w = w->parent()) typing |= w->wantsTextInput();
     const bool plain = ! k.cmd && ! k.alt && ! k.ctrl;
@@ -287,6 +294,8 @@ bool RootWidget::dispatchKey(const KeyEvent& k)
     if (ctx_.trackDrag && k.keyCode == juce::KeyPress::escapeKey)
     { ctx_.trackDrag.reset(); trackDrop_.reset(); captured_ = nullptr; movingTracks_ = false; cursor_ = Cursor::Default; markDirty(); return true; }
     if (ctx_.preferencesOpen || ctx_.exportOpen || ctx_.collabOpen) return keyPressed(k);
+    // UI-58: an open in-place name field takes every key (letters are text, never notes or shortcuts).
+    if (ctx_.trackRename.active()) { trackRenameKey(ctx_, k); markDirty(); return true; }
     if (ctx_.computerKeyboard)
     {
         bool typing = false;

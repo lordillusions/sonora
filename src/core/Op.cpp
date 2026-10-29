@@ -286,6 +286,223 @@ EditCommand build(const Song& song, const ops::DeleteLocator& op)
     return deleteLocator(song, op.locatorId);
 }
 
+EditCommand build(const Song& song, const ops::SetTracksFolded& op)
+{
+    if (op.trackIds.size() > 1024) invalid("Expected at most 1024 trackIds");
+    std::vector<int> groups;
+    if (op.trackIds.empty())
+    {
+        for (size_t i = 0; i < song.tracks.size(); ++i)
+            if (song.tracks[i].kind == TrackKind::Group) groups.push_back(static_cast<int>(i));
+    }
+    else
+    {
+        std::set<TrackId> unique;
+        for (const auto id : op.trackIds)
+        {
+            if (! unique.insert(id).second) invalid("Duplicate trackId");
+            const int index = trackIndex(song, id);
+            if (song.tracks[static_cast<size_t>(index)].kind != TrackKind::Group) invalid("Only group tracks fold: trackId " + std::to_string(id));
+            groups.push_back(index);
+        }
+    }
+    std::vector<EditCommand> parts;
+    for (const int index : groups)
+        if (song.tracks[static_cast<size_t>(index)].folded != op.folded) parts.push_back(setTrackFolded(song, index, op.folded));
+    auto command = compose(op.folded ? "Fold Groups" : "Unfold Groups", std::move(parts));
+    if (! command.apply) command.apply = command.revert = [](Song&) {}; // already in that state: an empty undo step
+    return command;
+}
+
+// An Arrangement region [start, end) of track `index` that no clip occupies.
+void requireFreeRegion(const Song& song, int index, Beats start, Beats end)
+{
+    for (const auto& clip : song.tracks[static_cast<size_t>(index)].arrangementClips)
+        if (clip.currentStart < end - 1e-9 && clip.currentEnd > start + 1e-9)
+            throw OpError("region_occupied", "Clip " + std::to_string(clip.uid) + " already occupies part of that region; move or delete it first");
+}
+
+EditCommand build(const Song& song, const ops::CreateClip& op)
+{
+    const int index = trackIndex(song, op.trackId);
+    const auto& track = song.tracks[static_cast<size_t>(index)];
+    if (track.kind != TrackKind::Midi) throw OpError("unsupported_clip", "Only MIDI tracks take a new MIDI clip; copy an audio clip instead");
+    const Beats length = bounded(op.lengthBeats, 1.0 / 64, 65536, "lengthBeats");
+    const Beats start = op.scene >= 0 ? 0.0 : bounded(op.startBeat, 0, maxBeat - length, "startBeat");
+    if (op.name && op.name->size() > 256) invalid("Clip name exceeds 256 bytes");
+    if (op.notes.size() > maxNotesPerOp) invalid("Expected at most 4096 notes");
+    Clip clip;
+    if (! makeEmptyMidiClip(song, start, length, clip))
+        throw OpError("unsupported_clip", "This set has no MIDI clip format to create a clip from");
+    clip.colorIndex = track.colorIndex;
+    if (op.name) clip.name = *op.name;
+    appendNew(clip.notes, op.notes);
+    if (op.scene >= 0)
+    {
+        if (op.scene > 999) invalid("Out of range: scene");
+        if (static_cast<size_t>(op.scene) < track.slots.size() && track.slots[static_cast<size_t>(op.scene)].clip)
+            throw OpError("region_occupied", "That Session slot already holds a clip");
+        auto command = setSessionClip(song, index, op.scene, std::move(clip));
+        command.label = "Insert MIDI Clip";
+        return command;
+    }
+    requireFreeRegion(song, index, start, start + length);
+    return insertClip(index, std::move(clip), "Insert MIDI Clip");
+}
+
+EditCommand build(const Song& song, const ops::CopyClip& op)
+{
+    const int from = trackIndex(song, op.trackId);
+    const int to = trackIndex(song, op.toTrackId < 0 ? op.trackId : op.toTrackId);
+    const auto* clip = findArrangementClip(song, from, op.clipUid);
+    if (! clip) throw OpError("target_replaced", "Clip no longer exists");
+    const Beats start = bounded(op.destinationBeat, 0, maxBeat, "destinationBeat");
+    const auto kind = song.tracks[static_cast<size_t>(to)].kind;
+    if ((clip->kind == Clip::Kind::Midi) != (kind == TrackKind::Midi) || (clip->kind == Clip::Kind::Audio) != (kind == TrackKind::Audio))
+        throw OpError("unsupported_clip", "Destination track cannot hold this clip kind");
+    requireFreeRegion(song, to, start, start + (clip->currentEnd - clip->currentStart));
+    return copyClipToTrack(song, from, op.clipUid, to, start);
+}
+
+constexpr double preRollTime = -63072000.0;
+
+// The lane's value at `beat` as the engine evaluates it (engine::AutomationLane::valueAt, kept in core for edits).
+double envelopeValue(const AutomationEnvelope& envelope, Beats beat)
+{
+    const auto& points = envelope.points;
+    if (points.empty()) return 0.0;
+    const auto next = std::upper_bound(points.begin(), points.end(), beat, [](Beats t, const AutomationPoint& p) { return t < p.time; });
+    if (next == points.begin()) return next->value;
+    const auto& prev = *(next - 1);
+    if (next == points.end() || envelope.stepped) return prev.value;
+    return prev.value + (next->value - prev.value) * segmentShape(prev, (beat - prev.time) / (next->time - prev.time));
+}
+
+// The device (top level or inside a rack chain) owning `targetId`; fills info's parameter, stepped and normalized.
+const Device* findDevice(const std::vector<Device>& devices, int targetId, AutomationTargetInfo& info)
+{
+    for (const auto& device : devices)
+    {
+        if (device.enabledTargetId == targetId) { info.parameter = "on"; info.stepped = true; return &device; }
+        for (const auto& p : device.parameters)
+            if (p.automationTargetId == targetId) { info.parameter = p.path; return &device; }
+        for (const auto& p : device.pluginParams)
+            if (p.automationTargetId == targetId) { info.parameter = std::to_string(p.parameterId); info.normalized = true; return &device; }
+        for (const auto& chain : device.chains)
+            if (const auto* inner = findDevice(chain.devices, targetId, info)) return inner;
+    }
+    return nullptr;
+}
+
+// The manual (unautomated) value of a target, used as the value outside a new lane.
+double manualValue(const Track& track, const AutomationTargetInfo& info, int targetId)
+{
+    const auto& mixer = track.mixer;
+    if (info.kind == "volume") return mixer.volume;
+    if (info.kind == "pan") return mixer.pan;
+    if (info.kind == "activator") return mixer.speakerOn ? 1.0 : 0.0;
+    if (info.kind == "send") return static_cast<size_t>(info.sendIndex) < mixer.sends.size() ? mixer.sends[static_cast<size_t>(info.sendIndex)] : 0.0;
+    AutomationTargetInfo found;
+    if (const auto* device = findDevice(track.devices, targetId, found))
+    {
+        if (found.parameter == "on") return device->enabled ? 1.0 : 0.0;
+        for (const auto& p : device->parameters) if (p.automationTargetId == targetId) return p.value;
+        for (const auto& p : device->pluginParams) if (p.automationTargetId == targetId) return p.value;
+    }
+    return 0.0;
+}
+
+void checkValue(const AutomationTargetInfo& info, double value)
+{
+    const auto range = [value](double lo, double hi) { if (! std::isfinite(value) || value < lo || value > hi) invalid("Out of range: automation value"); };
+    if (info.stepped) { if (value != 0.0 && value != 1.0) invalid("On/off automation values are 0 or 1"); return; }
+    if (info.kind == "volume") range(0.0, 1.995262315);
+    else if (info.kind == "pan") range(-1.0, 1.0);
+    else if (info.kind == "send") range(0.0, 1.0);
+    else if (info.kind == "tempo") range(20.0, 999.0);
+    else if (info.normalized) range(0.0, 1.0); // plug-in parameters automate their normalized value
+    else range(-1e12, 1e12);
+}
+
+EditCommand build(const Song& song, const ops::SetAutomation& op)
+{
+    const int index = controlIndex(song, op.trackId);
+    const auto& track = *trackAt(song, index);
+    const auto info = describeAutomationTarget(track, op.targetId);
+    if (info.kind.empty() || info.kind == "midi") throw OpError("target_replaced", "Automation target is not on this track");
+    if (! op.eventType.empty() && op.eventType != "FloatEvent" && op.eventType != "BoolEvent" && op.eventType != "EnumEvent")
+        invalid("eventType must be FloatEvent, BoolEvent or EnumEvent");
+    if (op.points.size() > maxNotesPerOp) invalid("Expected at most 4096 automation points");
+    const auto existing = std::find_if(track.automation.begin(), track.automation.end(), [&op](const AutomationEnvelope& e) { return e.targetId == op.targetId; });
+    if (op.clear)
+    {
+        if (! op.points.empty() || op.rangeStart || op.rangeEnd) invalid("automation.clear takes no points or range");
+        if (existing == track.automation.end()) invalid("That target has no automation to clear");
+        const auto before = track.automation;
+        auto after = before;
+        after.erase(after.begin() + (existing - track.automation.begin()));
+        EditCommand command;
+        command.label = "Delete Automation";
+        command.tracks = {index};
+        command.apply = [index, after](Song& s) { if (auto* t = trackAt(s, index)) t->automation = after; };
+        command.revert = [index, before](Song& s) { if (auto* t = trackAt(s, index)) t->automation = before; };
+        return command;
+    }
+    if (op.rangeStart.has_value() != op.rangeEnd.has_value()) invalid("Give both rangeStartBeat and rangeEndBeat, or neither");
+    const bool ranged = op.rangeStart.has_value();
+    if (ranged)
+    {
+        bounded(*op.rangeStart, 0, maxBeat, "rangeStartBeat");
+        bounded(*op.rangeEnd, 0, maxBeat, "rangeEndBeat");
+        if (*op.rangeEnd <= *op.rangeStart) invalid("rangeEndBeat must be after rangeStartBeat");
+    }
+    else if (op.points.empty()) invalid("Give at least one point (automation.clear removes a lane)");
+    auto points = op.points;
+    std::stable_sort(points.begin(), points.end(), [](const AutomationPoint& a, const AutomationPoint& b) { return a.time < b.time; });
+    const bool stepped = info.stepped || op.eventType == "BoolEvent" || op.eventType == "EnumEvent"
+                      || (existing != track.automation.end() && existing->stepped && op.eventType.empty());
+    for (auto& point : points)
+    {
+        bounded(point.time, 0, maxBeat, "beat");
+        if (ranged && (point.time < *op.rangeStart || point.time > *op.rangeEnd)) invalid("Every point must lie inside the range");
+        checkValue(info, point.value);
+        point.x1 = point.y1 = point.x2 = point.y2 = 0.5;
+    }
+    AutomationEnvelope envelope;
+    if (existing != track.automation.end()) envelope = *existing;
+    else
+    {
+        envelope.targetId = op.targetId;
+        envelope.eventType = stepped ? (op.eventType.empty() ? "BoolEvent" : op.eventType) : "FloatEvent";
+        envelope.points.push_back({preRollTime, manualValue(track, info, op.targetId)});
+    }
+    if (! op.eventType.empty()) envelope.eventType = op.eventType;
+    envelope.stepped = stepped;
+    if (! ranged)
+    {
+        // The whole lane: the value before the first point holds the first point's value.
+        envelope.points.clear();
+        envelope.points.push_back({preRollTime, points.front().value});
+        envelope.points.insert(envelope.points.end(), points.begin(), points.end());
+    }
+    else
+    {
+        // Replace only [start, end]; the previous value is pinned at both edges so the lane outside is unchanged.
+        const Beats start = *op.rangeStart, end = *op.rangeEnd;
+        const double atStart = envelopeValue(envelope, start - 1e-9), atEnd = envelopeValue(envelope, end);
+        std::vector<AutomationPoint> kept;
+        for (const auto& point : envelope.points)
+            if (point.time < start || point.time > end) kept.push_back(point);
+        if (points.empty() || points.front().time > start) kept.push_back({start, atStart});
+        kept.insert(kept.end(), points.begin(), points.end());
+        if (points.empty() || points.back().time < end) kept.push_back({end, atEnd});
+        std::stable_sort(kept.begin(), kept.end(), [](const AutomationPoint& a, const AutomationPoint& b) { return a.time < b.time; });
+        envelope.points = std::move(kept);
+    }
+    if (envelope.points.size() > maxNotesPerClip) invalid("Automation lane exceeds 65536 points");
+    return setAutomation(song, index, std::move(envelope));
+}
+
 // Runs the first apply of `command` under a scope, then restores the plain apply for undo/redo.
 template<class Before, class After>
 EditCommand wrapFirstApply(EditCommand command, Before before, After after)
@@ -309,9 +526,11 @@ EditCommand wrapFirstApply(EditCommand command, Before before, After after)
 
 const char* opType(const Op& op)
 {
+    if (const auto* automation = std::get_if<ops::SetAutomation>(&op.payload); automation && automation->clear) return "automation.clear";
     static constexpr const char* names[] = {"tempo.set", "track.set_gain", "track.rename", "track.set_color", "loop.set",
                                             "clip.move", "clip.duplicate", "clip.delete", "notes.add", "notes.update",
-                                            "notes.delete", "notes.replace", "locator.add", "locator.update", "locator.delete"};
+                                            "notes.delete", "notes.replace", "locator.add", "locator.update", "locator.delete",
+                                            "track.set_folded", "clip.create", "clip.copy", "automation.set"};
     static_assert(std::size(names) == std::variant_size_v<OpPayload>);
     return names[op.payload.index()];
 }
@@ -352,6 +571,29 @@ EditCommand replayOp(const Song& song, const Op& op, OpIdentities identities, st
     return wrapFirstApply(std::move(command),
                           [remaining] { return std::make_unique<ClipUidScope>(ClipUidScope::Mode::Replay, *remaining); },
                           [matched](const ClipUidScope& scope) { if (! scope.replayedExactly()) *matched = false; });
+}
+
+AutomationTargetInfo describeAutomationTarget(const Track& track, int targetId)
+{
+    AutomationTargetInfo info;
+    if (targetId < 0) return info;
+    const auto& mixer = track.mixer;
+    if (targetId == mixer.volumeTargetId) info.kind = "volume";
+    else if (targetId == mixer.panTargetId) info.kind = "pan";
+    else if (targetId == mixer.speakerTargetId) { info.kind = "activator"; info.stepped = true; }
+    else if (targetId == mixer.tempoTargetId) info.kind = "tempo";
+    for (size_t i = 0; info.kind.empty() && i < mixer.sendTargetIds.size(); ++i)
+        if (mixer.sendTargetIds[i] == targetId) { info.kind = "send"; info.sendIndex = static_cast<int>(i); }
+    if (! info.kind.empty()) return info;
+    if (const auto* device = findDevice(track.devices, targetId, info))
+    {
+        info.kind = "device";
+        info.deviceId = device->id;
+        return info;
+    }
+    for (size_t i = 0; i < track.midiControllerTargets.size(); ++i)
+        if (track.midiControllerTargets[i] == targetId) info.kind = "midi";
+    return info;
 }
 
 std::vector<MidiNote> keyedNotes(const Clip& clip)

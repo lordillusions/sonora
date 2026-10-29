@@ -78,11 +78,39 @@ struct UpdateLocator
     std::optional<bool> songStart;
 };
 struct DeleteLocator { int locatorId = -1; };
+// AGT-7d: group folding, clip creation/copy and envelope writes for agents.
+// Folds groups (empty trackIds = every group in the set).
+struct SetTracksFolded { std::vector<TrackId> trackIds; bool folded = true; };
+// A new MIDI clip on a MIDI track: Arrangement at startBeat, or the empty Session slot `scene`. The region must be free.
+struct CreateClip
+{
+    TrackId trackId = -1;
+    int scene = -1;
+    Beats startBeat = 0.0, lengthBeats = 4.0;
+    std::optional<std::string> name;
+    std::vector<MidiNote> notes;
+};
+// Copies an Arrangement clip onto another track of the same kind (or the same track); the region must be free.
+struct CopyClip { TrackId trackId = -1; int clipUid = -1; TrackId toTrackId = -1; Beats destinationBeat = 0.0; };
+// Writes the track-level envelope of `targetId` (a mixer or device automation target of that track or return).
+// Without a range the lane becomes exactly `points`; with [rangeStart, rangeEnd) only the points inside the range are
+// replaced and the rest of the lane is kept. An empty eventType keeps the existing lane's kind (FloatEvent for a new
+// lane). `clear` removes the lane (points and range must then be empty).
+struct SetAutomation
+{
+    TrackId trackId = -1;
+    int targetId = -1;
+    std::vector<AutomationPoint> points;
+    std::optional<Beats> rangeStart, rangeEnd;
+    std::string eventType;
+    bool clear = false;
+};
 } // namespace ops
 
 using OpPayload = std::variant<ops::SetTempo, ops::SetTrackGain, ops::RenameTrack, ops::SetTrackColor, ops::SetLoop,
                                ops::MoveClip, ops::DuplicateClip, ops::DeleteClip, ops::AddNotes, ops::UpdateNotes,
-                               ops::DeleteNotes, ops::ReplaceNotes, ops::AddLocator, ops::UpdateLocator, ops::DeleteLocator>;
+                               ops::DeleteNotes, ops::ReplaceNotes, ops::AddLocator, ops::UpdateLocator, ops::DeleteLocator,
+                               ops::SetTracksFolded, ops::CreateClip, ops::CopyClip, ops::SetAutomation>;
 
 struct Op
 {
@@ -107,6 +135,17 @@ EditCommand recordOp(const Song& song, const Op& op, std::shared_ptr<OpIdentitie
 // Replica side: the build and first apply hand out exactly `identities`. `*matched` becomes false when the replica
 // needed a different number of UIDs, meaning its state diverged and it must resynchronize from a snapshot.
 EditCommand replayOp(const Song& song, const Op& op, OpIdentities identities, std::shared_ptr<bool> matched);
+
+// Where an automation target lives on a track: "volume", "pan", "activator", "send" (index), "device" (deviceId and
+// the parameter path / VST3 parameter id, "on" for the device switch). kind is empty when the track has no such target.
+struct AutomationTargetInfo
+{
+    std::string kind, parameter;
+    int sendIndex = -1, deviceId = -1;
+    bool stepped = false;    // on/off switches
+    bool normalized = false; // plug-in parameters: values are 0..1
+};
+AutomationTargetInfo describeAutomationTarget(const Track& track, int targetId);
 
 // The current notes of a clip with keys normalized exactly as the next note edit will store them.
 std::vector<MidiNote> keyedNotes(const Clip& clip);

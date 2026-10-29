@@ -164,6 +164,7 @@ private:
     std::map<std::tuple<int, int, int>, float> liveSent_; // (track id, device id or -1, target) -> last value sent or received
     std::map<int, uint64_t> pluginStateHash_;             // device id -> hash of the last state sent or received
     int collabTicks_ = 0;
+    bool copyInviteWhenReady_ = false; // internet share: put the invite on the clipboard once the relay answers
     collab::AuthorId collabAuthorForNextEdit_ = collab::hostAuthor; // host: a guest's dropped file
     juce::uint32 collabAttributionSetMs_ = 0;
     bool installingCollabSong_ = false;

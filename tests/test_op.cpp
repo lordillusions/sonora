@@ -104,14 +104,19 @@ TEST_CASE("op: every op type survives the wire form and doubles round-trip exact
         {model::ops::AddNotes{clip, {note(60, 0.5, 0.25, 90)}}}, {model::ops::UpdateNotes{clip, {update}}},
         {model::ops::DeleteNotes{{12, 1000123, -1, 4}, {1, 2}}}, {model::ops::ReplaceNotes{clip, {}}},
         {model::ops::AddLocator{8.5, std::string("Verse \xc3\xa9"), 12}},
-        {model::ops::UpdateLocator{3, 1.0 / 3.0, std::string("Drop"), std::string("info"), 5, true}}, {model::ops::DeleteLocator{3}}};
+        {model::ops::UpdateLocator{3, 1.0 / 3.0, std::string("Drop"), std::string("info"), 5, true}}, {model::ops::DeleteLocator{3}},
+        {model::ops::SetTracksFolded{{12, 14}, false}}, {model::ops::SetTracksFolded{{}, true}},
+        {model::ops::CreateClip{12, -1, 32, 8, std::string("Fill"), {note(62, 0, 1, 100)}}}, {model::ops::CreateClip{12, 3, 0, 4, {}, {}}},
+        {model::ops::CopyClip{12, 1000123, 13, 64}},
+        {model::ops::SetAutomation{12, 40, {{256, 1.0}, {1.0 / 3.0, 0.25}}, 256.0, 288.0, "FloatEvent", false}},
+        {model::ops::SetAutomation{12, 40, {}, std::nullopt, std::nullopt, "", true}}};
     std::set<std::string> types;
     for (const auto& op : all)
     {
         roundTrip(op);
         types.insert(model::opType(op));
     }
-    CHECK(types.size() == std::variant_size_v<model::OpPayload>);
+    CHECK(types.size() == std::variant_size_v<model::OpPayload> + 1); // SetAutomation is also "automation.clear"
 
     const double tricky[] = {0.1 + 0.2, 1.0 / 3.0, 123456.78901234567, 3.3e-7, 0.012345678901234567, 999999.99999999988, 7.0};
     model::ops::AddNotes add{clip, {}};

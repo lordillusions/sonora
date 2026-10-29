@@ -1,8 +1,10 @@
 #include "ui/views/StatusBar.h"
 #include "ui/views/DetailView.h"
+#include "ui/ClipEditing.h"
 #include "ui/Controls.h"
 #include "ui/UiContext.h"
 #include "gfx/Brand.h"
+#include "gfx/Fonts.h"
 #include "include/core/SkPaint.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -65,7 +67,19 @@ void StatusBar::paint(SkCanvas& c, const Theme& t)
         }
     }
     else if (logIndex_ >= 0 && (size_t) logIndex_ < x.buildLog.size()) text = "[" + std::to_string(logIndex_ + 1) + "/" + std::to_string(x.buildLog.size()) + "] " + x.buildLog[(size_t) logIndex_];
-    paint::text(c, text, r.reduced(8, 0), t.color("ControlForeground"), m.fontSize);
+    auto field = r.reduced(8, 0);
+    // Live: the selected clip's (or time selection's) start, end and length sit at the right of the message field.
+    if (const auto range = x.statusRange(); range && ! busy && x.song != nullptr)
+    {
+        const auto readout = rangeStatusText(range->first, range->second, x.song->timeSigNumerator, x.song->timeSigDenominator);
+        const float w = gfx::measureText(readout, m.fontSize) + 2;
+        if (w < field.w * 0.7f)
+        {
+            paint::text(c, readout, {field.right() - w, field.y, w, field.h}, t.color("ControlForeground"), m.fontSize, Align::Right);
+            field.w -= w + 16;
+        }
+    }
+    paint::text(c, text, field, t.color("ControlForeground"), m.fontSize);
 }
 void StatusBar::tick()
 {

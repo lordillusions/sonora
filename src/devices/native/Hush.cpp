@@ -78,21 +78,20 @@ float timeTilt(float tilt, float share)
     return std::pow(t, (t > 1.0f ? 0.4f : 0.95f) * share);
 }
 
-// Built-in frequency emphasis of the reduction (measured on the reference with a tone in white noise, relative to
-// 1 kHz): the ear's most sensitive region, 2-8 kHz, is treated about three times harder than the lows.
+// Built-in frequency emphasis of the reduction (Hush::Tuning::emphasisGain at Hush::emphasisHz, relative to 1 kHz): the
+// ear's most sensitive region is treated harder than the lows.
 float emphasis(float hz)
 {
-    static constexpr float kHz[] = {20, 50, 100, 200, 300, 500, 700, 1000, 1400, 2000, 2800, 4000, 5600, 8000, 12000, 16000, 24000};
-    static constexpr float kGain[] = {1.055f, 1.385f, 0.967f, 1.183f, 0.975f, 0.824f, 0.853f, 1.000f, 1.488f, 2.825f, 4.088f, 4.669f, 4.917f, 4.458f, 3.942f, 3.245f, 2.368f};
-    constexpr int n = (int) std::size(kHz);
-    if (hz <= kHz[0]) return kGain[0];
-    for (int i = 1; i < n; ++i)
-        if (hz <= kHz[i])
+    const auto& gain = Hush::tuning().emphasisGain;
+    const auto& at = Hush::emphasisHz;
+    if (hz <= at[0]) return gain[0];
+    for (size_t i = 1; i < at.size(); ++i)
+        if (hz <= at[i])
         {
-            const float t = std::log(hz / kHz[i - 1]) / std::log(kHz[i] / kHz[i - 1]);
-            return kGain[i - 1] + t * (kGain[i] - kGain[i - 1]);
+            const float t = std::log(hz / at[i - 1]) / std::log(at[i] / at[i - 1]);
+            return gain[i - 1] + t * (gain[i] - gain[i - 1]);
         }
-    return kGain[n - 1];
+    return gain.back();
 }
 
 int orderOf(int size)
@@ -116,11 +115,14 @@ Hush::Tuning& Hush::tuning()
                 const auto key = item.upToFirstOccurrenceOf("=", false, false).trim();
                 const float value = item.fromFirstOccurrenceOf("=", false, false).getFloatValue();
                 float* fields[] = {&v.softGain, &v.softCurve, &v.hardGain, &v.hardCurve, &v.hardLevel, &v.hardThreshold,
-                                   &v.hardThresholdSlope, &v.knee, &v.envelopeRatio, &v.floorDb, &v.floorRange, &v.excessFloor, &v.widthComp, &v.widthScale, &v.curveBoost, &v.curveCut, &v.curveSaturation, &v.temporalGain, &v.temporalTime, &v.temporalFloor, &v.temporalFloorSlope};
+                                   &v.hardThresholdSlope, &v.knee, &v.envelopeRatio, &v.floorDb, &v.floorRange, &v.excessFloor, &v.widthComp, &v.widthScale, &v.curveBoost, &v.curveCut, &v.curveSaturation, &v.temporalGain, &v.temporalTime, &v.temporalFloor, &v.temporalFloorSlope, &v.envelopePower, &v.excessFloorSlope};
                 const char* names[] = {"softGain", "softCurve", "hardGain", "hardCurve", "hardLevel", "hardThreshold",
-                                       "hardThresholdSlope", "knee", "envelopeRatio", "floorDb", "floorRange", "excessFloor", "widthComp", "widthScale", "curveBoost", "curveCut", "curveSaturation", "temporalGain", "temporalTime", "temporalFloor", "temporalFloorSlope"};
+                                       "hardThresholdSlope", "knee", "envelopeRatio", "floorDb", "floorRange", "excessFloor", "widthComp", "widthScale", "curveBoost", "curveCut", "curveSaturation", "temporalGain", "temporalTime", "temporalFloor", "temporalFloorSlope", "envelopePower", "excessFloorSlope"};
                 for (size_t i = 0; i < std::size(names); ++i)
                     if (key == names[i]) *fields[i] = value;
+                if (key.startsWith("e") && key.substring(1).containsOnly("0123456789")) // e0..e16: emphasisGain
+                    if (const int i = key.substring(1).getIntValue(); i >= 0 && i < (int) v.emphasisGain.size())
+                        v.emphasisGain[(size_t) i] = value;
             }
         }
         return v;
@@ -262,6 +264,8 @@ void Hush::prepare(double sampleRate, int maxBlockSize)
     fftB_.assign((size_t) maxConv * 2 + 2, 0.0f);
     impulse_.assign((size_t) maxConv, 0.0f);
     prefix_.assign((size_t) bins_ + 1, 0.0);
+    envPower_.assign((size_t) bins_, 0.0f);
+    envPowerMean_.assign((size_t) bins_, 0.0f);
     binHz_.resize((size_t) bins_);
     for (int k = 0; k < bins_; ++k) binHz_[(size_t) k] = std::max(1.0f, (float) (k * sampleRate_ / maxAnalysis));
     attackCoef_.assign((size_t) bins_, 1.0f);
@@ -445,11 +449,23 @@ void Hush::computeReduction()
         // Local envelope: twice a box mean of the dB spectrum over envelopeRatio x the spread width.
         boxMean(lvl.data(), scratch, nb, spreadBins_.data(), tune.envelopeRatio, prefix_);
         boxMean(scratch, scratch2, nb, spreadBins_.data(), tune.envelopeRatio, prefix_);
+        if (const float a = std::clamp(tune.envelopePower, 0.0f, 1.0f); a > 0.0f)
+        {
+            // Blend in a power mean over the same width: many peaks close together (harmonics) lift it, so dense
+            // harmonic material shows less excess than a lone resonance on the same envelope.
+            for (int k = 0; k < nb; ++k) envPower_[(size_t) k] = std::pow(10.0f, 0.1f * lvl[(size_t) k]);
+            boxMean(envPower_.data(), envPowerMean_.data(), nb, spreadBins_.data(), tune.envelopeRatio, prefix_);
+            boxMean(envPowerMean_.data(), envPower_.data(), nb, spreadBins_.data(), tune.envelopeRatio, prefix_);
+            for (int k = 0; k < nb; ++k)
+                scratch2[k] = (1.0f - a) * scratch2[k] + a * 10.0f * std::log10(envPower_[(size_t) k] + 1.0e-14f);
+        }
         // Soft mode's threshold also adapts over time: the envelope rising above its own recent average (transients,
         // a new tonal build-up) counts as excess too. Stationary material, tonal or noisy, shows none of it.
         auto& slow = slowEnvelope_[(size_t) c];
         // Measured on drums: barely anything at depth 5, several dB at depth 10, so the rise needed drops with depth.
         const float riseFloor = tune.temporalFloor + tune.temporalFloorSlope * (10.0f - depth);
+        // More depth also reacts to smaller peaks (measured on dense material: more cut at depth 10, less at 2.5).
+        const float excessFloor = std::max(0.0f, tune.excessFloor - tune.excessFloorSlope * (depth - 5.0f));
         const float slowCoef = 1.0f - std::exp(-(float) cfg_.hop / ((float) sampleRate_ * std::max(0.01f, tune.temporalTime)));
         for (int k = 0; k < nb; ++k)
         {
@@ -459,7 +475,7 @@ void Hush::computeReduction()
             slow[(size_t) k] += slowCoef * (env - slow[(size_t) k]);
             ex[(size_t) k] = (k == 0 || lvl[(size_t) k] < floor)
                                  ? 0.0f
-                                 : std::max(0.0f, lvl[(size_t) k] - env - tune.excessFloor) + tune.temporalGain * rise;
+                                 : std::max(0.0f, lvl[(size_t) k] - env - excessFloor) + tune.temporalGain * rise;
         }
         // Spread the excess over the detail width (area preserving: narrow peaks become notches of that width).
         boxMean(ex.data(), scratch, nb, spreadBins_.data(), 1.0f, prefix_);

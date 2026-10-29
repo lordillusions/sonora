@@ -1,6 +1,7 @@
 #include "control/ControlService.h"
 #include "agent/AgentRunner.h"
 #include "control/LocalEndpoint.h"
+#include "core/Op.h"
 #include "control/SerumLead.h"
 #include "control/HostedParameters.h"
 #include "control/DeviceControl.h"
@@ -81,6 +82,73 @@ int main(int argc, char** argv)
         std::printf("PASS: locators saved and reloaded (%zu; ids, names, beats, colours, song start)\n%s\n", after.size(), file.getFullPathName().toRawUTF8());
         return 0;
     };
+    // AGT-7d: clip.create / clip.copy and volume + native filter automation through the service, then saved and reloaded.
+    const auto verifyAgentEdits = [&](const model::Song& edited) -> int {
+        const auto file = folder.getChildFile("AgentEdits.als");
+        if (! io::saveAls(edited, file).ok) return 70;
+        auto reloaded = io::loadAls(file); if (! reloaded) return 71;
+        const auto& tracks = reloaded.song->tracks;
+        int fills = 0, copies = 0, volumeLanes = 0, filterLanes = 0;
+        for (const auto& track : tracks)
+        {
+            for (const auto& clip : track.arrangementClips)
+            {
+                if (clip.name == "Fill" && clip.notes.size() == 2 && std::abs(clip.currentStart - 32) < 1e-9) ++fills;
+                if (clip.name == "Fill" && std::abs(clip.currentStart - 64) < 1e-9) ++copies;
+            }
+            for (const auto& lane : track.automation)
+            {
+                const auto info = model::describeAutomationTarget(track, lane.targetId);
+                if (info.kind == "volume" && lane.points.size() >= 3 && std::abs(lane.points.back().value) < 1e-9) ++volumeLanes;
+                if (info.kind == "device" && info.parameter == "Filter_Frequency" && lane.points.size() >= 3) ++filterLanes;
+            }
+        }
+        if (fills != 1 || copies != 1 || volumeLanes != 1 || filterLanes != 1)
+        {
+            std::fprintf(stderr, "fills=%d copies=%d volume=%d filter=%d\n", fills, copies, volumeLanes, filterLanes);
+            return 72;
+        }
+        std::printf("PASS: agent clip create/copy and volume/filter automation saved and reloaded\n%s\n", file.getFullPathName().toRawUTF8());
+        return 0;
+    };
+    if (args.contains("--agent-edits"))
+    {
+        const auto run = [&](const char* operation, juce::var arguments, const char* key) {
+            return service.execute(control::object({{"apiVersion", "1.0"}, {"operation", operation}, {"arguments", arguments},
+                {"target", control::object({{"instanceId", service.instanceId()}, {"documentId", document}})},
+                {"expectedRevision", service.inspect()["revision"]}, {"idempotencyKey", key}}));
+        };
+        const auto edit = [&](juce::Array<juce::var> commands, const char* key) { return run("edits.apply", control::object({{"commands", commands}}), key); };
+        int midiTrack = -1, other = -1, audio = -1;
+        for (const auto& track : song->tracks)
+        {
+            if (track.kind == model::TrackKind::Midi) (midiTrack < 0 ? midiTrack : other) = track.id;
+            if (track.kind == model::TrackKind::Audio && audio < 0) audio = track.id;
+        }
+        if (midiTrack < 0 || other < 0 || audio < 0) return 73;
+        const auto note = [](int pitch, double start) { return control::object({{"pitch", pitch}, {"startBeat", start}, {"durationBeats", 1}, {"velocity", 100}}); };
+        const auto created = edit({control::object({{"type", "clip.create"}, {"trackId", midiTrack}, {"startBeat", 32}, {"lengthBeats", 8}, {"name", "Fill"},
+                                                    {"notes", juce::Array<juce::var>{note(60, 0), note(67, 4)}}})}, "agent-create");
+        if (! static_cast<bool>(created["ok"])) { std::fprintf(stderr, "%s\n", juce::JSON::toString(created).toRawUTF8()); return 74; }
+        const int uid = created["data"]["clips"][0]["clipId"];
+        const auto copied = edit({control::object({{"type", "clip.copy"}, {"trackId", midiTrack}, {"clipId", uid}, {"toTrackId", other}, {"destinationBeat", 64}})}, "agent-copy");
+        if (! static_cast<bool>(copied["ok"])) return 75;
+        const auto inserted = run("devices.insert", control::object({{"trackId", audio}, {"catalogId", "native:AutoFilter2"}}), "agent-filter");
+        if (! static_cast<bool>(inserted["ok"])) { std::fprintf(stderr, "%s\n", juce::JSON::toString(inserted).toRawUTF8()); return 76; }
+        const int filter = inserted["data"]["deviceId"];
+        const auto point = [](double beat, const char* key, double value) { return control::object({{"beat", beat}, {key, value}}); };
+        const auto automated = edit({
+            control::object({{"type", "automation.set"}, {"trackId", audio}, {"target", "volume"},
+                             {"points", juce::Array<juce::var>{point(16, "gainDb", 0), point(32, "gainDb", -80)}}}),
+            control::object({{"type", "automation.set"}, {"trackId", audio}, {"target", "device"}, {"deviceId", filter}, {"parameterId", "Filter_Frequency"},
+                             {"rangeStartBeat", 16}, {"rangeEndBeat", 48}, {"points", juce::Array<juce::var>{point(16, "value", 20000), point(44, "value", 40)}}})}, "agent-automation");
+        if (! static_cast<bool>(automated["ok"])) { std::fprintf(stderr, "%s\n", juce::JSON::toString(automated).toRawUTF8()); return 77; }
+        const auto outOfRange = edit({control::object({{"type", "automation.set"}, {"trackId", audio}, {"target", "device"}, {"deviceId", filter},
+                                                       {"parameterId", "Filter_Frequency"}, {"points", juce::Array<juce::var>{point(0, "value", 99999)}}})}, "agent-range");
+        if (static_cast<bool>(outOfRange["ok"])) return 78;
+        std::printf("PASS: clip.create/copy, device insert and volume/filter automation through the control service\n");
+        return verifyAgentEdits(*song);
+    }
     if (args.contains("--locators"))
     {
         const auto edit = [&](juce::Array<juce::var> commands, const char* key) {
@@ -127,6 +195,8 @@ int main(int argc, char** argv)
             if (volume < 0 || std::abs(plugin->getParameter(volume) - .27f) > 1e-5f) return 48;
             std::printf("PASS: MCP native and generic VST3 insertion/removal/edit/undo saved and reloaded\n");
         }
+        if (args.contains("--verify-agent-edits-on-exit"))
+            if (const int failed = verifyAgentEdits(*song)) return failed;
         if (args.contains("--verify-locators-on-exit"))
         {
             if (song->locators.size() != 2 || song->locators[1].name != "Chorus" || song->locators[1].colorIndex != 22) return 64;

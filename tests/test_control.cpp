@@ -338,3 +338,135 @@ TEST_CASE("control: edits address stale tracks consistently as target_replaced t
     CHECK(missing(control::object({{"type", "track.rename"}, {"trackId", h.song->tracks[0].id}, {"name", "x"}}), "rename") == "unsupported_operation");
     CHECK(! h.history.canUndo());
 }
+
+namespace
+{
+juce::var one(juce::var item) { return control::object({{"commands", juce::Array<juce::var>{std::move(item)}}}); }
+int firstTrack(const model::Song& song, model::TrackKind kind)
+{
+    for (size_t i = 0; i < song.tracks.size(); ++i) if (song.tracks[i].kind == kind) return static_cast<int>(i);
+    return -1;
+}
+juce::String code(const juce::var& result) { return result["error"]["code"].toString(); }
+}
+TEST_CASE("control: inspect shows groups with their children; track.set_folded folds one, all, and undoes")
+{
+    Harness h;
+    REQUIRE(h.song->tracks.size() >= 2);
+    model::Track group; group.kind = model::TrackKind::Group; group.id = 900; group.name = "Back Vocal";
+    h.song->tracks.insert(h.song->tracks.begin(), group);
+    h.song->tracks[1].groupId = 900; h.song->tracks[2].groupId = 900;
+    control::ControlService s(h.backend());
+    const auto inspected = s.execute(control::object({{"apiVersion", "1.0"}, {"operation", "project.inspect"}}));
+    const auto first = inspected["data"]["tracks"][0];
+    CHECK(first["kind"].toString() == "group"); CHECK(! static_cast<bool>(first["folded"]));
+    REQUIRE(first["childTrackIds"].size() == 2);
+    CHECK(static_cast<int>(first["childTrackIds"][0]) == h.song->tracks[1].id);
+    CHECK(static_cast<int>(inspected["data"]["tracks"][1]["groupId"]) == 900);
+    CHECK(inspected["data"]["returnTracks"].isArray());
+
+    const auto foldAll = one(control::object({{"type", "track.set_folded"}, {"folded", true}}));
+    REQUIRE(static_cast<bool>(s.execute(h.request(s, "edits.apply", foldAll, "fold-all"))["ok"]));
+    CHECK(h.song->tracks[0].folded);
+    const auto unfold = one(control::object({{"type", "track.set_folded"}, {"trackIds", juce::Array<juce::var>{900}}, {"folded", false}}));
+    REQUIRE(static_cast<bool>(s.execute(h.request(s, "edits.apply", unfold, "unfold"))["ok"]));
+    CHECK(! h.song->tracks[0].folded);
+    REQUIRE(static_cast<bool>(s.submit("undo")["ok"])); CHECK(h.song->tracks[0].folded);
+    const auto notGroup = one(control::object({{"type", "track.set_folded"}, {"trackIds", juce::Array<juce::var>{h.song->tracks[1].id}}, {"folded", true}}));
+    CHECK(code(s.execute(h.request(s, "edits.apply", notGroup, "not-group"))) == "invalid_request");
+}
+TEST_CASE("control: clip.create fills an empty MIDI track, refuses occupied regions and audio tracks; clip.copy crosses tracks")
+{
+    Harness h;
+    const int midi = firstTrack(*h.song, model::TrackKind::Midi), audio = firstTrack(*h.song, model::TrackKind::Audio);
+    REQUIRE(midi >= 0); REQUIRE(audio >= 0);
+    h.song->midiClipTemplate = std::make_shared<const std::string>(io::midiClipTemplate());
+    control::ControlService s(h.backend());
+    const int trackId = h.song->tracks[(size_t) midi].id;
+    const auto create = one(control::object({{"type", "clip.create"}, {"trackId", trackId}, {"startBeat", 256}, {"lengthBeats", 16},
+        {"name", "Back vox fill"}, {"notes", juce::Array<juce::var>{newNote(60, 0), newNote(64, 4)}}}));
+    const auto created = s.execute(h.request(s, "edits.apply", create, "create"));
+    REQUIRE(static_cast<bool>(created["ok"]));
+    REQUIRE(h.song->tracks[(size_t) midi].arrangementClips.size() == 1);
+    const auto& clip = h.song->tracks[(size_t) midi].arrangementClips[0];
+    CHECK_NEAR(clip.currentStart, 256, 1e-9); CHECK_NEAR(clip.currentEnd, 272, 1e-9); CHECK(clip.notes.size() == 2);
+    CHECK(clip.name == "Back vox fill");
+    REQUIRE(created["data"]["clips"].size() == 1);
+    CHECK(static_cast<int>(created["data"]["clips"][0]["clipId"]) == clip.uid);
+    const int uid = clip.uid;
+
+    const auto overlap = one(control::object({{"type", "clip.create"}, {"trackId", trackId}, {"startBeat", 260}, {"lengthBeats", 4}}));
+    CHECK(code(s.execute(h.request(s, "edits.apply", overlap, "overlap"))) == "region_occupied");
+    const auto onAudio = one(control::object({{"type", "clip.create"}, {"trackId", h.song->tracks[(size_t) audio].id}, {"startBeat", 0}, {"lengthBeats", 4}}));
+    CHECK(code(s.execute(h.request(s, "edits.apply", onAudio, "audio"))) == "unsupported_clip");
+    const auto session = one(control::object({{"type", "clip.create"}, {"trackId", trackId}, {"scene", 1}, {"lengthBeats", 8}}));
+    REQUIRE(static_cast<bool>(s.execute(h.request(s, "edits.apply", session, "session"))["ok"]));
+    REQUIRE(h.song->tracks[(size_t) midi].slots.size() > 1); CHECK(h.song->tracks[(size_t) midi].slots[1].clip.has_value());
+
+    int otherMidi = -1;
+    for (size_t i = 0; i < h.song->tracks.size(); ++i)
+        if (static_cast<int>(i) != midi && h.song->tracks[i].kind == model::TrackKind::Midi) otherMidi = static_cast<int>(i);
+    const int destination = otherMidi >= 0 ? h.song->tracks[(size_t) otherMidi].id : trackId;
+    const auto copy = one(control::object({{"type", "clip.copy"}, {"trackId", trackId}, {"clipId", uid}, {"toTrackId", destination}, {"destinationBeat", 512}}));
+    const auto copied = s.execute(h.request(s, "edits.apply", copy, "copy"));
+    REQUIRE(static_cast<bool>(copied["ok"]));
+    CHECK(static_cast<int>(copied["data"]["clips"][0]["trackId"]) == destination);
+    const auto badKind = one(control::object({{"type", "clip.copy"}, {"trackId", trackId}, {"clipId", uid}, {"toTrackId", h.song->tracks[(size_t) audio].id}, {"destinationBeat", 0}}));
+    CHECK(code(s.execute(h.request(s, "edits.apply", badKind, "bad-kind"))) == "unsupported_clip");
+    REQUIRE(static_cast<bool>(s.submit("undo")["ok"]));
+}
+TEST_CASE("control: automation.set writes volume and device lanes, range edits keep the rest, clear removes")
+{
+    Harness h;
+    const int audio = firstTrack(*h.song, model::TrackKind::Audio);
+    REQUIRE(audio >= 0);
+    auto& track = h.song->tracks[(size_t) audio];
+    REQUIRE(track.mixer.volumeTargetId >= 0);
+    model::Device filter; filter.kind = model::DeviceKind::Native; filter.type = "AutoFilter2"; filter.id = 77;
+    model::Parameter frequency; frequency.path = "Filter_Frequency"; frequency.value = 20000; frequency.automationTargetId = 4321;
+    filter.parameters.push_back(frequency); track.devices.push_back(filter);
+    control::ControlService s(h.backend());
+    const int trackId = track.id;
+    auto point = [](double beat, const char* key, double value) { return control::object({{"beat", beat}, {key, value}}); };
+
+    const auto fade = one(control::object({{"type", "automation.set"}, {"trackId", trackId}, {"target", "volume"},
+        {"points", juce::Array<juce::var>{point(256, "gainDb", 0), point(288, "gainDb", -80)}}}));
+    REQUIRE(static_cast<bool>(s.execute(h.request(s, "edits.apply", fade, "fade"))["ok"]));
+    REQUIRE(track.automation.size() == 1);
+    const auto& lane = track.automation[0];
+    CHECK(lane.targetId == track.mixer.volumeTargetId); REQUIRE(lane.points.size() == 3);
+    CHECK(lane.points[0].time < -1e6); CHECK_NEAR(lane.points[0].value, 1, 1e-9);
+    CHECK_NEAR(lane.points[2].value, 0, 1e-9);
+    const auto gain = one(control::object({{"type", "track.set_gain"}, {"trackId", trackId}, {"gainDb", -3}}));
+    CHECK(code(s.execute(h.request(s, "edits.apply", gain, "gain"))) == "automation_conflict");
+
+    // Replace bars 9..10 only: the earlier points stay, both edges keep the old curve.
+    const auto dip = one(control::object({{"type", "automation.set"}, {"trackId", trackId}, {"target", "volume"},
+        {"rangeStartBeat", 32}, {"rangeEndBeat", 40}, {"points", juce::Array<juce::var>{point(36, "value", 0.25)}}}));
+    REQUIRE(static_cast<bool>(s.execute(h.request(s, "edits.apply", dip, "dip"))["ok"]));
+    REQUIRE(track.automation[0].points.size() == 6);
+    CHECK_NEAR(track.automation[0].points[1].time, 32, 1e-9); CHECK_NEAR(track.automation[0].points[1].value, 1, 1e-9);
+    CHECK_NEAR(track.automation[0].points[2].value, .25, 1e-9); CHECK_NEAR(track.automation[0].points[3].time, 40, 1e-9);
+    CHECK_NEAR(track.automation[0].points[4].time, 256, 1e-9);
+
+    const auto sweep = one(control::object({{"type", "automation.set"}, {"trackId", trackId}, {"target", "device"}, {"deviceId", 77},
+        {"parameterId", "Filter_Frequency"}, {"points", juce::Array<juce::var>{point(256, "value", 20000), point(288, "value", 40)}}}));
+    REQUIRE(static_cast<bool>(s.execute(h.request(s, "edits.apply", sweep, "sweep"))["ok"]));
+    REQUIRE(track.automation.size() == 2); CHECK(track.automation[1].targetId == 4321);
+    const auto inspected = s.inspect()["data"]["tracks"][audio]["automation"];
+    REQUIRE(inspected.size() == 2);
+    CHECK(inspected[1]["target"].toString() == "device"); CHECK(inspected[1]["parameterId"].toString() == "Filter_Frequency");
+    CHECK(static_cast<int>(inspected[1]["pointCount"]) == 2);
+
+    const auto unknown = one(control::object({{"type", "automation.set"}, {"trackId", trackId}, {"target", "device"}, {"deviceId", 77},
+        {"parameterId", "Nope"}, {"points", juce::Array<juce::var>{point(0, "value", 1)}}}));
+    CHECK(code(s.execute(h.request(s, "edits.apply", unknown, "unknown"))) == "parameter_mismatch");
+    const auto loud = one(control::object({{"type", "automation.set"}, {"trackId", trackId}, {"target", "volume"},
+        {"points", juce::Array<juce::var>{point(0, "value", 3)}}}));
+    CHECK(code(s.execute(h.request(s, "edits.apply", loud, "loud"))) == "invalid_request");
+
+    const auto clear = one(control::object({{"type", "automation.clear"}, {"trackId", trackId}, {"target", "volume"}}));
+    REQUIRE(static_cast<bool>(s.execute(h.request(s, "edits.apply", clear, "clear"))["ok"]));
+    REQUIRE(track.automation.size() == 1); CHECK(track.automation[0].targetId == 4321);
+    REQUIRE(static_cast<bool>(s.submit("undo")["ok"])); CHECK(h.song->tracks[(size_t) audio].automation.size() == 2);
+}

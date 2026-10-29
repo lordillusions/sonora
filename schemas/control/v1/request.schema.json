@@ -680,6 +680,265 @@
               "$ref": "#/$defs/id"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "folded"
+          ],
+          "properties": {
+            "type": {
+              "const": "track.set_folded"
+            },
+            "trackIds": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "$ref": "#/$defs/id"
+              },
+              "description": "Group track IDs; omit to fold or unfold every group"
+            },
+            "folded": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trackId",
+            "lengthBeats"
+          ],
+          "not": {
+            "required": [
+              "startBeat",
+              "scene"
+            ]
+          },
+          "properties": {
+            "type": {
+              "const": "clip.create"
+            },
+            "trackId": {
+              "$ref": "#/$defs/id"
+            },
+            "startBeat": {
+              "$ref": "#/$defs/beat"
+            },
+            "scene": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 999
+            },
+            "lengthBeats": {
+              "type": "number",
+              "minimum": 0.015625,
+              "maximum": 65536
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "notes": {
+              "type": "array",
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/note"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trackId",
+            "clipId",
+            "destinationBeat"
+          ],
+          "properties": {
+            "type": {
+              "const": "clip.copy"
+            },
+            "trackId": {
+              "$ref": "#/$defs/id"
+            },
+            "clipId": {
+              "$ref": "#/$defs/id"
+            },
+            "toTrackId": {
+              "$ref": "#/$defs/id"
+            },
+            "destinationBeat": {
+              "$ref": "#/$defs/beat"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trackId",
+            "clipId",
+            "startBeat"
+          ],
+          "properties": {
+            "type": {
+              "const": "clip.move"
+            },
+            "trackId": {
+              "$ref": "#/$defs/id"
+            },
+            "clipId": {
+              "$ref": "#/$defs/id"
+            },
+            "toTrackId": {
+              "$ref": "#/$defs/id"
+            },
+            "startBeat": {
+              "$ref": "#/$defs/beat"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trackId",
+            "clipId"
+          ],
+          "not": {
+            "required": [
+              "scene",
+              "laneId"
+            ]
+          },
+          "properties": {
+            "type": {
+              "const": "clip.delete"
+            },
+            "trackId": {
+              "$ref": "#/$defs/id"
+            },
+            "clipId": {
+              "$ref": "#/$defs/id"
+            },
+            "scene": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "laneId": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trackId",
+            "points"
+          ],
+          "properties": {
+            "type": {
+              "const": "automation.set"
+            },
+            "trackId": {
+              "$ref": "#/$defs/id"
+            },
+            "target": {
+              "type": "string",
+              "enum": [
+                "volume",
+                "pan",
+                "activator",
+                "send",
+                "device"
+              ]
+            },
+            "sendIndex": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            "deviceId": {
+              "$ref": "#/$defs/id"
+            },
+            "parameterId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "devices.parameters parameterId, or \"on\" for the device switch"
+            },
+            "targetId": {
+              "$ref": "#/$defs/id"
+            },
+            "points": {
+              "type": "array",
+              "maxItems": 4096,
+              "items": {
+                "$ref": "#/$defs/automationPoint"
+              }
+            },
+            "rangeStartBeat": {
+              "$ref": "#/$defs/beat"
+            },
+            "rangeEndBeat": {
+              "$ref": "#/$defs/beat"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "trackId"
+          ],
+          "properties": {
+            "type": {
+              "const": "automation.clear"
+            },
+            "trackId": {
+              "$ref": "#/$defs/id"
+            },
+            "target": {
+              "type": "string",
+              "enum": [
+                "volume",
+                "pan",
+                "activator",
+                "send",
+                "device"
+              ]
+            },
+            "sendIndex": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            "deviceId": {
+              "$ref": "#/$defs/id"
+            },
+            "parameterId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "devices.parameters parameterId, or \"on\" for the device switch"
+            },
+            "targetId": {
+              "$ref": "#/$defs/id"
+            }
+          }
         }
       ]
     },
@@ -915,6 +1174,27 @@
     "locatorName": {
       "type": "string",
       "maxLength": 256
+    },
+    "automationPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "beat"
+      ],
+      "description": "Song time in quarter-note beats and exactly one of value (the target's own units: volume/send linear gain, pan -1..1, on/off 0 or 1, device parameter in its descriptor range, VST3 normalized 0..1) or gainDb (volume/send only).",
+      "properties": {
+        "beat": {
+          "$ref": "#/$defs/beat"
+        },
+        "value": {
+          "type": "number"
+        },
+        "gainDb": {
+          "type": "number",
+          "minimum": -1000,
+          "maximum": 6
+        }
+      }
     }
   }
 }

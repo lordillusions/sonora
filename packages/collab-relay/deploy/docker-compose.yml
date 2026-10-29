@@ -1,0 +1,73 @@
+# COL-3b: the whole collab server on one small VM: relay (signalling + TURN credentials), Caddy (HTTPS, automatic
+# certificate) and coturn (STUN + TURN). Values come from .env next to this file (deploy/gcp.sh writes it; see .env.example).
+services:
+  relay:
+    build: ..
+    restart: unless-stopped
+    environment:
+      SONORA_RELAY_MODE: selfhost
+      SONORA_RELAY_PUBLIC_URL: https://${SONORA_RELAY_DOMAIN}
+      SONORA_TURN_SECRET: ${SONORA_TURN_SECRET}
+      SONORA_TURN_URLS: turn:${SONORA_PUBLIC_IP}:3478?transport=udp,turn:${SONORA_PUBLIC_IP}:3478?transport=tcp
+    volumes:
+      - ./data:/data
+    expose:
+      - "8787"
+
+  caddy:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    environment:
+      SONORA_RELAY_DOMAIN: ${SONORA_RELAY_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - relay
+
+  # Host networking: TURN allocates a UDP port per relayed connection (the range below), which bridge port mapping
+  # handles badly. The firewall opens only 3478 and that range.
+  coturn:
+    image: coturn/coturn:4.18.0-alpine
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      # Only the VM's own interface: with host networking coturn would otherwise also relay on Docker's bridge
+      # addresses (172.17/18.x), and allocations there advertise an address nobody can reach.
+      - --listening-ip=${SONORA_PRIVATE_IP}
+      - --relay-ip=${SONORA_PRIVATE_IP}
+      - --external-ip=${SONORA_PUBLIC_IP}/${SONORA_PRIVATE_IP}
+      - --realm=${SONORA_RELAY_DOMAIN}
+      - --use-auth-secret
+      - --static-auth-secret=${SONORA_TURN_SECRET}
+      - --fingerprint
+      # coturn 4.18: CLI, DTLS and the software attribute are off by default.
+      - --no-tls
+      - --no-multicast-peers
+      # Never relay into the VM's own networks or the cloud metadata server.
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=100.64.0.0-100.127.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      # Except coturn's own relay address: two peers that both need TURN talk through it.
+      - --allowed-peer-ip=${SONORA_PRIVATE_IP}
+      # Allocation limits: 12 per peer, 100 in total. No rate caps (--max-bps, --bps-capacity): coturn enforces them by
+      # dropping packets, which collapses the data channels to ~100 KB/s, and --bps-capacity refuses new allocations.
+      - --user-quota=12
+      - --total-quota=100
+      - --log-file=stdout
+      - --simple-log
+
+volumes:
+  caddy-data:
+  caddy-config:

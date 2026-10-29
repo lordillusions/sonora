@@ -30,8 +30,12 @@ These run on every release, and a release is not done until they pass.
   `Sonora-X-VST3-<v>.pkg` plus the stable `Sonora-X-VST3-macOS.pkg`, and `site/download.html` has its card (`id="x"`),
   download link and screenshot `site/assets/img/plugin-x.webp`. CI runs it before building a tag. A new plug-in therefore
   needs all of those in the same change.
-- **No dead download buttons.** The release job fails if any `releases/latest/download/<name>` link in `site/*.html` has
-  no matching file in the release.
+- **Versioned downloads.** The site's buttons and the public README link the release's versioned files
+  (`releases/download/vX.Y.Z/Sonora-X.Y.Z.dmg` ...) and show its number: run `scripts/release/set_version_links.py` after
+  the bump; `check_release_ready.sh` refuses a tag whose pages name another version. The release still attaches the
+  version-free copies (`Sonora-macOS.dmg` ...) so older links keep working.
+- **No dead download buttons.** The release job fails if any download link in `site/*.html` has no matching file in the
+  release.
 - **After publishing:** `scripts/release/check_downloads.sh --version x.y.z` checks the release is Latest, the live site
   links the same files as `site/`, and every link answers HTTP 200 with the asset's exact size.
 - **First launch:** the builds are not signed by Apple or Microsoft yet. `site/download.html#first-launch` explains the

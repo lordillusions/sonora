@@ -115,7 +115,8 @@ Text frames only, each one JSON object of at most 64 KiB. The first frame must a
  "turn":{"urls":["turn:turn.example:3478"],"username":"1760702400:s_x.p3","credential":"…","ttlSeconds":3600}}
 ```
 
-`turn` is omitted when the relay has no TURN configured. Then:
+`turn` is omitted when the relay has no TURN configured; clients then use a public STUN server for their internet
+address (Sonora: `stun:stun.l.google.com:19302`). Each welcome (also after a reconnect) replaces the client's ICE servers. Then:
 
 | Client → relay | Relay → client |
 |---|---|

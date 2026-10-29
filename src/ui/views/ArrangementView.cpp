@@ -245,8 +245,19 @@ public:
             }
             else ctl::triangle(c, indent + 11, ringY + 6, 5, 4, collapsed() ? ctl::Dir::Right : ctl::Dir::Down, ink);
         }
-        const std::string name = (track && track->hidden ? "(hidden) " : "") + ctx().trackDisplayName(index_);
-        paint::text(c, name, Rect{indent + 21, shortLane ? 0.0f : 2.0f, kTitleW - indent - 24, shortLane ? h : 15.0f}, ink, t.metrics.fontSize, Align::Left, true);
+        if (auto& rename = ctx().trackRename; track && rename.trackId == track->id)
+        {
+            // UI-58: Cmd+R edits the name right here.
+            const Rect field{indent + 18, shortLane ? std::max(0.0f, (h - 15) * 0.5f) : 1.0f, kTitleW - indent - 20, 15};
+            rename.bounds = field.translated(boundsInRoot().x, boundsInRoot().y);
+            rename.edit.paint(c, field, t.color("ControlTextBack"), t.color("ControlForeground"), t.color("RangeEditField"),
+                              t.color("ControlForeground"), t.metrics.fontSize, true);
+        }
+        else
+        {
+            const std::string name = (track && track->hidden ? "(hidden) " : "") + ctx().trackDisplayName(index_);
+            paint::text(c, name, Rect{indent + 21, shortLane ? 0.0f : 2.0f, kTitleW - indent - 24, shortLane ? h : 15.0f}, ink, t.metrics.fontSize, Align::Left, true);
+        }
 
         // I/O column for returns, groups and main
         if (io && (isReturn_ || isGroup_ || isMain_))
@@ -359,7 +370,7 @@ public:
             }
         if (Rect{indent, 0, 22, std::min(height(), 22.0f)}.contains(e.x, e.y) && ! isMain_)
         {
-            toggleCollapsed();
+            toggleCollapsed(e.alt);
             return;
         }
         if (e.x < titleW() && e.clicks < 2 && index_ < ctx().numTracks()) ctx().beginTrackDrag();
@@ -418,11 +429,22 @@ private:
         return std::find(v.begin(), v.end(), index_) != v.end();
     }
 
-    void toggleCollapsed()
+    void toggleCollapsed(bool allGroups)
     {
         if (isGroup_ && ctx().song != nullptr && ctx().applyEdit && index_ < ctx().numTracks())
         {
-            ctx().applyEdit(model::setTrackFolded(*ctx().song, index_, ! ctx().song->tracks[(size_t) index_].folded));
+            const bool fold = ! ctx().song->tracks[(size_t) index_].folded;
+            if (! allGroups)
+            {
+                ctx().applyEdit(model::setTrackFolded(*ctx().song, index_, fold));
+                return;
+            }
+            // Alt-click folds or unfolds every group, as in the reference.
+            std::vector<model::EditCommand> commands;
+            for (int i = 0; i < ctx().numTracks(); ++i)
+                if (const auto& track = ctx().song->tracks[(size_t) i]; track.kind == model::TrackKind::Group && track.folded != fold)
+                    commands.push_back(model::setTrackFolded(*ctx().song, i, fold));
+            ctx().applyEdit(model::compose(fold ? "Fold All Groups" : "Unfold All Groups", std::move(commands)));
             return;
         }
         auto& v = ctx().collapsedTracks;
@@ -541,7 +563,7 @@ void drawClip(SkCanvas& c, const Theme& t, const model::Clip& clip, const Rect& 
     }
 
     const SkColor ink = paint::mix(cc, SkColorSetRGB(0, 0, 0), lightTheme ? 0.75f : 0.6f);
-    if (clip.kind == model::Clip::Kind::Midi && ! clip.notes.empty() && body.h > 4)
+    if (clip.kind == model::Clip::Kind::Midi && ! clip.notes.empty() && body.h > 2)
     {
         int lo = 127, hi = 0;
         for (const auto& n : clip.notes)
@@ -1013,7 +1035,8 @@ void ArrangementView::paint(SkCanvas& c, const Theme& t)
                 }
             }
         }
-        if (track != nullptr && clips && clipHeight > 20)
+        // Clips stay visible at every lane height, down to a collapsed 18-pixel row (a name strip), as in the reference.
+        if (track != nullptr && clips)
             for (const auto& clip : *clips)
             {
                 if (drag_.active && drag_.moved && ! drag_.copy && lane.controlIndex == drag_.track && lane.takeLaneId == drag_.laneId && clip.uid == drag_.uid)
@@ -1037,7 +1060,7 @@ void ArrangementView::paint(SkCanvas& c, const Theme& t)
                         }
             }
         c.restore();
-        if (movingRegion && clipHeight > 20)
+        if (movingRegion)
         {
             const double delta = regionDrag_.at - regionDrag_.original.start;
             const float span = (float) ((regionDrag_.original.end - regionDrag_.original.start) * x.pixelsPerBeat);
@@ -1329,7 +1352,57 @@ void ArrangementView::paintOverChildren(SkCanvas& c, const Theme& t)
                 if (lane.controlIndex == x.selectedTrack && lane.takeLaneId < 0)
                     paint::line(c, cursor, std::max(area.y, lane.y), cursor, std::min(area.bottom(), lane.y + lane.h), t.color("ControlForeground"));
     }
+    paintDragGuide(c, t);
     paintCollaborators(c, t);
+}
+
+void ArrangementView::paintDragGuide(SkCanvas& c, const Theme& t)
+{
+    // Live: while a clip (or a selected region) is dragged, a line runs from the edge being placed up into the ruler,
+    // where a tag reads its position. Moving marks the snapping edge in the clip's title bar (start, or end with Shift).
+    const auto& x = ctx();
+    double beat = -1;
+    bool tagLeft = false; // the tag sits left of the line for edges that end a clip
+    float bottom = 0;
+    const Lane* clipLane = nullptr;
+    if (drag_.active && drag_.moved)
+    {
+        beat = ui::dragGuideBeat(drag_.preview, drag_.mode, drag_.alignEnd);
+        tagLeft = (drag_.mode == ui::DragMode::Move && drag_.alignEnd) || drag_.mode == ui::DragMode::ResizeEnd
+                  || drag_.mode == ui::DragMode::StretchEnd || drag_.mode == ui::DragMode::FadeOut;
+        for (const auto& lane : lanes_)
+            if (lane.controlIndex == drag_.targetTrack && lane.takeLaneId == drag_.laneId) clipLane = &lane;
+        if (clipLane) bottom = clipLane->y + clipLane->h;
+    }
+    else if (regionDrag_.active && regionDrag_.moved)
+    {
+        beat = regionDrag_.at;
+        for (const auto& lane : lanes_)
+            if (lane.takeLaneId < 0 && lane.controlIndex == regionDrag_.original.lastTrack + regionDrag_.trackOffset) bottom = lane.y + lane.h;
+    }
+    if (beat < 0 || x.song == nullptr)
+        return;
+    const auto area = timelineArea();
+    const float gx = std::round(beatToX(beat)) + 0.5f;
+    if (gx < 0 || gx > area.w)
+        return;
+    const float top = 16; // below the locator strip, through the bar numbers
+    const SkColor ink = t.color("ControlForeground");
+    paint::line(c, gx, top, gx, std::clamp(bottom, area.y, area.bottom()), paint::withAlpha(ink, 200));
+    const auto& m = t.metrics;
+    const auto text = ui::formatBarBeat(beat, x.song->timeSigNumerator, x.song->timeSigDenominator, false);
+    const float w = gfx::measureText(text, m.fontSize) + 8;
+    const Rect tag{tagLeft ? gx - 0.5f - w : gx + 0.5f, top + 1, w, 13};
+    paint::fillRounded(c, tag, 2, ink);
+    paint::text(c, text, tag, paint::contrastText(ink), m.fontSize, Align::Centre);
+    if (clipLane && drag_.mode == ui::DragMode::Move && clipLane->y >= area.y)
+    {
+        // A small arrow at the snapping edge, pointing at the edge, inside the title bar.
+        const float edge = drag_.alignEnd ? beatToX(drag_.preview.currentEnd) : beatToX(drag_.preview.currentStart);
+        const float cy = clipLane->y + 1 + 6.5f;
+        paint::fill(c, {drag_.alignEnd ? edge - 2 : edge, clipLane->y + 1, 2, 13}, ink);
+        ctl::triangle(c, drag_.alignEnd ? edge - 7 : edge + 7, cy, 6, 7, drag_.alignEnd ? ctl::Dir::Right : ctl::Dir::Left, ink);
+    }
 }
 
 // COL-5: where the others are: their selected clip outlined, their time selection framed, their pointer with a name tag.
@@ -1417,7 +1490,19 @@ void ArrangementView::zoomAt(float anchorX, double factor)
     repaint();
 }
 
-void ArrangementView::zoomTrackHeight(double factor, float anchorY)
+void ArrangementView::zoomAllTrackHeights(double factor)
+{
+    // Keep the selected track in place, else the first track lane on screen.
+    const auto& x = ctx();
+    const Lane* anchor = nullptr;
+    for (const auto& lane : lanes_)
+        if (lane.takeLaneId < 0 && lane.y + lane.h > x.theme.metrics.arrangementRulerHeight && lane.y < height()
+            && (anchor == nullptr || lane.controlIndex == x.selectedTrack))
+            anchor = &lane;
+    if (anchor != nullptr) zoomTrackHeight(factor, anchor->y + anchor->h * 0.5f, true);
+}
+
+void ArrangementView::zoomTrackHeight(double factor, float anchorY, bool allTracks)
 {
     auto& x = ctx();
     const auto* anchor = laneAt(anchorY);
@@ -1429,7 +1514,7 @@ void ArrangementView::zoomTrackHeight(double factor, float anchorY)
     for (const auto& lane : lanes_)
     {
         if (lane.takeLaneId >= 0) continue;
-        const bool selected = range.active ? lane.controlIndex >= range.firstTrack && lane.controlIndex <= range.lastTrack
+        const bool selected = allTracks ? true : range.active ? lane.controlIndex >= range.firstTrack && lane.controlIndex <= range.lastTrack
                                            : x.sessionTrackSelection ? x.isTrackSelected(lane.controlIndex) : lane.controlIndex == anchorTrack;
         if (! selected) continue;
         const float automation = x.automationHeight(lane.controlIndex);
@@ -1507,7 +1592,7 @@ const model::Clip* ArrangementView::clipAt(float x, float y, model::ClipLocation
         return nullptr;
     for (const auto& lane : lanes_)
     {
-        if (y < lane.y || y >= lane.y + lane.h - (lane.takeLaneId < 0 ? ctx().automationHeight(lane.controlIndex) : 0.0f) || lane.controlIndex >= ctx().numTracks() || lane.h <= 20)
+        if (y < lane.y || y >= lane.y + lane.h - (lane.takeLaneId < 0 ? ctx().automationHeight(lane.controlIndex) : 0.0f) || lane.controlIndex >= ctx().numTracks())
             continue;
         const auto* clips = laneClips(lane);
         if (! clips) continue;
@@ -1667,6 +1752,7 @@ void ArrangementView::mouseDown(const MouseEvent& e)
     draggingRuler_ = false;
     drag_ = {};
     regionDrag_ = {};
+    ctx().dragRange.reset();
     loopDrag_ = LoopDrag::None;
     selectingTime_ = false;
     const auto* hitLane = laneAt(e.y);
@@ -2103,6 +2189,7 @@ void ArrangementView::mouseDrag(const MouseEvent& e)
                 regionDrag_.original.start, regionDrag_.original.end, regionDrag_.at, regionDrag_.trackOffset);
         x.statusText = regionDrag_.valid ? (regionDrag_.copy ? "Copy selection" : "Move selection")
                                         : "Selection needs compatible tracks and automation targets";
+        x.dragRange = std::make_pair(regionDrag_.at, regionDrag_.at + regionDrag_.original.end - regionDrag_.original.start);
         repaint(); return;
     }
     if (laneResize_ >= 0)
@@ -2181,7 +2268,12 @@ void ArrangementView::mouseDrag(const MouseEvent& e)
     const double deltaBeats = (e.x - drag_.startX) / x.pixelsPerBeat;
     // Option means "copy" for a clip body drag, so only Cmd skips the grid there
     const double unit = drag_.copy ? ui::snapSize(x.arrangementGrid, x.pixelsPerBeat, beatsPerBar(), e.cmd) : snapUnit(e);
-    drag_.preview = ui::dragClip(drag_.original, drag_.mode, deltaBeats, unit, unit > 0.0, x.song ? x.song->tempo : 120.0);
+    drag_.alignEnd = drag_.mode == ui::DragMode::Move && e.shift;
+    drag_.preview = ui::dragClip(drag_.original, drag_.mode, deltaBeats, unit, unit > 0.0, x.song ? x.song->tempo : 120.0, drag_.alignEnd);
+    if (drag_.mode == ui::DragMode::Move)
+        x.statusText = drag_.alignEnd ? "Move Clip: its end snaps to the grid" : "Move Clip: its start snaps to the grid (hold Shift to snap its end)";
+    if (drag_.mode != ui::DragMode::FadeInCurve && drag_.mode != ui::DragMode::FadeOutCurve)
+        x.dragRange = std::make_pair(drag_.preview.currentStart, drag_.preview.currentEnd);
 
     if (drag_.mode == ui::DragMode::FadeInCurve || drag_.mode == ui::DragMode::FadeOutCurve)
     {
@@ -2234,6 +2326,7 @@ void ArrangementView::mouseUp(const MouseEvent& e)
     {
         mouseDrag(e); // validate the release position even when no final drag event arrived
         auto region = std::move(regionDrag_); regionDrag_ = {};
+        x.dragRange.reset();
         if (region.moved && region.valid && region.song == x.song && region.structure == x.trackStructure()
             && ! x.recording && ! x.recordingRequested && x.applyEdit)
         {
@@ -2287,6 +2380,7 @@ void ArrangementView::mouseUp(const MouseEvent& e)
         }
     }
     drag_ = {};
+    x.dragRange.reset();
     repaint();
 }
 
@@ -2294,7 +2388,7 @@ bool ArrangementView::keyPressed(const KeyEvent& k)
 {
     auto& x = ctx();
     if (regionDrag_.active && k.keyCode == juce::KeyPress::escapeKey)
-    { regionDrag_ = {}; x.statusText = "Move cancelled"; repaint(); return true; }
+    { regionDrag_ = {}; x.dragRange.reset(); x.statusText = "Move cancelled"; repaint(); return true; }
     if (editingWaveformZoom_)
     {
         if (k.keyCode == juce::KeyPress::escapeKey) editingWaveformZoom_ = false;
@@ -2352,10 +2446,14 @@ bool ArrangementView::keyPressed(const KeyEvent& k)
         if (k.cmd && ! k.alt && (k.textChar == 'r' || k.textChar == 'R')) { beginLocatorText(id, false); return true; }
         if (k.keyCode == juce::KeyPress::escapeKey) { x.selectedLocator = -1; repaint(); return true; }
     }
-    if (! k.cmd && k.alt && ! k.ctrl && (k.keyCode == '+' || k.keyCode == '=' || k.keyCode == '-' || k.textChar == '+' || k.textChar == '-' || k.textChar == '='))
+    if (! k.cmd && k.alt && ! k.ctrl && (k.keyCode == '+' || k.keyCode == '=' || k.keyCode == '-' || k.keyCode == '_'
+                                         || k.textChar == '+' || k.textChar == '-' || k.textChar == '=' || k.textChar == '_'))
     {
+        // Alt +/- zooms the selected tracks' height; with Shift, every track at once.
+        const bool out = k.keyCode == '-' || k.keyCode == '_' || k.textChar == '-' || k.textChar == '_';
+        if (k.shift) { zoomAllTrackHeights(out ? 0.8 : 1.25); return true; }
         for (const auto& lane : lanes_) if (lane.controlIndex == x.selectedTrack && lane.takeLaneId < 0)
-        { zoomTrackHeight(k.keyCode == '-' || k.textChar == '-' ? 0.8 : 1.25, lane.y + lane.h * 0.5f); break; }
+        { zoomTrackHeight(out ? 0.8 : 1.25, lane.y + lane.h * 0.5f); break; }
         return true;
     }
     if (k.alt && ! k.cmd && ! k.ctrl && ! k.shift && (k.keyCode == juce::KeyPress::leftKey || k.keyCode == juce::KeyPress::rightKey)
@@ -2521,7 +2619,9 @@ bool ArrangementView::mouseWheel(const MouseEvent& e)
         return true;
     }
     if (e.alt && ! e.cmd && timelineArea().contains(e.x, e.y) && std::abs(e.wheelDeltaY) > 1e-8f)
-    { zoomTrackHeight(wheelZoomFactor(e.wheelDeltaY), e.y); return true; }
+    { zoomTrackHeight(wheelZoomFactor(e.wheelDeltaY), e.y, e.shift); return true; }
+    if (e.alt && e.shift && ! e.cmd && timelineArea().contains(e.x, e.y) && std::abs(e.wheelDeltaX) > 1e-8f)
+    { zoomTrackHeight(wheelZoomFactor(e.wheelDeltaX), e.y, true); return true; } // the system turns Shift + wheel horizontal
     // Shift + wheel scrolls horizontally; the wheel scrolls the tracks.
     const bool horizontal = e.shift;
     const float dx = horizontal ? (std::fabs(e.wheelDeltaX) > std::fabs(e.wheelDeltaY) ? e.wheelDeltaX : e.wheelDeltaY) : e.wheelDeltaX;

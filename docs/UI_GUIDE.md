@@ -110,6 +110,7 @@ Options > Load Live Theme (.ask) imports any Live 12 theme, e.g.
 | Cmd+3 / Cmd+4 / Cmd+5 | Triplet Grid / Snap to Grid / Fixed Grid |
 | Cmd or Alt while dragging | ignore the grid |
 | Shift/Cmd+click a track name | select a range / toggle tracks (Cmd+G groups adjacent tracks, Shift+Cmd+G ungroups) |
+| Shift while moving a clip | snap the clip's end to the grid instead of its start (an edge bar and arrow mark the snapping edge) |
 | Cmd+L | Loop Selection: loop brace = selected notes (note editor), take range or selected Arrangement clip, loop on |
 | Delete (Device View) | remove the device you last clicked (also right-click a device title > Delete, Edit > Delete Device); undo restores it |
 | Shift+Cmd+M / Create menu | insert an empty one-bar MIDI clip on the selected MIDI track |
@@ -182,6 +183,10 @@ compared with Live's mono file display.
 
 Cmd+F searches the selected category/current folder. Add Folder stores a custom Place; disclosure arrows or double-click expand folders inline,
 and the toolbar Up button changes the browser root to its parent. Selecting a sample auditions it when Preview is on; the footer toggle stops preview.
+While a clip is moved, resized, trimmed, stretched or a fade is dragged, a line runs from the edge being placed up into
+the ruler, where a tag shows its position (bar.beat.sixteenth). The status bar shows Start / End / Length of the dragged
+clip, the time selection or the selected Arrangement clip at its right end, like Live.
+
 Drag samples onto Audio-track Arrangement lanes (grid snap; Alt for free placement) or Session slots.
 Plug-ins are grouped in collapsible vendor folders with format icons; missing manufacturers appear under
 Unknown Vendor. Native Instruments, Audio Effects and MIDI Effects have category folders. Click a folder
@@ -498,7 +503,10 @@ Create > Insert Audio Track (Cmd+T) / Insert MIDI Track (Shift+Cmd+T) inserts af
 group. Selecting a folded group inserts inside it and unfolds it in the same undo step. Create > Import Audio File uses
 the browser sample-import path, creating an audio track when needed; that track and the subsequent clip are separate
 history entries. Insert Empty MIDI Clip also works in an empty selected Session slot. Rename (Cmd+R) targets the selected
-clip or track (or the selected locator). Track insertion, names, locators and global launch quantization are undoable
+clip or track (or the selected locator). A track is renamed in place (UI-58): its name in the Arrangement header or the
+Session title becomes a field with the whole name selected; typing replaces it, arrows/Home/End move the caret, Cmd+A/C/X/V
+work, Return commits one "Rename Track" undo step, Escape cancels, a click elsewhere commits. While it is open every key
+is text (no shortcuts, no computer MIDI keyboard). Clips still use the dialog. Track insertion, names, locators and global launch quantization are undoable
 and saved. Locator IDs remain unique when imported IDs are not ordinal.
 
 Locators (UI-3b, `ui/Locators.*`, drawn by `ArrangementView`): the scrub strip under the bar numbers shows each locator as
@@ -892,7 +900,10 @@ Nested track groups remain supported, as in the reference app and its documented
   only. Drag or scroll the factor, double-click to type (Enter/Escape), Cmd-click to reset, or right-click for x/dB display
   and reset. Adjusting the factor enables waveform zoom immediately. Option+wheel over the Arrangement lanes resizes
   track heights around the pointer; a time selection or selected headers resize all selected visible lanes together.
-  Option `+` / `−` resizes the selected track(s). H fits visible track heights (minimum 18 px), W fits
+  Option `+` / `−` resizes the selected track(s); Shift+Option `+` / `−`, Shift+Option+wheel and View > Increase/Decrease
+  All Track Heights resize every track at once (UI-59). Clips stay drawn at every lane height, down to an 18 px name strip.
+  Option-click a group's fold triangle folds or unfolds every group; View > Show All Grouped Tracks unfolds them all.
+  H fits visible track heights (minimum 18 px), W fits
   the song horizontally; pressing again restores prior geometry. H/W keyboard shortcuts apply with Arrangement focus
   and the computer MIDI keyboard off. Persistent display state and resize-aware fitting remain UI-31b.
 - Session and Arrangement icons sit side by side at the far top right (vertical bars then horizontal bars), with hover
@@ -1101,12 +1112,15 @@ with the `ReferenceFace` kit
 
 ## Collab sessions (COL-5)
 
-- **File** menu: Share Session on Local Network, Share Session through Relay, Join Session..., Collaborate...,
-  Leave/End Session. The **people button** at the right of the control bar (left of the CPU/MIDI readouts) shows "Share"
+- **File** menu: Share Session... (opens the Collaborate panel; "Session and People..." during one), Join Session...,
+  Leave/End Session. One menu entry for sharing: where people are is chosen in the panel (COL-3e). The **people button** at the right of the control bar (left of the CPU/MIDI readouts) shows "Share"
   before a session and everyone's avatar during one (a green dot when connected, amber while connecting); it opens the
   Collaborate panel.
-- **Collaborate panel** (`ui/views/CollabPanel`, modal like Export): before a session, your name, the two Share buttons with
-  the relay address, Paste Invite Link and the sessions found on the network ("Ask to Join"); during one, the invite link
+- **Collaborate panel** (`ui/views/CollabPanel`, modal like Export): before a session, your name, "They are: Anywhere
+  (internet) / On my Wi-Fi" radio (internet by default), one **Start Sharing** button, **Join with Invite Link...**, the
+  sessions found on the network ("Ask to Join", only when there are some), a failed share's reason word-wrapped in the
+  alert colour, and at the bottom "Server: ..." with **Connection Settings...** (address, empty = Sonora's server, and the
+  optional access key). User-facing text says "sharing server", never "relay"; during one, the invite link
   with Copy, everyone with colour, role (host clicks to switch Editor/Listener), the four safety words and Remove, join
   requests (Allow/Deny), Shared transport (guests), recent notices and Leave/End Session. Text is typed in native prompts.
 - **Presence** (`ui/CollabOverlay`): each participant has a colour (`collabColor`, host = blue). Arrangement: their pointer

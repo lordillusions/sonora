@@ -1,8 +1,9 @@
 #pragma once
-// COL-5: the Collaborate panel (File > Collaborate..., or the people button in the top bar).
+// COL-5: the Collaborate panel (File > Share Session..., or the people button in the top bar).
 //
-// Before a session: your name, Share on Local Network / Share through Relay (with the relay address), Join with an
-// invite link, and the sessions other Sonoras advertise on this network. During one: the invite link to copy, everyone
+// Before a session: your name, Start Sharing with one choice of where people are (anywhere over the internet, the
+// default, or this Wi-Fi), Join with an invite link, the sessions other Sonoras advertise on this network, and the
+// server under Connection Settings. During one: the invite link to copy, everyone
 // with their colour, role and safety code, join requests to allow, the shared-transport switch, recent notices and
 // Leave / End Session. Text is typed in native prompts (the app's callbacks); this widget only shows UiContext::collab
 // and calls UiContext::collab* callbacks.

@@ -19,11 +19,21 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <string_view>
+
 namespace sonora::app
 {
 namespace
 {
-constexpr const char* kDefaultRelay = "http://127.0.0.1:8787";
+#ifndef SONORA_COLLAB_DEFAULT_RELAY
+#define SONORA_COLLAB_DEFAULT_RELAY ""
+#endif
+// COL-3b: the project's relay (CMake SONORA_COLLAB_RELAY, https://relay.sonoradaw.com); empty = a relay on this Mac.
+const char* defaultRelay()
+{
+    if constexpr (std::string_view(SONORA_COLLAB_DEFAULT_RELAY).empty()) return "http://127.0.0.1:8787";
+    else return SONORA_COLLAB_DEFAULT_RELAY;
+}
 const platform::SecretId kRelayKey{"Sonora Collab Relay", "host-token"};
 
 ui::CollabView::State viewState(collab::CollabSession::State s)
@@ -64,7 +74,14 @@ void AppController::initialiseCollab()
     collabPort_ = std::make_unique<CollabPort>(*this);
     ui_.collab.networkAvailable = collab::networkAvailable();
     ui_.collab.displayName = collabName();
-    ui_.collab.relayUrl = settings().getValue("collabRelay", kDefaultRelay).toStdString();
+    // Before COL-3b the local-relay address was the default and got saved with the other settings; it reached nobody
+    // over the internet. Forget it once so "Share" uses the project's server (a developer can set it again).
+    if (! settings().getBoolValue("collabRelayMigrated") && settings().getValue("collabRelay") == "http://127.0.0.1:8787"
+        && juce::String(defaultRelay()) != "http://127.0.0.1:8787")
+        settings().removeValue("collabRelay");
+    settings().setValue("collabRelayMigrated", true);
+    ui_.collab.relayUrl = settings().getValue("collabRelay", defaultRelay()).toStdString();
+    ui_.collab.relayIsDefault = ui_.collab.relayUrl == defaultRelay();
     ui_.collabShare = [this](bool lan) { shareSession(lan); };
     ui_.collabJoinLink = [this] { joinSessionDialog(); };
     ui_.collabJoinNearby = [this](const std::string& address) { joinNearbySession(address); };
@@ -90,10 +107,13 @@ void AppController::initialiseCollab()
         }), true);
     };
     ui_.collabEditRelay = [this] {
-        auto* dialog = new juce::AlertWindow("Relay", "The relay that introduces you to your collaborators (https://..., or http://127.0.0.1:8787 "
-                                                      "for a relay on this Mac). The access key is only needed by relays that require an account.",
+        auto* dialog = new juce::AlertWindow("Connection Settings",
+                                             "Sharing over the internet goes through a server that introduces you to each other; the music "
+                                             "itself goes directly between you, encrypted. Leave the address empty to use Sonora's server. "
+                                             "The access key is only needed to host on servers that ask for one.",
                                              juce::MessageBoxIconType::NoIcon);
-        dialog->addTextEditor("relay", juce::String::fromUTF8(ui_.collab.relayUrl.c_str()), "Relay address");
+        dialog->addTextEditor("relay", ui_.collab.relayIsDefault ? juce::String() : juce::String::fromUTF8(ui_.collab.relayUrl.c_str()),
+                              "Server address (empty = " + juce::String(defaultRelay()) + ")");
         juce::String key;
         platform::SecretStore().read(kRelayKey, key);
         dialog->addTextEditor("key", key, "Access key (optional)", true);
@@ -103,14 +123,17 @@ void AppController::initialiseCollab()
             if (alive.expired() || result != 1) return;
             auto relay = dialog->getTextEditorContents("relay").trim();
             while (relay.endsWith("/")) relay = relay.dropLastCharacters(1);
+            if (relay.isEmpty()) relay = defaultRelay();
             if (! relay.startsWith("https://") && ! relay.startsWith("http://127.0.0.1") && ! relay.startsWith("http://localhost"))
             {
-                collabNotice("The relay must use https:// (plain http only for a relay on this Mac).");
+                collabNotice("The server address must start with https:// (plain http only for a server on this Mac).");
                 return;
             }
-            settings().setValue("collabRelay", relay);
+            if (relay == defaultRelay()) settings().removeValue("collabRelay");
+            else settings().setValue("collabRelay", relay);
             settings().saveIfNeeded();
             ui_.collab.relayUrl = relay.toStdString();
+            ui_.collab.relayIsDefault = relay == defaultRelay();
             const auto accessKey = dialog->getTextEditorContents("key").trim();
             platform::SecretStore store;
             if (accessKey.isEmpty()) store.remove(kRelayKey);
@@ -317,8 +340,9 @@ void AppController::shareSession(bool lan)
     collabPort_->guestReady = true;
     startCollab(collab::CollabSession::host(*collabPort_, std::move(transport), options));
     ui_.collab.sessionName = net.sessionName;
-    collabNotice(lan ? "Sharing on your local network. Copy the invite link, or let people ask to join from their Join list."
-                     : "Sharing through " + net.relay + ". Copy the invite link and send it.");
+    copyInviteWhenReady_ = ! lan;
+    collabNotice(lan ? "Sharing on your Wi-Fi. Send the invite link, or people on the same network pick you from their Join list."
+                     : "Sharing over the internet. The invite link is copied as soon as it is ready.");
 }
 
 void AppController::joinSessionDialog()
@@ -765,6 +789,13 @@ void AppController::refreshCollabView()
     v.status = collab_->status();
     v.progress = collab_->progress();
     v.invite = collab_->inviteLink();
+    if (copyInviteWhenReady_ && ! v.invite.empty())
+    {
+        // One click: the link is on the clipboard by the time the relay has registered the session.
+        copyInviteWhenReady_ = false;
+        juce::SystemClipboard::copyTextToClipboard(juce::String::fromUTF8(v.invite.c_str()));
+        collabNotice("Invite link copied. Paste it to the people you want to work with.");
+    }
     if (! v.host && ! collab_->sourceName().empty()) v.sessionName = juce::File(collab_->sourceName()).getFileNameWithoutExtension().toStdString();
     v.participants.clear();
     for (const auto& p : collab_->participants())

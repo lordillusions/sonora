@@ -65,3 +65,9 @@ target_compile_definitions(collab_probe PRIVATE SONORA_SOURCE_DIR="${CMAKE_SOURC
 # PLG-14: render any effect plug-in over a WAV with named parameter settings (black-box measurements, A/B renders).
 add_executable(fx_render fx_render/main.cpp)
 target_link_libraries(fx_render PRIVATE sonora_juce)
+
+# --bench reads usrsctp's counters (retransmissions, timeouts) when the collab network is built in.
+if (TARGET usrsctp)
+    target_include_directories(collab_probe SYSTEM PRIVATE $<TARGET_PROPERTY:usrsctp,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_compile_definitions(collab_probe PRIVATE SONORA_PROBE_SCTP_STATS=1)
+endif()

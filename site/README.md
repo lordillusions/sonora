@@ -38,10 +38,12 @@ Then open <http://localhost:8794/>. Opening `site/index.html` directly from disk
 
 ## Updating content
 
-- **Downloads:** every button links to `https://github.com/lordillusions/sonora/releases/latest/download/<stable name>`
-  (`Sonora-macOS.dmg`, `Sonora-Windows-x64-setup.exe`, `Sonora-Linux-x86_64.AppImage`, `Sonora-Linux-amd64.deb`,
-  `Sonora-Prism-VST3-macOS.pkg`, `Sonora-Curve-LFO-VST3-macOS.pkg`, `Sonora-Hush-VST3-macOS.pkg`): the installers
-  workflow attaches these copies next to the versioned files, and refuses a release that lacks one the pages link to.
+- **Downloads:** every button links to the current release's versioned file,
+  `https://github.com/lordillusions/sonora/releases/download/vX.Y.Z/<name>` (`Sonora-X.Y.Z.dmg`,
+  `Sonora-X.Y.Z-windows-x64-setup.exe`, `Sonora-X.Y.Z-x86_64.AppImage`, `sonora_X.Y.Z_amd64.deb`,
+  `Sonora-<Plug-in>-VST3-X.Y.Z.pkg`), and `<span data-version>` shows the number. `scripts/release/set_version_links.py`
+  rewrites them for a new version. The installers workflow also attaches version-free copies (`Sonora-macOS.dmg` ...) for
+  older links, and refuses a release that lacks a file the pages link to.
 - **Plug-ins:** every VST3 has a card in `download.html#plugins` (`id` = its name, screenshot `assets/img/plugin-<id>.webp`
   rendered from the real editor). `scripts/release/check_release_ready.sh` fails a release without one.
 - **First launch:** `download.html#first-launch` has the Gatekeeper (macOS 15+: Open Anyway) and SmartScreen steps. Keep

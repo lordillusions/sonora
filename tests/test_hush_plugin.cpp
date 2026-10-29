@@ -135,6 +135,53 @@ TEST_CASE("hush plugin: the editor takes clicks, keys and wheel through the root
     CHECK(p.hush().getParameter(H::Bypass) >= 0.5f);
     click(200, view.height() - 17);
     CHECK(p.hush().getParameter(H::Bypass) < 0.5f);
+    // Delta, clicked like a host window does: the output becomes exactly what Hush removes. A second instance with the
+    // same settings and delta off gets the same audio; delta must equal the dry signal (delayed by the latency) minus it.
+    click(296, view.height() - 17);
+    REQUIRE(p.hush().getParameter(H::Delta) >= 0.5f);
+    {
+        plugin::HushPlugin q;
+        juce::MemoryBlock state;
+        p.getStateInformation(state);
+        q.setStateInformation(state.getData(), (int) state.getSize());
+        q.hush().setParameter(H::Delta, 0.0f);
+        q.prepareToPlay(48000, 512);
+        const int latency = p.getLatencySamples();
+        REQUIRE(latency == q.getLatencySamples());
+        std::vector<float> dry, delta, wet;
+        juce::AudioBuffer<float> other(2, 512);
+        for (int block = 0; block < 160; ++block)
+        {
+            for (int s = 0; s < 512; ++s)
+            {
+                const float t = (float) ((200 + block) * 512 + s) / 48000.0f;
+                const float v = 0.05f * (rng.nextFloat() * 2 - 1) + 0.4f * std::sin(6.2831853f * 3000.0f * t) + 0.3f * std::sin(6.2831853f * 700.0f * t);
+                audio.setSample(0, s, v);
+                audio.setSample(1, s, v);
+                other.setSample(0, s, v);
+                other.setSample(1, s, v);
+                dry.push_back(v);
+            }
+            p.processBlock(audio, midi);
+            q.processBlock(other, midi);
+            for (int s = 0; s < 512; ++s)
+            {
+                delta.push_back(audio.getSample(0, s));
+                wet.push_back(other.getSample(0, s));
+            }
+        }
+        double err = 0, ref = 0;
+        for (size_t i = 120 * 512; i < delta.size(); ++i) // both have settled on the same audio by then
+        {
+            const double expected = dry[i - (size_t) latency] - wet[i];
+            err += (delta[i] - expected) * (delta[i] - expected);
+            ref += expected * expected;
+        }
+        CHECK(ref > 0.0);
+        CHECK(err < ref * 0.01); // within -20 dB of the removed part
+    }
+    click(296, view.height() - 17);
+    CHECK(p.hush().getParameter(H::Delta) < 0.5f);
     click(864, 17); // settings
     CHECK(std::find(view.lastMenu.begin(), view.lastMenu.end(), "Show frequency near cursor") != view.lastMenu.end());
     const bool before = plugin::HushSettings::get().frequencyNearCursor.load();

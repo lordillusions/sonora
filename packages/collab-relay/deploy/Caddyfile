@@ -1,0 +1,4 @@
+# COL-3b: HTTPS in front of the relay. Caddy gets and renews the certificate for the domain by itself.
+{$SONORA_RELAY_DOMAIN} {
+	reverse_proxy relay:8787
+}

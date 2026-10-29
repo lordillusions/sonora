@@ -4,7 +4,8 @@
 #   scripts/release/check_downloads.sh [--site https://sonoradaw.com] [--repo lordillusions/sonora] [--version 0.1.4]
 #
 # 1. The latest release on GitHub is --version (default: project() in CMakeLists.txt) and is not a draft.
-# 2. Every page of the live site and of site/ links only to releases/latest/download/<name> files that exist.
+# 2. Every page of the live site and of site/ links only to files of v<version> (releases/download/v<version>/<name>,
+#    or releases/latest/download/<name>) that exist.
 # 3. Each of those links answers HTTP 200 after redirects with the byte size of the release asset.
 # 4. The live pages carry the same download links as site/ (the site repository was synced).
 # Exit code 0 only when everything passes. Needs curl and gh (signed in).
@@ -30,7 +31,7 @@ latest="$(gh release view --repo "$REPO" --json tagName,isDraft -q '.tagName + "
 [ "$latest" = "v$VERSION false" ] && echo "ok   latest release is v$VERSION" || bad "latest release is '$latest', expected v$VERSION"
 gh release view "v$VERSION" --repo "$REPO" --json assets -q '.assets[] | .name + " " + (.size|tostring)' > "$TMP/assets"
 
-links() { grep -oh 'releases/latest/download/[^"]*' "$@" | sed 's|.*/||' | sort -u; }
+links() { grep -ohE 'releases/(latest/download|download/v[0-9.]+)/[^"]*' "$@" | sed 's|^releases/||' | sort -u; }
 links "$ROOT"/site/*.html > "$TMP/local"
 for page in $(cd "$ROOT/site" && ls *.html); do
     code="$(curl -s -o "$TMP/live-$page" -w '%{http_code}' "$SITE/$page")"
@@ -40,12 +41,14 @@ links "$TMP"/live-*.html > "$TMP/live" || true
 if diff -q "$TMP/local" "$TMP/live" >/dev/null; then echo "ok   live site links the same $(wc -l < "$TMP/local" | xargs) files as site/"
 else bad "live site and site/ link different files (sync the site repository):"; diff "$TMP/local" "$TMP/live" || true; fi
 
-for name in $(sort -u "$TMP/local" "$TMP/live"); do
+for link in $(sort -u "$TMP/local" "$TMP/live"); do
+    name="${link##*/}"
+    case "$link" in latest/download/*|download/v$VERSION/*) ;; *) bad "$link names another version than v$VERSION"; continue ;; esac
     want="$(awk -v n="$name" '$1 == n { print $2 }' "$TMP/assets")"
     [ -n "$want" ] || { bad "$name is linked but not attached to v$VERSION"; continue; }
     read -r code size < <(curl -sL -o /dev/null -r 0-0 -w '%{http_code} %{size_download}\n' \
-        "https://github.com/$REPO/releases/latest/download/$name")
-    total="$(curl -sIL "https://github.com/$REPO/releases/latest/download/$name" | tr -d '\r' |
+        "https://github.com/$REPO/releases/$link")
+    total="$(curl -sIL "https://github.com/$REPO/releases/$link" | tr -d '\r' |
         awk 'tolower($1) == "content-length:" { n = $2 } END { print n }')"
     if [ "$code" = 206 ] || [ "$code" = 200 ]; then
         [ "$total" = "$want" ] && echo "ok   $name ($total bytes)" || bad "$name is $total bytes, the asset is $want"

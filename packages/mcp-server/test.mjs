@@ -260,3 +260,56 @@ test('MCP: Arrangement locators add, update, delete, undo and persist through ed
   assert.equal(native.exitCode, 0, errors); assert.match(output, /PASS: locators saved and reloaded/);
   await assert.rejects(fs.access(registry));
 });
+
+test('MCP: groups, clip create/copy and volume/filter automation through edits.apply persist (AGT-7d)', { timeout: 60000 }, async () => {
+  const native = spawn(probe, ['--serve', '--verify-agent-edits-on-exit'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '', errors = '';
+  native.stdout.on('data', b => { output += b; }); native.stderr.on('data', b => { errors += b; });
+  const registry = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Startup timeout: ${errors}`)), 10000);
+    createInterface({ input: native.stdout }).once('line', line => { clearTimeout(timer); resolve(line); });
+    native.once('error', reject);
+  });
+  const entry = JSON.parse(await fs.readFile(registry, 'utf8')); const c = client();
+  try {
+    await initialize(c);
+    let current = await c.tool('sonora_session_attach', { instanceId: entry.instanceId, documentId: entry.documentId });
+    const tracks = current.data.tracks;
+    assert.ok(tracks.every(track => ['audio', 'midi', 'group'].includes(track.kind) && Number.isInteger(track.groupId)));
+    const [midi, other] = tracks.filter(track => track.kind === 'midi').map(track => track.trackId);
+    const audio = tracks.find(track => track.kind === 'audio').trackId;
+    const folded = await c.tool('sonora_edits_apply', { expectedRevision: current.revision, idempotencyKey: 'fold-all',
+      commands: [{ type: 'track.set_folded', folded: true }] });
+    assert.equal(folded.ok, true, JSON.stringify(folded));
+    const invalid = await c.request('tools/call', { name: 'sonora_edits_apply', arguments: { expectedRevision: folded.revision,
+      idempotencyKey: 'both-places', commands: [{ type: 'clip.create', trackId: midi, startBeat: 0, scene: 0, lengthBeats: 4 }] } });
+    assert.ok(invalid.error || invalid.result?.isError);
+    const created = await c.tool('sonora_edits_apply', { expectedRevision: folded.revision, idempotencyKey: 'create', commands: [
+      { type: 'clip.create', trackId: midi, startBeat: 32, lengthBeats: 8, name: 'Fill',
+        notes: [{ pitch: 60, startBeat: 0, durationBeats: 1, velocity: 100 }, { pitch: 67, startBeat: 4, durationBeats: 1, velocity: 100 }] }] });
+    assert.equal(created.ok, true, JSON.stringify(created));
+    const clipId = created.data.clips[0].clipId;
+    const copied = await c.tool('sonora_edits_apply', { expectedRevision: created.revision, idempotencyKey: 'copy', commands: [
+      { type: 'clip.copy', trackId: midi, clipId, toTrackId: other, destinationBeat: 64 }] });
+    assert.equal(copied.ok, true, JSON.stringify(copied));
+    const occupied = await c.tool('sonora_edits_apply', { expectedRevision: copied.revision, idempotencyKey: 'occupied', commands: [
+      { type: 'clip.create', trackId: other, startBeat: 66, lengthBeats: 2 }] });
+    assert.equal(occupied.error.code, 'region_occupied');
+    const filter = await c.tool('sonora_devices_insert', { expectedRevision: copied.revision, idempotencyKey: 'filter',
+      trackId: audio, catalogId: 'native:AutoFilter2' });
+    assert.equal(filter.ok, true, JSON.stringify(filter));
+    const automated = await c.tool('sonora_edits_apply', { expectedRevision: filter.revision, idempotencyKey: 'automate', commands: [
+      { type: 'automation.set', trackId: audio, target: 'volume', points: [{ beat: 16, gainDb: 0 }, { beat: 32, gainDb: -80 }] },
+      { type: 'automation.set', trackId: audio, target: 'device', deviceId: filter.data.deviceId, parameterId: 'Filter_Frequency',
+        rangeStartBeat: 16, rangeEndBeat: 48, points: [{ beat: 16, value: 20000 }, { beat: 44, value: 40 }] }] });
+    assert.equal(automated.ok, true, JSON.stringify(automated));
+    current = await c.tool('sonora_project_inspect');
+    const lanes = current.data.tracks.find(track => track.trackId === audio).automation;
+    assert.deepEqual(lanes.map(lane => lane.target).sort(), ['device', 'volume']);
+    assert.equal(lanes.find(lane => lane.target === 'device').parameterId, 'Filter_Frequency');
+  } finally {
+    await c.close(); if (native.exitCode === null) { const exit = once(native, 'exit'); native.kill('SIGTERM'); await exit; }
+  }
+  assert.equal(native.exitCode, 0, errors); assert.match(output, /PASS: agent clip create\/copy and volume\/filter automation saved and reloaded/);
+  await assert.rejects(fs.access(registry));
+});

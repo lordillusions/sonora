@@ -244,6 +244,7 @@ add_library(sonora_ui STATIC
     ui/GridModel.cpp
     ui/GridMenu.cpp
     ui/Locators.cpp
+    ui/InlineEdit.cpp
     ui/SetView.cpp
     ui/TrackMenu.cpp
     ui/Shortcuts.cpp
@@ -452,6 +453,9 @@ endif()
 set_source_files_properties(app/Main.cpp PROPERTIES COMPILE_DEFINITIONS
     "SONORA_APP_VERSION_STRING=\"${SONORA_APP_VERSION}\";SONORA_APP_NAME_STRING=\"${_sonoraProduct}\";SONORA_APP_DATA_FOLDER_STRING=\"${_sonoraProduct}\"")
 target_compile_definitions(Sonora PRIVATE SONORA_UPDATE_LOCAL_TEST=${_sonoraLocalTest})
+# COL-3b: the relay "Share over the Internet" uses until the user picks another (packages/collab-relay/deploy).
+set(SONORA_COLLAB_RELAY "https://relay.sonoradaw.com" CACHE STRING "Default collab relay origin, https://... (empty = a relay on this Mac)")
+set_property(SOURCE app/AppCollab.cpp APPEND PROPERTY COMPILE_DEFINITIONS "SONORA_COLLAB_DEFAULT_RELAY=\"${SONORA_COLLAB_RELAY}\"")
 if(APPLE)
     target_sources(Sonora PRIVATE app/AssistantDock.mm app/WindowChrome.mm)
 else()

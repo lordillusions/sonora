@@ -143,6 +143,27 @@ std::vector<MidiNote> readNotes(const juce::var& value)
     return notes;
 }
 
+std::vector<TrackId> trackIds(const juce::var& value)
+{
+    std::vector<TrackId> ids;
+    const auto* items = value["trackIds"].getArray();
+    if (! items || items->size() > 1024) invalid("Expected an array of at most 1024 trackIds");
+    for (const auto& item : *items)
+    {
+        if (! (item.isInt() || item.isInt64() || item.isDouble()) || std::floor(static_cast<double>(item)) != static_cast<double>(item))
+            invalid("Expected integer trackIds");
+        ids.push_back(static_cast<int>(item));
+    }
+    return ids;
+}
+
+juce::var writeTrackIds(const std::vector<TrackId>& ids)
+{
+    juce::Array<juce::var> out;
+    for (const auto trackId : ids) out.add(trackId);
+    return out;
+}
+
 uint32_t noteKey(const juce::var& value, const char* name)
 {
     return static_cast<uint32_t>(integer(value, name, 1, std::numeric_limits<uint32_t>::max()));
@@ -209,6 +230,34 @@ struct Encoder
         if (op.songStart) out.set("songStart", *op.songStart);
     }
     void operator()(const ops::DeleteLocator& op) { out.set("locatorId", op.locatorId); }
+    void operator()(const ops::SetTracksFolded& op)
+    {
+        if (! op.trackIds.empty()) out.set("trackIds", writeTrackIds(op.trackIds));
+        out.set("folded", op.folded);
+    }
+    void operator()(const ops::CreateClip& op)
+    {
+        out.set("trackId", op.trackId).set("lengthBeats", op.lengthBeats);
+        if (op.scene >= 0) out.set("scene", op.scene); else out.set("startBeat", op.startBeat);
+        if (op.name) out.set("name", juce::String::fromUTF8(op.name->c_str()));
+        if (! op.notes.empty()) out.set("notes", writeNotes(op.notes));
+    }
+    void operator()(const ops::CopyClip& op)
+    {
+        out.set("trackId", op.trackId).set("clipId", op.clipUid).set("destinationBeat", op.destinationBeat);
+        if (op.toTrackId >= 0) out.set("toTrackId", op.toTrackId);
+    }
+    void operator()(const ops::SetAutomation& op)
+    {
+        out.set("trackId", op.trackId).set("targetId", op.targetId);
+        if (op.clear) return;
+        juce::Array<juce::var> points;
+        for (const auto& point : op.points) points.add(Object().set("beat", point.time).set("value", point.value).var());
+        out.set("points", points);
+        if (op.rangeStart) out.set("rangeStartBeat", *op.rangeStart);
+        if (op.rangeEnd) out.set("rangeEndBeat", *op.rangeEnd);
+        if (! op.eventType.empty()) out.set("eventType", juce::String(op.eventType));
+    }
     void operator()(const ops::DeleteNotes& op)
     {
         write(out, op.clip);
@@ -334,6 +383,55 @@ Op decode(const juce::var& value)
     {
         allow(value, {"type", "locatorId"});
         return {ops::DeleteLocator{id(value, "locatorId")}};
+    }
+    if (type == "track.set_folded")
+    {
+        allow(value, {"type", "trackIds", "folded"});
+        ops::SetTracksFolded op;
+        if (value.hasProperty("trackIds")) op.trackIds = trackIds(value);
+        op.folded = boolean(value, "folded");
+        return {op};
+    }
+    if (type == "clip.create")
+    {
+        allow(value, {"type", "trackId", "startBeat", "scene", "lengthBeats", "name", "notes"});
+        ops::CreateClip op;
+        op.trackId = id(value, "trackId");
+        if (value.hasProperty("scene") == value.hasProperty("startBeat")) invalid("Choose startBeat (Arrangement) OR scene (Session)");
+        if (value.hasProperty("scene")) op.scene = static_cast<int>(integer(value, "scene", 0, 1000000));
+        else op.startBeat = number(value, "startBeat");
+        op.lengthBeats = number(value, "lengthBeats");
+        op.name = maybe<std::string>(value, "name", text);
+        if (value.hasProperty("notes")) op.notes = readNotes(value);
+        return {op};
+    }
+    if (type == "clip.copy")
+    {
+        allow(value, {"type", "trackId", "clipId", "toTrackId", "destinationBeat"});
+        return {ops::CopyClip{id(value, "trackId"), id(value, "clipId"),
+                              value.hasProperty("toTrackId") ? id(value, "toTrackId") : -1, number(value, "destinationBeat")}};
+    }
+    if (type == "automation.set" || type == "automation.clear")
+    {
+        ops::SetAutomation op;
+        op.clear = type == "automation.clear";
+        if (op.clear) allow(value, {"type", "trackId", "targetId"});
+        else allow(value, {"type", "trackId", "targetId", "points", "rangeStartBeat", "rangeEndBeat", "eventType"});
+        op.trackId = id(value, "trackId");
+        op.targetId = id(value, "targetId");
+        if (op.clear) return {op};
+        for (const auto& item : array(value, "points"))
+        {
+            allow(item, {"beat", "value"});
+            AutomationPoint point;
+            point.time = number(item, "beat");
+            point.value = number(item, "value");
+            op.points.push_back(point);
+        }
+        op.rangeStart = maybe<double>(value, "rangeStartBeat", real);
+        op.rangeEnd = maybe<double>(value, "rangeEndBeat", real);
+        if (value.hasProperty("eventType")) op.eventType = text(value, "eventType");
+        return {op};
     }
     throw OpError("unsupported_operation", "Unsupported edit type: " + type.toStdString());
 }

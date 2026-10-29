@@ -1,5 +1,6 @@
 #include "ui/views/CollabPanel.h"
 
+#include "gfx/Fonts.h"
 #include "ui/Painter.h"
 #include "ui/UiContext.h"
 
@@ -55,7 +56,11 @@ const char* roleText(CollabView::Role r)
 
 Rect CollabPanel::panelRect() const
 {
-    const float w = std::min(kPanelW, width() - 40), h = std::min(kPanelH, height() - 40);
+    // Before a session the panel only offers Share and Join: shorter, unless nearby sessions need rows.
+    const auto& v = ctx().collab;
+    const float wanted = v.active() || ! v.networkAvailable ? kPanelH : 335.0f + 26.0f * (float) std::min<size_t>(v.lanSessions.size(), 5)
+                         + (v.lanSessions.empty() ? 0.0f : 30.0f) + (v.endedReason.empty() ? 0.0f : 36.0f);
+    const float w = std::min(kPanelW, width() - 40), h = std::min(wanted, height() - 40);
     return {(width() - w) * 0.5f, (height() - h) * 0.5f, w, h};
 }
 
@@ -110,46 +115,108 @@ void CollabPanel::paint(SkCanvas& c, const Theme& t)
     const bool active = v.active();
     if (! active)
     {
+        // Before a session: one way to share (internet by default, Wi-Fi as the alternative) and one way to join.
         {
             auto line = r.removeFromTop(kRowH);
             paint::text(c, "Your name", line.removeFromLeft(110), dim, fs, Align::Left);
             const auto name = line.removeFromLeft(220).reduced(0, 2);
             button(c, t, name, v.displayName.empty() ? std::string("Set your name...") : v.displayName, [&x, call] { call(x.collabEditName); });
         }
-        if (! v.endedReason.empty()) note("Last session: " + v.endedReason, dim);
 
-        heading("Share this set");
-        if (x.song == nullptr) note("Open or create a set first.", dim);
+        heading("Invite people to this set");
         {
-            auto line = r.removeFromTop(kRowH + 4).reduced(0, 2);
-            button(c, t, line.removeFromLeft(200), "Share on Local Network", [&x] { if (x.collabShare) x.collabShare(true); }, x.song != nullptr, true);
-            line.removeFromLeft(10);
-            button(c, t, line.removeFromLeft(200), "Share through Relay", [&x] { if (x.collabShare) x.collabShare(false); }, x.song != nullptr);
-        }
-        note("Local network: no server; people in the same studio or Wi-Fi join with the link or from their list.", dim);
-        {
-            auto line = r.removeFromTop(20);
-            paint::text(c, "Relay: " + v.relayUrl, line.removeFromLeft(line.w - 90), dim, fs - 1, Align::Left);
-            button(c, t, line.reduced(0, 1), "Change...", [&x, call] { call(x.collabEditRelay); });
-        }
-        note("Over the internet, through a relay. Edits and samples go directly between you, encrypted.", dim);
-
-        heading("Join a session");
-        {
-            auto line = r.removeFromTop(kRowH + 4).reduced(0, 2);
-            button(c, t, line.removeFromLeft(200), "Paste Invite Link...", [&x, call] { call(x.collabJoinLink); }, true, true);
+            // A radio choice, not two more buttons: Start Sharing stays the one action.
+            auto line = r.removeFromTop(kRowH).reduced(0, 2);
+            paint::text(c, "They are", line.removeFromLeft(110), dim, fs, Align::Left);
+            auto radio = [&](Rect area, const std::string& label, bool chosen, bool lan) {
+                SkPaint p;
+                p.setAntiAlias(true);
+                const float cx = area.x + 7, cy = area.centreY();
+                p.setStyle(SkPaint::kStroke_Style);
+                p.setStrokeWidth(1.2f);
+                p.setColor(chosen ? t.color("ChosenDefault") : t.color("ControlContrastFrame"));
+                c.drawCircle(cx, cy, 6.0f, p);
+                if (chosen)
+                {
+                    p.setStyle(SkPaint::kFill_Style);
+                    c.drawCircle(cx, cy, 3.5f, p);
+                }
+                paint::text(c, label, {area.x + 20, area.y, area.w - 20, area.h}, ink, fs, Align::Left, chosen);
+                hits_.push_back({area, [&x, lan] { x.collab.shareOnLan = lan; }});
+            };
+            radio(line.removeFromLeft(190), "Anywhere (internet)", ! v.shareOnLan, false);
+            radio(line.removeFromLeft(150), "On my Wi-Fi", v.shareOnLan, true);
         }
         r.removeFromTop(4);
-        paint::text(c, "On this network", r.removeFromTop(18), ink, fs, Align::Left, true);
-        if (v.lanSessions.empty()) note("No shared sessions found nearby.", dim);
-        for (const auto& s : v.lanSessions)
         {
-            if (r.h < 30) break;
-            auto line = r.removeFromTop(kRowH).reduced(0, 2);
-            const auto ask = line.removeFromRight(110);
-            paint::text(c, s.label, line, ink, fs, Align::Left);
-            button(c, t, ask, "Ask to Join", [&x, address = s.address] { if (x.collabJoinNearby) x.collabJoinNearby(address); });
+            auto line = r.removeFromTop(kRowH + 6).reduced(0, 2);
+            line.removeFromLeft(110);
+            button(c, t, line.removeFromLeft(220), "Start Sharing", [&x, lan = v.shareOnLan] { if (x.collabShare) x.collabShare(lan); }, x.song != nullptr, true);
         }
+        r.removeFromTop(2);
+        auto indented = [&](const std::string& text, SkColor color) {
+            auto line = r.removeFromTop(18);
+            line.removeFromLeft(110);
+            paint::text(c, text, line, color, fs - 1, Align::Left);
+        };
+        if (x.song == nullptr) indented("Open or create a set first.", alert);
+        else if (v.shareOnLan)
+        {
+            indented("No internet needed. People on the same Wi-Fi or studio network", dim);
+            indented("pick your set from their Join list, or open your invite link.", dim);
+        }
+        else
+        {
+            indented("You get an invite link (already copied) to send by chat or email.", dim);
+            indented("The music goes directly between you, encrypted.", dim);
+        }
+        if (! v.endedReason.empty())
+        {
+            // Word-wrapped: a failed share's reason says what to do and must be read whole.
+            const float maxW = r.w - 110;
+            std::string line, word;
+            const std::string text = "Last session: " + v.endedReason + " ";
+            for (char ch : text)
+            {
+                if (ch != ' ') { word.push_back(ch); continue; }
+                const auto trial = line.empty() ? word : line + " " + word;
+                if (! line.empty() && gfx::measureText(trial, fs - 1) > maxW) { indented(line, alert); line = word; }
+                else line = trial;
+                word.clear();
+            }
+            if (! line.empty()) indented(line, alert);
+        }
+
+        heading("Join someone's session");
+        {
+            auto line = r.removeFromTop(kRowH + 6).reduced(0, 2);
+            line.removeFromLeft(110);
+            button(c, t, line.removeFromLeft(220), "Join with Invite Link...", [&x, call] { call(x.collabJoinLink); }, true, true);
+        }
+        r.removeFromTop(2);
+        indented("Paste the link you were sent. No account needed.", dim);
+        if (! v.lanSessions.empty())
+        {
+            r.removeFromTop(6);
+            paint::text(c, "On your Wi-Fi", r.removeFromTop(20), ink, fs, Align::Left, true);
+            for (const auto& s : v.lanSessions)
+            {
+                if (r.h < 56) break;
+                auto line = r.removeFromTop(kRowH).reduced(0, 2);
+                const auto ask = line.removeFromRight(110);
+                paint::text(c, s.label, line, ink, fs, Align::Left);
+                button(c, t, ask, "Ask to Join", [&x, address = s.address] { if (x.collabJoinNearby) x.collabJoinNearby(address); });
+            }
+        }
+
+        // Advanced, at the bottom: which server introduces you over the internet, and an optional access key.
+        auto bottom = panel.reduced(16, 0).removeFromBottom(34).reduced(0, 7);
+        const auto settingsButton = bottom.removeFromRight(170);
+        std::string server = v.relayUrl;
+        for (const char* scheme : {"https://", "http://"})
+            if (server.rfind(scheme, 0) == 0) server = server.substr(std::string(scheme).size());
+        paint::text(c, v.relayIsDefault ? "Server: " + server + " (Sonora)" : "Server: " + server, bottom, dim, fs - 1, Align::Left);
+        button(c, t, settingsButton, "Connection Settings...", [&x, call] { call(x.collabEditRelay); });
         return;
     }
 

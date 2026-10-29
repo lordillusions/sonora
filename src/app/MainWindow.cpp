@@ -66,6 +66,9 @@ enum MenuIds
     FixedGrid,
     ZoomInTime,
     ZoomOutTime,
+    ZoomInTrackHeights,
+    ZoomOutTrackHeights,
+    UnfoldAllGroups,
     ToggleAssistant,
     CloseWindow, ClearRecent, RemoveUnavailable, AddFolder, ShowBackups, RevealBackups,
     SelectAll, ToggleClipActive, SoloTrack, ArmTrack, Quantize, QuantizeSettings, ApplyMidiTool,
@@ -81,7 +84,7 @@ enum MenuIds
     InsertTakeLane, FreezeTrack, BounceTrack, BounceNew, ConsolidateClips, ConvertMelody, ConvertHarmony, ConvertDrums, SliceMidi, ResynthesizeClip,
     DeactivateTrack, HideTrack, ShowHiddenTracks, StripSilence, NextTransient, PreviousTransient,
     CheckForUpdates, AboutSonora,
-    ShareSessionLan, ShareSessionRelay, JoinSession, CollaboratePanel, LeaveSession,
+    ShareSession, JoinSession, LeaveSession,
     RecentBase = 1000,
 };
 class Workspace final : public juce::Component
@@ -367,10 +370,9 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         // COL-5: collab sessions.
         m.addSeparator();
         const bool inSession = app_.inCollabSession();
-        m.addItem(ShareSessionLan, "Share Session on Local Network", loaded && ! inSession);
-        m.addItem(ShareSessionRelay, "Share Session through Relay", loaded && ! inSession);
+        // One entry opens the Collaborate panel, which picks internet (default) or Wi-Fi and shows a running session.
+        m.addItem(ShareSession, inSession ? "Session and People..." : "Share Session...", loaded || inSession, ui.collabOpen);
         m.addItem(JoinSession, "Join Session...", ! inSession);
-        m.addItem(CollaboratePanel, "Collaborate...", true, ui.collabOpen);
         m.addItem(LeaveSession, app_.collabGuest() ? "Leave Session" : "End Session", inSession);
     }
     else if (index == 1)
@@ -507,6 +509,7 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         unavailable(m, {"Arrangement Track Controls", "Overview", "Scene Tempo and Time Signature"});
         m.addItem(ToggleAutomation, "Automation Mode    (A)", loaded, ui.showsAutomation(ui.selectedTrack));
         m.addItem(HideGroupedTracks, "Hide Grouped Tracks", loaded);
+        m.addItem(UnfoldAllGroups, "Show All Grouped Tracks", loaded);
         int hiddenCount = 0;
         if (loaded) { for (const auto& t : ui.song->tracks) hiddenCount += t.hidden ? 1 : 0; for (const auto& t : ui.song->returns) hiddenCount += t.hidden ? 1 : 0; }
         m.addItem(ShowHiddenTracks, hiddenCount > 0 ? "Show Hidden Tracks (" + juce::String(hiddenCount) + ")" : juce::String("Show Hidden Tracks"),
@@ -518,6 +521,8 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         m.addItem(ToggleTakeLanes, "Take Lanes    (Cmd+Opt+U)", loaded && ui.selectedTrack < ui.numTracks(),
                   std::find(ui.unfoldedTakeTracks.begin(), ui.unfoldedTakeTracks.end(), ui.selectedTrack) != ui.unfoldedTakeTracks.end());
         m.addItem(ZoomInTime, "Zoom In Time    (+)", loaded); m.addItem(ZoomOutTime, "Zoom Out Time    (-)", loaded);
+        m.addItem(ZoomInTrackHeights, "Increase All Track Heights    (Shift+Opt++)", loaded);
+        m.addItem(ZoomOutTrackHeights, "Decrease All Track Heights    (Shift+Opt+-)", loaded);
         m.addSeparator(); m.addItem(ToggleAssistant, "Agent Control    (Cmd+Shift+P)", true, assistant_->isVisible());
     }
     else if (index == 5)
@@ -690,10 +695,8 @@ void MainWindow::menuItemSelected(int itemId, int)
         case ExportMidiClip: app_.exportMidiClip(); break;
         case CollectAllAndSave: app_.collectAllAndSave(); break;
         case ExportAudio: if (ui.song != nullptr) ui.exportOpen = true; break;
-        case ShareSessionLan: app_.shareSession(true); break;
-        case ShareSessionRelay: app_.shareSession(false); break;
+        case ShareSession: ui.collabOpen = ! ui.collabOpen; if (ui.requestRepaint) ui.requestRepaint(); break;
         case JoinSession: app_.joinSessionDialog(); break;
-        case CollaboratePanel: ui.collabOpen = ! ui.collabOpen; if (ui.requestRepaint) ui.requestRepaint(); break;
         case LeaveSession: app_.leaveSession(); break;
         case Undo: app_.undo(); break;
         case Redo: app_.redo(); break;
@@ -789,6 +792,11 @@ void MainWindow::menuItemSelected(int itemId, int)
         case FixedGrid: ui::handleGridShortcut(ui.activeGrid(), '5'); if (ui.layoutChanged) ui.layoutChanged(); break;
         case ZoomInTime: layout_->dispatchKey({.keyCode = '+', .textChar = '+'}); break;
         case ZoomOutTime: layout_->dispatchKey({.keyCode = '-', .textChar = '-'}); break;
+        case ZoomInTrackHeights:
+        case ZoomOutTrackHeights:
+            ui.mainView = ui::MainView::Arrangement; layout_->layout();
+            if (auto* arrangement = findWidget<ui::ArrangementView>(*layout_)) arrangement->zoomAllTrackHeights(itemId == ZoomInTrackHeights ? 1.25 : 0.8);
+            break;
         case ToggleBrowser: ui.browserVisible = ! ui.browserVisible; break;
         case ToggleDetail: ui.detailVisible = ! ui.detailVisible; break;
         case CloseWindow: closeButtonPressed(); break;
@@ -870,6 +878,16 @@ void MainWindow::menuItemSelected(int itemId, int)
                     if (ui.song->tracks[(size_t) i].kind == model::TrackKind::Group && ! ui.song->tracks[(size_t) i].folded)
                         commands.push_back(model::setTrackFolded(*ui.song, i, true));
                 if (! commands.empty()) ui.applyEdit(model::compose("Hide Grouped Tracks", std::move(commands)));
+            }
+            break;
+        case UnfoldAllGroups:
+            if (ui.song && ui.applyEdit)
+            {
+                std::vector<model::EditCommand> commands;
+                for (int i = 0; i < ui.numTracks(); ++i)
+                    if (ui.song->tracks[(size_t) i].kind == model::TrackKind::Group && ui.song->tracks[(size_t) i].folded)
+                        commands.push_back(model::setTrackFolded(*ui.song, i, false));
+                if (! commands.empty()) ui.applyEdit(model::compose("Show All Grouped Tracks", std::move(commands)));
             }
             break;
         case ShowGroupedTrack:

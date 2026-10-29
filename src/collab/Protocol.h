@@ -7,12 +7,15 @@
 
 #include "collab/Session.h"
 
+#include <memory>
+#include <unordered_map>
+#include <unordered_set>
 #include <variant>
 
 namespace sonora::collab
 {
 
-inline constexpr uint32_t protocolVersion = 1;
+inline constexpr uint32_t protocolVersion = 2; // 2 (COL-3c): deflated snapshot, commit and intent bodies
 inline constexpr size_t maxNameLength = 64;
 
 enum class Role : uint8_t
@@ -220,8 +223,33 @@ using Message = std::variant<HelloMsg, WelcomeMsg, SnapshotMsg, CommitMsg, Inten
                              PresenceMsg, LiveMsg, PluginStateMsg, TransportMsg, ClockMsg, AssetRequestMsg, AssetChunkMsg,
                              AssetAddMsg, UploadMsg, DropRequestMsg, RoleMsg, NoticeMsg, ByeMsg>;
 
-std::string encodeMessage(const Message&);
-Message decodeMessage(std::string_view); // throws model::CodecError
+// COL-3c: chunks of big bodies (snapshot, commits, intents) that already crossed a link travel as 8-byte references,
+// so renaming a track whose header carries megabytes of source XML sends only the chunk that changed. One dictionary
+// per link and side. Both ends decide the same way because each direction sees the same chunks in the same order (Ops
+// is reliable and ordered); each direction keeps at most `maxBytes` of chunks. Dictionaries own their chunks; the pool
+// lets the links of a session share the bytes, which go when the last link holding them closes.
+using WireChunk = std::shared_ptr<const std::string>;
+
+struct WirePool
+{
+    std::unordered_map<uint64_t, std::weak_ptr<const std::string>> chunks;
+};
+
+struct WireDictionary
+{
+    explicit WireDictionary(std::shared_ptr<WirePool> p = std::make_shared<WirePool>()) : pool(std::move(p)) {}
+    static constexpr uint64_t maxBytes = 256u << 20;
+    std::shared_ptr<WirePool> pool;
+    std::unordered_map<uint64_t, WireChunk> sent, received; // chunks this side sent / received on this link
+    uint64_t sentBytes = 0, receivedBytes = 0;
+    uint64_t referencedBytes = 0;                           // body bytes that travelled as references (stats)
+};
+
+// Without a dictionary big bodies are only deflated. Encoding with one updates it; so does decoding.
+std::string encodeMessage(const Message&, WireDictionary* = nullptr);
+Message decodeMessage(std::string_view, WireDictionary* = nullptr); // throws model::CodecError
+// Messages whose encoding depends on the link's dictionary (they can't be encoded once for everyone).
+bool usesDictionary(const Message&);
 const char* messageName(const Message&);
 
 } // namespace sonora::collab

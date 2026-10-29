@@ -203,6 +203,93 @@ TEST_CASE("collab protocol: every message survives the wire; garbage is rejected
     }
 }
 
+TEST_CASE("collab protocol: big snapshot, commit and intent bodies travel deflated and decode strictly")
+{
+    // COL-3c: a track header with dense automation, as the model codec writes it, compresses several times over.
+    std::string automation;
+    for (int i = 0; i < 20000; ++i) automation += "point " + std::to_string(i % 977) + " 0.5;";
+    collab::CommitMsg commit;
+    commit.seq = 3;
+    commit.label = "Rename Track";
+    commit.objects = {{collab::ObjectKey::track(60), automation}, {collab::ObjectKey::clip(7), std::nullopt}};
+    const auto bytes = collab::encodeMessage(commit);
+    CHECK(bytes.size() * 4 < automation.size());
+    const auto back = std::get<collab::CommitMsg>(collab::decodeMessage(bytes));
+    CHECK(back.objects.size() == 2 && back.objects[0].full == automation && ! back.objects[1].full && back.label == "Rename Track");
+    CHECK(collab::encodeMessage(back) == bytes);
+
+    collab::IntentMsg intent;
+    intent.objects = commit.objects;
+    CHECK(std::get<collab::IntentMsg>(collab::decodeMessage(collab::encodeMessage(intent))).objects[0].full == automation);
+
+    collab::SnapshotMsg snap;
+    snap.objects = commit.objects;
+    snap.document = automation;
+    snap.sourceFile = std::string("\x1f\x8b raw als", 11);
+    const auto snapBytes = collab::encodeMessage(snap);
+    CHECK(snapBytes.size() * 4 < automation.size() * 2);
+    const auto snapBack = std::get<collab::SnapshotMsg>(collab::decodeMessage(snapBytes));
+    CHECK(snapBack.document == automation && snapBack.objects[0].full == automation && snapBack.sourceFile == snap.sourceFile);
+
+    // Small edits stay plain (no compression cost on the common path).
+    collab::CommitMsg small;
+    small.objects = {{collab::ObjectKey::song(), std::string("tempo 120")}};
+    CHECK(collab::encodeMessage(small).find("tempo 120") != std::string::npos);
+
+    auto rejects = [](const std::string& b) {
+        try { (void) collab::decodeMessage(b); } catch (const model::CodecError&) { return true; }
+        return false;
+    };
+    // A corrupt deflated stream, and a declared size that doesn't match what inflates.
+    auto corrupt = bytes;
+    corrupt[corrupt.size() / 2] = static_cast<char>(corrupt[corrupt.size() / 2] ^ 0x55);
+    CHECK(rejects(corrupt));
+    auto wrongSize = bytes;
+    wrongSize[wrongSize.size() - 1] = static_cast<char>(wrongSize[wrongSize.size() - 1] + 1); // the trailing size varint
+    CHECK(rejects(wrongSize));
+}
+
+TEST_CASE("collab protocol: a link's chunk dictionary sends unchanged chunks of big bodies as references")
+{
+    // A track header whose source XML (incompressible here) dwarfs the fields an edit changes.
+    std::mt19937 random(11);
+    std::string xml(400000, ' ');
+    for (auto& ch : xml) ch = static_cast<char>('a' + random() % 26);
+    auto header = [&](const std::string& name) { return name + "|" + xml; };
+    collab::CommitMsg first;
+    first.objects = {{collab::ObjectKey::track(60), header("Bass")}};
+    auto pool = std::make_shared<collab::WirePool>();
+    collab::WireDictionary host(pool), guest; // each side of one link
+    const auto a = collab::encodeMessage(first, &host);
+    CHECK(std::get<collab::CommitMsg>(collab::decodeMessage(a, &guest)).objects[0].full == header("Bass"));
+
+    // Renamed: only the chunk around the name travels.
+    auto renamed = first;
+    renamed.objects[0].full = header("Sub Bass");
+    const auto b = collab::encodeMessage(renamed, &host);
+    CHECK(b.size() * 10 < a.size());
+    CHECK(std::get<collab::CommitMsg>(collab::decodeMessage(b, &guest)).objects[0].full == header("Sub Bass"));
+    CHECK(host.referencedBytes > 300000 && guest.referencedBytes == host.referencedBytes);
+
+    // The other direction may reference what it received.
+    collab::IntentMsg intent;
+    intent.objects = {{collab::ObjectKey::track(60), header("Bass 2")}};
+    const auto c = collab::encodeMessage(intent, &guest);
+    CHECK(c.size() * 10 < a.size());
+    CHECK(std::get<collab::IntentMsg>(collab::decodeMessage(c, &host)).objects[0].full == header("Bass 2"));
+
+    auto rejects = [](const std::string& bytes, collab::WireDictionary* d) {
+        try { (void) collab::decodeMessage(bytes, d); } catch (const model::CodecError&) { return true; }
+        return false;
+    };
+    collab::WireDictionary stranger;
+    CHECK(rejects(b, &stranger)); // references it never received
+    CHECK(rejects(b, nullptr));
+    // Without a dictionary big bodies are deflated only, and decode anywhere.
+    const auto plain = collab::encodeMessage(renamed);
+    CHECK(std::get<collab::CommitMsg>(collab::decodeMessage(plain, &stranger)).objects[0].full == header("Sub Bass"));
+}
+
 TEST_CASE("collab live session: two guests join over memory links, edit, undo, and converge with the host")
 {
     Rig rig(loadFixture());

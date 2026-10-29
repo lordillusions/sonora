@@ -181,7 +181,9 @@ bool networkAvailable() { return true; }
 
 namespace
 {
-constexpr size_t frameBytes = 60 * 1024;
+// COL-3c: 16 KiB SCTP messages with the frame byte. Larger ones let a busy channel starve the others: with 64 KiB sample
+// chunks an edit on Ops arrived only after every queued chunk (collab_probe --bench: 20 KiB starves, 16 KiB doesn't).
+constexpr size_t frameBytes = 16 * 1024 - 1;
 constexpr size_t maxMessageBytes = 512u << 20;
 constexpr const char* labels[3] = {"ops", "live", "assets"};
 constexpr uint8_t frameWhole = 0, frameFirst = 1, frameMiddle = 2, frameLast = 3;
@@ -201,16 +203,16 @@ std::string closeMessage(int code, const std::string& reason, bool host)
 {
     switch (code)
     {
-        case 4401: return host ? "The relay did not accept this host. Check the relay address and your account."
+        case 4401: return host ? "The sharing server did not accept you as a host. Check the access key in Connection Settings."
                                : "This invite is no longer valid: the session ended or the link is wrong.";
-        case 4402: return "Hosting on this relay needs an active Sonora Cloud subscription.";
+        case 4402: return "Hosting on this server needs an active Sonora Cloud subscription.";
         case 4002: return "The session is full.";
         case 4003: return "The host removed you from the session.";
         case 4001: return "The session ended.";
         case 4004: return "This session was opened again somewhere else.";
         default: break;
     }
-    return reason.empty() ? std::string("The connection to the relay closed.") : "The relay closed the connection: " + reason;
+    return reason.empty() ? std::string("The connection to the sharing server closed.") : "The sharing server closed the connection: " + reason;
 }
 
 int64_t connectTimeoutMs()
@@ -221,16 +223,57 @@ int64_t connectTimeoutMs()
 }
 
 // Same-machine tests (two app instances, or a sandbox without Local Network access): ICE on one address only.
-void applyTestBinding(rtc::Configuration& config)
+// SONORA_COLLAB_ICE_POLICY=relay allows TURN candidates only, to prove a relay's TURN server works; relay-host and
+// relay-guest force it on one side only (the other side's direct candidates still count).
+void applyTestBinding(rtc::Configuration& config, bool host)
 {
     const auto bind = juce::SystemStats::getEnvironmentVariable("SONORA_COLLAB_BIND_ADDRESS", {}).toStdString();
     if (! bind.empty()) config.bindAddress = bind;
+    const auto policy = juce::SystemStats::getEnvironmentVariable("SONORA_COLLAB_ICE_POLICY", {});
+    if (policy == "relay" || policy == (host ? "relay-host" : "relay-guest")) config.iceTransportPolicy = rtc::TransportPolicy::Relay;
 }
+
+// COL-3b: used when the relay offers no TURN (its coturn also answers STUN). Without any STUN server, peers behind
+// different NATs only know their private addresses and can't connect over the internet.
+constexpr const char* kFallbackStun = "stun:stun.l.google.com:19302";
 
 void initLibrary()
 {
     static std::once_flag once;
-    std::call_once(once, [] { rtc::InitLogger(rtc::LogLevel::Error); });
+    std::call_once(once, [] {
+        // SONORA_COLLAB_RTC_LOG=warning|info|debug|verbose: libdatachannel/libjuice diagnostics on stderr.
+        const auto log = juce::SystemStats::getEnvironmentVariable("SONORA_COLLAB_RTC_LOG", {});
+        rtc::InitLogger(log == "verbose" ? rtc::LogLevel::Verbose
+                        : log == "debug" ? rtc::LogLevel::Debug
+                        : log == "info"  ? rtc::LogLevel::Info
+                        : log == "warning" ? rtc::LogLevel::Warning
+                                           : rtc::LogLevel::Error);
+        rtc::SctpSettings s;
+        // COL-3c: retransmission timeouts no shorter than 2 s (libdatachannel: 200 ms). Over a ~400 ms path queueing
+        // pushes round trips past 1 s; each early timeout cut the congestion window to one packet although nothing was
+        // lost (usrsctp counters: 16-82 timeouts per 45 s at 0-8 retransmitted chunks), and runs spiralled down to
+        // 0.01-0.3 MB/s with edits waiting 20-85 s. With 2 s: 3 timeouts per run, no spiral. Losses are still repaired
+        // by fast retransmit, which the presence and clock traffic keep fed.
+        s.minRetransmitTimeout = std::chrono::milliseconds(2000);
+        // Tuning experiments (collab_probe --bench): SONORA_COLLAB_SCTP="recv=KiB,send=KiB,cwnd=MTUs,burst=MTUs,cc=0..3,
+        // rtomin=ms,rtomax=ms,rtoinit=ms,sack=ms".
+        const auto tuning = juce::StringArray::fromTokens(juce::SystemStats::getEnvironmentVariable("SONORA_COLLAB_SCTP", {}), ",", {});
+        for (const auto& item : tuning)
+        {
+            const auto key = item.upToFirstOccurrenceOf("=", false, false).trim();
+            const auto value = static_cast<size_t>(item.fromFirstOccurrenceOf("=", false, false).getLargeIntValue());
+            if (key == "recv") s.recvBufferSize = value << 10;
+            else if (key == "send") s.sendBufferSize = value << 10;
+            else if (key == "cwnd") s.initialCongestionWindow = value;
+            else if (key == "burst") s.maxBurst = value;
+            else if (key == "cc") s.congestionControlModule = static_cast<unsigned int>(value);
+            else if (key == "rtomin") s.minRetransmitTimeout = std::chrono::milliseconds(value);
+            else if (key == "rtomax") s.maxRetransmitTimeout = std::chrono::milliseconds(value);
+            else if (key == "rtoinit") s.initialRetransmitTimeout = std::chrono::milliseconds(value);
+            else if (key == "sack") s.delayedSackTime = std::chrono::milliseconds(value);
+        }
+        rtc::SetSctpSettings(s);
+    });
 }
 
 struct Link
@@ -368,7 +411,7 @@ struct RtcTransport::Core : std::enable_shared_from_this<Core>
     void ensurePeerConnection(const std::shared_ptr<Link>& link, bool offerer)
     {
         if (link->pc) return;
-        applyTestBinding(config);
+        applyTestBinding(config, host);
         link->pc = std::make_shared<rtc::PeerConnection>(config);
         std::weak_ptr<Core> weak = shared_from_this();
         std::weak_ptr<Link> weakLink = link;
@@ -389,7 +432,7 @@ struct RtcTransport::Core : std::enable_shared_from_this<Core>
             auto l = weakLink.lock();
             if (! core || ! l) return;
             if (s == rtc::PeerConnection::State::Failed)
-                core->markClosed(l, l->connected ? "the connection was lost" : "could not connect directly (a TURN relay may be needed)");
+                core->markClosed(l, l->connected ? "the connection was lost" : "could not connect (the network may block it)");
             else if (s == rtc::PeerConnection::State::Closed || s == rtc::PeerConnection::State::Disconnected)
                 core->markClosed(l, "the connection was lost");
         });
@@ -569,11 +612,11 @@ struct RtcTransport::Core : std::enable_shared_from_this<Core>
             if (auto core = weak.lock()) core->relayClosed();
         });
         socket->onError([weak](std::string error) {
-            if (auto core = weak.lock()) core->status("Relay connection error: " + error);
+            if (auto core = weak.lock()) core->status("Connection problem: " + error);
         });
         ws = socket;
         try { socket->open(origin + "/v1/signal?session=" + invite.sessionId); }
-        catch (const std::exception& e) { fail(std::string("Can't reach the relay: ") + e.what()); }
+        catch (const std::exception& e) { fail(std::string("Can't reach the sharing server. Check your internet connection. (") + e.what() + ")"); }
     }
 
     void relayMessage(const juce::var& m)
@@ -648,9 +691,15 @@ struct RtcTransport::Core : std::enable_shared_from_this<Core>
         }
     }
 
+    // Every welcome (also after a relay reconnect) replaces the ICE servers: TURN credentials are short-lived.
     void configureTurn(const juce::var& turn)
     {
-        if (! turn.isObject()) return;
+        config.iceServers.clear();
+        if (! turn.isObject())
+        {
+            config.iceServers.emplace_back(kFallbackStun);
+            return;
+        }
         const auto user = str(turn["username"]), credential = str(turn["credential"]);
         if (auto* urls = turn["urls"].getArray())
             for (const auto& u : *urls)
@@ -706,12 +755,12 @@ struct RtcTransport::Core : std::enable_shared_from_this<Core>
         if (host)
         {
             if (fatal) { fail(closeMessage(closingCode, closingReason, true)); return; }
-            status("Relay connection lost; reconnecting...");
+            status("Connection to the sharing server lost; reconnecting...");
             const std::lock_guard<std::mutex> l(lock);
             reconnectAtMs = juce::Time::currentTimeMillis() + 3000;
             return;
         }
-        if (! anyConnected) fail(closingCode ? closeMessage(closingCode, closingReason, false) : "Could not reach the relay.");
+        if (! anyConnected) fail(closingCode ? closeMessage(closingCode, closingReason, false) : "Can't reach the sharing server. Check your internet connection.");
         else if (closingCode == 4003 || closingCode == 4001) fail(closeMessage(closingCode, closingReason, false));
     }
 
@@ -988,7 +1037,7 @@ std::vector<TransportEvent> RtcTransport::poll()
                 core_->connectDeadlineMs = 0;
                 TransportEvent e;
                 e.kind = TransportEvent::Kind::Failed;
-                e.text = "Could not connect to the host. The invite may be damaged, or the network needs a TURN relay.";
+                e.text = "Could not connect to the host. The invite may be damaged, or this network blocks the connection.";
                 out.push_back(std::move(e));
             }
         }
@@ -1052,7 +1101,7 @@ std::unique_ptr<Transport> openHost(const HostNetOptions& options)
     auto relay = options.relay;
     while (! relay.empty() && relay.back() == '/') relay.pop_back();
     core->invite.relay = relay;
-    core->status("Contacting the relay...");
+    core->status("Connecting to the sharing server...");
     std::weak_ptr<RtcTransport::Core> weak = core;
     core->worker = std::thread([weak, relay, token = options.hostToken, ticket = core->invite.ticket] {
         const auto body = toJson(object({{"protocol", 1}, {"guestTicketSha256", juce::String(ticketHash(ticket))}, {"maxParticipants", 4}}));
@@ -1068,15 +1117,16 @@ std::unique_ptr<Transport> openHost(const HostNetOptions& options)
                                                 .withHttpRequestCmd("POST"));
         auto owner = weak.lock();
         if (! owner || owner->shutdown) return;
-        if (! stream) { owner->fail("Can't reach the relay at " + relay + "."); return; }
-        const auto response = parseJson(stream->readEntireStreamAsString().toStdString());
+        // JUCE gives no stream for an HTTP error either; only a missing status means the server was never reached.
+        if (! stream && status == 0) { owner->fail("Can't reach the sharing server (" + relay + "). Check your internet connection."); return; }
+        const auto response = stream ? parseJson(stream->readEntireStreamAsString().toStdString()) : juce::var();
         if (status != 201)
         {
             const auto code = str(response["error"]["code"]);
-            if (status == 402 || code == "subscription_required") owner->fail("Hosting on this relay needs an active Sonora Cloud subscription.");
-            else if (status == 401) owner->fail("The relay did not accept your account. Sign in again or check the relay address.");
-            else if (status == 429) owner->fail("You already host the maximum number of sessions on this relay.");
-            else owner->fail("The relay refused to create a session (" + std::to_string(status) + " " + code + ").");
+            if (status == 402 || code == "subscription_required") owner->fail("Hosting on this server needs an active Sonora Cloud subscription.");
+            else if (status == 401) owner->fail("This sharing server needs an access key to host. Enter it in Collaborate > Connection Settings.");
+            else if (status == 429) owner->fail("You already host the maximum number of sessions on this server. End one first.");
+            else owner->fail("The sharing server refused to start a session (" + std::to_string(status) + " " + code + ").");
             return;
         }
         {

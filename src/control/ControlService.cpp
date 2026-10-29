@@ -139,9 +139,45 @@ bool descendantAutomation(const model::Track& track, const model::Device& device
     }
     return false;
 }
+const char* kindName(model::TrackKind kind)
+{
+    switch (kind)
+    {
+        case model::TrackKind::Audio: return "audio";
+        case model::TrackKind::Midi: return "midi";
+        case model::TrackKind::Group: return "group";
+        case model::TrackKind::Return: return "return";
+        case model::TrackKind::Main: return "main";
+    }
+    return "audio";
+}
+// AGT-7d: the track's automation lanes with what each one controls (pre-roll value excluded from the counts).
+juce::Array<juce::var> automationLanes(const model::Track& track)
+{
+    juce::Array<juce::var> lanes;
+    for (const auto& envelope : track.automation)
+    {
+        const auto info = model::describeAutomationTarget(track, envelope.targetId);
+        juce::Array<juce::var> points;
+        for (const auto& point : envelope.points)
+            if (point.time > -1e6 && points.size() < 64) points.add(object({{"beat", point.time}, {"value", point.value}}));
+        int count = 0;
+        for (const auto& point : envelope.points) count += point.time > -1e6 ? 1 : 0;
+        auto lane = object({{"targetId", envelope.targetId}, {"target", juce::String(info.kind.empty() ? "unknown" : info.kind)},
+                            {"pointCount", count}, {"points", points}, {"stepped", envelope.stepped}});
+        if (info.kind == "send") lane.getDynamicObject()->setProperty("sendIndex", info.sendIndex);
+        if (info.kind == "device")
+        {
+            lane.getDynamicObject()->setProperty("deviceId", info.deviceId);
+            lane.getDynamicObject()->setProperty("parameterId", juce::String::fromUTF8(info.parameter.c_str()));
+        }
+        lanes.add(lane);
+    }
+    return lanes;
+}
 juce::var snapshot(const State& state)
 {
-    juce::Array<juce::var> tracks;
+    juce::Array<juce::var> tracks, returns;
     if (state.song)
         for (const auto& track : state.song->tracks)
         {
@@ -161,8 +197,27 @@ juce::var snapshot(const State& state)
                                     {"hosted", device.plugin.has_value()}}));
             const auto index = static_cast<size_t>(tracks.size());
             const double gain = index < state.liveGains.size() ? state.liveGains[index] : track.mixer.volume;
-            tracks.add(object({{"trackId", track.id}, {"name", track.name}, {"gainLinear", gain}, {"authoredGainLinear", track.mixer.volume},
-                               {"clips", clips}, {"sessionClips", sessionClips}, {"takeClips", takeClips}, {"devices", devices}}));
+            auto item = object({{"trackId", track.id}, {"name", track.name}, {"kind", kindName(track.kind)}, {"groupId", track.groupId},
+                                {"gainLinear", gain}, {"authoredGainLinear", track.mixer.volume},
+                                {"clips", clips}, {"sessionClips", sessionClips}, {"takeClips", takeClips}, {"devices", devices},
+                                {"automation", automationLanes(track)}});
+            if (track.hidden) item.getDynamicObject()->setProperty("hidden", true);
+            if (track.kind == model::TrackKind::Group)
+            {
+                // AGT-7d: a group holds no clips itself; its content is on the tracks listed here.
+                juce::Array<juce::var> children;
+                for (const auto& other : state.song->tracks) if (other.groupId == track.id) children.add(other.id);
+                item.getDynamicObject()->setProperty("folded", track.folded);
+                item.getDynamicObject()->setProperty("childTrackIds", children);
+            }
+            tracks.add(item);
+        }
+    if (state.song)
+        for (size_t i = 0; i < state.song->returns.size(); ++i)
+        {
+            const auto& track = state.song->returns[i];
+            returns.add(object({{"trackId", track.id}, {"name", track.name}, {"sendIndex", static_cast<int>(i)},
+                                {"automation", automationLanes(track)}}));
         }
     juce::Array<juce::var> locators;
     if (state.song)
@@ -172,7 +227,7 @@ juce::var snapshot(const State& state)
                                  {"infoText", juce::String::fromUTF8(locator.annotation.c_str())}}));
     return object({{"documentId", state.documentId}, {"revision", state.revision}, {"busy", state.busy},
                    {"tempo", state.liveTempo > 0 ? state.liveTempo : (state.song ? state.song->tempo : 0.0)}, {"tracks", tracks},
-                   {"locators", locators}});
+                   {"returnTracks", returns}, {"locators", locators}});
 }
 } // namespace
 
@@ -191,6 +246,103 @@ juce::var ControlService::failure(const std::string& code, const std::string& me
     out.getDynamicObject()->setProperty("error", object({{"code", code}, {"message", message}}));
     return out;
 }
+juce::var ControlService::automationTarget(const model::Song& song, const juce::var& item)
+{
+    const bool clear = item["type"].toString() == "automation.clear";
+    if (clear) fields(item, {"type", "trackId", "target", "sendIndex", "deviceId", "parameterId", "targetId"});
+    else fields(item, {"type", "trackId", "target", "sendIndex", "deviceId", "parameterId", "targetId", "points", "rangeStartBeat", "rangeEndBeat"});
+    const int trackId = integer(item, "trackId", 0, 1000000000);
+    const model::Track* track = nullptr;
+    for (const auto* list : {&song.tracks, &song.returns})
+        for (const auto& candidate : *list) if (candidate.id == trackId) track = &candidate;
+    if (! track) throw model::OpError("target_replaced", "Track ID no longer exists");
+    int targetId = -1;
+    juce::String target;
+    if (item.hasProperty("targetId"))
+    {
+        if (item.hasProperty("target")) throw std::runtime_error("Choose target OR targetId");
+        targetId = integer(item, "targetId", 0, 1000000000);
+    }
+    else
+    {
+        target = string(item, "target", 32);
+        const auto& mixer = track->mixer;
+        if (target == "volume") targetId = mixer.volumeTargetId;
+        else if (target == "pan") targetId = mixer.panTargetId;
+        else if (target == "activator") targetId = mixer.speakerTargetId;
+        else if (target == "send")
+        {
+            const int send = integer(item, "sendIndex", 0, 1000);
+            if (static_cast<size_t>(send) >= mixer.sendTargetIds.size()) throw model::OpError("invalid_request", "No such send; sendIndex follows returnTracks[]");
+            targetId = mixer.sendTargetIds[static_cast<size_t>(send)];
+        }
+        else if (target == "device")
+        {
+            const int deviceId = integer(item, "deviceId", 0, 1000000000);
+            const auto parameter = string(item, "parameterId", 1024).toStdString();
+            std::function<const model::Device*(const std::vector<model::Device>&)> find = [&](const std::vector<model::Device>& devices) -> const model::Device* {
+                for (const auto& device : devices)
+                {
+                    if (device.id == deviceId) return &device;
+                    for (const auto& chain : device.chains) if (const auto* inner = find(chain.devices)) return inner;
+                }
+                return nullptr;
+            };
+            const auto* device = find(track->devices);
+            if (! device) throw model::OpError("target_replaced", "Device no longer exists on this track");
+            if (parameter == "on") targetId = device->enabledTargetId;
+            for (const auto& p : device->parameters) if (p.path == parameter) targetId = p.automationTargetId;
+            for (const auto& p : device->pluginParams) if (std::to_string(p.parameterId) == parameter) targetId = p.automationTargetId;
+            if (targetId < 0)
+                throw model::OpError("parameter_mismatch", "That parameter has no automation target in this set (use parameterId from sonora_parameters_get, or \"on\")");
+        }
+        else throw std::runtime_error("target must be volume, pan, activator, send or device");
+        if (targetId < 0) throw model::OpError("invalid_request", "This track has no " + target.toStdString() + " to automate");
+    }
+    auto* translated = new juce::DynamicObject();
+    juce::var out(translated);
+    translated->setProperty("type", item["type"]);
+    translated->setProperty("trackId", trackId);
+    translated->setProperty("targetId", targetId);
+    if (clear) return out;
+    const auto info = model::describeAutomationTarget(*track, targetId);
+    // Native device parameters: the processor's range and kind (switch/choice) come from its descriptors.
+    double lo = -1e12, hi = 1e12;
+    if (info.kind == "device" && ! info.normalized && info.parameter != "on" && backend_.parameters)
+    {
+        const auto descriptors = backend_.parameters(trackId, info.deviceId);
+        if (const auto* list = descriptors.getArray())
+            for (const auto& d : *list)
+                if (d["parameterId"].toString().toStdString() == info.parameter && d.hasProperty("minimum"))
+                {
+                    lo = static_cast<double>(d["minimum"]); hi = static_cast<double>(d["maximum"]);
+                    const int steps = static_cast<int>(d["steps"]);
+                    if (steps > 0) translated->setProperty("eventType", d["choices"].size() > 0 ? "EnumEvent" : "BoolEvent");
+                }
+    }
+    const auto* points = item["points"].getArray();
+    if (! points || points->size() > 4096) throw std::runtime_error("Expected an array of 0–4096 points");
+    juce::Array<juce::var> converted;
+    for (const auto& point : *points)
+    {
+        fields(point, {"beat", "value", "gainDb"});
+        if (point.hasProperty("value") == point.hasProperty("gainDb")) throw std::runtime_error("Each point needs value OR gainDb");
+        double value = 0;
+        if (point.hasProperty("gainDb"))
+        {
+            if (info.kind != "volume" && info.kind != "send") throw std::runtime_error("gainDb applies to volume and send targets only");
+            const double db = number(point, "gainDb", -1000, info.kind == "volume" ? 6.0 : 0.0);
+            value = db <= -70 ? 0.0 : std::pow(10.0, db / 20.0);
+        }
+        else value = number(point, "value", -1e12, 1e12);
+        if (value < lo || value > hi) throw std::runtime_error("Out of range: automation value (see the parameter's minimum/maximum)");
+        converted.add(object({{"beat", point["beat"]}, {"value", value}}));
+    }
+    translated->setProperty("points", converted);
+    for (const auto* key : {"rangeStartBeat", "rangeEndBeat"}) if (item.hasProperty(key)) translated->setProperty(key, item[key]);
+    return out;
+}
+
 juce::var ControlService::inspect() { return result("observed", snapshot(backend_.state())); }
 juce::var ControlService::context()
 {
@@ -216,7 +368,8 @@ juce::var ControlService::execute(const juce::var& request)
                 "project.inspect", "capabilities.get", "clips.get", "devices.parameters", "edits.apply",
                 "devices.parameters.set", "devices.catalog", "devices.insert", "devices.remove", "workflow.serum_supersaw", "history.undo"})}, {"promptMode", "client-provided reasoning; optional configured native LLM"},
                 {"editTypes", juce::var(juce::StringArray{"tempo.set", "track.set_gain", "clip.duplicate", "notes.add", "notes.update", "notes.delete", "notes.replace",
-                                                          "locator.add", "locator.update", "locator.delete"})},
+                                                          "locator.add", "locator.update", "locator.delete", "track.set_folded", "clip.create", "clip.copy",
+                                                          "clip.move", "clip.delete", "automation.set", "automation.clear"})},
                 {"limits", "Top-level native/rack/VST3 controls and device insertion/removal; parameter writes rebuild processor; Arrangement/Session/take notes; no save/export commands yet"}}));
         const auto target = request["target"];
         fields(target, {"instanceId", "documentId"});
@@ -486,6 +639,8 @@ juce::var ControlService::dispatch(const juce::String& operation, const juce::va
         for (size_t i = 0; i < staged.tracks.size() && i < before.liveGains.size(); ++i)
             staged.tracks[i].mixer.volume = before.liveGains[i];
         if (before.liveTempo > 0) staged.tempo = before.liveTempo;
+        // clip.create copies the clip format from the set, or from this template when the set has no MIDI clip yet.
+        if (! staged.midiClipTemplate) staged.midiClipTemplate = std::make_shared<const std::string>(io::midiClipTemplate());
         std::vector<model::EditCommand> parts;
         try
         {
@@ -496,9 +651,12 @@ juce::var ControlService::dispatch(const juce::String& operation, const juce::va
                 if (! item.getDynamicObject()) throw std::runtime_error("Expected an object");
                 if (type != "tempo.set" && type != "track.set_gain" && type != "clip.duplicate" && type != "notes.add"
                     && type != "notes.update" && type != "notes.delete" && type != "notes.replace"
-                    && type != "locator.add" && type != "locator.update" && type != "locator.delete")
+                    && type != "locator.add" && type != "locator.update" && type != "locator.delete"
+                    && type != "track.set_folded" && type != "clip.create" && type != "clip.copy" && type != "clip.move"
+                    && type != "clip.delete" && type != "automation.set" && type != "automation.clear")
                     return failure("unsupported_operation", "Unsupported edit type: " + type.toStdString());
-                auto part = model::opToCommand(staged, model::opFromJson(noteKeysForIndices(staged, item)));
+                const auto translated = type.startsWith("automation.") ? automationTarget(staged, item) : noteKeysForIndices(staged, item);
+                auto part = model::opToCommand(staged, model::opFromJson(translated));
                 part.apply(staged); parts.push_back(std::move(part));
             }
         }
@@ -508,11 +666,30 @@ juce::var ControlService::dispatch(const juce::String& operation, const juce::va
         juce::Array<juce::var> created;
         for (const auto& locator : staged.locators)
             if (! model::findLocator(*before.song, locator.id)) created.add(locator.id);
+        report = object({});
         if (! created.isEmpty())
         {
             std::sort(created.begin(), created.end(), [](const juce::var& a, const juce::var& b) { return static_cast<int>(a) < static_cast<int>(b); });
-            report = object({{"locatorIds", created}});
+            report.getDynamicObject()->setProperty("locatorIds", created);
         }
+        // AGT-7d: handles of clips this batch created (clip.create/copy/duplicate/move to another track). The commit
+        // replays the staged command, which keeps the UIDs its first apply allocated.
+        juce::Array<juce::var> clipsCreated;
+        for (const auto& track : staged.tracks)
+        {
+            const auto old = std::find_if(before.song->tracks.begin(), before.song->tracks.end(), [&track](const auto& t) { return t.id == track.id; });
+            const auto existed = [&](int uid, int scene) {
+                if (old == before.song->tracks.end()) return false;
+                if (scene < 0) return std::any_of(old->arrangementClips.begin(), old->arrangementClips.end(), [uid](const auto& c) { return c.uid == uid; });
+                return static_cast<size_t>(scene) < old->slots.size() && old->slots[static_cast<size_t>(scene)].clip && old->slots[static_cast<size_t>(scene)].clip->uid == uid;
+            };
+            for (const auto& clip : track.arrangementClips)
+                if (! existed(clip.uid, -1)) clipsCreated.add(object({{"trackId", track.id}, {"clipId", clip.uid}, {"startBeat", clip.currentStart}, {"endBeat", clip.currentEnd}}));
+            for (size_t scene = 0; scene < track.slots.size(); ++scene)
+                if (const auto& slot = track.slots[scene]; slot.clip && ! existed(slot.clip->uid, static_cast<int>(scene)))
+                    clipsCreated.add(object({{"trackId", track.id}, {"clipId", slot.clip->uid}, {"scene", static_cast<int>(scene)}}));
+        }
+        if (! clipsCreated.isEmpty()) report.getDynamicObject()->setProperty("clips", clipsCreated);
     }
     else return failure("unsupported_operation", "Unsupported operation: " + operation.toStdString());
     ApplyResult applied;

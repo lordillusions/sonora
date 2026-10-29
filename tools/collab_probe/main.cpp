@@ -1,11 +1,13 @@
 // collab_probe: a headless collab session over the real network (COL-3, docs/collab/PEER_PROTOCOL.md).
 //
-//   collab_probe <set.als|.xml> [--lan] [--relay URL | --spawn-relay] [--guests N] [--edits N]
+//   collab_probe <set.als|.xml> [--lan] [--relay URL [--token KEY] | --spawn-relay] [--guests N] [--edits N]
 //
 // Runs a host and N guests in one process: WebRTC data channels through a relay (a local open-mode relay it starts
 // itself with --spawn-relay, the default) and/or directly on the local network (--lan). It checks that every guest
 // receives the set and its samples, that random concurrent edits from everyone converge, that per-user undo works,
 // and that a wrong ticket, a wrong secret, garbage frames and an uninvited LAN guest are refused. Prints PASS/FAIL.
+// --token is the host access key of a self-hosted relay (deploy/gcp.sh token). With SONORA_COLLAB_ICE_POLICY=relay
+// every link must go through the relay's TURN server.
 
 #include "collab/BarePort.h"
 #include "collab/Net.h"
@@ -15,9 +17,14 @@
 
 #include <juce_core/juce_core.h>
 
+#if SONORA_PROBE_SCTP_STATS
+#include <usrsctp.h>
+#endif
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <random>
 
 using namespace sonora;
@@ -25,6 +32,43 @@ using namespace sonora;
 namespace
 {
 int failures = 0;
+
+// COL-3c: time budgets that grow with the path. Over a far relay with forced TURN every message crosses the ocean twice
+// (~400 ms) and a big set's join is bandwidth-bound, so LAN-sized budgets fail runs that work.
+struct Budgets
+{
+    int64_t payloadBytes = 0; // samples + source file a guest downloads
+    double relayRttMs = 0.0;  // HTTP round trip to the relay (0 on LAN)
+    double peerRttMs = 0.0;   // measured after the join (clock pings)
+
+    // SONORA_COLLAB_PROBE_JOIN_MS overrides. Far relays: two minutes plus the payload at 256 KiB/s per guest.
+    int joinMs(int guests) const
+    {
+        const auto env = juce::SystemStats::getEnvironmentVariable("SONORA_COLLAB_PROBE_JOIN_MS", {}).getIntValue();
+        if (env > 0) return env;
+        if (relayRttMs < 60.0) return 120000;
+        return 120000 + (int) std::min<int64_t>(payloadBytes * guests / 262, 1800000);
+    }
+    // A step that needs `trips` peer round trips, never less than the LAN budget.
+    int stepMs(int lanMs, int trips) const { return std::max(lanMs, lanMs / 4 + (int) (trips * peerRttMs)); }
+};
+
+double relayRoundTripMs(const std::string& relay)
+{
+    double best = 0.0;
+    for (int i = 0; i < 4; ++i) // the first request pays DNS and TLS
+    {
+        const auto t = juce::Time::getMillisecondCounterHiRes();
+        int status = 0;
+        auto stream = juce::URL(juce::String(relay) + "/v1/health")
+                          .createInputStream(juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+                                                 .withConnectionTimeoutMs(5000)
+                                                 .withStatusCode(&status));
+        const auto ms = juce::Time::getMillisecondCounterHiRes() - t;
+        if (stream && status == 200 && i > 0 && (best == 0.0 || ms < best)) best = ms;
+    }
+    return best;
+}
 
 void check(bool ok, const std::string& what)
 {
@@ -120,9 +164,12 @@ std::unique_ptr<collab::CollabSession> makeGuest(collab::BarePort& port, std::un
     return s;
 }
 
-void scenario(const char* title, const model::Song& set, const collab::HostNetOptions& net, int guests, int edits)
+void scenario(const char* title, const model::Song& set, const collab::HostNetOptions& net, int guests, int edits, Budgets budget)
 {
     std::printf("\n== %s\n", title);
+    if (net.mode == collab::HostNetOptions::Mode::Relay) budget.relayRttMs = relayRoundTripMs(net.relay);
+    if (budget.relayRttMs > 0.0)
+        std::printf("  relay round trip %.0f ms; join budget %d s\n", budget.relayRttMs, budget.joinMs(guests) / 1000);
     Run run;
     run.host.port->document = std::make_unique<model::Song>(set);
     collab::CollabSession::Options o;
@@ -156,7 +203,7 @@ void scenario(const char* title, const model::Song& set, const collab::HostNetOp
         for (auto& g : run.guests)
             if (g.session->state() != collab::CollabSession::State::Active || g.session->downloadsPending() > 0) return false;
         return run.host.session->participants().size() == (size_t) guests + 1;
-    }, 120000);
+    }, budget.joinMs(guests));
     const double joinMs = juce::Time::getMillisecondCounterHiRes() - start;
     for (auto& g : run.guests) joined = joined && ! g.port->ended_;
     check(joined, std::to_string(guests) + " guests joined and fetched the samples in " + std::to_string((int) joinMs) + " ms");
@@ -179,6 +226,10 @@ void scenario(const char* title, const model::Song& set, const collab::HostNetOp
         codes = codes && ! g.session->safetyCode(0).empty() && g.session->safetyCode(0) == run.host.session->safetyCode(g.session->self());
     check(codes, "host and guests derive the same safety code (" + run.guests[0].session->safetyCode(0) + ")");
 
+    run.pump(2500); // a clock ping or two: the peer round trip sizes the budgets below
+    for (auto& g : run.guests) budget.peerRttMs = std::max(budget.peerRttMs, (double) g.session->roundTripMs());
+    if (budget.peerRttMs > 50.0) std::printf("  peer round trip %.0f ms: budgets scaled\n", budget.peerRttMs);
+
     // Concurrent random edits from everyone, then quiet.
     std::mt19937 random(42);
     int made = 0;
@@ -194,7 +245,7 @@ void scenario(const char* title, const model::Song& set, const collab::HostNetOp
         }
         run.pump(3 + (int) (random() % 10));
     }
-    const bool settled = run.pumpUntil([&] { return run.quiet(); }, 20000);
+    const bool settled = run.pumpUntil([&] { return run.quiet(); }, budget.stepMs(20000, 40));
     const double editMs = juce::Time::getMillisecondCounterHiRes() - editStart;
     same = settled;
     for (auto& g : run.guests) same = same && canonical(*g.port->document) == canonical(*run.host.port->document);
@@ -202,6 +253,9 @@ void scenario(const char* title, const model::Song& set, const collab::HostNetOp
     for (auto& g : run.guests) rejects += g.session->stats().rejects;
     check(same, std::to_string(made) + " concurrent edits converged (" + std::to_string(run.host.session->seq()) + " commits, "
                     + std::to_string(rejects) + " conflicts rolled back) in " + std::to_string((int) editMs) + " ms");
+    const auto& hs = run.host.session->stats();
+    std::printf("        host sent %llu KiB in all; %llu KiB of big bodies went as chunk references\n", (unsigned long long) (hs.bytesOut >> 10),
+                (unsigned long long) (hs.referencedBytes >> 10));
 
     // Per-user undo round trip.
     auto& g0 = run.guests[0];
@@ -209,10 +263,10 @@ void scenario(const char* title, const model::Song& set, const collab::HostNetOp
     model::EditHistory h;
     h.perform(*g0.port->document, model::setTempo(*g0.port->document, 77.0));
     g0.session->localEdit("Set Tempo");
-    run.pumpUntil([&] { return run.quiet() && std::abs(run.host.port->document->tempo - 77.0) < 1e-9; }, 5000);
+    run.pumpUntil([&] { return run.quiet() && std::abs(run.host.port->document->tempo - 77.0) < 1e-9; }, budget.stepMs(5000, 10));
     const auto t0 = juce::Time::getMillisecondCounterHiRes();
     g0.session->undo();
-    const bool undone = run.pumpUntil([&] { return run.quiet() && std::abs(g0.port->document->tempo - before) < 1e-9; }, 5000);
+    const bool undone = run.pumpUntil([&] { return run.quiet() && std::abs(g0.port->document->tempo - before) < 1e-9; }, budget.stepMs(5000, 10));
     check(undone, "a guest's undo round trip took " + std::to_string((int) (juce::Time::getMillisecondCounterHiRes() - t0)) + " ms");
 
     // Presence and transport travel to everyone.
@@ -224,7 +278,7 @@ void scenario(const char* title, const model::Song& set, const collab::HostNetOp
     const bool relayed = run.pumpUntil([&] {
         return run.host.session->presence().count(g0.session->self()) && ! run.host.port->transports.empty()
             && ! g0.port->transports.empty();
-    }, 5000);
+    }, budget.stepMs(5000, 10));
     check(relayed, "presence and a guest's Play reach the host and the other guests (clock offset "
                        + std::to_string(g0.session->clockOffsetMs()) + " ms, round trip " + std::to_string(g0.session->roundTripMs()) + " ms)");
 
@@ -293,8 +347,148 @@ void scenario(const char* title, const model::Song& set, const collab::HostNetOp
         for (auto& g : run.guests)
             if (! g.port->ended_) return false;
         return true;
-    }, 10000);
+    }, budget.stepMs(10000, 10));
     check(ended, "ending the session reaches every guest (" + (run.guests.empty() ? std::string() : run.guests[0].port->endReason) + ")");
+}
+
+// --bench MB: raw data-channel throughput between one host and one guest transport, no session (COL-3c). The host
+// pushes MB of 64 KiB messages on the Assets channel, keeping at most `backlogKb` queued (the session keeps 64), and
+// pings over Ops every 250 ms: the pings show how long an edit waits behind bulk data. Stops after `seconds`.
+void bench(const collab::HostNetOptions& net, int megabytes, int backlogKb, int seconds)
+{
+    std::printf("\n== Bench %s: %d MB on Assets, backlog %d KiB\n", net.mode == collab::HostNetOptions::Mode::Lan ? "LAN" : net.relay.c_str(),
+                megabytes, backlogKb);
+    auto host = collab::openHost(net);
+    if (! host) { check(false, "collab network is compiled in"); return; }
+    std::unique_ptr<collab::Transport> guest;
+    collab::PeerId peer;
+    bool guestUp = false;
+    std::string why;
+    auto now = [] { return juce::Time::getMillisecondCounterHiRes(); };
+    std::vector<double> idlePings, loadPings, oneWay;
+    uint64_t received = 0;
+    double doneAt = 0.0;
+    const uint64_t total = (uint64_t) megabytes << 20;
+    auto ping = [&] {
+        std::string m(9, 'P');
+        const double t = now();
+        std::memcpy(m.data() + 1, &t, 8);
+        host->send(peer, collab::Channel::Ops, m);
+    };
+    auto drain = [&](bool loaded) {
+        for (auto& e : host->poll())
+        {
+            if (e.kind == collab::TransportEvent::Kind::Connected) peer = e.peer;
+            else if (e.kind == collab::TransportEvent::Kind::Closed || e.kind == collab::TransportEvent::Kind::Failed) why = "host: " + e.text;
+            else if (e.kind == collab::TransportEvent::Kind::Message && e.data.size() == 9 && e.data[0] == 'Q')
+            {
+                double t = 0.0;
+                std::memcpy(&t, e.data.data() + 1, 8);
+                (loaded ? loadPings : idlePings).push_back(now() - t);
+            }
+            else if (e.kind == collab::TransportEvent::Kind::Message && e.data == "D") doneAt = now();
+        }
+        if (! guest) return;
+        for (auto& e : guest->poll())
+        {
+            if (e.kind == collab::TransportEvent::Kind::Connected) guestUp = true;
+            else if (e.kind == collab::TransportEvent::Kind::Closed || e.kind == collab::TransportEvent::Kind::Failed) why = "guest: " + e.text;
+            else if (e.kind == collab::TransportEvent::Kind::Message && e.channel == collab::Channel::Ops && e.data.size() == 9)
+            {
+                double t = 0.0;
+                std::memcpy(&t, e.data.data() + 1, 8);
+                if (loaded) oneWay.push_back(now() - t);
+                e.data[0] = 'Q';
+                guest->send(collab::hostPeer, collab::Channel::Ops, e.data);
+            }
+            else if (e.kind == collab::TransportEvent::Kind::Message && e.channel == collab::Channel::Assets)
+            {
+                received += e.data.size();
+                if (received == total) guest->send(collab::hostPeer, collab::Channel::Ops, "D");
+            }
+        }
+    };
+    auto until = [&](auto&& done, double ms, bool loaded) {
+        const double end = now() + ms;
+        while (now() < end && why.empty())
+        {
+            drain(loaded);
+            if (done()) return true;
+            juce::Thread::sleep(1);
+        }
+        return done();
+    };
+    std::string link;
+    until([&] { link = host->inviteLink(); return ! link.empty(); }, 15000, false);
+    std::string error;
+    const auto invite = collab::parseInvite(link, error);
+    if (! invite) { check(false, "invite link (" + why + ")"); return; }
+    guest = collab::openGuest(*invite, "Bench");
+    const bool up = until([&] { return guestUp && ! peer.empty(); }, 30000, false);
+    check(up, "host and guest connected" + (why.empty() ? std::string() : " (" + why + ")"));
+    if (! up) return;
+    for (int i = 0; i < 5; ++i)
+    {
+        const auto n = idlePings.size();
+        ping();
+        until([&] { return idlePings.size() > n; }, 5000, false);
+    }
+#if SONORA_PROBE_SCTP_STATS
+    sctpstat before{};
+    usrsctp_get_stat(&before);
+#endif
+    const double start = now();
+    const double reportMs = megabytes <= 64 && net.mode == collab::HostNetOptions::Mode::Lan ? 200.0 : 5000.0;
+    double nextPing = start, nextReport = start + reportMs;
+    uint64_t sent = 0;
+    const std::string block(64 * 1024, 'x');
+    const bool done = until([&] {
+        while (sent < total && host->buffered(peer, collab::Channel::Assets) <= (size_t) backlogKb << 10)
+        {
+            host->send(peer, collab::Channel::Assets, block);
+            sent += block.size();
+        }
+        if (now() >= nextPing) { ping(); nextPing += 250.0; }
+        if (now() >= nextReport)
+        {
+            nextReport += reportMs;
+            std::string counters;
+#if SONORA_PROBE_SCTP_STATS
+            sctpstat now_{};
+            usrsctp_get_stat(&now_);
+            counters = ", " + std::to_string(now_.sctps_sendretransdata - before.sctps_sendretransdata) + " retransmitted, "
+                     + std::to_string(now_.sctps_timodata - before.sctps_timodata) + " T3";
+#endif
+            std::printf("    %4.0f s: %.1f MB received, %.2f MB/s, last Ops round trip %.0f ms, queued %zu KiB%s\n", (now() - start) / 1000.0,
+                        (double) received / 1048576.0, (double) received / 1048576.0 / ((now() - start) / 1000.0),
+                        loadPings.empty() ? 0.0 : loadPings.back(), host->buffered(peer, collab::Channel::Assets) >> 10, counters.c_str());
+        }
+        return doneAt > 0.0;
+    }, seconds * 1000.0, true);
+    const double elapsed = ((doneAt > 0.0 ? doneAt : now()) - start) / 1000.0;
+    auto stats = [](std::vector<double> v) {
+        if (v.empty()) return std::string("none");
+        std::sort(v.begin(), v.end());
+        char text[96];
+        std::snprintf(text, sizeof(text), "min %.0f / median %.0f / max %.0f ms", v.front(), v[v.size() / 2], v.back());
+        return std::string(text);
+    };
+#if SONORA_PROBE_SCTP_STATS
+    sctpstat after{};
+    usrsctp_get_stat(&after);
+    std::printf("  SCTP (both ends): %u DATA chunks sent, %u retransmitted (%u fast), %u T3 timeouts, %u duplicate chunks received\n",
+                after.sctps_senddata - before.sctps_senddata, after.sctps_sendretransdata - before.sctps_sendretransdata,
+                after.sctps_sendfastretrans - before.sctps_sendfastretrans, after.sctps_timodata - before.sctps_timodata,
+                after.sctps_recvdupdata - before.sctps_recvdupdata);
+    std::printf("  SCTP detail: marked for retransmission %u, window probes %u, zero-window probes received %u, sack timers %u\n",
+                after.sctps_markedretrans - before.sctps_markedretrans, after.sctps_timowindowprobe - before.sctps_timowindowprobe,
+                after.sctps_recvdupdata - before.sctps_recvdupdata, after.sctps_timosack - before.sctps_timosack);
+#endif
+    std::printf("  idle Ops round trip: %s\n", stats(idlePings).c_str());
+    std::printf("  Ops host -> guest under load: %s\n", stats(oneWay).c_str());
+    std::printf("  Ops round trip under load (%zu pings): %s\n", loadPings.size(), stats(loadPings).c_str());
+    check(done, "BENCH " + std::to_string(received >> 20) + " MB in " + std::to_string(elapsed).substr(0, 6) + " s = "
+                    + std::to_string((double) received / 1048576.0 / elapsed).substr(0, 5) + " MB/s" + (why.empty() ? "" : " (" + why + ")"));
 }
 
 struct RelayProcess
@@ -332,22 +526,28 @@ struct RelayProcess
 
 int main(int argc, char** argv)
 {
-    std::string setPath, relayUrl;
+    std::setvbuf(stdout, nullptr, _IOLBF, 0); // progress shows up in logs even when a watchdog kills a slow run
+    std::string setPath, relayUrl, token;
     bool lan = false, relay = false, spawn = false;
-    int guests = 2, edits = 60;
+    int guests = 2, edits = 60, benchMb = 0, backlogKb = 1024, benchSeconds = 900;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
         if (a == "--lan") lan = true;
         else if (a == "--relay" && i + 1 < argc) { relay = true; relayUrl = argv[++i]; }
+        else if (a == "--token" && i + 1 < argc) token = argv[++i];
         else if (a == "--spawn-relay") { relay = spawn = true; }
         else if (a == "--guests" && i + 1 < argc) guests = std::max(1, std::min(3, std::atoi(argv[++i])));
         else if (a == "--edits" && i + 1 < argc) edits = std::max(0, std::atoi(argv[++i]));
+        else if (a == "--bench" && i + 1 < argc) benchMb = std::max(1, std::atoi(argv[++i]));
+        else if (a == "--backlog" && i + 1 < argc) backlogKb = std::max(0, std::atoi(argv[++i]));
+        else if (a == "--seconds" && i + 1 < argc) benchSeconds = std::max(1, std::atoi(argv[++i]));
         else setPath = a;
     }
-    if (setPath.empty())
+    if (setPath.empty() && benchMb == 0)
     {
-        std::printf("usage: collab_probe <set.als|.xml> [--lan] [--relay URL | --spawn-relay] [--guests N] [--edits N]\n");
+        std::printf("usage: collab_probe <set.als|.xml> [--lan] [--relay URL [--token KEY] | --spawn-relay] [--guests N] [--edits N]\n"
+                    "       collab_probe --bench MB [--backlog KB] [--seconds S] [--lan] [--relay URL [--token KEY] | --spawn-relay]\n");
         return 2;
     }
     if (! lan && ! relay) lan = relay = spawn = true;
@@ -355,6 +555,38 @@ int main(int argc, char** argv)
     {
         std::printf("FAIL: built without SONORA_COLLAB_NET\n");
         return 1;
+    }
+    // Runs `body` on the local network and/or through the relay, as the options ask.
+    auto eachMode = [&](auto&& body) {
+        if (lan)
+        {
+            collab::HostNetOptions net;
+            net.mode = collab::HostNetOptions::Mode::Lan;
+            net.lanPort = 0;
+            net.displayName = "Probe";
+            net.advertise = false;
+            body(net, "LAN (direct, no server)");
+        }
+        if (relay)
+        {
+            RelayProcess process;
+            if (spawn && ! process.start(juce::File(SONORA_SOURCE_DIR))) check(false, "start a local open-mode relay");
+            else
+            {
+                collab::HostNetOptions net;
+                net.mode = collab::HostNetOptions::Mode::Relay;
+                net.relay = spawn ? process.url : relayUrl;
+                if (! spawn) net.hostToken = token;
+                net.displayName = "Probe";
+                body(net, "Relay " + net.relay);
+            }
+        }
+    };
+    if (benchMb > 0)
+    {
+        eachMode([&](const collab::HostNetOptions& net, const std::string&) { bench(net, benchMb, backlogKb, benchSeconds); });
+        std::printf("\n%s (%d failed)\n", failures == 0 ? "PASS" : "FAIL", failures);
+        return failures == 0 ? 0 : 1;
     }
     auto loaded = io::loadAls(juce::File(juce::String::fromUTF8(setPath.c_str())));
     if (! loaded)
@@ -380,6 +612,28 @@ int main(int argc, char** argv)
         std::sort(scans.begin(), scans.end());
         std::printf("Change detection: %zu objects, index %.1f ms, diff %.2f ms per edit (median of %zu, min %.2f)\n",
                     index.size(), resetMs, scans[scans.size() / 2], scans.size(), scans.front());
+        // What a joining guest receives before the samples (COL-3c): the snapshot with its deflated body.
+        collab::SnapshotMsg snap;
+        size_t raw = 0;
+        for (const auto& key : collab::objectKeys(*loaded.song))
+        {
+            snap.objects.push_back({key, index.full(key)});
+            raw += snap.objects.back().full ? snap.objects.back().full->size() : 0;
+        }
+        snap.document = model::codec::encodeDocument(*loaded.song);
+        raw += snap.document.size();
+        juce::MemoryBlock source;
+        if (juce::File(juce::String::fromUTF8(setPath.c_str())).loadFileAsData(source))
+            snap.sourceFile.assign(static_cast<const char*>(source.getData()), source.getSize());
+        t = juce::Time::getMillisecondCounterHiRes();
+        collab::WireDictionary dictionary;
+        const auto wire = collab::encodeMessage(snap, &dictionary);
+        const double encodeMs = juce::Time::getMillisecondCounterHiRes() - t;
+        t = juce::Time::getMillisecondCounterHiRes();
+        collab::WireDictionary receiver;
+        (void) collab::decodeMessage(wire, &receiver);
+        std::printf("Snapshot: objects + document %zu KiB, source file %zu KiB, on the wire %zu KiB (encode %.0f ms, decode %.0f ms)\n",
+                    raw >> 10, snap.sourceFile.size() >> 10, wire.size() >> 10, encodeMs, juce::Time::getMillisecondCounterHiRes() - t);
     }
     // Probe caches go to a private data folder: the real app's CollabCache stays untouched.
     sonora::core::setAppDataFolderName("Sonora Collab Probe");
@@ -390,28 +644,11 @@ int main(int argc, char** argv)
     ::setenv("SONORA_COLLAB_CONNECT_TIMEOUT_MS", "8000", 1);
 #endif
 
-    if (lan)
-    {
-        collab::HostNetOptions net;
-        net.mode = collab::HostNetOptions::Mode::Lan;
-        net.lanPort = 0;
-        net.displayName = "Probe";
-        net.advertise = false;
-        scenario("LAN (direct, no server)", *loaded.song, net, guests, edits);
-    }
-    if (relay)
-    {
-        RelayProcess process;
-        if (spawn && ! process.start(juce::File(SONORA_SOURCE_DIR))) check(false, "start a local open-mode relay");
-        else
-        {
-            collab::HostNetOptions net;
-            net.mode = collab::HostNetOptions::Mode::Relay;
-            net.relay = spawn ? process.url : relayUrl;
-            net.displayName = "Probe";
-            scenario(("Relay " + net.relay).c_str(), *loaded.song, net, guests, edits);
-        }
-    }
+    Budgets budget;
+    budget.payloadBytes = juce::File(juce::String::fromUTF8(setPath.c_str())).getSize();
+    for (const auto& ref : collab::sampleRefs(*loaded.song))
+        budget.payloadBytes += juce::File(juce::String::fromUTF8(io::resolveProjectSamplePath(*loaded.song, ref).c_str())).getSize();
+    eachMode([&](const collab::HostNetOptions& net, const std::string& title) { scenario(title.c_str(), *loaded.song, net, guests, edits, budget); });
     sonora::core::appDataDirectory().deleteRecursively(); // "Sonora Collab Probe" only
     std::printf("\n%s (%d failed)\n", failures == 0 ? "PASS" : "FAIL", failures);
     return failures == 0 ? 0 : 1;

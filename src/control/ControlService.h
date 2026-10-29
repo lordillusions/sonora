@@ -72,6 +72,8 @@ public:
 
 private:
     juce::var dispatch(const juce::String& operation, const juce::var& args, const State& before);
+    // AGT-7d: public automation commands name their target ("volume", "device" + parameterId...); returns the op form.
+    juce::var automationTarget(const model::Song& song, const juce::var& item);
     juce::var result(const char* status, juce::var data = {});
     juce::var failure(const std::string& code, const std::string& message);
     Backend backend_;

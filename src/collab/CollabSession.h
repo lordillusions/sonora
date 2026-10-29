@@ -138,6 +138,7 @@ public:
     struct Stats
     {
         uint64_t commits = 0, rejects = 0, intents = 0, bytesIn = 0, bytesOut = 0, dropped = 0;
+        uint64_t referencedBytes = 0; // body bytes that crossed as chunk references instead of bytes (COL-3c)
     };
     const Stats& stats() const { return stats_; }
 
@@ -159,7 +160,9 @@ private:
         uint64_t uploadTotal = 0, uploadWritten = 0;
         // Asset requests waiting for channel space.
         std::deque<AssetRequestMsg> assetQueue;
+        std::unique_ptr<WireDictionary> wire; // this link's chunk dictionary (COL-3c)
     };
+    WireDictionary* wireFor(const PeerId&);
 
     void send(const PeerId&, Channel, const Message&);
     void broadcast(Channel, const Message&, const PeerId& except = {});
@@ -246,6 +249,8 @@ private:
     bool joinPlayback_ = false;
 
     // Both
+    std::shared_ptr<WirePool> wirePool_ = std::make_shared<WirePool>();
+    std::unique_ptr<WireDictionary> hostWire_; // guest: the link to the host (new for every connection)
     std::shared_ptr<AssetCatalog> catalog_ = std::make_shared<AssetCatalog>();
     juce::ThreadPool pool_{1};
     bool followTransport_ = true;

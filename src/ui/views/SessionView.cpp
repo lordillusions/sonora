@@ -664,7 +664,16 @@ void SessionView::paint(SkCanvas& c, const Theme& t)
         const auto toggle = groupToggleBounds(col);
         if (! toggle.isEmpty()) titleLabel.w = std::max(0.0f, toggle.x - titleLabel.x - 3);
         const auto titleInk = selected ? t.color("SelectionForeground") : paint::contrastText(trackColor);
-        paint::text(c, (track->hidden ? "(hidden) " : "") + x.trackDisplayName(col), titleLabel, titleInk, m.fontSize, Align::Left, true);
+        if (auto& rename = ctx().trackRename; rename.trackId == track->id)
+        {
+            // UI-58: Cmd+R edits the name in the title.
+            const Rect field{title.x + 2, m.sessionHeaderHeight - 17, titleLabel.right() + 3 - (title.x + 2), 16};
+            rename.bounds = field.translated(boundsInRoot().x, boundsInRoot().y);
+            rename.edit.paint(c, field, t.color("ControlTextBack"), t.color("ControlForeground"), t.color("RangeEditField"),
+                              t.color("ControlForeground"), m.fontSize, true);
+        }
+        else
+            paint::text(c, (track->hidden ? "(hidden) " : "") + x.trackDisplayName(col), titleLabel, titleInk, m.fontSize, Align::Left, true);
         if (! toggle.isEmpty())
         {
             SkPaint pen; pen.setAntiAlias(true); pen.setColor(titleInk);

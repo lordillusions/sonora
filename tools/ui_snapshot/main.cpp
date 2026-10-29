@@ -6,15 +6,16 @@
 //                       [--prefs plugins|midi|display|audio|keys|updates] [--zoom 1.25] [--midimap|--keymap] [--clip TRACK] [--scene N] [--count-in N]
 //                       [--floating-wavetables] [--wavetable-window] [--waveform-zoom FACTOR]
 //                       [--wavetable-browser] [--wavetable-preset NAME] [--wavetable-search TEXT]
-//                       [--collab share|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N]
+//                       [--collab share|share-wifi|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N]
 //                       [--bench N [--gpu] [--warmup N] [--no-sweep|--device-sweep]]
 // Benchmarks exclude 20 warm-up frames by default; --warmup 0 includes first-use work.
 //
 // --play-at plays the transport from that song beat, or with --clip/--scene from that many beats into the Session clip,
 // so playheads (Arrangement, piano roll, sample editor) show.
 //
-// --collab (COL-5) fills a synthetic session: "share" opens the Collaborate panel before a session (with two nearby
-// sessions), "host"/"guest" open it during one (three people, an invite, a join request), "presence" closes it and draws
+// --collab (COL-5) fills a synthetic session: "share" opens the Collaborate panel before a session (internet chosen, a
+// failed share's reason), "share-wifi" with Wi-Fi chosen and two nearby sessions, "host"/"guest" open it during one
+// (three people, an invite, a join request), "presence" closes it and draws
 // two collaborators' pointers and selections over the Arrangement (or Session with --session).
 //
 // Sonora Prism editors render docked by default here; --floating-wavetables shows the app's default (a stub in the
@@ -437,12 +438,14 @@ int main(int argc, char** argv)
         auto& v = ctx.collab;
         v.networkAvailable = true;
         v.displayName = "Hana Okafor";
-        v.relayUrl = "https://relay.sonora.example";
+        v.relayUrl = "https://relay.sonoradaw.com";
         ctx.collabOpen = collabMode != "presence";
         if (collabMode == "share")
+            v.endedReason = "This sharing server needs an access key to host. Enter it in Collaborate > Connection Settings.";
+        else if (collabMode == "share-wifi")
         {
+            v.shareOnLan = true;
             v.lanSessions = {{"Ben's MacBook Pro: Night Drive", "bens-macbook-pro.local:47100"}, {"Studio B: Mixdown v3", "studio-b.local:47100"}};
-            v.endedReason = "The host ended the session.";
         }
         else
         {
