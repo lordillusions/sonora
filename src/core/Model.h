@@ -265,7 +265,12 @@ struct PluginInfo
 
     bool isInstrument = false;
 
-    // Opaque plugin state. VST2: chunk/fxp body. VST3: IComponent state. AU: ClassInfo plist.
+    // VST2 <VstPreset> layout of `state` (PLG-15): 'FBCh' = bank chunk (effGetChunk), 'FxBk' = programs of a 28-byte
+    // name + little-endian floats. Counts and the current program as Live stored them.
+    uint32_t vst2PresetType = 0;
+    int vst2ProgramCount = 0, vst2ParameterCount = 0, vst2ProgramNumber = 0, vst2PluginVersion = 0;
+
+    // Opaque plugin state. VST2: <VstPreset><Buffer> (see vst2PresetType). VST3: IComponent state. AU: ClassInfo plist (XML).
     std::vector<uint8_t> state;
     std::vector<uint8_t> controllerState; // VST3 only (IEditController state)
 };

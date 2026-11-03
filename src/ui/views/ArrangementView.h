@@ -2,7 +2,9 @@
 // Arrangement view: bar ruler with loop brace, one lane per track with its clips (MIDI
 // notes / audio placeholder), playhead, and Live-style track headers on the RIGHT.
 //
-// Input: click ruler = set position, drag the loop brace to move / resize the loop, click lane = select
+// Input: the ruler's bar-number row is Live's beat-time ruler (UI-62): drag down/up zooms in/out around the grabbed beat,
+// left/right scrolls, double-click zooms to the time selection (or the whole Arrangement), Shift-click plays from there.
+// Below it the scrub area: click = play from there; drag the loop brace to move / resize the loop, click lane = select
 // track, wheel = scroll, Cmd+wheel = time zoom, Option+wheel = track height, Shift+wheel = horizontal scroll.
 // Clip editing (UI-3): click selects, drag the title bar to move (also to another track of the same kind),
 // drag the body/empty lane to select time, Cmd+D duplicates that range including its gaps,
@@ -92,6 +94,10 @@ private:
     double beatsPerBar() const;
     double snapUnit(const MouseEvent& e) const; // grid to snap to, 0 when snapping is off or overridden with Cmd/Alt
     void zoomAt(float anchorX, double factor);
+    // UI-62: the beat-time ruler (bar numbers between the overview and the scrub area) and its zoom drag.
+    bool inBeatRuler(float x, float y) const;
+    void zoomToWholeArrangement();
+    double arrangementEndBeat() const;
     void zoomTrackHeight(double factor, float anchorY, bool allTracks = false); // allTracks: every lane, not the selection
     void scrub(const MouseEvent& e, bool start);
     void showContextMenu(const MouseEvent& e);
@@ -180,6 +186,12 @@ private:
     // Fade handle of an audio clip under (x, y), if any: FadeIn / FadeOut.
     bool fadeHandleAt(const model::Clip& clip, const model::ClipLocation& location, float clipX0, float clipX1, float x, float y, ui::DragMode& mode) const;
     bool draggingRuler_ = false, draggingOverview_ = false;
+    struct RulerZoom
+    {
+        bool active = false;
+        float startY = 0;
+        double startPixelsPerBeat = 0, anchorBeat = 0;
+    } rulerZoom_; // UI-62: beat-time ruler / overview zoom drag
     bool selectingTime_ = false;
     double selectionGrab_ = 0;
     int selectionTrack_ = -1;

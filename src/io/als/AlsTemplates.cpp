@@ -272,6 +272,65 @@ std::string deviceTemplate(const model::Device& device)
         preset->createNewChildElement("ControllerState")->addTextElement(hex(plugin.controllerState));
         root.createNewChildElement("ParameterList");
     }
+    else if (device.kind == model::DeviceKind::PluginVst2 && device.plugin)
+    {
+        // PLG-15: <PluginDevice><PluginDesc><VstPluginInfo>, the fields Live 12 writes (real-world sets).
+        const auto& plugin = *device.plugin;
+        auto* info = root.createNewChildElement("PluginDesc")->createNewChildElement("VstPluginInfo");
+        info->setAttribute("Id", 0);
+        value(*info, "WinPosX", "0");
+        value(*info, "WinPosY", "0");
+        value(*info, "Path", juce::String(plugin.path));
+        value(*info, "PlugName", juce::String(plugin.name));
+        value(*info, "UniqueId", juce::String(plugin.vst2UniqueId));
+        value(*info, "Inputs", "0");
+        value(*info, "Outputs", "0");
+        value(*info, "NumberOfParameters", juce::String(plugin.vst2ParameterCount));
+        value(*info, "NumberOfPrograms", juce::String(plugin.vst2ProgramCount));
+        value(*info, "Flags", "0");
+        auto* preset = info->createNewChildElement("Preset")->createNewChildElement("VstPreset");
+        preset->setAttribute("Id", 0);
+        value(*preset, "IsOn", "true");
+        value(*preset, "Type", juce::String((int64_t) plugin.vst2PresetType));
+        value(*preset, "ProgramCount", juce::String(plugin.vst2ProgramCount));
+        value(*preset, "ParameterCount", juce::String(plugin.vst2ParameterCount));
+        value(*preset, "ProgramNumber", juce::String(plugin.vst2ProgramNumber));
+        preset->createNewChildElement("Buffer")->addTextElement(hex(plugin.state));
+        value(*preset, "Name", "");
+        value(*preset, "PluginVersion", juce::String(plugin.vst2PluginVersion));
+        value(*preset, "UniqueId", juce::String(plugin.vst2UniqueId));
+        value(*preset, "ByteOrder", "2");
+        value(*info, "Version", "1");
+        value(*info, "VstVersion", "2400");
+        value(*info, "IsShellClient", "false");
+        value(*info, "Category", plugin.isInstrument ? "2" : "1");
+        root.createNewChildElement("ParameterList");
+    }
+    else if (device.kind == model::DeviceKind::PluginAu && device.plugin)
+    {
+        // PLG-15: <AuPluginDevice><PluginDesc><AuPluginInfo>; the preset buffer is the ClassInfo XML plist.
+        const auto& plugin = *device.plugin;
+        auto* info = root.createNewChildElement("PluginDesc")->createNewChildElement("AuPluginInfo");
+        info->setAttribute("Id", 0);
+        value(*info, "WinPosX", "0");
+        value(*info, "WinPosY", "0");
+        value(*info, "ComponentType", juce::String((int64_t) plugin.auType));
+        value(*info, "ComponentSubType", juce::String((int64_t) plugin.auSubType));
+        value(*info, "ComponentManufacturer", juce::String((int64_t) plugin.auManufacturer));
+        value(*info, "ComponentFlags", "2");
+        value(*info, "Name", juce::String(plugin.name));
+        value(*info, "Manufacturer", juce::String(plugin.vendor));
+        auto* preset = info->createNewChildElement("Preset")->createNewChildElement("AuPreset");
+        preset->setAttribute("Id", 0);
+        value(*preset, "IsOn", "true");
+        preset->createNewChildElement("Buffer")->addTextElement(hex(plugin.state));
+        value(*preset, "Name", "Default");
+        value(*preset, "Manufacturer", juce::String((int64_t) plugin.auManufacturer));
+        value(*preset, "SubType", juce::String((int64_t) plugin.auSubType));
+        value(*preset, "Type", juce::String((int64_t) plugin.auType));
+        value(*info, "IsUnusable", "false");
+        root.createNewChildElement("ParameterList");
+    }
     return root.toString().toStdString();
 }
 } // namespace sonora::io

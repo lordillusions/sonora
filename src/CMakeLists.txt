@@ -135,6 +135,7 @@ add_library(sonora_engine STATIC
     devices/native/AutoFilter.cpp
     plugins/PluginHost.cpp
     plugins/PluginDevice.cpp
+    plugins/Vst2Bank.cpp
     plugins/Vst3PresetBuilder.cpp
     plugins/SerumState.cpp
     plugins/SerumPatch.cpp
@@ -290,9 +291,11 @@ function(sonora_add_native_vst3 target)
     target_sources(${target} PRIVATE ${ARG_SOURCES} ${_sonoraCoreSources} ${_sonoraEngineSources} ${_sonoraUiSources})
     target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     get_target_property(_sonoraJuceDefinitions sonora_juce COMPILE_DEFINITIONS)
+    list(FILTER _sonoraJuceDefinitions EXCLUDE REGEX "^JUCE_PLUGINHOST_VST=") # plug-ins host nothing (PLG-15 headers stay app-only)
     target_compile_definitions(${target} PUBLIC
         ${_sonoraJuceDefinitions}
         JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_PLUGINHOST_VST=0
         SONORA_METAL_VIEW_CLASS=${ARG_METAL_VIEW}) # Sonora.app may load these bundles: one ObjC class name each
     target_link_libraries(${target}
         PRIVATE

@@ -223,9 +223,9 @@ void PreferencesPanel::paint(SkCanvas& c, const Theme& t)
         section("Plug-In Sources");
         button(c, t, field("Rescan Plug-Ins"), "Rescan Plug-Ins", x.scanning ? "Scanning..." : "Rescan", x.scanning,
                x.scanning ? nullptr : x.scanPlugins);
-        button(c, t, field("Audio Units"), "Scan Audio Units", "Rescan VST3 + AU", false, x.scanning ? nullptr : x.scanAudioUnits);
+        button(c, t, field("Audio Units"), "Scan Audio Units", "Rescan VST3 + VST2 + AU", false, x.scanning ? nullptr : x.scanAudioUnits);
         for (size_t i = 0; i < x.pluginFolders.size(); ++i)
-            reveal("VST3 System Folder " + std::to_string(i + 1), x.pluginFolders[i]);
+            reveal("Plug-In Folder " + std::to_string(i + 1), x.pluginFolders[i]);
         value("Plug-Ins Found", std::to_string(x.pluginNames.size()));
         section("Failed Plug-Ins");
         button(c, t, field("Retry Failed Plug-Ins"), "Retry Failed Plug-Ins", "Retry", false, x.scanning ? nullptr : std::function<void()>([&x] {

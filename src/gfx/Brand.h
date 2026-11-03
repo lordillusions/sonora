@@ -108,6 +108,11 @@ void drawBusyCursor(SkCanvas& canvas, double timeSeconds);
 constexpr int scrubCursorSize = 24;
 constexpr int scrubCursorHotSpotX = 8, scrubCursorHotSpotY = 12;
 void drawScrubCursor(SkCanvas& canvas);
+// The Arrangement beat-time ruler's zoom cursor (drag up/down zooms, left/right scrolls): a magnifying glass, lens centre
+// at the hot spot.
+constexpr int zoomCursorSize = 24;
+constexpr int zoomCursorHotSpotX = 9, zoomCursorHotSpotY = 9;
+void drawZoomCursor(SkCanvas& canvas);
 
 // SVG documents for the website and the repository (resources/brand).
 std::string markSvg(bool onIcon);

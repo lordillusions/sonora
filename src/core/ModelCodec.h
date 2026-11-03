@@ -26,7 +26,8 @@
 
 namespace sonora::model::codec
 {
-inline constexpr uint32_t formatVersion = 3; // 2: locator id, info text, song start and colour (UI-3b); 3: view state (UI-57)
+inline constexpr uint32_t formatVersion = 4; // 2: locator id, info text, song start and colour (UI-3b); 3: view state (UI-57);
+                                              // 4: VST2 preset layout in PluginInfo (PLG-15)
 inline constexpr int maxDeviceDepth = 12;
 
 enum class Form

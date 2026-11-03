@@ -380,6 +380,11 @@ template <class IO> void visit(IO& io, PluginInfo& p)
     io.v(p.auSubType);
     io.v(p.auManufacturer);
     io.v(p.isInstrument);
+    io.v(p.vst2PresetType);
+    io.v(p.vst2ProgramCount);
+    io.v(p.vst2ParameterCount);
+    io.v(p.vst2ProgramNumber);
+    io.v(p.vst2PluginVersion);
     io.live(p.state);
     io.live(p.controllerState);
 }
@@ -712,14 +717,14 @@ template <class F> void decodeWith(std::string_view bytes, F&& body)
 #if defined(__APPLE__) && defined(__aarch64__) && defined(_LIBCPP_VERSION)
 // A new model field changes these sizes: add it to the visitors above (and to the live/identity split), then update.
 static_assert(sizeof(Clip) == 520, "model::Clip changed: update ModelCodec");
-static_assert(sizeof(Device) == 544, "model::Device changed: update ModelCodec");
+static_assert(sizeof(Device) == 568, "model::Device changed: update ModelCodec");
 static_assert(sizeof(Device::Chain) == 120, "model::Device::Chain changed: update ModelCodec");
 static_assert(sizeof(Track) == 1144, "model::Track changed: update ModelCodec");
 static_assert(sizeof(Mixer) == 200, "model::Mixer changed: update ModelCodec");
 static_assert(sizeof(Song) == 1528, "model::Song changed: update ModelCodec");
 static_assert(sizeof(MidiNote) == 48, "model::MidiNote changed: update ModelCodec");
 static_assert(sizeof(SamplePart) == 232, "model::SamplePart changed: update ModelCodec");
-static_assert(sizeof(PluginInfo) == 160, "model::PluginInfo changed: update ModelCodec");
+static_assert(sizeof(PluginInfo) == 184, "model::PluginInfo changed: update ModelCodec");
 static_assert(sizeof(Parameter) == 80, "model::Parameter changed: update ModelCodec");
 static_assert(sizeof(TakeLane) == 104, "model::TakeLane changed: update ModelCodec");
 static_assert(sizeof(AutomationEnvelope) == 64, "model::AutomationEnvelope changed: update ModelCodec");

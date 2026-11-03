@@ -175,6 +175,32 @@ void patchDevice(XmlElement* x, const model::Device& d)
             state("ProcessorState", d.plugin->state);
             state("ControllerState", d.plugin->controllerState);
         }
+    // PLG-15: VST2 bank and AU ClassInfo captured from the hosted instance.
+    const auto patchBuffer = [&](XmlElement* preset, const std::vector<uint8_t>& bytes) {
+        auto* e = child(preset, "Buffer");
+        if (e && decodeHexBlob(e->getAllSubText().toStdString()) == bytes) return;
+        if (! e) e = preset->createNewChildElement("Buffer");
+        e->deleteAllChildElements();
+        e->addTextElement(juce::String::toHexString(bytes.data(), (int) bytes.size(), 0).toUpperCase());
+    };
+    if (d.kind == model::DeviceKind::PluginVst2 && d.plugin && ! d.plugin->state.empty())
+        if (auto* preset = at(x, "PluginDesc/VstPluginInfo/Preset/VstPreset"))
+        {
+            const auto& plugin = *d.plugin;
+            const auto number = [&](const char* tag, int64_t v) {
+                auto* e = child(preset, tag);
+                if (! e) e = preset->createNewChildElement(tag);
+                if (e->getStringAttribute("Value") != juce::String(v)) e->setAttribute("Value", juce::String(v));
+            };
+            number("Type", plugin.vst2PresetType);
+            number("ProgramCount", plugin.vst2ProgramCount);
+            number("ParameterCount", plugin.vst2ParameterCount);
+            number("ProgramNumber", plugin.vst2ProgramNumber);
+            patchBuffer(preset, plugin.state);
+        }
+    if (d.kind == model::DeviceKind::PluginAu && d.plugin && ! d.plugin->state.empty())
+        if (auto* preset = at(x, "PluginDesc/AuPluginInfo/Preset/AuPreset"))
+            patchBuffer(preset, d.plugin->state);
     if (auto* list = child(x, "ParameterList"))
         for (auto* parameter : list->getChildWithTagNameIterator("PluginFloatParameter"))
             if (const auto* id = child(parameter, "ParameterId"))

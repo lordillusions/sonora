@@ -559,7 +559,7 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         unavailable(m, {"Max for Live Developer Mode", "Audio Engine On"});
         m.addSeparator(); m.addItem(Preferences, "Settings...    (Cmd+,)"); m.addItem(AudioSettings, "Audio Settings...");
         m.addItem(EnableMidi, "Enable All MIDI Inputs");
-        m.addItem(ScanVst3, "Scan Plug-ins (VST3)"); m.addItem(ScanVst3AndAu, "Scan Plug-ins (VST3 + Audio Units)");
+        m.addItem(ScanVst3, "Scan Plug-ins (VST3 + VST2)"); m.addItem(ScanVst3AndAu, "Scan Plug-ins (VST3 + VST2 + Audio Units)");
         m.addItem(LoadTheme, "Load Theme (.ask)...");
     }
     else if (index == 7)

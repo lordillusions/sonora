@@ -74,6 +74,7 @@ private:
     int64_t framesRendered_ = 0;
     std::vector<juce::MouseCursor> busyCursors_; // rendered on first use
     std::optional<juce::MouseCursor> scrubCursor_; // rendered on first use
+    std::optional<juce::MouseCursor> zoomCursor_;  // likewise
     int busyFrame_ = -1;                         // shown busy frame, -1 when the normal cursor is set
 };
 

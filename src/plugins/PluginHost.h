@@ -1,8 +1,8 @@
 #pragma once
 // Discovers and instantiates third-party plugins.
 //
-// Primary format: VST3 (docs/adr/0003-plugin-format.md). AU is compiled in too because it
-// costs nothing on macOS, but VST3 is the one we test and match against .als data.
+// Formats (docs/adr/0003-plugin-format.md): VST3, VST2 (PLG-15, through FST's clean-room headers; JUCE's name "VST")
+// and Audio Units on macOS. Each loads with the state Live stored for it.
 //
 // Scanning is slow and may hang or crash on buggy plugins, so every plugin file is scanned
 // by a separate helper process (`sonora_plugin_scanner`, PLG-3) with a timeout. Files whose
@@ -33,7 +33,7 @@ public:
     void loadCache();
     void saveCache() const;
 
-    // Scans the default VST3 folders (and AU when includeAu). Blocking: call from a
+    // Scans the default VST3 and VST2 folders (and AU when includeAu). Blocking: call from a
     // background thread. `progress` receives (0..1, currentFileName).
     void scan(bool includeAu, const std::function<void(float, const juce::String&)>& progress = {});
 
@@ -53,8 +53,8 @@ public:
     int scanTimeoutMs = 60000; // per plugin file
 
     // Finds the installed plugin that corresponds to a plugin referenced in a .als.
-    // Matching rules (in order): VST3 by class uid, then name; AU by type/subtype/manufacturer, then any
-    // VST3 with the same name for VST2 references (no state migration, see PLG-5).
+    // Matching rules (in order): VST3 by class uid, then name; VST2 by unique id, then name, then the VST3 build of the same
+    // name (no state migration, PLG-5); AU by type/subtype/manufacturer, then the VST3, then the VST2 of the same name.
     std::optional<juce::PluginDescription> findMatch(const model::PluginInfo& info, model::DeviceKind kind) const;
 
     // Instantiates a plugin and restores the state stored in the .als. Message thread.

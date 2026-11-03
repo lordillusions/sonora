@@ -14,6 +14,11 @@
 namespace sonora::plugins
 {
 
+// Reads the instance's current state into `info` in the layout the .als keeps for `kind` (VST3 preset chunks, VST2 bank
+// as <VstPreset>, AU ClassInfo as an XML plist). False when the instance's format does not match `kind` or it gave nothing.
+// Message thread.
+bool capturePluginInfo(juce::AudioPluginInstance& instance, model::DeviceKind kind, model::PluginInfo& info);
+
 class PluginDevice final : public devices::DeviceProcessor
 {
 public:

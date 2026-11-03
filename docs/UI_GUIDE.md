@@ -627,8 +627,13 @@ Modelled on Live 12 (measured in Live: adaptive grid, ruler labels and the corne
 - **Ruler** (`ui/GridModel`): bar numbers, then beats (1.2, 1.3, 1.4) and finer positions (1.1.3 ...) appear as the zoom allows
   (the finest level whose label fits), with unlabelled ticks down to 1/64. Lane/note grid lines follow the grid size with
   bar > beat > sub-beat strength; tiles alternate per beat when zoomed in, per bar or several bars when out.
-- **Scrub area**: clicking the number strip of the Arrangement ruler plays from that (grid-snapped) position and dragging
-  moves it; a click on empty lane space moves the insert marker (play start) without playing. The loop brace below drags as before.
+- **Beat-time ruler (UI-62)**: the number strip of the Arrangement ruler is Live's zoom tool, with a magnifying-glass cursor
+  (`brand::drawZoomCursor`): drag down to zoom in, up to zoom out (x2 per 48 px) around the grabbed beat, which stays under the
+  pointer so dragging sideways scrolls; double-click zooms to the time selection, or to the whole Arrangement when there is
+  none; Shift-click plays from there like the scrub area; a click while playing pauses Follow. The Overview strip zooms with
+  a vertical drag too and a double-click there shows the whole Arrangement.
+- **Scrub area**: the strip below the numbers (locators, loop brace) plays from the clicked (grid-snapped) position and
+  dragging moves it; a click on empty lane space moves the insert marker (play start) without playing. The loop brace drags as before.
 - **Note editor scrolling**: the wheel / two-finger scroll moves continuously over all 128 pitches (pitch 0 can sit at the
   bottom edge, 127 at the top), transposing or nudging keeps the selection in view and dragging notes near an edge scrolls.
   Alt+wheel changes the row height around the pointer.

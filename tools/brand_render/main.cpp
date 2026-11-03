@@ -119,5 +119,7 @@ int main(int argc, char** argv)
     }, SkColorSetRGB(0xb4, 0xb4, 0xb4));
     ok &= writePng((dir / "preview-scrub-cursor.png").string(), brand::scrubCursorSize * 4, brand::scrubCursorSize * 4, 4.0f,
                    [](SkCanvas& c) { brand::drawScrubCursor(c); }, SkColorSetRGB(0xb4, 0xb4, 0xb4));
+    ok &= writePng((dir / "preview-zoom-cursor.png").string(), brand::zoomCursorSize * 4, brand::zoomCursorSize * 4, 4.0f,
+                   [](SkCanvas& c) { brand::drawZoomCursor(c); }, SkColorSetRGB(0xb4, 0xb4, 0xb4));
     return ok ? 0 : 1;
 }

@@ -18,6 +18,20 @@ LIBDATACHANNEL_URL="https://github.com/paullouisageneau/libdatachannel.git"
 # openssl@3 is built for the newest macOS only). OPENSSLDIR=/etc/ssl so default CA paths use macOS's /etc/ssl/cert.pem.
 OPENSSL_VERSION="3.5.9"
 OPENSSL_SHA256="603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
+# PLG-15: FST (GPL-3.0-or-later), clean-room VST2 interface headers that let JUCE host VST2 plug-ins without Steinberg's
+# SDK (docs/adr/0003-plugin-format.md). Without it CMake builds with VST2 hosting off.
+FST_URL="https://git.iem.at/zmoelnig/FST.git"
+FST_COMMIT="647af068765b75867e3a28b4dd8991ab9ed47f7c" # v0.177.0 + 1
+# src/plugins/vst2/fst-host-layout.patch gives three structs the sizes hosts and plug-ins allocate (heap/stack overruns
+# otherwise); CMake turns VST2 off when it is missing.
+fetch_fst() {
+    local dir="$1/fst"
+    [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" = "$FST_COMMIT" ] && grep -q "Sonora PLG-15 r2" "$dir/fst/fst.h" && return 0
+    rm -rf "$dir"
+    git clone --quiet "$FST_URL" "$dir" && git -C "$dir" checkout --quiet "$FST_COMMIT" \
+        && git -C "$dir" apply "$PWD/src/plugins/vst2/fst-host-layout.patch" \
+        || { echo "warning: could not fetch FST, VST2 hosting will be off" >&2; rm -rf "$dir"; }
+}
 
 # COM-7: Linux x64 and Windows x64 (Git Bash) fetch their own Skia build and expect cmake/ninja to be
 # installed already (docs/PLATFORMS.md). SONORA_THIRD_PARTY_DIR puts the dependencies elsewhere (the
@@ -43,6 +57,7 @@ if [ -n "$SKIA_TARGET" ]; then
         git clone --depth 1 --branch "$LIBDATACHANNEL_TAG" --recurse-submodules --shallow-submodules \
             "$LIBDATACHANNEL_URL" "$tp/libdatachannel"
     fi
+    fetch_fst "$tp"
     echo "OK. Now: ci/linux/build.sh (Linux) or see docs/PLATFORMS.md (Windows)"
     exit 0
 fi
@@ -75,6 +90,8 @@ if [ ! -d third_party/libdatachannel ]; then
     git clone --depth 1 --branch "$LIBDATACHANNEL_TAG" --recurse-submodules --shallow-submodules \
         "$LIBDATACHANNEL_URL" third_party/libdatachannel
 fi
+
+fetch_fst third_party
 
 ossl="$PWD/third_party/openssl-macos-arm64"
 if [ ! -f "$ossl/lib/libssl.a" ] || [ "$(cat "$ossl/VERSION" 2>/dev/null)" != "$OPENSSL_VERSION" ]; then

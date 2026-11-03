@@ -78,7 +78,7 @@
       <table>
         <thead><tr><th scope="col">Platform</th><th scope="col">Status</th><th scope="col">Notes</th></tr></thead>
         <tbody>
-          <tr><th scope="row">macOS 13 or later, Apple silicon</th><td class="yes">Main platform (alpha)</td><td>Metal drawing, VST3 and Audio Units, automatic delta updates, collaboration and the assistant.</td></tr>
+          <tr><th scope="row">macOS 13 or later, Apple silicon</th><td class="yes">Main platform (alpha)</td><td>Metal drawing, VST3, VST2 and Audio Units, automatic delta updates, collaboration and the assistant.</td></tr>
           <tr><th scope="row">macOS on Intel</th><td class="no">Not supported</td><td>The graphics library Sonora uses is built for Apple silicon only.</td></tr>
           <tr><th scope="row">Windows x64</th><td class="part">Early alpha build</td><td>Installer built automatically and barely tested on real machines. The interface draws on the CPU, there are no automatic updates, and the installer isn't code-signed yet, so Windows will warn about an unknown publisher.</td></tr>
           <tr><th scope="row">Linux x64</th><td class="part">Early alpha build</td><td>AppImage and <code>.deb</code>, tested by installing on Ubuntu 24.04 and starting the app. The interface draws on the CPU and there are no automatic updates. Audio hardware and plug-ins are not yet qualified.</td></tr>
@@ -99,8 +99,8 @@
         <thead><tr><th scope="col">Format</th><th scope="col">Status</th><th scope="col">Notes</th></tr></thead>
         <tbody>
           <tr><th scope="row">VST3</th><td class="yes">Supported</td><td>The main format. Plug-in state is saved with the project and restored.</td></tr>
-          <tr><th scope="row">Audio Units</th><td class="yes">Supported (macOS)</td><td>Hosted through the same plug-in layer.</td></tr>
-          <tr><th scope="row">VST2</th><td class="no">Not supported</td><td>The VST2 SDK can no longer be licensed.</td></tr>
+          <tr><th scope="row">Audio Units</th><td class="yes">Supported (macOS)</td><td>Scan them with Options &gt; Scan Plug-ins (VST3 + VST2 + Audio Units). Their state is saved with the project in the same form Live uses.</td></tr>
+          <tr><th scope="row">VST2</th><td class="yes">Supported (since 0.1.6)</td><td>Hosted through open-source interface headers (FST). Projects made in Live load the VST2 plug-in with its saved settings; if only the VST3 version is installed, that one loads instead.</td></tr>
           <tr><th scope="row">Intel-only (x86_64) plug-ins</th><td class="no">Not supported</td><td>Sonora runs natively on Apple silicon and can't load Intel-only plug-ins.</td></tr>
           <tr><th scope="row">CLAP, ARA 2</th><td class="no">Planned</td><td>On the roadmap.</td></tr>
         </tbody>

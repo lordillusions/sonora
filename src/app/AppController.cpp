@@ -909,7 +909,11 @@ void AppController::wirePreferences()
         if (ui_.requestRepaint) ui_.requestRepaint();
     };
 
-    ui_.pluginFolders = {"/Library/Audio/Plug-Ins/VST3", "~/Library/Audio/Plug-Ins/VST3"};
+    ui_.pluginFolders.clear(); // VST3 and VST2 (PLG-15) search folders; Audio Units come from the system registry
+    for (int i = 0; i < host_.formats().getNumFormats(); ++i)
+        if (auto* format = host_.formats().getFormat(i); format->getName() == "VST3" || format->getName() == "VST")
+            for (int p = 0; p < format->getDefaultLocationsToSearch().getNumPaths(); ++p)
+                ui_.pluginFolders.push_back(format->getDefaultLocationsToSearch()[p].getFullPathName().toStdString());
     ui_.failedPlugins.clear();
     for (const auto& f : host_.failedPlugins())
         ui_.failedPlugins.push_back(f.toStdString());
@@ -2831,22 +2835,40 @@ void AppController::dropBrowserItem(const ui::BrowserDrag& item, int trackIndex,
         const auto types = host_.knownPlugins().getTypes();
         const auto found = std::find_if(types.begin(), types.end(), [&](const auto& desc) { return desc.createIdentifierString().toStdString() == item.value; });
         if (found == types.end()) { ui_.statusText = "Plugin is no longer in the scan cache"; return; }
-        if (found->pluginFormatName != "VST3") { ui_.statusText = "Browser insertion currently supports VST3 plugins"; return; }
+        // PLG-15: VST3, VST2 and Audio Units, each saved in the .als form Live uses for that format.
+        const auto& format = found->pluginFormatName;
+        const auto kind = format == "VST3" ? model::DeviceKind::PluginVst3 : format == "VST" ? model::DeviceKind::PluginVst2
+                        : format == "AudioUnit" ? model::DeviceKind::PluginAu : model::DeviceKind::Native;
+        if (kind == model::DeviceKind::Native) { ui_.statusText = "Unsupported plug-in format: " + format.toStdString(); return; }
         instrument = found->isInstrument;
         if (instrument && track->kind != model::TrackKind::Midi) { ui_.statusText = "Drop instruments on a MIDI track"; return; }
         juce::String error;
         auto instance = host_.formats().createPluginInstance(*found, engine_.sampleRate(), engine_.blockSize(), error);
         if (! instance) { ui_.statusText = "Could not load plugin: " + error.toStdString(); return; }
-        const auto* client = instance->getVST3Client();
-        const auto preset = client ? client->getPreset() : juce::MemoryBlock{};
         model::PluginInfo info;
         info.name = found->name.toStdString();
         info.vendor = found->manufacturerName.toStdString();
         info.isInstrument = instrument;
-        const auto* bytes = static_cast<const uint8_t*>(preset.getData());
-        if (preset.isEmpty() || ! plugins::readVstPreset({bytes, bytes + preset.getSize()}, info))
+        if (kind == model::DeviceKind::PluginVst2)
+        {
+            info.vst2UniqueId = found->uniqueId;
+            info.path = found->fileOrIdentifier.toStdString();
+        }
+        else if (kind == model::DeviceKind::PluginAu)
+        {
+            // JUCE AU identifiers end in "type,subtype,manufacturer" four-char codes ("AudioUnit:Effects/aufx,XXXX,YYYY").
+            const auto codes = juce::StringArray::fromTokens(found->fileOrIdentifier.fromLastOccurrenceOf("/", false, false), ",", "");
+            const auto code = [&](int i) {
+                uint32_t v = 0;
+                for (const auto c : codes[i].toStdString().substr(0, 4)) v = v << 8 | (uint8_t) c;
+                return v;
+            };
+            if (codes.size() == 3) { info.auType = code(0); info.auSubType = code(1); info.auManufacturer = code(2); }
+        }
+        if (! plugins::capturePluginInfo(*instance, kind, info) && kind == model::DeviceKind::PluginVst3)
         { ui_.statusText = "Plugin did not provide a saveable VST3 preset"; return; }
-        device.kind = model::DeviceKind::PluginVst3;
+        device.type = kind == model::DeviceKind::PluginAu ? "AuPluginDevice" : "PluginDevice";
+        device.kind = kind;
         device.plugin = std::move(info);
         device.displayName = found->name.toStdString();
     }

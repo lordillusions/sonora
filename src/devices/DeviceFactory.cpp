@@ -190,7 +190,7 @@ std::unique_ptr<DeviceProcessor> createPlugin(const model::Device& d, BuildConte
                       + std::to_string((int) createMs) + ", state " + std::to_string((int) stateMs) + ", prepare "
                       + std::to_string((int) prepareMs) + ")");
 
-    if (d.kind == model::DeviceKind::PluginVst2 && ! d.pluginParams.empty())
+    if (d.kind == model::DeviceKind::PluginVst2 && match->pluginFormatName != "VST" && ! d.pluginParams.empty())
     {
         // A VST2 reference loaded into the VST3 build of the same plugin: the saved chunk is not
         // portable, so restore what Live stored as individual parameter values, matched by name.

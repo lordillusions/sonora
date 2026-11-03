@@ -95,6 +95,14 @@ The portable dock has no provider setup sheet yet. Configure the optional native
 - `Secrets.json`: `{"org.sonora.daw.native-agent": {"openai:responses:https://api.openai.com/v1": "<api key>"}}`, readable only by
   you (`chmod 600` on Linux).
 
+## VST2 hosting (FST, PLG-15)
+
+`scripts/bootstrap.sh` clones FST (clean-room VST2 headers, GPL-3.0-or-later) at a pinned commit into
+`<third_party>/fst` on every OS and applies `src/plugins/vst2/fst-host-layout.patch`. CMake (`cmake/SonoraJuce.cmake`) turns
+`JUCE_PLUGINHOST_VST` on only when the patched header is there; otherwise it prints a status line and builds without VST2.
+The native-device VST3 targets always build with it off (they host nothing). Default VST2 folders come from JUCE
+(macOS `/Library/Audio/Plug-Ins/VST` and `~/Library/Audio/Plug-Ins/VST`; Windows/Linux their usual VST paths).
+
 ## Collab network (libdatachannel)
 
 Collab sessions (COL-3, [COLLAB_DESIGN.md](COLLAB_DESIGN.md) section 8) use **libdatachannel** for WebRTC data channels

@@ -43,6 +43,24 @@ else()
     set(_sonora_juce_curl 0)
 endif()
 
+# PLG-15: VST2 hosting through FST's clean-room headers (scripts/bootstrap.sh fetches them; docs/adr/0003-plugin-format.md).
+# JUCE includes <pluginterfaces/vst2.x/aeffect.h>; src/plugins/vst2/ maps that path onto FST.
+set(_sonora_fst_dir "${SONORA_THIRD_PARTY_DIR}/fst")
+set(_sonora_fst_patched FALSE)
+if(EXISTS "${_sonora_fst_dir}/fst/fst.h")
+    file(STRINGS "${_sonora_fst_dir}/fst/fst.h" _sonora_fst_marker REGEX "Sonora PLG-15")
+    if(_sonora_fst_marker) # src/plugins/vst2/fst-host-layout.patch applied (scripts/bootstrap.sh)
+        set(_sonora_fst_patched TRUE)
+    endif()
+endif()
+if(_sonora_fst_patched)
+    set(_sonora_juce_vst2 1)
+    target_include_directories(sonora_juce PRIVATE "${CMAKE_SOURCE_DIR}/src/plugins/vst2" "${_sonora_fst_dir}")
+else()
+    set(_sonora_juce_vst2 0)
+    message(STATUS "Patched FST headers not found in ${_sonora_fst_dir}: VST2 hosting is off (run scripts/bootstrap.sh)")
+endif()
+
 target_compile_definitions(sonora_juce
     PUBLIC
         JUCE_WEB_BROWSER=0
@@ -50,7 +68,7 @@ target_compile_definitions(sonora_juce
         JUCE_PLUGINHOST_VST3=1      # chosen format, see docs/adr/0003-plugin-format.md
         JUCE_PLUGINHOST_AU=${_sonora_juce_au}  # cheap to keep on macOS; UI exposes it later
         JUCE_USE_MP3AUDIOFORMAT=${_sonora_juce_mp3}
-        JUCE_PLUGINHOST_VST=0       # VST2 SDK is not licensable any more
+        JUCE_PLUGINHOST_VST=${_sonora_juce_vst2}  # VST2 via FST headers (PLG-15)
         JUCE_PLUGINHOST_LV2=0
         JUCE_PLUGINHOST_LADSPA=0
         JUCE_REPORT_APP_USAGE=0

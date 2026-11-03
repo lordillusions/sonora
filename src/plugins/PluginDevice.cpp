@@ -1,19 +1,81 @@
 #include "plugins/PluginDevice.h"
+#include "plugins/Vst2Bank.h"
 #include "plugins/Vst3PresetBuilder.h"
 
+#include <algorithm>
 #include <cmath>
+#if defined(__APPLE__)
+ #include <CoreFoundation/CoreFoundation.h>
+#endif
 
 namespace sonora::plugins
 {
+namespace
+{
+#if defined(__APPLE__)
+// JUCE hands out the AU ClassInfo as a binary plist; Live writes (and reads) the XML form.
+std::vector<uint8_t> xmlPlist(const juce::MemoryBlock& binary)
+{
+    std::vector<uint8_t> out;
+    auto* data = CFDataCreate(kCFAllocatorDefault, static_cast<const UInt8*>(binary.getData()), (CFIndex) binary.getSize());
+    if (data == nullptr) return out;
+    if (auto* list = CFPropertyListCreateWithData(kCFAllocatorDefault, data, kCFPropertyListImmutable, nullptr, nullptr))
+    {
+        if (auto* xml = CFPropertyListCreateData(kCFAllocatorDefault, list, kCFPropertyListXMLFormat_v1_0, 0, nullptr))
+        {
+            const auto* bytes = CFDataGetBytePtr(xml);
+            out.assign(bytes, bytes + CFDataGetLength(xml));
+            CFRelease(xml);
+        }
+        CFRelease(list);
+    }
+    CFRelease(data);
+    return out;
+}
+#endif
+} // namespace
+
+bool capturePluginInfo(juce::AudioPluginInstance& instance, model::DeviceKind kind, model::PluginInfo& info)
+{
+    const auto format = instance.getPluginDescription().pluginFormatName;
+    if (kind == model::DeviceKind::PluginVst3 && format == "VST3")
+    {
+        const auto* client = instance.getVST3Client();
+        if (! client) return false;
+        const auto preset = client->getPreset();
+        if (preset.isEmpty()) return false;
+        const auto* bytes = static_cast<const uint8_t*>(preset.getData());
+        return readVstPreset({bytes, bytes + preset.getSize()}, info);
+    }
+    if (kind == model::DeviceKind::PluginVst2 && format == "VST")
+    {
+        juce::MemoryBlock bank;
+        instance.getStateInformation(bank);
+        const auto* bytes = static_cast<const uint8_t*>(bank.getData());
+        model::PluginInfo read = info;
+        read.vst2ParameterCount = instance.getParameters().size();
+        if (bank.isEmpty() || ! readVst2Bank({bytes, bytes + bank.getSize()}, read)) return false;
+        read.vst2ProgramNumber = std::max(0, instance.getCurrentProgram());
+        info = std::move(read);
+        return true;
+    }
+#if defined(__APPLE__)
+    if (kind == model::DeviceKind::PluginAu && format == "AudioUnit")
+    {
+        juce::MemoryBlock state;
+        instance.getStateInformation(state);
+        auto xml = xmlPlist(state);
+        if (xml.empty()) return false;
+        info.state = std::move(xml);
+        return true;
+    }
+#endif
+    return false;
+}
+
 bool PluginDevice::captureState(model::Device& device) const
 {
-    if (device.kind != model::DeviceKind::PluginVst3 || ! device.plugin) return false;
-    const auto* client = instance_->getVST3Client();
-    if (! client) return false;
-    const auto preset = client->getPreset();
-    if (preset.isEmpty()) return false;
-    const auto* bytes = static_cast<const uint8_t*>(preset.getData());
-    return readVstPreset({bytes, bytes + preset.getSize()}, *device.plugin);
+    return device.plugin && capturePluginInfo(*instance_, device.kind, *device.plugin);
 }
 
 PluginDevice::PluginDevice(std::unique_ptr<juce::AudioPluginInstance> instance) : instance_(std::move(instance))

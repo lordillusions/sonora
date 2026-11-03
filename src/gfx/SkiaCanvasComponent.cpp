@@ -228,6 +228,15 @@ void SkiaCanvasComponent::updateCursor()
             }
             setMouseCursor(*scrubCursor_);
             break;
+        case ui::Cursor::Zoom:
+            if (! zoomCursor_)
+            {
+                constexpr int px = gfx::brand::zoomCursorSize * 2;
+                const auto image = gfx::brand::renderImage(px, px, 2.0f, [](SkCanvas& c) { gfx::brand::drawZoomCursor(c); });
+                zoomCursor_.emplace(juce::ScaledImage(image, 2.0), juce::Point<int>(gfx::brand::zoomCursorHotSpotX, gfx::brand::zoomCursorHotSpotY));
+            }
+            setMouseCursor(*zoomCursor_);
+            break;
         case ui::Cursor::Default: setMouseCursor(juce::MouseCursor::NormalCursor); break;
     }
     if (wasBusy && isMouseOver()) juce::Desktop::getInstance().getMainMouseSource().forceMouseCursorUpdate();

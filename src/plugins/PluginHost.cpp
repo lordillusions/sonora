@@ -1,5 +1,6 @@
 #include "plugins/PluginHost.h"
 
+#include "plugins/Vst2Bank.h"
 #include "plugins/Vst3PresetBuilder.h"
 #include "core/AppDataFolder.h"
 
@@ -128,7 +129,7 @@ void PluginHost::scan(bool includeAu, const std::function<void(float, const juce
     {
         auto* format = formatManager_.getFormat(i);
         const auto formatName = format->getName();
-        if (formatName != "VST3" && ! (includeAu && formatName == "AudioUnit"))
+        if (formatName != "VST3" && formatName != "VST" && ! (includeAu && formatName == "AudioUnit"))
             continue;
 
         const auto blacklisted = knownPlugins_.getBlacklistedFiles();
@@ -206,8 +207,18 @@ std::optional<juce::PluginDescription> PluginHost::findMatch(const model::Plugin
     switch (kind)
     {
         case model::DeviceKind::PluginVst3:
-        case model::DeviceKind::PluginVst2:
             return byName("VST3");
+        case model::DeviceKind::PluginVst2:
+        {
+            // PLG-15: the VST2 build itself (full state), by unique id, then name; else the VST3 build (PLG-5).
+            if (info.vst2UniqueId != 0)
+                for (const auto& d : types)
+                    if (d.pluginFormatName == "VST" && (d.uniqueId == (int) info.vst2UniqueId || d.deprecatedUid == (int) info.vst2UniqueId))
+                        return d;
+            if (auto vst2 = byName("VST"))
+                return vst2;
+            return byName("VST3");
+        }
         case model::DeviceKind::PluginAu:
         {
             // JUCE AU identifiers look like "AudioUnit:Synths/aumu,XXXX,YYYY".
@@ -221,7 +232,7 @@ std::optional<juce::PluginDescription> PluginHost::findMatch(const model::Plugin
                     return d;
             if (auto vst3 = byName("VST3"))
                 return vst3; // fall back to the VST3 build of the same plugin
-            return std::nullopt;
+            return byName("VST");
         }
         case model::DeviceKind::Native:
         case model::DeviceKind::Rack:
@@ -325,9 +336,23 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance(const juce
         // JUCE's AU wrapper accepts in setStateInformation(). Verify with real plugins.
         instance->setStateInformation(src.state.data(), (int) src.state.size());
     }
+    else if (kindInSet == model::DeviceKind::PluginVst2 && desc.pluginFormatName == "VST")
+    {
+        // PLG-15: Live's <VstPreset> as the FXB bank JUCE's VST2 host reads, then the program Live had selected.
+        if (! src.state.empty())
+        {
+            const auto bank = buildVst2Bank(src, (int32_t) src.vst2UniqueId);
+            if (bank.empty())
+                error = desc.name + ": VST2 state layout not understood, loaded with default settings";
+            else
+                instance->setStateInformation(bank.data(), (int) bank.size());
+        }
+        if (src.vst2ProgramNumber > 0 && src.vst2ProgramNumber < instance->getNumPrograms())
+            instance->setCurrentProgram(src.vst2ProgramNumber);
+    }
     else if (kindInSet == model::DeviceKind::PluginVst2)
     {
-        error = desc.name + ": VST2 state cannot be migrated yet, loaded with default settings (PLG-5)";
+        error = desc.name + ": VST2 state cannot be migrated to the VST3 build, loaded with default settings (PLG-5)";
     }
     lastStateMs_ = juce::Time::getMillisecondCounterHiRes() - t1;
     return instance;

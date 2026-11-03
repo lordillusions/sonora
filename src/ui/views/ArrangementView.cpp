@@ -709,6 +709,34 @@ void ArrangementView::showWaveformZoomMenu()
     menu.showMenuAsync(juce::PopupMenu::Options(), [pick](int result) { if (result > 0) pick(result - 1); });
 }
 
+bool ArrangementView::inBeatRuler(float x, float y) const
+{
+    // Between the overview and the scrub strip (locators and the loop brace start at 31, see paintLocators / loopZoneAt).
+    return x >= 0 && x < timelineArea().w && y >= overviewRect().bottom() + 1 && y < 31;
+}
+
+double ArrangementView::arrangementEndBeat() const
+{
+    const auto& x = ctx();
+    double end = beatsPerBar();
+    if (! x.song) return end;
+    for (const auto& track : x.song->tracks)
+        for (const auto& clip : track.arrangementClips) end = std::max(end, clip.currentEnd);
+    if (x.song->loopOn) end = std::max(end, x.song->loopStart + x.song->loopLength);
+    return end;
+}
+
+void ArrangementView::zoomToWholeArrangement()
+{
+    auto& x = ctx();
+    widthOptimized_ = false;
+    x.scrollBeats = 0;
+    x.pixelsPerBeat = std::clamp((timelineArea().w - 12) / arrangementEndBeat(), 0.01, 2400.0);
+    if (x.transport && x.transport->isPlaying()) x.followPaused = true;
+    layout();
+    repaint();
+}
+
 void ArrangementView::optimizeWidth()
 {
     auto& x = ctx();
@@ -720,12 +748,8 @@ void ArrangementView::optimizeWidth()
     else
     {
         savedPixelsPerBeat_ = x.pixelsPerBeat; savedScrollBeats_ = x.scrollBeats;
-        double end = beatsPerBar();
-        for (const auto& track : x.song->tracks)
-            for (const auto& clip : track.arrangementClips) end = std::max(end, clip.currentEnd);
-        if (x.song->loopOn) end = std::max(end, x.song->loopStart + x.song->loopLength);
         x.scrollBeats = 0;
-        x.pixelsPerBeat = std::clamp((timelineArea().w - 12) / end, 0.01, 2400.0);
+        x.pixelsPerBeat = std::clamp((timelineArea().w - 12) / arrangementEndBeat(), 0.01, 2400.0);
     }
     widthOptimized_ = ! widthOptimized_;
     repaint();
@@ -1686,6 +1710,8 @@ Cursor ArrangementView::cursorAt(float x, float y) const
     // The loop brace: its ends resize (the resize cursor shows it), its body moves it.
     if (const auto zone = loopDrag_ != LoopDrag::None ? loopDrag_ : loopZoneAt(x, y); zone != LoopDrag::None)
         return zone == LoopDrag::Move ? Cursor::Move : Cursor::ResizeHorizontal;
+    // UI-62: the bar-number row is the beat-time ruler: a magnifying glass (drag zooms and scrolls).
+    if ((rulerZoom_.active && ! draggingOverview_) || (! draggingRuler_ && inBeatRuler(x, y))) return Cursor::Zoom;
     // UI-52: the rest of the ruler is the scrub area (click plays from there): Live's speaker cursor.
     if (draggingRuler_ || (y < ctx().theme.metrics.arrangementRulerHeight && x < timelineArea().w && ! overviewRect().reduced(-1).contains(x, y)))
         return Cursor::Scrub;
@@ -1802,10 +1828,29 @@ void ArrangementView::mouseDown(const MouseEvent& e)
         return;
     }
 
+    rulerZoom_ = {};
     if (e.y < m.arrangementRulerHeight && overviewRect().reduced(-1).contains(e.x, e.y))
     {
+        // Live's Overview: drag left/right scrolls, up/down zooms; double-click shows the whole Arrangement.
+        if (e.clicks >= 2) { zoomToWholeArrangement(); return; }
         draggingOverview_ = true;
+        rulerZoom_ = {true, e.y, x.pixelsPerBeat, 0.0};
         scrollToOverview(e.x);
+        return;
+    }
+    if (inBeatRuler(e.x, e.y) && ! e.shift)
+    {
+        // UI-62: Live's beat-time ruler. Double-click: the time selection fills the view, else the whole Arrangement.
+        x.selectedLocator = -1;
+        if (x.transport && x.transport->isPlaying()) x.followPaused = true; // clicking the beat-time ruler pauses Follow
+        if (e.clicks >= 2)
+        {
+            if (x.arrangementSelection.active && x.arrangementSelection.end > x.arrangementSelection.start) zoomTimeSelection(false);
+            else zoomToWholeArrangement();
+            return;
+        }
+        rulerZoom_ = {true, e.y, x.pixelsPerBeat, xToBeat(e.x)};
+        repaint();
         return;
     }
     if (const int id = e.y < m.arrangementRulerHeight ? locatorAt(e.x, e.y) : -1; id >= 0)
@@ -2212,9 +2257,25 @@ void ArrangementView::mouseDrag(const MouseEvent& e)
         repaint();
         return;
     }
+    // UI-62: dragging down zooms in, up zooms out (x2 per 48 px, like Live's feel); the grabbed beat stays under the pointer,
+    // so dragging sideways scrolls. The overview keeps its own horizontal mapping.
+    const auto zoomedPixelsPerBeat = [&] {
+        const double fit = timelineArea().w / std::max(1.0, arrangementEndBeat() * 1.5);
+        return std::clamp(rulerZoom_.startPixelsPerBeat * std::exp2((e.y - rulerZoom_.startY) / 48.0), std::min(0.25, fit), 2400.0);
+    };
     if (draggingOverview_)
     {
+        if (std::abs(e.y - rulerZoom_.startY) > 2) { widthOptimized_ = false; x.pixelsPerBeat = zoomedPixelsPerBeat(); }
         scrollToOverview(e.x);
+        return;
+    }
+    if (rulerZoom_.active)
+    {
+        widthOptimized_ = false;
+        x.pixelsPerBeat = zoomedPixelsPerBeat();
+        x.scrollBeats = std::max(0.0, rulerZoom_.anchorBeat - e.x / x.pixelsPerBeat);
+        layout();
+        repaint();
         return;
     }
     if (locatorDrag_.id >= 0)
@@ -2315,6 +2376,7 @@ void ArrangementView::mouseUp(const MouseEvent& e)
     draggingWaveformZoom_ = false;
     selectingTime_ = false;
     draggingOverview_ = false;
+    rulerZoom_ = {};
     if (laneResize_ >= 0)
     {
         laneResize_ = -1;

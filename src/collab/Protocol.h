@@ -15,7 +15,8 @@
 namespace sonora::collab
 {
 
-inline constexpr uint32_t protocolVersion = 2; // 2 (COL-3c): deflated snapshot, commit and intent bodies
+inline constexpr uint32_t protocolVersion = 3; // 2 (COL-3c): deflated snapshot, commit and intent bodies;
+                                                // 3 (PLG-15): model codec 4 (VST2 preset fields)
 inline constexpr size_t maxNameLength = 64;
 
 enum class Role : uint8_t

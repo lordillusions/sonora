@@ -31,7 +31,8 @@ enum class Cursor
     ResizeHorizontal, // left/right arrows: a vertical divider
     ResizeVertical,   // up/down arrows: a horizontal divider
     Move,             // a selected Arrangement region can be dragged as one block
-    Scrub             // speaker: click to play from here (the Arrangement ruler's scrub area)
+    Scrub,            // speaker: click to play from here (the Arrangement ruler's scrub area)
+    Zoom              // magnifying glass: drag up/down zooms, left/right scrolls (the Arrangement beat-time ruler)
 };
 
 struct MouseEvent

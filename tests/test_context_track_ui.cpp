@@ -323,7 +323,8 @@ TEST_CASE("arrangement loop brace: resize cursor on its ends, move cursor on its
     CHECK(rig.arrangement->cursorAt(4 * 20 + 1, y) == ui::Cursor::ResizeHorizontal);
     CHECK(rig.arrangement->cursorAt(12 * 20 - 1, y) == ui::Cursor::ResizeHorizontal);
     CHECK(rig.arrangement->cursorAt(8 * 20, y) == ui::Cursor::Move);
-    CHECK(rig.arrangement->cursorAt(8 * 20, 24) == ui::Cursor::Scrub); // the numbers row scrubs: speaker cursor
+    CHECK(rig.arrangement->cursorAt(8 * 20, 24) == ui::Cursor::Zoom);  // the numbers row is the beat-time ruler (UI-62)
+    CHECK(rig.arrangement->cursorAt(8 * 20, 33) == ui::Cursor::Scrub); // below it, above the brace: the scrub area
     CHECK(rig.arrangement->cursorAt(8 * 20, 8) == ui::Cursor::Default); // the overview strip above it
     CHECK(rig.arrangement->cursorAt(20 * 20, y) == ui::Cursor::Scrub);  // the brace strip outside the brace too
     CHECK(rig.arrangement->cursorAt(8 * 20, rig.ctx.theme.metrics.arrangementRulerHeight + 30) != ui::Cursor::Scrub);
@@ -345,7 +346,7 @@ TEST_CASE("arrangement Follow: scrolling away while playing pauses it; the scrub
     const double looked = rig.ctx.scrollBeats;
     moveTo(800); CHECK_NEAR(rig.ctx.scrollBeats, looked, 1e-9); // no pulling back to the playhead
 
-    ui::MouseEvent click; click.x = 100; click.y = 24; // the scrub area
+    ui::MouseEvent click; click.x = 100; click.y = 33; // the scrub area (below the numbers, UI-62)
     rig.arrangement->mouseDown(click); rig.arrangement->mouseUp(click);
     CHECK(! rig.ctx.followPaused);
 

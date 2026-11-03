@@ -682,6 +682,25 @@ void drawScrubCursor(SkCanvas& canvas)
     canvas.drawPath(speaker, p);
 }
 
+void drawZoomCursor(SkCanvas& canvas)
+{
+    const float cx = (float) zoomCursorHotSpotX, cy = (float) zoomCursorHotSpotY, r = 6.0f;
+    SkPathBuilder b;
+    b.addCircle(cx, cy, r);
+    b.moveTo(cx + r * 0.72f, cy + r * 0.72f).lineTo(21.0f, 21.0f); // handle
+    const auto glass = b.detach();
+    SkPaint p;
+    p.setAntiAlias(true);
+    p.setStyle(SkPaint::kStroke_Style);
+    p.setStrokeCap(SkPaint::kRound_Cap);
+    p.setColor(SK_ColorWHITE);
+    p.setStrokeWidth(4.4f);
+    canvas.drawPath(glass, p);
+    p.setColor(SkColorSetRGB(0x10, 0x10, 0x10));
+    p.setStrokeWidth(2.0f);
+    canvas.drawPath(glass, p);
+}
+
 std::string markSvg(bool onIcon)
 {
     if (! onIcon)

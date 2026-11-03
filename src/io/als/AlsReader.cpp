@@ -440,8 +440,16 @@ PluginInfo readPluginInfo(const XmlElement* desc, DeviceKind& kindOut)
         info.path = str(v2, "Path").toStdString();
         info.vst2UniqueId = (int64_t) num(v2, "UniqueId");
         info.isInstrument = integer(v2, "Category", 0) == 2; // TODO(ALS-7): confirm Category semantics
-        if (const auto* buf = at(v2, "Preset/VstPreset/Buffer"))
-            info.state = decodeHexBlob(buf->getAllSubText().toStdString());
+        if (const auto* preset = at(v2, "Preset/VstPreset"))
+        {
+            info.vst2PresetType = (uint32_t) (int64_t) num(preset, "Type");
+            info.vst2ProgramCount = integer(preset, "ProgramCount", 0);
+            info.vst2ParameterCount = integer(preset, "ParameterCount", 0);
+            info.vst2ProgramNumber = integer(preset, "ProgramNumber", 0);
+            info.vst2PluginVersion = integer(preset, "PluginVersion", 0);
+            if (const auto* buf = preset->getChildByName("Buffer"))
+                info.state = decodeHexBlob(buf->getAllSubText().toStdString());
+        }
     }
     else if (const auto* v3 = desc->getChildByName("Vst3PluginInfo"))
     {

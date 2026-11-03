@@ -19,10 +19,10 @@ for starting new tracks, especially electronic music, and it can also open and s
 > breaks: the idea is to build it together with the people who use it.
 
 - Website: <https://sonoradaw.com>
-- Latest version: **0.1.5** — [macOS](https://github.com/lordillusions/sonora/releases/download/v0.1.5/Sonora-0.1.5.dmg) ·
-  [Windows](https://github.com/lordillusions/sonora/releases/download/v0.1.5/Sonora-0.1.5-windows-x64-setup.exe) ·
-  [Linux .deb](https://github.com/lordillusions/sonora/releases/download/v0.1.5/sonora_0.1.5_amd64.deb) ·
-  [AppImage](https://github.com/lordillusions/sonora/releases/download/v0.1.5/Sonora-0.1.5-x86_64.AppImage)
+- Latest version: **0.1.6** — [macOS](https://github.com/lordillusions/sonora/releases/download/v0.1.6/Sonora-0.1.6.dmg) ·
+  [Windows](https://github.com/lordillusions/sonora/releases/download/v0.1.6/Sonora-0.1.6-windows-x64-setup.exe) ·
+  [Linux .deb](https://github.com/lordillusions/sonora/releases/download/v0.1.6/sonora_0.1.6_amd64.deb) ·
+  [AppImage](https://github.com/lordillusions/sonora/releases/download/v0.1.6/Sonora-0.1.6-x86_64.AppImage)
 - Older downloads: [Releases](https://github.com/lordillusions/sonora/releases)
 - Everything it does today: [docs/ROADMAP.md](docs/ROADMAP.md)
 - User guide: [docs/UI_GUIDE.md](docs/UI_GUIDE.md)
@@ -32,7 +32,7 @@ for starting new tracks, especially electronic music, and it can also open and s
 - Arrangement and Session views, MIDI and audio editing, warping, automation, racks, groups and returns.
 - Built-in instruments, including **Sonora Prism** (also available as a VST3 plug-in for other hosts) and
   **Sonora Resynth**.
-- VST3 and Audio Unit plug-ins, MIDI controllers and MIDI learn.
+- VST3, VST2 and Audio Unit plug-ins, MIDI controllers and MIDI learn.
 - Real-time collaboration over the internet or the local network.
 - A built-in assistant, and an MCP server so external agents can work on the open project, every change undoable.
 - Updates delivered as small delta patches.
@@ -69,7 +69,8 @@ your macOS version, what you did, and a small set that shows the problem when yo
 ## License and trademarks
 
 Sonora is licensed under the GNU Affero General Public License v3.0 or later (see [LICENSE](LICENSE)); it is built
-with JUCE under its AGPL option.
+with JUCE under its AGPL option. VST2 hosting uses FST (git.iem.at/zmoelnig/FST, GPL-3.0-or-later), interface headers
+written without Steinberg's SDK. VST is a trademark of Steinberg Media Technologies GmbH.
 
 Ableton and Live are trademarks of Ableton AG. Sonora is an independent project, not affiliated with or endorsed
 by Ableton. Sonora contains no Ableton code or content; it reads and writes

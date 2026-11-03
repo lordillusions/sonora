@@ -17,9 +17,10 @@
 //        [--text-sweep <hostId>=<2..4097 points>] ... (active hosted controller text, no writes)
 //        [--native-interfaces] (opt-in public VST3 method module-relative offsets on macOS)
 //        inspect/restore isolated instances and export state/audio (60 s watchdog; editor 180 s)
-//   plugin_probe <set.als> [--render]                                  for every plugin in the set:
+//   plugin_probe <set.als> [--render] [--params]                       for every plugin in the set:
 //        match against the cache, instantiate, restore Live's saved state, report the
-//        result, and (with --render) process one second of audio to check it runs.
+//        result, and (with --render) process one second of audio to check it runs. --params prints the first restored
+//        parameter values and whether capturing the state again gives back what the set stored (VST2/AU, PLG-15).
 //
 // Scan/list/set modes share the stable app's cache (~/Library/Application Support/Sonora/PluginCache.xml).
 // --data-folder "Sonora Nightly" (any position) uses another app's data folder instead (COM-4c, core/AppDataFolder.h).
@@ -27,6 +28,7 @@
 
 #include "core/AppDataFolder.h"
 #include "io/als/AlsReader.h"
+#include "plugins/PluginDevice.h"
 #include "plugins/PluginHost.h"
 #include "plugins/Vst3PresetBuilder.h"
 #include "plugins/SerumState.h"
@@ -1257,7 +1259,7 @@ void collect(const std::vector<model::Device>& devices, std::vector<const model:
     }
 }
 
-void probeSet(plugins::PluginHost& host, const juce::File& file, bool render)
+void probeSet(plugins::PluginHost& host, const juce::File& file, bool render, bool params)
 {
     auto r = io::loadAls(file);
     if (! r)
@@ -1312,6 +1314,28 @@ void probeSet(plugins::PluginHost& host, const juce::File& file, bool render)
             std::printf(" rendered peak=%.3f", (double) peak);
         }
         std::printf("\n");
+        if (params)
+        {
+            std::printf("      ");
+            for (int i = 0; i < std::min(8, inst->getParameters().size()); ++i)
+                std::printf(" %s=%.3f", inst->getParameters()[i]->getName(12).toRawUTF8(), (double) inst->getParameters()[i]->getValue());
+            model::PluginInfo captured = *d->plugin;
+            if (plugins::capturePluginInfo(*inst, d->kind, captured))
+            {
+                size_t differing = std::max(captured.state.size(), d->plugin->state.size()) - std::min(captured.state.size(), d->plugin->state.size());
+                for (size_t i = 0; i < std::min(captured.state.size(), d->plugin->state.size()); ++i)
+                    differing += captured.state[i] != d->plugin->state[i];
+                const auto nonZero = (size_t) std::count_if(captured.state.begin(), captured.state.end(), [](uint8_t b) { return b != 0; });
+                std::printf("\n       captured %zu B (%zu non-zero), %zu B differ from the stored state", captured.state.size(), nonZero, differing);
+                // A restore that did nothing captures the plug-in's defaults: compare with a fresh instance.
+                juce::String freshError;
+                model::PluginInfo defaults = *d->plugin;
+                if (auto fresh = host.formats().createPluginInstance(*match, 48000.0, 512, freshError);
+                    fresh && plugins::capturePluginInfo(*fresh, d->kind, defaults))
+                    std::printf(", restore %s the defaults", defaults.state == captured.state ? "KEPT" : "changed");
+            }
+            std::printf("\n");
+        }
         ++ok;
     }
     std::printf("\n%d / %zu plugins instantiated\n", ok, plugs.size());
@@ -1598,7 +1622,13 @@ static int runProbeCommand(int argc, char** argv)
     }
     else
     {
-        probeSet(host, juce::File(juce::String::fromUTF8(argv[1])), argc > 2 && juce::String(argv[2]) == "--render");
+        bool render = false, params = false;
+        for (int i = 2; i < argc; ++i)
+        {
+            render = render || juce::String(argv[i]) == "--render";
+            params = params || juce::String(argv[i]) == "--params";
+        }
+        probeSet(host, juce::File(juce::String::fromUTF8(argv[1])), render, params);
     }
     return 0;
 }
