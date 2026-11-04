@@ -73,7 +73,9 @@ are **off**. It logs `[sonora] updates: off, Info.plist has no SUFeedURL/SUPubli
 
 One-time prerequisites for the maintainer:
 
-1. **EdDSA key**: run `third_party/sparkle/bin/generate_keys` once. It stores the private key in the login keychain and
+Releases normally come from CI (see "Releases from CI"). By hand, on a maintainer's Mac:
+
+1. **EdDSA key**: run `third_party/sparkle/bin/generate_keys` once (done 2026-11-04; its public key is in `updates.env`). It stores the private key in the login keychain and
    prints the public key for `--public-key`. Back up the private key with `generate_keys -x` to offline storage.
    Losing it means users cannot verify future updates.
 2. **Developer ID Application** certificate in the keychain for `--sign-identity`.
@@ -99,9 +101,33 @@ Each GitHub Release has its own URL prefix, but `generate_appcast` rewrites ever
 `pin_urls.py` restores the URL each file was first published under. Without it, a stable user would hit a 404 when the
 newest item is beta. The e2e test checks this.
 
-The appcast itself needs one fixed URL. `releases/latest/download/appcast.xml` only works if every stable release
-re-attaches the appcast, and a beta (pre-release) is never "latest". Still to choose: GitHub Pages, a fixed `appcast`
-release tag re-uploaded each time, or another static host.
+The appcast itself needs one fixed URL: **`https://sonoradaw.com/appcast.xml`** (COM-4b, from 0.1.7). It is
+`site/appcast.xml`, served by the website's GitHub Pages. `releases/latest/download/appcast.xml` was not used: a beta
+(pre-release) is never "latest".
+
+## Releases from CI
+
+Since 0.1.7 every Mac release updates itself. The public repository's `installers` workflow does it on each `v*` tag:
+
+| Piece | Where |
+|---|---|
+| Feed URL and public key compiled into the app | `packaging/macos/updates.env` (committed, public). Never change either: installed copies would stop updating. |
+| Private EdDSA key | Secret `SPARKLE_ED_PRIVATE_KEY` of `lordillusions/sonora`, exported with `generate_keys -x`. The maintainer's login keychain holds the same key, with an offline backup. |
+| Signing, zip, deltas, appcast | `make_release.sh --app <built app> --previous-feed <feed>` in the macOS job. |
+| Previous releases for deltas | `fetch_previous_updates.py` downloads the live appcast and the full zips of its 3 newest stable items. No feed yet (404) starts a new appcast. |
+| Published | The release gets `Sonora-X.Y.Z.zip`, `SonoraX.Y.Z-A.B.C.delta` files, `Sonora-X.Y.Z.html` (Sparkle's release note: a link to the GitHub release), `Sonora-X.Y.Z-update.sha256` and `appcast.xml`. |
+| Live | After the release is published: copy its `appcast.xml` to `site/appcast.xml` and sync the website (RELEASING.md step 8). `check_downloads.sh` checks the live feed and verifies the newest archive's signature with the public key (`verify_ed_signature.swift`). |
+
+- A tag in `lordillusions/sonora` without the secret fails the macOS job: a release built without the feed could never
+  be updated again.
+- Manual runs and forks build with updates off.
+- The appcast keeps the 3 newest versions (`generate_appcast` default). The newest carries deltas from the 3 before it.
+  Releases are pruned to 5, so every file the appcast names still exists.
+- Builds are still ad hoc signed. Sparkle checks the EdDSA signature, which does not need a Developer ID (verified in
+  the local end-to-end test below). Developer ID signing and notarization remain COM-4b, for Gatekeeper on first install.
+- Tested 2026-11-04 with dummy apps, a throwaway key and a local server: five releases in a row, each from an empty
+  folder like CI. Every item stayed at its own release URL, deltas were made from the 3 previous versions, and every
+  archive and delta matched its length and signature.
 
 ## Local end-to-end test (no real keys, nothing published)
 

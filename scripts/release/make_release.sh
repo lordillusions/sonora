@@ -10,6 +10,8 @@
 # The archives folder (default dist/<channel>/) keeps every previous release zip and appcast.xml: generate_appcast reads
 # them to write deltas from the last --max-deltas versions to the new one and moves releases it drops into old_updates/.
 # Keep that folder between releases (it is the input for the next deltas), but do not upload old_updates/.
+# CI (.github/workflows/installers.yml) starts empty: --previous-feed downloads the live appcast and the latest zips first,
+# and --app packages the app the workflow already built.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 ROOT="$(pwd)"
@@ -32,6 +34,9 @@ Options (environment variable in brackets):
   --max-deltas N            delta updates from the N latest previous versions (default 3)
   --phased-rollout SECONDS  staged rollout interval for this item (default: none)
   --build-dir DIR           CMake build directory (default build-release-app)
+  --app PATH                package this already built app instead of building (its feed and key must match)
+  --previous-feed URL       first download URL's appcast + the latest --max-deltas zips into the archives folder
+  --product-link URL        page Sparkle offers when an update cannot be installed in the app
   --config CFG              Release (default) or Debug
   --local-test              local update test build: plain-HTTP localhost feed, SONORA_UPDATE_AUTOTEST hook
   --bundle-id ID            bundle id override (local tests)
@@ -39,7 +44,7 @@ EOF
 }
 
 VERSION="" BUILD="" CHANNEL="stable" PREFIX="" ARCHIVES="" NOTES="" MAX_DELTAS=3 PHASED="" BUILD_DIR="build-release-app"
-CONFIG="Release" LOCAL_TEST=OFF BUNDLE_ID=""
+CONFIG="Release" LOCAL_TEST=OFF BUNDLE_ID="" PREBUILT="" PREVIOUS_FEED="" PRODUCT_LINK=""
 FEED_URL="${SONORA_UPDATE_FEED_URL:-}" PUBLIC_KEY="${SONORA_UPDATE_PUBLIC_KEY:-}" ED_KEY_FILE="${SONORA_ED_KEY_FILE:-}"
 IDENTITY="${SONORA_SIGN_IDENTITY:--}" NOTARY="${SONORA_NOTARY_PROFILE:-}"
 while [ $# -gt 0 ]; do
@@ -61,6 +66,9 @@ while [ $# -gt 0 ]; do
         --config) CONFIG="$2"; shift 2 ;;
         --local-test) LOCAL_TEST=ON; shift ;;
         --bundle-id) BUNDLE_ID="$2"; shift 2 ;;
+        --app) PREBUILT="$2"; shift 2 ;;
+        --previous-feed) PREVIOUS_FEED="$2"; shift 2 ;;
+        --product-link) PRODUCT_LINK="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -81,16 +89,30 @@ ARCHIVES="${ARCHIVES:-$ROOT/dist/$APP_CHANNEL}"
 mkdir -p "$ARCHIVES"
 ARCHIVES="$(cd "$ARCHIVES" && pwd)"
 
-echo "== build $PRODUCT $VERSION ($BUILD), $CONFIG, channel $CHANNEL"
-cmake -S "$ROOT" -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE="$CONFIG" \
-    -DSONORA_APP_VERSION="$VERSION" -DSONORA_APP_BUILD="$BUILD" -DSONORA_UPDATE_CHANNEL="$APP_CHANNEL" \
-    -DSONORA_UPDATE_FEED_URL="$FEED_URL" -DSONORA_UPDATE_PUBLIC_KEY="$PUBLIC_KEY" \
-    -DSONORA_UPDATE_ALLOW_LOCAL_HTTP="$LOCAL_TEST" -DSONORA_BUNDLE_ID="$BUNDLE_ID" -DSONORA_WITH_SPARKLE=ON >/dev/null
-cmake --build "$BUILD_DIR" --target Sonora
-BUILT="$BUILD_DIR/src/Sonora_artefacts/$CONFIG/$PRODUCT.app"
+if [ -n "$PREVIOUS_FEED" ]; then
+    echo "== previous releases from $PREVIOUS_FEED"
+    python3 -I "$ROOT/scripts/release/fetch_previous_updates.py" "$PREVIOUS_FEED" "$ARCHIVES" --count "$MAX_DELTAS"
+fi
+
+if [ -n "$PREBUILT" ]; then
+    echo "== package $PREBUILT as $PRODUCT $VERSION ($BUILD), channel $CHANNEL"
+    BUILT="${PREBUILT%/}"
+else
+    echo "== build $PRODUCT $VERSION ($BUILD), $CONFIG, channel $CHANNEL"
+    cmake -S "$ROOT" -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE="$CONFIG" \
+        -DSONORA_APP_VERSION="$VERSION" -DSONORA_APP_BUILD="$BUILD" -DSONORA_UPDATE_CHANNEL="$APP_CHANNEL" \
+        -DSONORA_UPDATE_FEED_URL="$FEED_URL" -DSONORA_UPDATE_PUBLIC_KEY="$PUBLIC_KEY" \
+        -DSONORA_UPDATE_ALLOW_LOCAL_HTTP="$LOCAL_TEST" -DSONORA_BUNDLE_ID="$BUNDLE_ID" -DSONORA_WITH_SPARKLE=ON >/dev/null
+    cmake --build "$BUILD_DIR" --target Sonora
+    BUILT="$BUILD_DIR/src/Sonora_artefacts/$CONFIG/$PRODUCT.app"
+fi
 [ -d "$BUILT/Contents/Frameworks/Sparkle.framework" ] || fail "$BUILT has no embedded Sparkle.framework"
 PLIST="$BUILT/Contents/Info.plist"
-[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")" = "$BUILD" ] || fail "Info.plist CFBundleVersion is not $BUILD"
+plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$PLIST" 2>/dev/null || true; }
+[ "$(plist CFBundleVersion)" = "$BUILD" ] || fail "Info.plist CFBundleVersion is not $BUILD"
+# An archive signed with one key but carrying another (or no feed) would install once and never update again.
+[ "$(plist SUFeedURL)" = "$FEED_URL" ] || fail "Info.plist SUFeedURL is '$(plist SUFeedURL)', expected $FEED_URL"
+[ "$(plist SUPublicEDKey)" = "$PUBLIC_KEY" ] || fail "Info.plist SUPublicEDKey differs from --public-key"
 
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/sonora-release.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
@@ -146,6 +168,7 @@ MARK="$STAGE/mark"; touch "$MARK"; sleep 1
 GEN=("$SPARKLE/bin/generate_appcast" --download-url-prefix "$PREFIX" --maximum-deltas "$MAX_DELTAS" --embed-release-notes
      -o "$ARCHIVES/appcast.xml")
 [ "$CHANNEL" = beta ] && GEN+=(--channel beta)
+[ -n "$PRODUCT_LINK" ] && GEN+=(--link "$PRODUCT_LINK")
 [ -n "$PHASED" ] && GEN+=(--phased-rollout-interval "$PHASED")
 [ -n "$ED_KEY_FILE" ] && GEN+=(--ed-key-file "$ED_KEY_FILE")
 "${GEN[@]}" "$ARCHIVES"

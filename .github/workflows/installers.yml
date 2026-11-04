@@ -1,9 +1,12 @@
 # COM-4/COM-7 installers (docs/INSTALLERS.md):
 #   windows: Release UI build (MSVC, static CRT) + sonora_tests, then Inno Setup -> Sonora-<v>-windows-x64-setup.exe
 #   linux:   ci/linux/Dockerfile, Release UI build -> Sonora-<v>-x86_64.AppImage + sonora_<v>_amd64.deb
-#   macos:   Release app (arm64), ad hoc signed -> Sonora-<v>.dmg, plus the VST3 installers
-#            Sonora-Prism-VST3-<v>.pkg (PLG-11c), Sonora-Curve-LFO-VST3-<v>.pkg (PLG-12b) and Sonora-Hush-VST3-<v>.pkg (PLG-14). Unsigned/not notarized: the signed release is made on
-#            a maintainer's Mac with scripts/release/make_release.sh. Off by default for manual runs (macOS minutes cost 10x).
+#   macos:   Release app (arm64), ad hoc signed -> Sonora-<v>.dmg, plus the VST3 installers. On a tag it also makes the
+#            Sparkle update (COM-4b, docs/UPDATES.md "Releases from CI"): Sonora-<v>.zip, deltas and appcast.xml, signed
+#            with the SPARKLE_ED_PRIVATE_KEY secret; the app carries packaging/macos/updates.env (feed + public key).
+#            Plus the VST3 installers
+#            Sonora-Prism-VST3-<v>.pkg (PLG-11c), Sonora-Curve-LFO-VST3-<v>.pkg (PLG-12b) and Sonora-Hush-VST3-<v>.pkg (PLG-14). Not
+#            Developer ID signed or notarized yet (COM-4b). Off by default for manual runs (macOS minutes cost 10x).
 # A v* tag builds all three and attaches them to a draft GitHub Release; nothing is published automatically.
 # The tag must equal project() in CMakeLists.txt (the version About shows), and the release must carry every file the
 # website links to (site/*.html releases/latest/download/<name>). docs/INSTALLERS.md "Release checks".
@@ -181,24 +184,69 @@ jobs:
     timeout-minutes: 120
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Fetch JUCE, Skia and Sparkle
         run: scripts/bootstrap.sh
 
+      # A tag is a release users install, so it must update itself: a build without the feed could never be updated
+      # again. Other runs (and forks, which have no secret) build with updates off.
+      - name: Updates for this build
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ -n "$SPARKLE_ED_PRIVATE_KEY" ]; then
+            . packaging/macos/updates.env
+            [ -n "$SONORA_UPDATE_PUBLIC_KEY" ] || { echo "::error::packaging/macos/updates.env has no SONORA_UPDATE_PUBLIC_KEY"; exit 1; }
+            { echo "SONORA_UPDATE_FEED_URL=$SONORA_UPDATE_FEED_URL"; echo "SONORA_UPDATE_PUBLIC_KEY=$SONORA_UPDATE_PUBLIC_KEY"; } >> "$GITHUB_ENV"
+            echo "updates on: $SONORA_UPDATE_FEED_URL"
+          elif [ "${GITHUB_REF_TYPE}" = tag ] && [ "$GITHUB_REPOSITORY" = lordillusions/sonora ]; then
+            echo "::error::the SPARKLE_ED_PRIVATE_KEY secret is missing: a release without it never updates (docs/UPDATES.md)"
+            exit 1
+          else
+            echo "updates off in this build (not a tag, or no SPARKLE_ED_PRIVATE_KEY secret)"
+          fi
+
       - name: Release build
         run: |
-          cmake -S . -B build-release-app -G Ninja -DCMAKE_BUILD_TYPE=Release -DSONORA_APP_VERSION="$VERSION" -DSONORA_BUILD_TESTS=OFF
+          cmake -S . -B build-release-app -G Ninja -DCMAKE_BUILD_TYPE=Release -DSONORA_APP_VERSION="$VERSION" -DSONORA_BUILD_TESTS=OFF \
+              -DSONORA_UPDATE_FEED_URL="${SONORA_UPDATE_FEED_URL:-}" -DSONORA_UPDATE_PUBLIC_KEY="${SONORA_UPDATE_PUBLIC_KEY:-}"
           cmake --build build-release-app --target Sonora SonoraPrism_VST3 SonoraCurveLfo_VST3 SonoraHush_VST3
 
       - name: Disk image (ad hoc signed, not notarized)
+        if: env.SONORA_UPDATE_FEED_URL == ''
         run: |
           app=build-release-app/src/Sonora_artefacts/Release/Sonora.app
           codesign --force --sign - "$app/Contents/MacOS/sonora_plugin_scanner"
           codesign --force --sign - "$app"
           packaging/macos/make_dmg.sh "$app" "dist/macos/Sonora-$VERSION.dmg"
           (cd dist/macos && shasum -a 256 *.dmg > "Sonora-$VERSION-macos.sha256")
+
+      # make_release.sh signs the app the same way, makes the dmg, the update zip, deltas from the latest releases in
+      # the live feed, and the new appcast.xml. The appcast goes live when the website is synced (docs/RELEASING.md 8).
+      - name: Disk image and update (ad hoc signed, not notarized)
+        if: env.SONORA_UPDATE_FEED_URL != ''
+        run: |
+          key="$RUNNER_TEMP/sparkle_ed.key"
+          (umask 077 && printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$key")
+          printf '<p>Sonora %s. <a href="https://github.com/%s/releases/tag/v%s">What is new in this version</a>.</p>\n' \
+              "$VERSION" "$GITHUB_REPOSITORY" "$VERSION" > "$RUNNER_TEMP/notes.html"
+          status=0
+          scripts/release/make_release.sh --app build-release-app/src/Sonora_artefacts/Release/Sonora.app \
+              --version "$VERSION" --feed-url "$SONORA_UPDATE_FEED_URL" --public-key "$SONORA_UPDATE_PUBLIC_KEY" \
+              --download-url-prefix "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/" \
+              --previous-feed "$SONORA_UPDATE_FEED_URL" --archives dist/updates --ed-key-file "$key" \
+              --notes "$RUNNER_TEMP/notes.html" --product-link https://sonoradaw.com/download.html || status=$?
+          rm -f "$key"
+          [ "$status" = 0 ] || exit "$status"
+          mkdir -p dist/macos
+          mv "dist/installers/Sonora-$VERSION.dmg" dist/macos/
+          (cd dist/macos && shasum -a 256 *.dmg > "Sonora-$VERSION-macos.sha256")
+          # The update files: the zip, its deltas and their checksums (make_release.sh lists them), and the new feed.
+          for f in $(awk '{ print $2 }' "dist/updates/Sonora-$VERSION.sha256"); do cp "dist/updates/$f" dist/macos/; done
+          cp "dist/updates/Sonora-$VERSION.sha256" "dist/macos/Sonora-$VERSION-update.sha256"
+          cp dist/updates/appcast.xml dist/macos/appcast.xml
+          ls -l dist/macos
 
       - name: VST3 installer package (unsigned, not notarized)
         run: |

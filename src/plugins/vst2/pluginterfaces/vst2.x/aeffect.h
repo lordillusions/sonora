@@ -3,7 +3,7 @@
 // the interface as clean-room headers; scripts/bootstrap.sh fetches it. See docs/adr/0003-plugin-format.md.
 // FST marks opcodes it has not documented yet as deprecated and prints notes; JUCE's host uses a few, so both are quiet.
 #ifndef FST_DONT_DEPRECATE_UNKNOWN
- #define FST_DONT_DEPRECATE_UNKNOWN 1
+ #define FST_DONT_DEPRECATE_UNKNOWN // no value: FST defines it the same way on MSVC
 #endif
 #ifndef FST_QUIET
  #define FST_QUIET 1 // fst-host-layout.patch: no "document origin" notes

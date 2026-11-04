@@ -1,7 +1,8 @@
 # Installers
 
 First-install packages for the three platforms (ROADMAP COM-4k). Updates after the first install are separate:
-Sparkle on macOS ([UPDATES.md](UPDATES.md)); Windows and Linux have no updater yet (COM-4l).
+Sparkle on macOS ([UPDATES.md](UPDATES.md); a tagged CI release also builds the update zip, deltas and appcast); Windows
+and Linux have no updater yet (COM-4l).
 
 | OS | Package | What it installs | Made by |
 |---|---|---|---|
@@ -153,10 +154,11 @@ Autoupdate and Updater.app) is covered by `make_release.sh`. What a maintainer's
    `xcrun notarytool store-credentials sonora-notary --apple-id APPLE_ID --team-id TEAMID` (it prompts for the
    password). Check: `xcrun notarytool history --keychain-profile sonora-notary`. The Command Line Tools are enough
    (`notarytool` and `stapler` are there); full Xcode is not required.
-4. **Sparkle EdDSA key** (updates): `third_party/sparkle/bin/generate_keys` once, then `generate_keys -x FILE` to an
-   offline backup. Its public key goes to `--public-key`. Losing the private key strands every installed copy.
-5. **The appcast URL**, fixed for the life of the app (for example `https://sonoradaw.com/appcast.xml`, served by the
-   site). See [UPDATES.md](UPDATES.md) "Hosting".
+4. **Sparkle EdDSA key** (updates): done 2026-11-04. The maintainer's login keychain holds it, with an offline backup and the
+   CI secret `SPARKLE_ED_PRIVATE_KEY`. Its public key is in `packaging/macos/updates.env`. Losing the private key
+   strands every installed copy.
+5. **The appcast URL**: `https://sonoradaw.com/appcast.xml` (`site/appcast.xml`), fixed for the life of the app. See
+   [UPDATES.md](UPDATES.md) "Hosting".
 6. **Build and sign**, with a new version (the published 0.1.2 image is CI's ad hoc one):
    `scripts/release/make_release.sh --version 0.1.3 --feed-url URL --public-key KEY --download-url-prefix
    https://github.com/lordillusions/sonora/releases/download/v0.1.3/ --sign-identity "Developer ID Application: NAME
