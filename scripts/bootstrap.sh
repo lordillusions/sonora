@@ -24,7 +24,9 @@ fetch_monocypher() {
         "https://github.com/LoupVaillant/Monocypher/releases/download/${MONOCYPHER_VERSION}/monocypher-${MONOCYPHER_VERSION}.tar.gz"
     if (cd "$dir" && { command -v sha256sum >/dev/null && echo "${MONOCYPHER_SHA256}  m.tgz" | sha256sum -c - >/dev/null \
             || echo "${MONOCYPHER_SHA256}  m.tgz" | shasum -a 256 -c - >/dev/null; }); then
-        tar -xzf "$dir/m.tgz" -C "$dir" --strip-components=1 && rm "$dir/m.tgz" && echo "$MONOCYPHER_VERSION" > "$dir/VERSION"
+        # Only the sources and the licence: the docs hold symlinks, which Git Bash's tar cannot create on Windows.
+        tar -xzf "$dir/m.tgz" -C "$dir" --strip-components=1 "monocypher-${MONOCYPHER_VERSION}/src" \
+            "monocypher-${MONOCYPHER_VERSION}/LICENCE.md" && rm "$dir/m.tgz" && echo "$MONOCYPHER_VERSION" > "$dir/VERSION"
     else
         echo "warning: Monocypher checksum mismatch, Linux updates will be off" >&2; rm -rf "$dir"
     fi
