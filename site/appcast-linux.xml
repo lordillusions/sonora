@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>Sonora</title>
+    <item>
+      <title>Sonora 0.1.8</title>
+      <pubDate>Wed, 04 Nov 2026 12:18:58 GMT</pubDate>
+      <link>https://sonoradaw.com/download.html</link>
+      <sparkle:version>0.1.8</sparkle:version>
+      <sparkle:shortVersionString>0.1.8</sparkle:shortVersionString>
+      <description><![CDATA[<p>Sonora 0.1.8. <a href="https://github.com/lordillusions/sonora/releases/tag/v0.1.8">What is new in this version</a>.</p>]]></description>
+      <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.8/Sonora-0.1.8-x86_64.AppImage" length="21699064" type="application/octet-stream" sparkle:os="linux-x64-appimage"
+                 sparkle:edSignature="bDOwSui7i5HALTHtwHsHKRY77ZFmtTPZcZ5wE0seBDvaIWGzBUQFyNYZAZVPGWNeVr9ZMJlq+Gdff+RtZ5a+Bw=="/>
+    </item>
+    <item>
+      <title>Sonora 0.1.8</title>
+      <pubDate>Wed, 04 Nov 2026 12:18:58 GMT</pubDate>
+      <link>https://sonoradaw.com/download.html</link>
+      <sparkle:version>0.1.8</sparkle:version>
+      <sparkle:shortVersionString>0.1.8</sparkle:shortVersionString>
+      <description><![CDATA[<p>Sonora 0.1.8. <a href="https://github.com/lordillusions/sonora/releases/tag/v0.1.8">What is new in this version</a>.</p>]]></description>
+      <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.8/sonora_0.1.8_amd64.deb" length="12752172" type="application/octet-stream" sparkle:os="linux-x64-deb"
+                 sparkle:edSignature="dpT6rAawEMBZk68IZDLyTA/F0mTSbfVIVg20q+QrfblyPNSlief8P2MF07UgUh8jbo049/18Vp2UJCe70wdvDA=="/>
+    </item>
+  </channel>
+</rss>

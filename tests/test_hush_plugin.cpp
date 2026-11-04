@@ -119,6 +119,9 @@ TEST_CASE("hush plugin: the editor takes clicks, keys and wheel through the root
     CHECK(window->getWidth() == 1050); // the reference's default size
     CHECK(window->getHeight() == 621);
     auto& view = window->view();
+    // Menus are checked through lastMenu/lastMenuResult; a real popup needs a desktop window, and JUCE's X11 window
+    // setup writes WM_PROTOCOLS without checking the atom exists, which kills the process on a bare Xvfb (no WM).
+    view.menuHost = nullptr;
     view.setBounds({0, 0, plugin::HushView::kWidth, plugin::HushView::kHeight});
     view.layout();
     const auto click = [&](float x, float y, int clicks = 1) {
