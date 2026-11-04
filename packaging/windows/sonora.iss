@@ -60,6 +60,10 @@ Name: "associate"; Description: "Make Sonora the default app for .als sets"; Gro
 [Files]
 Source: "{#SourceDir}\Sonora.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\sonora_plugin_scanner.exe"; DestDir: "{app}"; Flags: ignoreversion
+; COM-4l: WinSparkle, the updater (only in builds that have it, see src/CMakeLists.txt).
+#if FileExists(AddBackslash(SourceDir) + "WinSparkle.dll")
+Source: "{#SourceDir}\WinSparkle.dll"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 Source: "{#SourceDir}\Resources\*"; DestDir: "{app}\Resources"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Registry]
@@ -77,3 +81,5 @@ Name: "{autodesktop}\Sonora"; Filename: "{app}\Sonora.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\Sonora.exe"; Description: "{cm:LaunchProgram,Sonora}"; Flags: nowait postinstall skipifsilent
+; COM-4l: an update runs this installer with /SILENT after Sonora closed (WinSparkle); start it again as the user.
+Filename: "{app}\Sonora.exe"; Flags: nowait skipifnotsilent runasoriginaluser

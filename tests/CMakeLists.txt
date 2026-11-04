@@ -60,6 +60,7 @@ set(SONORA_TEST_SOURCES
     test_edit.cpp
     test_project.cpp
     test_updates.cpp
+    test_update_feed.cpp ../src/app/UpdateFeed.cpp
     test_control.cpp
     test_device_control.cpp
     test_op.cpp
@@ -85,7 +86,7 @@ if(SONORA_WITH_UI)
 endif()
 
 add_executable(sonora_tests ${SONORA_TEST_SOURCES})
-target_link_libraries(sonora_tests PRIVATE sonora_agent sonora_collab)
+target_link_libraries(sonora_tests PRIVATE sonora_agent sonora_collab sonora_monocypher)
 if(SONORA_WITH_UI)
     target_link_libraries(sonora_tests PRIVATE sonora_ui)
 endif()

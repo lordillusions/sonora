@@ -1,7 +1,7 @@
 #pragma once
-// COM-4: application updates behind a small platform-neutral interface. macOS uses Sparkle 2 (UpdaterSparkle.mm); other
-// platforms and builds without a configured feed get the inert stub (UpdaterStub.cpp) until COM-7 adds Velopack (Windows)
-// or Flatpak (Linux). Everything runs on the message thread, never near the audio callback. See docs/UPDATES.md.
+// COM-4: application updates behind a small platform-neutral interface. macOS uses Sparkle 2 (UpdaterSparkle.mm), Windows
+// WinSparkle (UpdaterWinSparkle.cpp), Linux its own AppImage/.deb updater (UpdaterLinux.cpp, COM-4l); other builds get the
+// inert stub (UpdaterStub.cpp). Everything runs on the message thread, never near the audio callback. See docs/UPDATES.md.
 
 #include "app/UpdatePolicy.h"
 

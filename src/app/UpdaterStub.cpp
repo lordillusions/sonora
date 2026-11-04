@@ -1,5 +1,5 @@
-// COM-4: inert updater for builds without Sparkle (non-Apple platforms, -DSONORA_WITH_SPARKLE=OFF).
-// COM-7 replaces it with Velopack (Windows) or Flatpak (Linux).
+// COM-4: inert updater for builds without an updater backend (-DSONORA_WITH_SPARKLE=OFF on macOS, Windows without
+// third_party/winsparkle, other systems).
 #include "app/Updater.h"
 
 namespace sonora::app

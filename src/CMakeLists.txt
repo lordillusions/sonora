@@ -476,8 +476,30 @@ if (SONORA_WITH_SPARKLE)
         COMMAND ${CMAKE_COMMAND} -E rm -rf $<TARGET_BUNDLE_CONTENT_DIR:Sonora>/Frameworks/Sparkle.framework
         COMMAND ditto ${SONORA_SPARKLE_DIR}/Sparkle.framework $<TARGET_BUNDLE_CONTENT_DIR:Sonora>/Frameworks/Sparkle.framework
         VERBATIM)
+elseif (WIN32 AND EXISTS "${SONORA_THIRD_PARTY_DIR}/winsparkle/include/winsparkle.h")
+    # COM-4l: WinSparkle.dll ships next to Sonora.exe (packaging/windows/sonora.iss); it needs only system DLLs.
+    set(_sonoraWinSparkle "${SONORA_THIRD_PARTY_DIR}/winsparkle")
+    target_sources(Sonora PRIVATE app/UpdaterWinSparkle.cpp)
+    set(_sonoraUpdaterSource app/UpdaterWinSparkle.cpp)
+    target_include_directories(Sonora SYSTEM PRIVATE "${_sonoraWinSparkle}/include")
+    target_link_libraries(Sonora PRIVATE "${_sonoraWinSparkle}/x64/Release/WinSparkle.lib")
+    add_custom_command(TARGET Sonora POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy "${_sonoraWinSparkle}/x64/Release/WinSparkle.dll" "$<TARGET_FILE_DIR:Sonora>/"
+        VERBATIM)
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # COM-4l: AppImage / .deb updates from appcast-linux.xml, signatures checked with Monocypher.
+    target_sources(Sonora PRIVATE app/UpdaterLinux.cpp)
+    set(_sonoraUpdaterSource app/UpdaterLinux.cpp)
 else()
     target_sources(Sonora PRIVATE app/UpdaterStub.cpp)
+endif()
+target_sources(Sonora PRIVATE app/UpdateFeed.cpp)
+target_link_libraries(Sonora PRIVATE sonora_monocypher)
+if (_sonoraUpdaterSource)
+    # Windows and Linux have no Info.plist: the feed and key are compiled into the updater (empty = updates off).
+    set_property(SOURCE ${_sonoraUpdaterSource} APPEND PROPERTY COMPILE_DEFINITIONS
+        "SONORA_UPDATE_FEED_URL_STRING=\"${SONORA_UPDATE_FEED_URL}\"" "SONORA_UPDATE_PUBLIC_KEY_STRING=\"${SONORA_UPDATE_PUBLIC_KEY}\""
+        "SONORA_APP_VERSION_STRING=\"${SONORA_APP_VERSION}\"")
 endif()
 target_compile_options(Sonora PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
 add_dependencies(Sonora sonora_plugin_scanner)

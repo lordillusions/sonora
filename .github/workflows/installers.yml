@@ -90,8 +90,16 @@ jobs:
         shell: bash
         run: scripts/bootstrap.sh
 
+      # COM-4l: a tag builds the WinSparkle updater with the feed and public key; other runs have updates off.
       - name: Configure (Release, UI)
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSONORA_WITH_UI=ON -DSONORA_APP_VERSION="$env:VERSION"
+        shell: bash
+        run: |
+          updates=()
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            . packaging/macos/updates.env
+            updates=(-DSONORA_UPDATE_FEED_URL="$SONORA_UPDATE_FEED_URL_WINDOWS" -DSONORA_UPDATE_PUBLIC_KEY="$SONORA_UPDATE_PUBLIC_KEY")
+          fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSONORA_WITH_UI=ON -DSONORA_APP_VERSION="$VERSION" "${updates[@]}"
 
       # -k 0: report every compile error of a run, not only the first one.
       - name: Build
@@ -112,9 +120,10 @@ jobs:
           [ -x "$iscc" ] || { choco install innosetup -y --no-progress; }
           app="$(dirname "$(find build/src/Sonora_artefacts -name Sonora.exe | head -1)")"
           ls -la "$app" "$app/Resources"
-          # The installer ships only the two executables: they must not need OpenSSL or the VC++ runtime DLLs, which
-          # are on this runner's PATH but not on a user's machine (0.1.1 asked for libcrypto-3-x64.dll).
-          for exe in "$app/Sonora.exe" "$app/sonora_plugin_scanner.exe"; do
+          # The installer ships the two executables and WinSparkle.dll (COM-4l): none may need OpenSSL or the VC++
+          # runtime DLLs, which are on this runner's PATH but not on a user's machine (0.1.1 asked for libcrypto-3-x64.dll).
+          [ -f "$app/WinSparkle.dll" ] || { echo "::error::WinSparkle.dll is missing next to Sonora.exe (scripts/bootstrap.sh)"; exit 1; }
+          for exe in "$app/Sonora.exe" "$app/sonora_plugin_scanner.exe" "$app/WinSparkle.dll"; do
             deps="$(dumpbin -nologo -dependents "$(cygpath -w "$exe")")"
             echo "$deps"
             if echo "$deps" | grep -iE "libcrypto|libssl|vcruntime|msvcp|ucrtbased"; then
@@ -152,13 +161,20 @@ jobs:
       - name: Build the container
         run: docker build -t sonora-linux ci/linux
 
+      # COM-4l: a tag builds the Linux updater with the feed and public key; other runs have updates off.
       - name: Release build + AppImage + .deb
         run: |
+          feed="" key=""
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            . packaging/macos/updates.env
+            feed="$SONORA_UPDATE_FEED_URL_LINUX" key="$SONORA_UPDATE_PUBLIC_KEY"
+          fi
           docker run --rm -v "$PWD":/src -w /src \
             -e SONORA_THIRD_PARTY_DIR=/src/third_party \
             -e SONORA_BUILD_ROOT=/src \
             -e SONORA_JOBS=4 \
             -e SONORA_APP_VERSION="${{ needs.version.outputs.version }}" \
+            -e SONORA_UPDATE_FEED_URL="$feed" -e SONORA_UPDATE_PUBLIC_KEY="$key" \
             sonora-linux ci/linux/build.sh package
 
       - name: Install the .deb and start the app on a clean Ubuntu
@@ -298,6 +314,22 @@ jobs:
           cp "Sonora-$VERSION-windows-x64-setup.exe" Sonora-Windows-x64-setup.exe
           cp "Sonora-$VERSION-x86_64.AppImage" Sonora-Linux-x86_64.AppImage
           cp "sonora_${VERSION}_amd64.deb" Sonora-Linux-amd64.deb
+      # COM-4l: appcast-windows.xml (WinSparkle) and appcast-linux.xml (AppImage + .deb), signed with the macOS key.
+      # The script checks every signature against updates.env's public key, so a mismatched secret fails here.
+      - name: Update feeds for Windows and Linux
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          [ -n "$SPARKLE_ED_PRIVATE_KEY" ] || { echo "::error::the SPARKLE_ED_PRIVATE_KEY secret is missing"; exit 1; }
+          . src/packaging/macos/updates.env
+          key="$RUNNER_TEMP/sparkle_ed.key"
+          (umask 077 && printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$key")
+          status=0
+          python3 -I src/scripts/release/write_platform_feeds.py --version "$VERSION" --dist dist --key-file "$key" \
+              --public-key "$SONORA_UPDATE_PUBLIC_KEY" --repo "$GITHUB_REPOSITORY" || status=$?
+          rm -f "$key"
+          exit "$status"
       # The website's download buttons must never point at a file the release lacks (a 404 for a visitor).
       - name: Every file the website links to is in this release
         run: |

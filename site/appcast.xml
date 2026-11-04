@@ -1,0 +1,18 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Sonora</title>
+        <item>
+            <title>0.1.7</title>
+            <pubDate>Wed, 04 Nov 2026 11:11:09 +0000</pubDate>
+            <link>https://sonoradaw.com/download.html</link>
+            <sparkle:version>0.1.7</sparkle:version>
+            <sparkle:shortVersionString>0.1.7</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<p>Sonora 0.1.7. <a href="https://github.com/lordillusions/sonora/releases/tag/v0.1.7">What is new in this version</a>.</p>
+]]></description>
+            <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.7/Sonora-0.1.7.zip" length="17686474" type="application/octet-stream" sparkle:edSignature="oZYuuRoXwQ4tuwq+HZ/yofwYYjWhtPn3yElL8fYc0+yIj1U4J5uwFmlQMnhqA4qgXYQqF5DzZo6l6YsCbHz1AA=="/>
+        </item>
+    </channel>
+</rss>

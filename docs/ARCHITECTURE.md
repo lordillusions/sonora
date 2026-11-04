@@ -33,7 +33,8 @@ Nothing touches the audio thread except `Transport::playNow/stopNow/seekNow` req
 All JUCE modules are compiled once into `sonora_juce` (`cmake/SonoraJuce.cmake`).
 
 Application updates (COM-4) live only in `app/`: `Updater.h` is platform-neutral, `UpdaterSparkle.mm` embeds Sparkle 2
-(`third_party/sparkle`, copied into `Contents/Frameworks`), `UpdaterStub.cpp` serves other platforms. The updater asks the
+(`third_party/sparkle`, copied into `Contents/Frameworks`), `UpdaterWinSparkle.cpp` WinSparkle on Windows, `UpdaterLinux.cpp`
+the AppImage/.deb updater (feed parsing and Ed25519 in `UpdateFeed.cpp`), `UpdaterStub.cpp` everything else. The updater asks the
 session (playing/recording/rendering/unsaved) before it restarts; it never runs on or waits for the audio thread.
 See [UPDATES.md](UPDATES.md).
 

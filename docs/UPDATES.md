@@ -12,7 +12,9 @@ archive instead.
 | `src/app/UpdatePolicy.h` | Platform-neutral rules: channels, which channel tags a channel accepts, `installBlocker()` (recording > render > playback > unsaved changes). Unit-tested in `tests/test_updates.cpp`. |
 | `src/app/Updater.h` | Small interface the app uses (`checkNow`, `setAutomaticChecks`, `channel`, `canInstallNow`, `installPending`). `Updater::Host` supplies session state, save-before-restart, status line and settings. |
 | `src/app/UpdaterSparkle.mm` | macOS backend: `SPUStandardUpdaterController` + delegate (channels, postponed relaunch, quiet scheduled checks, `[sonora] updates:` log lines). |
-| `src/app/UpdaterStub.cpp` | Inert backend for builds without Sparkle. COM-7 adds Velopack (Windows) and Flatpak (Linux) behind the same interface. |
+| `src/app/UpdaterWinSparkle.cpp` | Windows backend (COM-4l): WinSparkle 0.9.4, its own window; Sonora answers "may I close?" with the same safe-restart rules. |
+| `src/app/UpdaterLinux.cpp` | Linux backend (COM-4l): AppImage self-replace or `.deb` via `pkexec apt-get`, using `UpdateFeed.cpp` (feed parsing, Monocypher Ed25519). |
+| `src/app/UpdaterStub.cpp` | Inert backend for builds without any of the above. |
 | `src/app/MainWindow.cpp` | Owns the updater. "Check for Updates..." is in the Sonora menu and the Help menu. Wires Settings > Updates. |
 | `src/app/AppController.cpp` | `prepareForRestart()`: Save / Don't Save / Cancel before an update restarts. The quit that follows does not ask again. |
 | `src/ui/views/PreferencesPanel.cpp` | Settings > Updates: version, Check Automatically, Update Channel, Check Now / Install and Restart. `tests/test_updates_ui.cpp`. |
@@ -128,6 +130,31 @@ Since 0.1.7 every Mac release updates itself. The public repository's `installer
 - Tested 2026-11-04 with dummy apps, a throwaway key and a local server: five releases in a row, each from an empty
   folder like CI. Every item stayed at its own release URL, deltas were made from the 3 previous versions, and every
   archive and delta matched its length and signature.
+
+## Windows and Linux (COM-4l)
+
+Both use the macOS key and feeds next to `appcast.xml`. The release job of the `installers` workflow signs the installers
+and writes the feeds (`scripts/release/write_platform_feeds.py`). It runs `openssl pkeyutl -rawin`, and the signatures
+are byte-identical to Sparkle's `sign_update`. Each signature is checked against `updates.env`'s public key before the
+feed is written. Tag builds compile the feed URL and the public key in (`SONORA_UPDATE_FEED_URL` /
+`SONORA_UPDATE_PUBLIC_KEY`, on these systems compile definitions of the updater source); other builds have updates off.
+
+| | Windows | Linux |
+|---|---|---|
+| Feed | `https://sonoradaw.com/appcast-windows.xml` | `https://sonoradaw.com/appcast-linux.xml` |
+| Backend | WinSparkle 0.9.4 (MIT, `scripts/bootstrap.sh`, `WinSparkle.dll` next to `Sonora.exe`, only system DLLs) | `UpdaterLinux.cpp`; Ed25519 from Monocypher 4.0.3 (CC0/BSD-2, bootstrap) |
+| What it downloads | `Sonora-X.Y.Z-windows-x64-setup.exe` (`sparkle:os="windows-x64"`) | the AppImage (`linux-x64-appimage`) or the `.deb` (`linux-x64-deb`) |
+| Install | WinSparkle asks "may Sonora close?": no while recording, rendering or playing, otherwise after the save prompt. Then the installer runs with `/SILENT /SP- /SUPPRESSMSGBOXES /NOCANCEL /NORESTART /CLOSEAPPLICATIONS`; `sonora.iss` starts Sonora again (`skipifnotsilent runasoriginaluser`). Per-machine installs show the UAC prompt; Inno keeps the earlier install mode and tasks. | AppImage (`$APPIMAGE`): the new file replaces the old one as soon as it is verified (rename in the same folder; a read-only folder only gets a status line). "Install and Restart" relaunches it. `.deb` (`/opt/sonora/Sonora`): after the safe-restart rules, `pkexec /usr/bin/apt-get install -y <deb>` (asks for the password), then relaunch. |
+| Checks | WinSparkle, daily (its own schedule, Settings > Updates switches it) | daily (`updateLastCheck` in Sonora.settings), first one 15 s after launch; Help > Check for Updates... downloads at once |
+| Channels | stable only (WinSparkle has none) | stable + beta (`sparkle:channel`) |
+| Deltas | no (full installer, ~10 MB) | no (full file, 12–22 MB) |
+
+A relaunch waits for the old process to exit (`/bin/sh` loop on its pid, started with `setsid`), because Sonora allows a
+single instance. It also clears `APPDIR`/`APPIMAGE`, which describe the old mount.
+
+Linux end-to-end test: `ci/linux/update_e2e.sh` (Docker, throwaway key, local feed; usage in its header). It checks the
+AppImage self-update and relaunch, refuses a tampered download, and installs and relaunches the .deb. All passed on
+2026-11-04. Windows has no local test: CI builds it, and a real update on a Windows machine is COM-4l2.
 
 ## Local end-to-end test (no real keys, nothing published)
 

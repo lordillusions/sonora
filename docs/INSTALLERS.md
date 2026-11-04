@@ -1,8 +1,8 @@
 # Installers
 
 First-install packages for the three platforms (ROADMAP COM-4k). Updates after the first install are separate:
-Sparkle on macOS ([UPDATES.md](UPDATES.md); a tagged CI release also builds the update zip, deltas and appcast); Windows
-and Linux have no updater yet (COM-4l).
+Sparkle on macOS, WinSparkle on Windows and Sonora's own AppImage/.deb updater on Linux ([UPDATES.md](UPDATES.md); a
+tagged CI release builds and signs every update and writes the three feeds).
 
 | OS | Package | What it installs | Made by |
 |---|---|---|---|

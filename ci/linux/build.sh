@@ -46,7 +46,8 @@ build() {
 package() {
     local dir="$build_root/build-linux-release"
     cmake -S . -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DSONORA_WITH_UI=ON -DSONORA_THIRD_PARTY_DIR="$third_party" \
-        ${SONORA_APP_VERSION:+-DSONORA_APP_VERSION="$SONORA_APP_VERSION"}
+        ${SONORA_APP_VERSION:+-DSONORA_APP_VERSION="$SONORA_APP_VERSION"} \
+        -DSONORA_UPDATE_FEED_URL="${SONORA_UPDATE_FEED_URL:-}" -DSONORA_UPDATE_PUBLIC_KEY="${SONORA_UPDATE_PUBLIC_KEY:-}"
     cmake --build "$dir" -j "$jobs" --target Sonora 2>&1 | tee "$dir/build.log"
     packaging/linux/make_packages.sh "$dir" "${SONORA_DIST_DIR:-dist/linux}" ${SONORA_APP_VERSION:+"$SONORA_APP_VERSION"}
 }

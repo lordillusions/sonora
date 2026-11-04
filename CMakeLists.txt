@@ -10,7 +10,7 @@ if(CMAKE_HOST_APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET 13.0 CACHE STRING "")
 endif()
 
-project(Sonora VERSION 0.1.7 LANGUAGES C CXX)
+project(Sonora VERSION 0.1.8 LANGUAGES C CXX)
 if(APPLE)
     enable_language(OBJC OBJCXX)
 endif()
@@ -47,6 +47,7 @@ endif()
 include(cmake/SonoraJuce.cmake)
 include(cmake/Zstd.cmake)
 include(cmake/CollabNet.cmake) # option SONORA_WITH_COLLAB_NET, target sonora_collab_net (COL-3)
+include(cmake/Monocypher.cmake) # target sonora_monocypher (COM-4l Linux update signatures)
 
 add_subdirectory(src)
 

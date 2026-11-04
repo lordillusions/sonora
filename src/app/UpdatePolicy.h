@@ -1,6 +1,6 @@
 #pragma once
-// COM-4: platform-neutral update rules shared by every updater backend (Sparkle on macOS today; Velopack / Flatpak are
-// COM-7). Pure logic, no JUCE and no platform API, so it is unit-tested (tests/test_updates.cpp). See docs/UPDATES.md.
+// COM-4: platform-neutral update rules shared by every updater backend (Sparkle on macOS, WinSparkle on Windows, the Linux
+// updater; COM-4l). Pure logic, no JUCE and no platform API, so it is unit-tested (tests/test_updates.cpp). See docs/UPDATES.md.
 
 #include <string>
 #include <string_view>

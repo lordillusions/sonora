@@ -10,6 +10,25 @@ SKIA_ZIP="Skia-${SKIA_RELEASE}-macos-Release-arm64.zip"
 # COM-4: Sparkle 2 updater (framework embedded in Sonora.app, tools used by scripts/release/). See docs/UPDATES.md.
 SPARKLE_VERSION="2.9.6"
 SPARKLE_SHA256="52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192"
+# COM-4l: WinSparkle (MIT), Sparkle's Windows port: same appcast format and EdDSA key (src/app/UpdaterWinSparkle.cpp).
+WINSPARKLE_VERSION="0.9.4"
+WINSPARKLE_SHA256="6037df37fc263bd1650a1c4949681a9d40ffe991d01f35892a406cb5d103c976"
+# COM-4l: Monocypher (CC0 / BSD-2-Clause), audited Ed25519 used to verify Linux updates against the same EdDSA key.
+MONOCYPHER_VERSION="4.0.3"
+MONOCYPHER_SHA256="8cc9bc341a66249016db9bd70e9142d8d0aef9945973744b1ac05dbc55d8ee66"
+fetch_monocypher() {
+    local dir="$1/monocypher"
+    [ "$(cat "$dir/VERSION" 2>/dev/null)" = "$MONOCYPHER_VERSION" ] && return 0
+    rm -rf "$dir" && mkdir -p "$dir"
+    curl -fsSL -o "$dir/m.tgz" \
+        "https://github.com/LoupVaillant/Monocypher/releases/download/${MONOCYPHER_VERSION}/monocypher-${MONOCYPHER_VERSION}.tar.gz"
+    if (cd "$dir" && { command -v sha256sum >/dev/null && echo "${MONOCYPHER_SHA256}  m.tgz" | sha256sum -c - >/dev/null \
+            || echo "${MONOCYPHER_SHA256}  m.tgz" | shasum -a 256 -c - >/dev/null; }); then
+        tar -xzf "$dir/m.tgz" -C "$dir" --strip-components=1 && rm "$dir/m.tgz" && echo "$MONOCYPHER_VERSION" > "$dir/VERSION"
+    else
+        echo "warning: Monocypher checksum mismatch, Linux updates will be off" >&2; rm -rf "$dir"
+    fi
+}
 # COL-3: libdatachannel (MPL-2.0) for collab WebRTC data channels + WebSocket signalling; optional, CMake
 # turns SONORA_WITH_COLLAB_NET off without it (docs/PLATFORMS.md "Collab network"). Built against OpenSSL 3.
 LIBDATACHANNEL_TAG="v0.24.6"
@@ -58,6 +77,16 @@ if [ -n "$SKIA_TARGET" ]; then
             "$LIBDATACHANNEL_URL" "$tp/libdatachannel"
     fi
     fetch_fst "$tp"
+    fetch_monocypher "$tp"
+    if [ "$SKIA_TARGET" = windows-Release-x64 ] && [ "$(cat "$tp/winsparkle/VERSION" 2>/dev/null)" != "$WINSPARKLE_VERSION" ]; then
+        rm -rf "$tp/winsparkle" && mkdir -p "$tp/winsparkle"
+        curl -fL -o "$tp/winsparkle/ws.zip" \
+            "https://github.com/vslavik/winsparkle/releases/download/v${WINSPARKLE_VERSION}/WinSparkle-${WINSPARKLE_VERSION}.zip"
+        echo "${WINSPARKLE_SHA256}  $tp/winsparkle/ws.zip" | sha256sum -c -
+        (cd "$tp/winsparkle" && unzip -q ws.zip -x '__MACOSX/*' && mv "WinSparkle-${WINSPARKLE_VERSION}"/* . \
+            && rm -rf ws.zip "WinSparkle-${WINSPARKLE_VERSION}" x64/Release/WinSparkle.pdb)
+        echo "$WINSPARKLE_VERSION" > "$tp/winsparkle/VERSION"
+    fi
     echo "OK. Now: ci/linux/build.sh (Linux) or see docs/PLATFORMS.md (Windows)"
     exit 0
 fi
@@ -92,6 +121,7 @@ if [ ! -d third_party/libdatachannel ]; then
 fi
 
 fetch_fst third_party
+fetch_monocypher third_party
 
 ossl="$PWD/third_party/openssl-macos-arm64"
 if [ ! -f "$ossl/lib/libssl.a" ] || [ "$(cat "$ossl/VERSION" 2>/dev/null)" != "$OPENSSL_VERSION" ]; then
