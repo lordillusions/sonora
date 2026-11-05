@@ -18,7 +18,7 @@ std::string text(const juce::var& object, const char* name)
 int64_t number(const juce::var& object, const char* name)
 {
     const auto value = object.getProperty(name, {});
-    return value.isInt() || value.isInt64() || value.isDouble() ? static_cast<int64_t>(value) : -1;
+    return value.isInt() || value.isInt64() || value.isDouble() ? static_cast<int64_t>(static_cast<juce::int64>(value)) : -1; // long vs long long on Linux
 }
 
 bool shortLabel(const std::string& s, size_t limit) { return ! s.empty() && s.size() <= limit && s.find_first_of("\r\n\t") == std::string::npos; }
@@ -172,10 +172,10 @@ std::string catalogueToJson(const Catalogue& catalogue)
         auto object = infoObject(entry.info);
         juce::DynamicObject::Ptr archive = new juce::DynamicObject();
         archive->setProperty("url", juce::String::fromUTF8(entry.url.c_str()));
-        archive->setProperty("bytes", entry.bytes);
+        archive->setProperty("bytes", (juce::int64) entry.bytes);
         archive->setProperty("sha256", juce::String(entry.sha256));
         object->setProperty("archive", archive.get());
-        object->setProperty("installedBytes", entry.installedBytes);
+        object->setProperty("installedBytes", (juce::int64) entry.installedBytes);
         object->setProperty("files", entry.files);
         packs.add(object.get());
     }

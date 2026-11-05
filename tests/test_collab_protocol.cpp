@@ -237,9 +237,9 @@ TEST_CASE("collab protocol: big snapshot, commit and intent bodies travel deflat
     CHECK(snapBack.document == automation && snapBack.objects[0].full == automation && snapBack.sourceFile == snap.sourceFile);
 
     // Small edits stay plain (no compression cost on the common path).
-    collab::CommitMsg small;
-    small.objects = {{collab::ObjectKey::song(), std::string("tempo 120")}};
-    CHECK(collab::encodeMessage(small).find("tempo 120") != std::string::npos);
+    collab::CommitMsg compact;
+    compact.objects = {{collab::ObjectKey::song(), std::string("tempo 120")}};
+    CHECK(collab::encodeMessage(compact).find("tempo 120") != std::string::npos);
 
     auto rejects = [](const std::string& b) {
         try { (void) collab::decodeMessage(b); } catch (const model::CodecError&) { return true; }

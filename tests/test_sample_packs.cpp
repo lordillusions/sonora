@@ -426,9 +426,9 @@ TEST_CASE("packs: install unpacks a pack, replaces an older version, refuses uns
     auto ccBy = contents;
     ccBy.info.licence = "CC-BY-4.0";
     CHECK(refused(packArchive(ccBy), entry));
-    auto small = entry;
-    small.installedBytes = 1000; // unpacks to far more than the catalogue says
-    CHECK(refused(zipOf({{"pack.json", packs::packContentsToJson(contents)}, {"LICENSE.txt", "x"}, {"Big.wav", pseudoRandom(3 << 20, 3)}}), small));
+    auto undersized = entry; // not "small": a macro in Windows headers
+    undersized.installedBytes = 1000; // unpacks to far more than the catalogue says
+    CHECK(refused(zipOf({{"pack.json", packs::packContentsToJson(contents)}, {"LICENSE.txt", "x"}, {"Big.wav", pseudoRandom(3 << 20, 3)}}), undersized));
     CHECK(refused("not a zip", entry));
     CHECK(! temp.folder.getChildFile("evil.wav").exists());
     CHECK(library.find("sonora-test-kit")->contents.info.version == "1.1"); // a refused install leaves the old one
