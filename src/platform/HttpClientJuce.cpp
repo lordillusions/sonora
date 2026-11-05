@@ -190,6 +190,8 @@ DownloadResult downloadToFile(const DownloadRequest& request, const std::functio
             const auto now = std::chrono::steady_clock::now();
             if (progress && now - lastReport >= std::chrono::milliseconds(100)) { lastReport = now; progress(result.fileBytes, expected); }
         }
+        // A dropped connection also reads as exhausted on Linux and Windows: short of the announced size is a failure.
+        if (! cancelled && ! tooLarge && expected > 0 && result.fileBytes < expected) failed = true;
         out->flush();
         if (out->getStatus().failed()) failed = true;
         out.reset();

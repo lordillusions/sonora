@@ -9,6 +9,10 @@ using namespace sonora;
 
 namespace
 {
+// Native paths: on Windows JUCE reads "/packs" as "C:\packs", so the pack's parent must be built the same way.
+std::string packsRoot() { return juce::File("/packs").getFullPathName().toStdString(); }
+std::string houseKit() { return juce::File("/packs").getChildFile("Sonora House Kit").getFullPathName().toStdString(); }
+
 struct PacksRig
 {
     ui::UiContext context;
@@ -23,10 +27,10 @@ struct PacksRig
         context.theme.metrics.browserWidth = browserWidth;
         context.theme.metrics.browserSidebarWidth = 150;
         context.packsPath.clear();
-        context.samplePacksRoot = "/packs";
+        context.samplePacksRoot = packsRoot();
         context.samplePackList = ui::UiContext::SamplePackList::Hidden;
         context.samplePacks = {
-            {"house", "Sonora House Kit", "1.0", {}, "CC0-1.0", "/packs/Sonora House Kit", {}, {"House"}, {"Drums"}, 5'000'000, 0, State::Installed},
+            {"house", "Sonora House Kit", "1.0", {}, "CC0-1.0", houseKit(), {}, {"House"}, {"Drums"}, 5'000'000, 0, State::Installed},
             {"techno", "Sonora Techno Kit", "1.0", {}, "CC0-1.0", {}, {}, {"Techno"}, {"Drums"}, 6'000'000, 2'000'000, State::Downloading},
             {"ambient", "Sonora Ambient Textures", "1.0", {}, "CC0-1.0", {}, {}, {"Ambient"}, {"Pads"}, 35'000'000, 0, State::Available},
         };
@@ -87,7 +91,7 @@ TEST_CASE("packs list: Get Packs row, Download and Cancel buttons, Style facet, 
     rig.browser->toggleTagFilter({"Style", "House"});
     rig.doubleClick(rig.browser->listRowBounds(0));
     REQUIRE(rig.opened.size() == 1);
-    CHECK(rig.opened[0] == "/packs/Sonora House Kit");
+    CHECK(rig.opened[0] == houseKit());
 
     // Up from the pack's folder returns to the Packs list instead of listing the packs folder.
     const auto origin = rig.browser->boundsInRoot();
