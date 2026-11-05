@@ -31,6 +31,21 @@ fetch_monocypher() {
         echo "warning: Monocypher checksum mismatch, Linux updates will be off" >&2; rm -rf "$dir"
     fi
 }
+# COL-7: libopus (BSD-3-Clause), the voice codec of collab sessions; optional, CMake turns voice off without it.
+OPUS_VERSION="1.5.2"
+OPUS_SHA256="65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1"
+fetch_opus() {
+    local dir="$1/opus"
+    [ "$(cat "$dir/SONORA_VERSION" 2>/dev/null)" = "$OPUS_VERSION" ] && return 0
+    rm -rf "$dir" && mkdir -p "$dir"
+    curl -fsSL -o "$dir/o.tgz" "https://downloads.xiph.org/releases/opus/opus-${OPUS_VERSION}.tar.gz"
+    if (cd "$dir" && { command -v sha256sum >/dev/null && echo "${OPUS_SHA256}  o.tgz" | sha256sum -c - >/dev/null \
+            || echo "${OPUS_SHA256}  o.tgz" | shasum -a 256 -c - >/dev/null; }); then
+        tar -xzf "$dir/o.tgz" -C "$dir" --strip-components=1 && rm "$dir/o.tgz" && echo "$OPUS_VERSION" > "$dir/SONORA_VERSION"
+    else
+        echo "warning: libopus checksum mismatch, collab voice will be off" >&2; rm -rf "$dir"
+    fi
+}
 # COL-3: libdatachannel (MPL-2.0) for collab WebRTC data channels + WebSocket signalling; optional, CMake
 # turns SONORA_WITH_COLLAB_NET off without it (docs/PLATFORMS.md "Collab network"). Built against OpenSSL 3.
 LIBDATACHANNEL_TAG="v0.24.6"
@@ -80,6 +95,7 @@ if [ -n "$SKIA_TARGET" ]; then
     fi
     fetch_fst "$tp"
     fetch_monocypher "$tp"
+    fetch_opus "$tp"
     if [ "$SKIA_TARGET" = windows-Release-x64 ] && [ "$(cat "$tp/winsparkle/VERSION" 2>/dev/null)" != "$WINSPARKLE_VERSION" ]; then
         rm -rf "$tp/winsparkle" && mkdir -p "$tp/winsparkle"
         curl -fL -o "$tp/winsparkle/ws.zip" \
@@ -124,6 +140,7 @@ fi
 
 fetch_fst third_party
 fetch_monocypher third_party
+fetch_opus third_party
 
 ossl="$PWD/third_party/openssl-macos-arm64"
 if [ ! -f "$ossl/lib/libssl.a" ] || [ "$(cat "$ossl/VERSION" 2>/dev/null)" != "$OPENSSL_VERSION" ]; then

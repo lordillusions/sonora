@@ -180,6 +180,9 @@ public:
         onButton_->isOn = [this] { return ! proc_->isBypassed(); };
         onButton_->onClick = [this] { proc_->setBypassed(! proc_->isBypassed()); };
         if (chain_ >= 0) onButton_->midiTarget.reset();
+        // COL-4c: a built-in stand-in for a missing Sonora VST3 keeps the plug-in's knob panel (same parameter order as
+        // the VST3); the native editors would edit the plug-in's model as if it were the built-in device.
+        if (model_.plugin && ! dynamic_cast<plugins::PluginDevice*>(proc_)) return;
         if (auto* synth = dynamic_cast<devices::Resynth*>(proc_))
         {
             resynth_ = add<ResynthEditor>(synth, trackIndex, deviceIndex, chain, child,

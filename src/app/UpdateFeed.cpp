@@ -1,13 +1,10 @@
 // COM-4l: feed parsing and the EdDSA check for the Linux updater (UpdateFeed.h).
 #include "app/UpdateFeed.h"
+#include "core/Ed25519.h"
 
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
-
-#if SONORA_HAVE_MONOCYPHER
-#include "monocypher-ed25519.h"
-#endif
 
 namespace sonora::app
 {
@@ -17,14 +14,6 @@ juce::String childText(const juce::XmlElement& item, const char* tag)
 {
     if (const auto* child = item.getChildByName(tag)) return child->getAllSubText().trim();
     return {};
-}
-
-std::vector<uint8_t> fromBase64(std::string_view text)
-{
-    juce::MemoryOutputStream out;
-    if (! juce::Base64::convertFromBase64(out, juce::String(std::string(text)).trim())) return {};
-    const auto* bytes = static_cast<const uint8_t*>(out.getData());
-    return std::vector<uint8_t>(bytes, bytes + out.getDataSize());
 }
 } // namespace
 
@@ -94,18 +83,12 @@ std::optional<FeedItem> newestUpdate(const std::vector<FeedItem>& items, std::st
 
 bool edSignatureCheckAvailable()
 {
-    return SONORA_HAVE_MONOCYPHER != 0;
+    return crypto::ed25519Available();
 }
 
 bool verifyEdSignature(std::string_view publicKeyBase64, const void* data, size_t size, std::string_view signatureBase64)
 {
-    const auto key = fromBase64(publicKeyBase64), signature = fromBase64(signatureBase64);
-    if (key.size() != 32 || signature.size() != 64 || (data == nullptr && size > 0)) return false;
-#if SONORA_HAVE_MONOCYPHER
-    return crypto_ed25519_check(signature.data(), key.data(), static_cast<const uint8_t*>(data), size) == 0;
-#else
-    return false;
-#endif
+    return crypto::verifyEd25519(publicKeyBase64, data, size, signatureBase64);
 }
 
 } // namespace sonora::app

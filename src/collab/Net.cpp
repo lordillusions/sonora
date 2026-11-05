@@ -1,5 +1,6 @@
 #include "collab/Net.h"
 
+#include "collab/Video.h"
 #include "core/Sha256.h"
 
 #include <juce_core/juce_core.h>
@@ -281,6 +282,10 @@ struct Link
     PeerId id;
     std::shared_ptr<rtc::PeerConnection> pc;
     std::array<std::shared_ptr<rtc::DataChannel>, 3> dc;
+#if RTC_ENABLE_MEDIA
+    std::shared_ptr<rtc::Track> voice; // COL-7: SRTP audio, raw RTP both ways (absent with an older peer)
+    std::shared_ptr<rtc::Track> video; // COL-8: SRTP H.264
+#endif
     std::array<std::string, 3> partial;
     std::array<size_t, 3> expected{};
     bool connected = false, closed = false;
@@ -304,6 +309,8 @@ public:
     std::vector<TransportEvent> poll() override;
     void approveJoin(const PeerId& peer, bool allow) override;
     std::string inviteLink() const override;
+    bool mediaReady(const PeerId& peer) const override;
+    bool relayed(const PeerId& peer) const override;
 
     std::shared_ptr<Core> core_;
 };
@@ -436,6 +443,31 @@ struct RtcTransport::Core : std::enable_shared_from_this<Core>
             else if (s == rtc::PeerConnection::State::Closed || s == rtc::PeerConnection::State::Disconnected)
                 core->markClosed(l, "the connection was lost");
         });
+#if RTC_ENABLE_MEDIA
+        // COL-7/8: the guest offers an audio and a video track before the data channels, so the first offer carries them.
+        // Both list every speaker's SSRC (libdatachannel routes packets to tracks by SSRC once there are two). A host
+        // built without media (0.1.9) answers them as removed and the data channels work as before.
+        if (offerer)
+        {
+            rtc::Description::Audio audio("voice", rtc::Description::Direction::SendRecv);
+            audio.addOpusCodec(voicePayloadType);
+            rtc::Description::Video video("video", rtc::Description::Direction::SendRecv);
+            video.addH264Codec(videoPayloadType);
+            for (AuthorId a = 0; a <= 15; ++a)
+            {
+                audio.addSSRC(voiceSsrc(a), "sonora-voice-" + std::to_string(a));
+                video.addSSRC(videoSsrc(a), "sonora-video-" + std::to_string(a));
+            }
+            attachMedia(link, link->pc->addTrack(audio));
+            attachMedia(link, link->pc->addTrack(video));
+        }
+        else
+            link->pc->onTrack([weak, weakLink](std::shared_ptr<rtc::Track> track) {
+                auto core = weak.lock();
+                auto l = weakLink.lock();
+                if (core && l && (track->mid() == "voice" || track->mid() == "video")) core->attachMedia(l, std::move(track));
+            });
+#endif
         if (offerer)
         {
             for (int i = 0; i < 3; ++i)
@@ -488,6 +520,31 @@ struct RtcTransport::Core : std::enable_shared_from_this<Core>
         });
         if (dc->isOpen()) checkOpen(link);
     }
+
+#if RTC_ENABLE_MEDIA
+    void attachMedia(const std::shared_ptr<Link>& link, std::shared_ptr<rtc::Track> track)
+    {
+        {
+            const std::lock_guard<std::mutex> l(lock);
+            (track->mid() == "video" ? link->video : link->voice) = track;
+        }
+        std::weak_ptr<Core> weak = shared_from_this();
+        std::weak_ptr<Link> weakLink = link;
+        track->onMessage(
+            [weak, weakLink](rtc::binary data) {
+                auto core = weak.lock();
+                auto l = weakLink.lock();
+                if (! core || ! l || data.size() < 12 || data.size() > 1500) return;
+                TransportEvent e;
+                e.kind = TransportEvent::Kind::Message;
+                e.peer = l->id;
+                e.channel = Channel::Media;
+                e.data.assign(reinterpret_cast<const char*>(data.data()), data.size());
+                core->push(std::move(e));
+            },
+            [](rtc::string) {});
+    }
+#endif
 
     void checkOpen(const std::shared_ptr<Link>& link)
     {
@@ -951,6 +1008,28 @@ RtcTransport::~RtcTransport()
 
 void RtcTransport::send(const PeerId& peer, Channel channel, std::string bytes)
 {
+    if (channel == Channel::Media)
+    {
+#if RTC_ENABLE_MEDIA
+        std::shared_ptr<rtc::Track> track;
+        {
+            const std::lock_guard<std::mutex> l(core_->lock);
+            auto it = core_->links.find(peer);
+            if (it == core_->links.end() || ! it->second->connected) return;
+            const bool video = bytes.size() > 1 && (static_cast<uint8_t>(bytes[1]) & 0x7f) == videoPayloadType;
+            track = video ? it->second->video : it->second->voice;
+        }
+        if (! track || ! track->isOpen()) return;
+        try
+        {
+            rtc::binary packet(bytes.size());
+            std::memcpy(packet.data(), bytes.data(), bytes.size());
+            track->send(std::move(packet));
+        }
+        catch (const std::exception&) {}
+#endif
+        return;
+    }
     std::shared_ptr<rtc::DataChannel> dc;
     {
         const std::lock_guard<std::mutex> l(core_->lock);
@@ -990,8 +1069,38 @@ void RtcTransport::send(const PeerId& peer, Channel channel, std::string bytes)
     catch (const std::exception&) {}
 }
 
+bool RtcTransport::mediaReady([[maybe_unused]] const PeerId& peer) const
+{
+#if RTC_ENABLE_MEDIA
+    const std::lock_guard<std::mutex> l(core_->lock);
+    auto it = core_->links.find(peer);
+    return it != core_->links.end() && it->second->connected && it->second->voice && it->second->voice->isOpen();
+#else
+    return false;
+#endif
+}
+
+bool RtcTransport::relayed([[maybe_unused]] const PeerId& peer) const
+{
+    std::shared_ptr<rtc::PeerConnection> pc;
+    {
+        const std::lock_guard<std::mutex> l(core_->lock);
+        auto it = core_->links.find(peer);
+        if (it == core_->links.end() || ! it->second->connected) return false;
+        pc = it->second->pc;
+    }
+    rtc::Candidate local, remote;
+    try
+    {
+        if (! pc || ! pc->getSelectedCandidatePair(&local, &remote)) return false;
+    }
+    catch (const std::exception&) { return false; }
+    return local.type() == rtc::Candidate::Type::Relayed || remote.type() == rtc::Candidate::Type::Relayed;
+}
+
 size_t RtcTransport::buffered(const PeerId& peer, Channel channel) const
 {
+    if (channel == Channel::Media) return 0;
     const std::lock_guard<std::mutex> l(core_->lock);
     auto it = core_->links.find(peer);
     if (it == core_->links.end()) return 0;

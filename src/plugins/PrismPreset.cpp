@@ -18,7 +18,7 @@ constexpr char kMagic[4] = {'P', 'R', 'S', 'M'};
 constexpr uint32_t kVersion = 1;
 const juce::Identifier kState{"SonoraPrism"}, kName{"name"}, kEnabled{"enabled"}, kParameters{"Parameters"}, kPlain{"Plain"},
     kValue{"V"}, kId{"id"}, kNumber{"v"}, kBoolean{"bool"}, kContent{"Content"}, kFormat{"format"}, kDirectory{"directory"},
-    kData{"data"}, kController{"controller"};
+    kData{"data"}, kController{"controller"}, kLegacyState{"SonoraWavetableState"}, kLegacyVersion{"version"};
 
 juce::MemoryBlock block(const std::vector<uint8_t>& bytes) { return {bytes.data(), bytes.size()}; }
 std::vector<uint8_t> bytesOf(const juce::var& value)
@@ -77,13 +77,23 @@ std::vector<uint8_t> encodePrismPreset(const model::Device& device)
 
 bool decodePrismPreset(std::span<const uint8_t> bytes, model::Device& device, std::string& error)
 {
-    if (! isPrismPreset(bytes)) { error = "not a Prism preset"; return false; }
     if (bytes.size() > 2 * model::NativeContent::maxBytes) { error = "preset too large"; return false; }
-    juce::MemoryInputStream stream(bytes.data(), bytes.size(), false);
-    stream.skipNextBytes(4);
-    if ((uint32_t) stream.readInt() > kVersion) { error = "saved by a newer Sonora Prism"; return false; }
-    const auto state = juce::ValueTree::readFromStream(stream);
-    if (! state.hasType(kState)) { error = "damaged Prism preset"; return false; }
+    juce::ValueTree state;
+    if (isPrismPreset(bytes))
+    {
+        juce::MemoryInputStream stream(bytes.data(), bytes.size(), false);
+        stream.skipNextBytes(4);
+        if ((uint32_t) stream.readInt() > kVersion) { error = "saved by a newer Sonora Prism"; return false; }
+        state = juce::ValueTree::readFromStream(stream);
+        if (! state.hasType(kState)) { error = "damaged Prism preset"; return false; }
+    }
+    else
+    {
+        // VST3 state of the "Sonora Wavetable" build before UI-50 (class code SnWt): the same tree without the header.
+        if (! bytes.empty()) state = juce::ValueTree::readFromData(bytes.data(), bytes.size());
+        if (! state.hasType(kLegacyState)) { error = "not a Prism preset"; return false; }
+        if ((int) state.getProperty(kLegacyVersion, 0) > 1) { error = "saved by a newer Sonora Prism"; return false; }
+    }
     auto result = devices::nativeDeviceModel("SonoraWavetable");
     result.id = device.id;
     if (const auto name = state.getProperty(kName).toString(); name.isNotEmpty()) result.displayName = name.toStdString();

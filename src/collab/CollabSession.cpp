@@ -1,5 +1,7 @@
 #include "collab/CollabSession.h"
 
+#include "collab/Video.h"
+
 #include "core/ModelCodec.h"
 #include "core/Sha256.h"
 #include "io/als/AlsReader.h"
@@ -21,6 +23,10 @@ constexpr int64_t presencePeriodMs = 50;
 constexpr int64_t maxSourceFileBytes = 512ll << 20;
 constexpr AuthorId maxAuthor = 11;            // clip UID ranges: 1e9 + (author - 1) * 1e8 stays below INT_MAX
 constexpr size_t maxLiveValuesPerMessage = 400;
+constexpr size_t chatKept = 500;              // lines each replica keeps
+constexpr size_t chatHistorySent = 100;       // lines a joining guest gets
+constexpr size_t chatBurst = 20;              // lines per person per chatWindowMs, more are refused
+constexpr int64_t chatWindowMs = 10000;
 
 int clipUidBase(AuthorId author) { return 1000000000 + static_cast<int>(author - 1) * 100000000; }
 
@@ -58,6 +64,9 @@ std::unique_ptr<CollabSession> CollabSession::host(Port& port, std::unique_ptr<T
 {
     std::unique_ptr<CollabSession> s(new CollabSession(port, std::move(transport), std::move(options), true));
     s->self_ = hostAuthor;
+    s->policy_ = s->options_.policy;
+    s->hostFeatures_ = s->options_.features;
+    s->features_[hostAuthor] = s->options_.features;
     Participant me;
     me.id = hostAuthor;
     me.name = s->options_.name;
@@ -188,10 +197,12 @@ void CollabSession::handle(const TransportEvent& e)
             {
                 hostSafetyCode_ = e.safetyCode;
                 hostWire_ = std::make_unique<WireDictionary>(wirePool_);
+                mediaStateSent_ = false;
                 status_ = "Joining...";
                 HelloMsg hello;
                 hello.appVersion = options_.appVersion;
                 hello.name = options_.name;
+                hello.features = options_.features;
                 if (self_ != 0 && ! rejoinToken_.empty())
                 {
                     hello.rejoinAs = self_;
@@ -205,6 +216,11 @@ void CollabSession::handle(const TransportEvent& e)
         case Kind::Message:
         {
             stats_.bytesIn += e.data.size();
+            if (e.channel == Channel::Media)
+            {
+                receiveMedia(e.peer, e.data); // RTP, not a protocol message
+                break;
+            }
             Message message;
             auto* wire = wireFor(e.peer);
             const auto before = wire ? wire->referencedBytes : 0;
@@ -239,6 +255,7 @@ void CollabSession::handle(const TransportEvent& e)
                 if (welcomed && ! peerByAuthor(author))
                 {
                     presence_.erase(author);
+                    media_.erase(author);
                     for (auto p = participants_.begin(); p != participants_.end(); ++p)
                         if (p->id == author)
                         {
@@ -377,6 +394,21 @@ void CollabSession::handleHost(Peer& peer, Message&& message)
         {
             if (transport_) transport_->disconnect(peer.peer, m.reason.empty() ? "left" : m.reason);
         }
+        else if constexpr (std::is_same_v<T, ChatMsg>)
+        {
+            // Only peers that announced chat send it; a host without chat reacts like an older Sonora.
+            if ((options_.features & FeatureChat) && (peer.features & FeatureChat)) receiveChat(peer, m);
+            else if (transport_) transport_->disconnect(peer.peer, "unexpected chat");
+        }
+        else if constexpr (std::is_same_v<T, MediaStateMsg>)
+        {
+            if ((options_.features & (FeatureVoice | FeatureVideo)) && (peer.features & (FeatureVoice | FeatureVideo)))
+            {
+                m.author = peer.author;
+                receiveMediaState(m);
+            }
+            else if (transport_) transport_->disconnect(peer.peer, "unexpected media state");
+        }
         else
         {
             if (transport_) transport_->disconnect(peer.peer, std::string("unexpected ") + messageName(message));
@@ -415,6 +447,8 @@ void CollabSession::welcome(Peer& peer, const HelloMsg& hello)
     }
     peer.author = author;
     peer.welcomed = true;
+    peer.features = hello.features;
+    features_[author] = hello.features;
     peer.rejoinToken = crypto::base64Url(crypto::randomBytes(24));
     rejoinTokens_[author] = peer.rejoinToken;
 
@@ -446,6 +480,8 @@ void CollabSession::welcome(Peer& peer, const HelloMsg& hello)
     else if (initialHashDone_) sendSnapshot(peer);
     else awaitingSnapshot_.push_back(peer.peer);
     broadcastParticipants();
+    sendChatHistory(peer);
+    sendMediaStates(peer);
     port_.notify(p.name + (rejoin ? " is back" : " joined the session"));
     port_.changed();
 }
@@ -485,6 +521,100 @@ void CollabSession::broadcastParticipants()
     ParticipantsMsg m;
     m.participants = participants_;
     broadcast(Channel::Ops, m);
+    broadcastPolicy();
+}
+
+void CollabSession::broadcastFeature(uint32_t feature, Channel channel, const Message& message, const PeerId& except)
+{
+    if (! transport_) return;
+    const auto bytes = encodeMessage(message);
+    for (const auto& [id, peer] : peers_)
+        if (peer->welcomed && (peer->features & feature) && id != except)
+        {
+            stats_.bytesOut += bytes.size();
+            transport_->send(id, channel, bytes);
+        }
+}
+
+void CollabSession::broadcastPolicy()
+{
+    if (! host_ || ! (options_.features & FeatureChat)) return; // an older host never sends one
+    PolicyMsg m;
+    m.hostFeatures = options_.features;
+    m.policy = policy_;
+    for (const auto& p : participants_) m.features.push_back({p.id, featuresOf(p.id)});
+    broadcastFeature(FeatureChat, Channel::Ops, m);
+}
+
+void CollabSession::sendChatHistory(Peer& peer)
+{
+    if (! (options_.features & FeatureChat) || ! (peer.features & FeatureChat)) return;
+    const size_t from = chat_.size() > chatHistorySent ? chat_.size() - chatHistorySent : 0;
+    for (size_t i = from; i < chat_.size(); ++i)
+    {
+        const auto& e = chat_[i];
+        if (e.id == 0) continue;
+        ChatMsg m;
+        m.author = e.author;
+        m.id = e.id;
+        m.timeMs = e.timeMs;
+        m.history = true;
+        m.text = e.text;
+        send(peer.peer, Channel::Ops, m);
+    }
+}
+
+void CollabSession::receiveChat(Peer& peer, const ChatMsg& m)
+{
+    auto refuse = [&](const std::string& why) {
+        ChatMsg r; // id 0 tells the sender its line was not passed on
+        r.author = peer.author;
+        r.clientId = m.clientId;
+        r.timeMs = now();
+        r.text = why;
+        send(peer.peer, Channel::Ops, r);
+    };
+    if (! policy_.chat) return refuse("The host turned chat off for this session.");
+    const int64_t t = now();
+    while (! peer.chatTimes.empty() && t - peer.chatTimes.front() > chatWindowMs) peer.chatTimes.pop_front();
+    if (peer.chatTimes.size() >= chatBurst) return refuse("Too many messages at once; wait a moment.");
+    const auto text = cleanChatText(m.text);
+    if (text.empty()) return refuse("Empty message.");
+    peer.chatTimes.push_back(t);
+    ChatMsg out;
+    out.author = peer.author;
+    out.id = nextChatId_++;
+    out.clientId = m.clientId;
+    out.timeMs = t;
+    out.text = text;
+    addChat(out, true);
+    broadcastFeature(FeatureChat, Channel::Ops, out);
+}
+
+void CollabSession::addChat(const ChatMsg& m, bool notify)
+{
+    ChatEntry e;
+    e.author = m.author;
+    if (const auto* p = participant(m.author))
+    {
+        e.name = p->name;
+        e.color = p->color;
+    }
+    else
+    {
+        e.name = m.author == hostAuthor ? "Host" : "Guest " + std::to_string(m.author);
+        e.color = static_cast<uint8_t>(m.author % 8);
+    }
+    e.id = m.id;
+    e.clientId = m.clientId;
+    e.timeMs = host_ ? m.timeMs : m.timeMs - clockOffset_;
+    e.history = m.history;
+    e.text = m.text;
+    lastChatId_ = std::max(lastChatId_, m.id);
+    chat_.push_back(std::move(e));
+    while (chat_.size() > chatKept) chat_.pop_front();
+    if (notify && m.author != self_ && ! m.history) port_.chatArrived(chat_.back());
+    port_.changed();
 }
 
 void CollabSession::sendCommit(const CommitMsg& commit)
@@ -638,6 +768,13 @@ void CollabSession::handleGuest(Message&& message)
         buffered_.push_back(std::move(message));
         return;
     }
+    if ((! (options_.features & FeatureChat) && (std::holds_alternative<PolicyMsg>(message) || std::holds_alternative<ChatMsg>(message)))
+        || (! (options_.features & (FeatureVoice | FeatureVideo)) && std::holds_alternative<MediaStateMsg>(message)))
+    {
+        // Emulating an older Sonora (tests, probes): its decoder fails on these types.
+        end(std::string("The host sent something this version of Sonora can't read (unknown message type ") + messageName(message) + ").");
+        return;
+    }
     std::visit([&](auto& m) {
         using T = std::decay_t<decltype(m)>;
         if constexpr (std::is_same_v<T, WelcomeMsg>)
@@ -740,6 +877,8 @@ void CollabSession::handleGuest(Message&& message)
             participants_ = m.participants;
             for (auto it = presence_.begin(); it != presence_.end();)
                 it = participant(it->first) ? std::next(it) : presence_.erase(it);
+            for (auto it = media_.begin(); it != media_.end();)
+                it = participant(it->first) ? std::next(it) : media_.erase(it);
             if (role() != before)
                 port_.notify(role() == Role::Listener ? "The host made you a listener: you can follow along but not edit"
                                                       : "The host lets you edit now");
@@ -797,12 +936,63 @@ void CollabSession::handleGuest(Message&& message)
         }
         else if constexpr (std::is_same_v<T, NoticeMsg>)
             port_.notify(m.text);
+        else if constexpr (std::is_same_v<T, PolicyMsg>)
+        {
+            const bool chatBefore = policy_.chat, voiceBefore = policy_.voice, videoBefore = policy_.video;
+            hostFeatures_ = m.hostFeatures;
+            policy_ = m.policy;
+            features_.clear();
+            for (const auto& [id, bits] : m.features)
+                if (features_.size() < 64) features_[id] = bits;
+            if (policyKnown_ && chatBefore != policy_.chat)
+                port_.notify(policy_.chat ? "The host turned chat on" : "The host turned chat off");
+            if (policyKnown_ && voiceBefore != policy_.voice && (options_.features & FeatureVoice))
+                port_.notify(policy_.voice ? "The host turned voice on" : "The host turned voice off");
+            if (policyKnown_ && videoBefore != policy_.video && (options_.features & FeatureVideo))
+                port_.notify(policy_.video ? "The host turned the camera on" : "The host turned the camera off");
+            policyKnown_ = true;
+            if (! mediaStateSent_ && (hostFeatures_ & (FeatureVoice | FeatureVideo)) && (options_.features & (FeatureVoice | FeatureVideo)))
+            {
+                mediaStateSent_ = true; // a reconnect tells the host our switches again
+                const auto mine = mediaState(self_);
+                if (mine.micOn || mine.cameraOn) setMediaState(mine);
+            }
+            port_.changed();
+        }
+        else if constexpr (std::is_same_v<T, ChatMsg>)
+            receiveChatAsGuest(m);
+        else if constexpr (std::is_same_v<T, MediaStateMsg>)
+        {
+            if (m.author != self_) receiveMediaState(m);
+        }
         else if constexpr (std::is_same_v<T, ByeMsg>)
         {
             reconnect_ = nullptr; // a deliberate goodbye: don't come back
             end(m.reason.empty() ? "The host ended the session." : m.reason);
         }
     }, message);
+}
+
+void CollabSession::receiveChatAsGuest(const ChatMsg& m)
+{
+    if (m.author == self_ && ! m.history)
+        for (auto& e : chat_)
+            if (e.id == 0 && e.failed.empty() && e.clientId == m.clientId)
+            {
+                // The host passed our line on (its order and time), or refused it (id 0, the reason as text).
+                if (m.id == 0) e.failed = m.text.empty() ? std::string("not sent") : m.text;
+                else
+                {
+                    e.id = m.id;
+                    e.timeMs = m.timeMs - clockOffset_;
+                    lastChatId_ = std::max(lastChatId_, m.id);
+                }
+                port_.changed();
+                return;
+            }
+    if (m.id == 0) return;
+    if (m.history && m.id <= lastChatId_) return; // already here (a reconnect resends the history)
+    addChat(m, true);
 }
 
 void CollabSession::snapshotInstalled()
@@ -1112,6 +1302,194 @@ bool CollabSession::uploadAndDrop(const juce::File& file, int trackId, double be
     uploads_.push_back(std::move(u));
     port_.notify("Sending " + file.getFileName().toStdString() + " to the host...");
     return true;
+}
+
+std::string CollabSession::sendChat(const std::string& raw)
+{
+    if (const auto why = chatUnavailableReason(); ! why.empty()) return why;
+    const auto text = cleanChatText(raw);
+    if (text.empty()) return "Nothing to send.";
+    ChatMsg m;
+    m.author = self_;
+    m.clientId = nextClientChatId_++;
+    m.timeMs = now();
+    m.text = text;
+    if (host_)
+    {
+        m.id = nextChatId_++;
+        addChat(m, false);
+        broadcastFeature(FeatureChat, Channel::Ops, m);
+        return {};
+    }
+    ChatEntry e;
+    e.author = self_;
+    e.name = options_.name;
+    if (const auto* p = participant(self_)) e.color = p->color;
+    e.clientId = m.clientId;
+    e.timeMs = m.timeMs;
+    e.text = text;
+    chat_.push_back(std::move(e));
+    while (chat_.size() > chatKept) chat_.pop_front();
+    send(hostPeer, Channel::Ops, m);
+    port_.changed();
+    return {};
+}
+
+std::string CollabSession::chatUnavailableReason() const
+{
+    if (! (options_.features & FeatureChat)) return "This build has no chat.";
+    if (state_ == State::Ended) return "The session has ended.";
+    if (state_ == State::Reconnecting) return "Reconnecting...";
+    if (! host_ && (state_ == State::Starting || ! policyKnown_))
+        return state_ == State::Starting || state_ == State::Joining ? "Connecting..." : "The host's Sonora is older and has no chat.";
+    if (! (hostFeatures_ & FeatureChat)) return "The host's Sonora is older and has no chat.";
+    if (! policy_.chat) return host_ ? "Chat is off for this session." : "The host turned chat off for this session.";
+    return {};
+}
+
+void CollabSession::setPolicy(const SessionPolicy& p)
+{
+    if (! host_ || p == policy_) return;
+    policy_ = p;
+    broadcastPolicy();
+    port_.changed();
+}
+
+// ------------------------------------------------------------------------------------------------ voice (COL-7)
+
+void CollabSession::receiveMedia(const PeerId& from, const std::string& bytes)
+{
+    // Voice (PT 111) or video (PT 96); the SSRC names the speaker.
+    const auto packet = decodeRtp(bytes);
+    const bool video = packet && packet->payloadType == videoPayloadType;
+    const uint32_t feature = video ? FeatureVideo : FeatureVoice;
+    auto& in = video ? stats_.videoIn : stats_.voiceIn;
+    auto& dropped = video ? stats_.videoDropped : stats_.voiceDropped;
+    auto& forwarded = video ? stats_.videoForwarded : stats_.voiceForwarded;
+    ++in;
+    std::optional<AuthorId> speaker;
+    if (packet && (options_.features & feature))
+        speaker = video ? videoSpeaker(packet->ssrc) : packet->payloadType == voicePayloadType ? voiceSpeaker(packet->ssrc) : std::nullopt;
+    if (! speaker || ! (video ? policy_.video : policy_.voice) || state_ != State::Active || (video && transport_ && transport_->relayed(from)))
+    {
+        ++dropped;
+        return;
+    }
+    if (host_)
+    {
+        // A guest speaks only for itself; its packets go unchanged to everyone else with the feature (video: not over TURN).
+        const auto* peer = peerById(from);
+        if (! peer || ! peer->welcomed || ! (peer->features & feature) || *speaker != peer->author) { ++dropped; return; }
+        for (const auto& [id, other] : peers_)
+            if (id != from && other->welcomed && (other->features & feature) && transport_ && ! (video && transport_->relayed(id)))
+            {
+                transport_->send(id, Channel::Media, bytes);
+                ++forwarded;
+            }
+    }
+    else if (*speaker == self_ || ! participant(*speaker)) { ++dropped; return; }
+    if (video) port_.videoArrived(*speaker, bytes);
+    else port_.voiceArrived(*speaker, bytes);
+}
+
+void CollabSession::sendVideo(const std::string& rtp)
+{
+    if (! transport_ || ! videoAvailable()) return;
+    stats_.bytesOut += rtp.size();
+    if (! host_)
+    {
+        transport_->send(hostPeer, Channel::Media, rtp);
+        return;
+    }
+    for (const auto& [id, peer] : peers_)
+        if (peer->welcomed && (peer->features & FeatureVideo) && ! transport_->relayed(id)) transport_->send(id, Channel::Media, rtp);
+}
+
+std::string CollabSession::videoUnavailableReason() const
+{
+    if (! (options_.features & FeatureVideo)) return "This build has no camera support (macOS only for now).";
+    if (state_ == State::Ended) return "The session has ended.";
+    if (state_ == State::Reconnecting) return "Reconnecting...";
+    if (! host_ && (state_ == State::Starting || state_ == State::Joining)) return "Connecting...";
+    if (! host_ && (! policyKnown_ || ! (hostFeatures_ & FeatureVideo))) return "The host's Sonora has no camera support.";
+    if (! policy_.video) return host_ ? "Camera is off for this session." : "The host turned the camera off for this session.";
+    if (! host_ && transport_ && ! transport_->mediaReady(hostPeer)) return "No media connection to the host (the network may block it).";
+    if (! host_ && transport_ && transport_->relayed(hostPeer))
+        return "Camera needs a direct connection; it stays off through the sharing server's relay.";
+    return {};
+}
+
+void CollabSession::sendVoice(const std::string& rtp)
+{
+    if (! transport_ || ! voiceAvailable()) return;
+    stats_.bytesOut += rtp.size();
+    if (! host_)
+    {
+        transport_->send(hostPeer, Channel::Media, rtp);
+        return;
+    }
+    for (const auto& [id, peer] : peers_)
+        if (peer->welcomed && (peer->features & FeatureVoice)) transport_->send(id, Channel::Media, rtp);
+}
+
+std::string CollabSession::voiceUnavailableReason() const
+{
+    if (! (options_.features & FeatureVoice)) return "This build has no voice.";
+    if (state_ == State::Ended) return "The session has ended.";
+    if (state_ == State::Reconnecting) return "Reconnecting...";
+    if (! host_ && (state_ == State::Starting || state_ == State::Joining)) return "Connecting...";
+    if (! host_ && (! policyKnown_ || ! (hostFeatures_ & FeatureVoice))) return "The host's Sonora is older and has no voice.";
+    if (! policy_.voice) return host_ ? "Voice is off for this session." : "The host turned voice off for this session.";
+    if (! host_ && transport_ && ! transport_->mediaReady(hostPeer)) return "No audio connection to the host (the network may block it).";
+    return {};
+}
+
+void CollabSession::setMediaState(MediaState state)
+{
+    media_[self_] = state;
+    if (state_ == State::Ended || ! (options_.features & (FeatureVoice | FeatureVideo))) return;
+    MediaStateMsg m;
+    m.author = self_;
+    m.micOn = state.micOn;
+    m.cameraOn = state.cameraOn;
+    if (host_) broadcastFeature(FeatureVoice | FeatureVideo, Channel::Ops, m);
+    else if (transport_ && state_ == State::Active && (hostFeatures_ & (FeatureVoice | FeatureVideo))) send(hostPeer, Channel::Ops, m);
+    port_.changed();
+}
+
+CollabSession::MediaState CollabSession::mediaState(AuthorId id) const
+{
+    const auto it = media_.find(id);
+    return it == media_.end() ? MediaState{} : it->second;
+}
+
+void CollabSession::receiveMediaState(MediaStateMsg m)
+{
+    if (! participant(m.author)) return;
+    media_[m.author] = {m.micOn, m.cameraOn};
+    if (host_) broadcastFeature(FeatureVoice | FeatureVideo, Channel::Ops, m);
+    port_.changed();
+}
+
+void CollabSession::sendMediaStates(Peer& peer)
+{
+    if (! (options_.features & (FeatureVoice | FeatureVideo)) || ! (peer.features & (FeatureVoice | FeatureVideo))) return;
+    for (const auto& [id, state] : media_)
+    {
+        if (id == peer.author || ! participant(id)) continue;
+        MediaStateMsg m;
+        m.author = id;
+        m.micOn = state.micOn;
+        m.cameraOn = state.cameraOn;
+        send(peer.peer, Channel::Ops, m);
+    }
+}
+
+uint32_t CollabSession::featuresOf(AuthorId id) const
+{
+    if (id == self_) return options_.features;
+    const auto it = features_.find(id);
+    return it == features_.end() ? 0 : it->second;
 }
 
 void CollabSession::setRole(AuthorId who, Role r)

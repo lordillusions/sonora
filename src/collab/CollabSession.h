@@ -18,6 +18,20 @@
 namespace sonora::collab
 {
 
+// COL-9: one line of the session chat as this replica keeps it.
+struct ChatEntry
+{
+    AuthorId author = 0;
+    std::string name;       // as it was when the line arrived (the person may have left since)
+    uint8_t color = 0;
+    uint64_t id = 0;        // the host's order; 0 while an own line is on its way
+    uint64_t clientId = 0;  // own lines: this side's counter
+    int64_t timeMs = 0;     // this machine's clock
+    bool history = false;   // said before this replica joined
+    std::string failed;     // own line the host did not pass on, and why
+    std::string text;
+};
+
 class CollabSession
 {
 public:
@@ -43,6 +57,12 @@ public:
         virtual TransportState transportState() { return {}; }
         // Host: perform a guest's file drop (the file is already in the project folder). Return a label or "" on failure.
         virtual std::string performDrop(AuthorId /*author*/, const juce::File& /*file*/, const DropRequestMsg&) { return {}; }
+        // Someone else said something in the chat (not history, not own lines).
+        virtual void chatArrived(const ChatEntry&) {}
+        // COL-7: an RTP voice packet from `speaker` (checked: a participant, not this replica, voice allowed).
+        virtual void voiceArrived(AuthorId /*speaker*/, const std::string& /*rtp*/) {}
+        // COL-8: an RTP video packet from `speaker`, checked the same way (never over a relayed link).
+        virtual void videoArrived(AuthorId /*speaker*/, const std::string& /*rtp*/) {}
         // UI: participants, presence, status or progress changed.
         virtual void changed() {}
         // A short message for the user ("Ana's edit was undone: you changed that clip first").
@@ -59,6 +79,8 @@ public:
         size_t maxParticipants = 4;
         int64_t transportLeadMs = 150;      // scheduled starts happen this far ahead
         juce::File projectDirectory;        // host: where guests' uploads are stored (Samples/Collab)
+        uint32_t features = supportedFeatures; // announced in the hello; tests and probes emulate older peers with 0
+        SessionPolicy policy;               // host: what the session starts with (the host's saved defaults)
     };
 
     enum class State
@@ -95,6 +117,29 @@ public:
     void requestTransport(TransportMsg::Action, double beat);
     void setFollowTransport(bool on) { followTransport_ = on; }
     bool followTransport() const { return followTransport_; }
+    // COL-9 chat. Returns "" when the line went out (or was refused before), else why it can't be sent.
+    std::string sendChat(const std::string& text);
+    const std::deque<ChatEntry>& chat() const { return chat_; }
+    bool chatAvailable() const { return chatUnavailableReason().empty(); }
+    std::string chatUnavailableReason() const;
+    const SessionPolicy& policy() const { return policy_; }
+    void setPolicy(const SessionPolicy&); // host only
+    uint32_t featuresOf(AuthorId) const;  // 0 while unknown (an older Sonora announces none)
+    // COL-7 voice. sendVoice takes this replica's own RTP packets (VoiceChannel); the host forwards each guest's to the
+    // others unchanged. Mic and camera switches are everyone's own and shown to all.
+    void sendVoice(const std::string& rtp);
+    bool voiceAvailable() const { return voiceUnavailableReason().empty(); }
+    std::string voiceUnavailableReason() const;
+    struct MediaState
+    {
+        bool micOn = false, cameraOn = false;
+    };
+    void setMediaState(MediaState);
+    MediaState mediaState(AuthorId) const;
+    // COL-8 video, like voice; never sent through TURN.
+    void sendVideo(const std::string& rtp);
+    bool videoAvailable() const { return videoUnavailableReason().empty(); }
+    std::string videoUnavailableReason() const;
     // Guest: upload a local file and ask the host to drop it.
     bool uploadAndDrop(const juce::File& file, int trackId, double beat, int scene);
     // Host only.
@@ -139,6 +184,8 @@ public:
     {
         uint64_t commits = 0, rejects = 0, intents = 0, bytesIn = 0, bytesOut = 0, dropped = 0;
         uint64_t referencedBytes = 0; // body bytes that crossed as chunk references instead of bytes (COL-3c)
+        uint64_t voiceIn = 0, voiceForwarded = 0, voiceDropped = 0;
+        uint64_t videoIn = 0, videoForwarded = 0, videoDropped = 0;
     };
     const Stats& stats() const { return stats_; }
 
@@ -161,6 +208,8 @@ private:
         // Asset requests waiting for channel space.
         std::deque<AssetRequestMsg> assetQueue;
         std::unique_ptr<WireDictionary> wire; // this link's chunk dictionary (COL-3c)
+        uint32_t features = 0;                // from the hello
+        std::deque<int64_t> chatTimes;        // recent lines, for the rate limit
     };
     WireDictionary* wireFor(const PeerId&);
 
@@ -172,6 +221,15 @@ private:
     void welcome(Peer&, const HelloMsg&);
     void sendSnapshot(Peer&);
     void broadcastParticipants();
+    void broadcastFeature(uint32_t feature, Channel, const Message&, const PeerId& except = {});
+    void broadcastPolicy();
+    void sendChatHistory(Peer&);
+    void receiveChat(Peer&, const ChatMsg&);
+    void receiveChatAsGuest(const ChatMsg&);
+    void addChat(const ChatMsg&, bool notify);
+    void receiveMedia(const PeerId&, const std::string& bytes);
+    void receiveMediaState(MediaStateMsg);
+    void sendMediaStates(Peer&);
     void setParticipant(const Participant&);
     Peer* peerByAuthor(AuthorId);
     Peer* peerById(const PeerId&);
@@ -260,6 +318,16 @@ private:
     int64_t lastPresenceMs_ = 0;
     std::optional<PresenceMsg> pendingPresence_;
     bool endedNotified_ = false;
+    // Chat and policy (COL-9)
+    SessionPolicy policy_;
+    bool policyKnown_ = false;             // guest: the host sent its policy (an older host never does)
+    uint32_t hostFeatures_ = 0;
+    std::map<AuthorId, uint32_t> features_;
+    std::deque<ChatEntry> chat_;
+    uint64_t nextChatId_ = 1, nextClientChatId_ = 1, lastChatId_ = 0;
+    // Voice (COL-7)
+    std::map<AuthorId, MediaState> media_;
+    bool mediaStateSent_ = false; // guest: this connection has our switches
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 };
 

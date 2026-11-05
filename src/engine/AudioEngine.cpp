@@ -737,6 +737,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputs, i
             physical[(size_t) index] = inputs[channel];
     renderBlock(outputs, numOutputs, numSamples, physical.data(), numPhysicalInputs_);
     audioCapture_.write(physical.data(), numPhysicalInputs_, numSamples); // live device input only, never offline renders
+    voiceTap_.process(physical.data(), numPhysicalInputs_, outputs, numOutputs, numSamples, sampleRate_); // after Main: never exported
 }
 
 void AudioEngine::renderBlock(float* const* outputs, int numOutputs, int numSamples,

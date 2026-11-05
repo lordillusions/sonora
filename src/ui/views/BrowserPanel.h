@@ -12,6 +12,12 @@ namespace sonora::ui
 class BrowserPanel : public Widget
 {
 public:
+    // Sidebar rows in order (categories(); custom Places follow). UI-64: All lists every Library category together.
+    enum CategoryIndex : int
+    {
+        LibraryHeading, AllItems, Sounds, Drums, Instruments, AudioEffects, MidiEffects, PlugIns, Samples,
+        PlacesHeading, Projects, CurrentProject, UserLibrary, Packs
+    };
     void paint(SkCanvas& c, const Theme& t) override;
     void layout() override;
     void mouseDown(const MouseEvent& e) override;
@@ -28,7 +34,8 @@ public:
     // Row rectangles in this panel's coordinates (hit-testing, tests): sidebar entry / filtered list row.
     Rect sidebarRowBounds(int index) const;
     Rect listRowBounds(int index) const;
-    void showFolder(const std::string& path) { selectedCategory_ = 7; filters_.clear(); tagEditing_ = false; navigate(path); }
+    std::string rowLabel(int index) const; // tests: the label of a filtered list row (empty past the end)
+    void showFolder(const std::string& path) { selectedCategory_ = Samples; filters_.clear(); tagEditing_ = false; navigate(path); }
     void showCategory(int index) { selectCategory(index); repaint(); }
     void focusLost() override { searchFocused_ = keyboardFocused_ = tagEditing_ = false; repaint(); }
     bool wantsTextInput() const override { return searchFocused_ || tagEditing_; }
@@ -38,6 +45,8 @@ public:
     Rect tagFooter() const;
     Rect addTagBounds() const;
     Rect tagChipBounds(int index) const;
+    Rect packButtonBounds(int listRow) const; // LIB-1: the Download / Cancel / Update button of a Packs row
+    static int packsCategory();               // LIB-1: the sidebar index of Places > Packs
     Rect filterGroupBounds(const std::string& group) const;
     Rect filterChipBounds(int index) const;
     BrowserTags::Tags selectedTags() const;
@@ -61,10 +70,15 @@ private:
         std::string format{}, key{};
         bool instrument = false;
         BrowserTags::Tags tags{}, suggestedTags{};
+        int section = -1; // UI-64: the Library category an All row comes from
+        std::string packId{}; // LIB-1: a row of the Packs list ("@list" = the catalogue's status row)
     };
     static const std::vector<Category>& categories();
     const std::vector<Item>& items(bool filtered = true, bool grouped = true) const;
     std::vector<Item> buildItems(bool filtered, bool grouped) const;
+    void appendCategory(int category, std::vector<Item>& result, bool indexed) const;
+    std::vector<Item> groupAll(std::vector<Item> result) const;
+    bool listsFolder() const { return folderMode_ || selectedCategory_ == AllItems; }
     struct ItemsKey
     {
         uint64_t contentRevision = 0, tagsRevision = 0;
@@ -92,13 +106,19 @@ private:
     Rect sidebarArea() const;
     Rect listArea() const;
     std::vector<Rect> sidebarRows() const;
+    // LIB-1 Packs list (docs/SAMPLE_PACKS.md): Sonora's downloadable packs and the reference factory packs folder.
+    bool packList() const { return ! folderMode_ && selectedCategory_ == packsCategory(); }
+    void appendPacks(std::vector<Item>& result) const;
+    void paintPack(SkCanvas& c, const Theme& t, const Item& item, const Rect& row, bool selected) const;
+    void packAction(const Item& item);
+    void showPackMenu(const Item& item);
 
     class Splitter* splitter_ = nullptr;
-    int selectedCategory_ = 9, selectedItem_ = -1;
+    int selectedCategory_ = Projects, selectedItem_ = -1;
     float scroll_ = 0;
     bool folderMode_ = false, searchFocused_ = false, keyboardFocused_ = false;
     std::string query_;
-    bool filtersVisible_ = true, tagEditing_ = false;
+    bool filtersVisible_ = true, tagEditing_ = false, allOpened_ = false;
     std::string tagText_;
     BrowserTags::Tags filters_;
     std::set<std::string> expandedGroups_, expandedFolders_;

@@ -51,21 +51,24 @@ struct Rig
     std::vector<std::unique_ptr<collab::BarePort>> guestPorts;
     std::vector<std::unique_ptr<collab::CollabSession>> guests;
 
-    explicit Rig(model::Song song, juce::File project = {})
+    explicit Rig(model::Song song, juce::File project = {}, uint32_t hostFeatures = collab::supportedFeatures, collab::SessionPolicy policy = {})
     {
         hostPort.document = std::make_unique<model::Song>(std::move(song));
         collab::CollabSession::Options o;
         o.name = "Hana";
         o.sessionName = "Test Set";
         o.projectDirectory = project;
+        o.features = hostFeatures;
+        o.policy = policy;
         host = collab::CollabSession::host(hostPort, hub->hostSide(), o);
         hostPort.session = host.get();
     }
-    collab::CollabSession& join(const std::string& name)
+    collab::CollabSession& join(const std::string& name, uint32_t features = collab::supportedFeatures)
     {
         guestPorts.push_back(std::make_unique<collab::BarePort>());
         collab::CollabSession::Options o;
         o.name = name;
+        o.features = features;
         guests.push_back(collab::CollabSession::guest(*guestPorts.back(), hub->guestSide(), o));
         guestPorts.back()->session = guests.back().get();
         return *guests.back();
@@ -173,7 +176,9 @@ TEST_CASE("collab protocol: every message survives the wire; garbage is rejected
                                              collab::ClockMsg{true, 10, 20}, collab::AssetRequestMsg{std::string(64, 'b'), 65536},
                                              collab::AssetChunkMsg{std::string(64, 'b'), 0, 3, "xyz", false}, collab::AssetAddMsg{snap.assets},
                                              collab::UploadMsg{1, "kick.wav", 0, 3, "abc"}, collab::DropRequestMsg{1, 12, 4.0, -1},
-                                             collab::RoleMsg{2, collab::Role::Listener}, collab::NoticeMsg{"hi"}, collab::ByeMsg{"bye"}};
+                                             collab::RoleMsg{2, collab::Role::Listener}, collab::NoticeMsg{"hi"}, collab::ByeMsg{"bye"},
+                                             collab::PolicyMsg{1, collab::FeatureChat, {true, false, true}, {{0, 1}, {2, 0}}},
+                                             collab::ChatMsg{1, 2, 17, 4, 123456789, true, "hello \xF0\x9F\x8E\xB9"}};
     for (const auto& m : messages)
     {
         const auto bytes = collab::encodeMessage(m);
@@ -411,4 +416,145 @@ TEST_CASE("collab live session: samples are fetched by hash into the cache and r
     core::appDataDirectory().deleteRecursively(); // "Sonora Collab Test" only
     core::setAppDataFolderName(previousFolder);
     dir.deleteRecursively();
+}
+
+TEST_CASE("collab chat: features ride in the hello's version text; extension messages are versioned")
+{
+    // An older host reads appVersion as text of at most 64 bytes and ignores it: the features fit inside.
+    collab::HelloMsg hello;
+    hello.appVersion = "0.1.10";
+    hello.name = "Ana";
+    hello.features = collab::FeatureChat;
+    auto bytes = collab::encodeMessage(hello);
+    auto back = std::get<collab::HelloMsg>(collab::decodeMessage(bytes));
+    CHECK(back.appVersion == "0.1.10" && back.features == collab::FeatureChat && back.protocol == collab::protocolVersion);
+    hello.features = 0; // no suffix at all: byte for byte what 0.1.9 sends
+    CHECK(collab::encodeMessage(hello).find("features") == std::string::npos);
+    CHECK(std::get<collab::HelloMsg>(collab::decodeMessage(collab::encodeMessage(hello))).features == 0);
+    hello.appVersion = std::string(80, '9'); // the version is shortened, never the tag
+    hello.features = 7;
+    back = std::get<collab::HelloMsg>(collab::decodeMessage(collab::encodeMessage(hello)));
+    CHECK(back.features == 7 && back.appVersion.size() == 64 - std::string(" +features=7").size());
+    hello.appVersion = "1.0 +features=x"; // not a number: plain text, no features
+    hello.features = 0;
+    back = std::get<collab::HelloMsg>(collab::decodeMessage(collab::encodeMessage(hello)));
+    CHECK(back.features == 0 && back.appVersion == "1.0 +features=x");
+
+    // A later chat version appends fields: this build reads its own and skips the rest.
+    collab::ChatMsg chat;
+    chat.author = 3;
+    chat.id = 9;
+    chat.text = "later";
+    auto wire = collab::encodeMessage(chat);
+    REQUIRE(wire.size() > 2 && static_cast<uint8_t>(wire[1]) == collab::chatMessageVersion);
+    auto future = wire;
+    future[1] = 2;
+    future += std::string("\x05\x01\x02", 3);
+    const auto read = std::get<collab::ChatMsg>(collab::decodeMessage(future));
+    CHECK(read.text == "later" && read.author == 3 && read.id == 9 && read.version == collab::chatMessageVersion);
+    CHECK(collab::encodeMessage(read) == wire);
+    auto rejects = [](std::string b) {
+        try { (void) collab::decodeMessage(b); } catch (const model::CodecError&) { return true; }
+        return false;
+    };
+    auto zero = wire;
+    zero[1] = 0;
+    CHECK(rejects(zero));
+    CHECK(rejects(wire + "x")); // version 1 is still strict
+    chat.text = std::string(collab::maxChatBytes + 1, 'a');
+    CHECK(rejects(collab::encodeMessage(chat)));
+}
+
+TEST_CASE("collab chat: text is cleaned and bounded")
+{
+    CHECK(collab::cleanChatText("  hi there \n") == "hi there");
+    CHECK(collab::cleanChatText("a\r\nb\rc") == "a\nb\nc");
+    CHECK(collab::cleanChatText("a\n\n\n\n\n\nb") == "a\n\n\nb");
+    CHECK(collab::cleanChatText("\n\nx") == "x");
+    CHECK(collab::cleanChatText("tab\there") == "tab here");
+    CHECK(collab::cleanChatText(std::string("bell\x07\x1b[31m", 10)) == "bell[31m");
+    CHECK(collab::cleanChatText("\xC0\xAF overlong \xED\xA0\x80 surrogate \xFF") == "overlong  surrogate");
+    CHECK(collab::cleanChatText("\xE2\x80\xAE" "evil") == "evil"); // right-to-left override
+    CHECK(collab::cleanChatText("caf\xC3\xA9 \xF0\x9F\x8E\xB9 \xE6\x97\xA5") == "caf\xC3\xA9 \xF0\x9F\x8E\xB9 \xE6\x97\xA5");
+    CHECK(collab::cleanChatText("   \n\t ").empty());
+    std::string emoji;
+    for (int i = 0; i < 1500; ++i) emoji += "\xF0\x9F\x8E\xB9";
+    const auto capped = collab::cleanChatText(emoji);
+    CHECK(capped.size() == collab::maxChatChars * 4 && capped.size() <= collab::maxChatBytes);
+    CHECK(collab::cleanChatText("ab\xE2\x82") == "ab"); // cut inside a character
+}
+
+TEST_CASE("collab chat: lines reach everyone who has chat, never an older Sonora; the host's policy and limits hold")
+{
+    Rig rig(loadFixture());
+    auto& ana = rig.join("Ana");
+    auto& old = rig.join("Old", 0); // a 0.1.9 guest: its decoder would drop the link on a chat message
+    rig.pump();
+    REQUIRE(ana.state() == collab::CollabSession::State::Active);
+    REQUIRE(old.state() == collab::CollabSession::State::Active);
+    CHECK(ana.chatAvailable() && rig.host->chatAvailable());
+    CHECK(! old.chatAvailable());
+    CHECK(rig.host->featuresOf(ana.self()) == collab::supportedFeatures && rig.host->featuresOf(old.self()) == 0);
+    CHECK(ana.featuresOf(old.self()) == 0 && ana.featuresOf(collab::hostAuthor) == collab::supportedFeatures);
+
+    CHECK(ana.sendChat("  hello  everyone ").empty());
+    REQUIRE(ana.chat().size() == 1);
+    CHECK(ana.chat()[0].id == 0); // on its way
+    CHECK(rig.host->sendChat("hi Ana").empty());
+    rig.pump();
+    REQUIRE(rig.host->chat().size() == 2);
+    CHECK(rig.host->chat()[0].text == "hi Ana"); // the host's own line is in at once
+    CHECK(rig.host->chat()[1].text == "hello  everyone" && rig.host->chat()[1].name == "Ana");
+    REQUIRE(ana.chat().size() == 2);
+    CHECK(ana.chat()[0].id != 0 && ana.chat()[0].failed.empty()); // the host passed it on
+    CHECK(ana.chat()[1].text == "hi Ana" && ana.chat()[1].name == "Hana" && ana.chat()[1].author == collab::hostAuthor);
+    CHECK(rig.hostPort.chats.size() == 1 && rig.guestPorts[0]->chats.size() == 1); // only others' lines count as new
+    CHECK(old.state() == collab::CollabSession::State::Active && ! rig.guestPorts[1]->ended_ && old.chat().empty());
+
+    // Someone joining later gets the conversation as history, not as new lines.
+    auto& cleo = rig.join("Cleo");
+    rig.pump();
+    REQUIRE(cleo.state() == collab::CollabSession::State::Active);
+    REQUIRE(cleo.chat().size() == 2);
+    CHECK(cleo.chat()[0].history && cleo.chat()[0].text == "hi Ana" && cleo.chat()[1].history);
+    CHECK(cleo.chat()[1].text == "hello  everyone" && cleo.chat()[1].name == "Ana");
+    CHECK(rig.guestPorts[2]->chats.empty());
+
+    // The host turns chat off: guests learn it; a line already on its way is refused and marked.
+    rig.host->setPolicy({false, true, true});
+    CHECK(ana.sendChat("racing the switch").empty());
+    rig.pump();
+    CHECK(! ana.chatAvailable() && ! ana.policy().chat);
+    CHECK(! ana.sendChat("now").empty());
+    CHECK(ana.chat().back().text == "racing the switch" && ! ana.chat().back().failed.empty());
+    CHECK(rig.host->chat().size() == 2);
+    rig.host->setPolicy({true, true, true});
+    rig.pump();
+    CHECK(ana.chatAvailable());
+
+    // At most 20 lines in 10 seconds per person; long lines are cut at 1000 characters.
+    for (int i = 0; i < 25; ++i) ana.sendChat("line " + std::to_string(i));
+    ana.sendChat(std::string(3000, 'z'));
+    rig.pump();
+    size_t delivered = 0, refused = 0;
+    for (const auto& e : ana.chat())
+    {
+        if (e.text.rfind("line ", 0) == 0) (e.id != 0 ? delivered : refused) += 1;
+        if (e.text.size() > 100) CHECK(e.text.size() == collab::maxChatChars && ! e.failed.empty()); // over the limit too
+    }
+    CHECK(delivered == 19 && refused == 6); // "hello  everyone" already counts in the window
+    CHECK(old.state() == collab::CollabSession::State::Active && ! rig.guestPorts[1]->ended_);
+}
+
+TEST_CASE("collab chat: a guest with chat in an older host's session stays connected and says why there is no chat")
+{
+    Rig rig(loadFixture(), {}, 0);
+    auto& ana = rig.join("Ana");
+    rig.pump();
+    REQUIRE(ana.state() == collab::CollabSession::State::Active);
+    CHECK(! ana.chatAvailable());
+    CHECK(ana.chatUnavailableReason().find("older") != std::string::npos);
+    CHECK(! ana.sendChat("anyone?").empty());
+    rig.pump();
+    CHECK(ana.state() == collab::CollabSession::State::Active && rig.host->participants().size() == 2);
 }

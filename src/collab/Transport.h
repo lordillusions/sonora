@@ -24,6 +24,7 @@ enum class Channel : uint8_t
     Ops = 0,
     Live = 1,
     Assets = 2,
+    Media = 3, // COL-7: whole RTP packets (voice), on the link's SRTP track; lossy, never fragmented
 };
 
 using PeerId = std::string;
@@ -58,6 +59,10 @@ public:
     virtual void disconnect(const PeerId& peer, const std::string& reason) = 0;
     virtual std::vector<TransportEvent> poll() = 0;
     virtual void approveJoin(const PeerId& /*peer*/, bool /*allow*/) {}
+    // The link carries media (its audio track is open). An older peer, or a network that blocked it, has none.
+    virtual bool mediaReady(const PeerId& /*peer*/) const { return false; }
+    // The link goes through a TURN relay (COL-8: video is not sent over those).
+    virtual bool relayed(const PeerId& /*peer*/) const { return false; }
     // The invite link guests use (host side; "" until the transport knows it).
     virtual std::string inviteLink() const { return {}; }
 };
@@ -72,6 +77,9 @@ public:
     std::unique_ptr<Transport> guestSide(const std::string& safetyCode = "test-safety-code");
     // Drops every message instead of delivering it while true (simulates a dead link).
     void setBlackhole(bool on);
+    // Every link reports that it goes through TURN (video tests).
+    void setRelayed(bool on);
+    bool relayed() const;
     size_t delivered() const;
 
 private:
@@ -87,7 +95,7 @@ private:
     mutable std::mutex lock_;
     std::map<std::string, Endpoint> endpoints_; // "host" and "g<n>"
     int nextGuest_ = 1;
-    bool blackhole_ = false;
+    bool blackhole_ = false, relayed_ = false;
     size_t delivered_ = 0;
 };
 

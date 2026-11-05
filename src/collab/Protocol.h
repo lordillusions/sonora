@@ -19,6 +19,34 @@ inline constexpr uint32_t protocolVersion = 3; // 2 (COL-3c): deflated snapshot,
                                                 // 3 (PLG-15): model codec 4 (VST2 preset fields)
 inline constexpr size_t maxNameLength = 64;
 
+// COL-9: optional features a peer announces in its hello (HelloMsg::features). The wire protocol stays 3, so a peer
+// without them (0.1.9 and older) still joins; messages for a feature only go to peers that announced it, because
+// older decoders drop the link on an unknown message type.
+enum Feature : uint32_t
+{
+    FeatureChat = 1u << 0,  // policy + chat messages
+    FeatureVoice = 1u << 1, // COL-7: media-state messages and the SRTP audio track
+    FeatureVideo = 1u << 2, // COL-8: the H.264 video track (macOS: AVFoundation + VideoToolbox)
+};
+#if defined(SONORA_HAVE_OPUS) && SONORA_HAVE_OPUS
+inline constexpr uint32_t voiceFeature = FeatureVoice;
+#else
+inline constexpr uint32_t voiceFeature = 0;
+#endif
+#if defined(__APPLE__)
+inline constexpr uint32_t videoFeature = FeatureVideo;
+#else
+inline constexpr uint32_t videoFeature = 0; // TODO(COM-7): camera capture and H.264 on Windows/Linux
+#endif
+inline constexpr uint32_t supportedFeatures = FeatureChat | voiceFeature | videoFeature;
+
+// Chat limits (PEER_PROTOCOL.md "Chat").
+inline constexpr size_t maxChatChars = 1000;  // Unicode code points per message
+inline constexpr size_t maxChatBytes = 4000;  // UTF-8 bytes per message
+// Valid UTF-8 (bad bytes dropped), no control characters except line breaks (tabs become spaces, at most two blank
+// lines in a row), trimmed, at most maxChatChars code points. "" when nothing is left.
+std::string cleanChatText(std::string_view);
+
 enum class Role : uint8_t
 {
     Host = 0,
@@ -59,6 +87,7 @@ struct HelloMsg
     AuthorId rejoinAs = 0;    // non-zero: a reconnect as this participant
     std::string rejoinToken;  // proves the reconnecting guest is the same one
     uint64_t lastSeq = 0;     // reconnect: commits after this are replayed when the host still has them
+    uint32_t features = 0;    // Feature bits; on the wire as a suffix of appVersion (PEER_PROTOCOL.md "Features")
 };
 
 struct WelcomeMsg
@@ -220,9 +249,54 @@ struct ByeMsg
     std::string reason;
 };
 
+// What the host allows in this session (COL-9). Defaults are the host's settings.
+struct SessionPolicy
+{
+    bool chat = true, voice = true, video = true;
+    bool operator==(const SessionPolicy&) const = default;
+};
+
+// Extension messages (COL-9) start with a version byte. A later version only appends fields: a reader keeps the
+// fields it knows and skips the rest. They go only to peers whose hello announced the feature.
+inline constexpr uint8_t policyMessageVersion = 1;
+inline constexpr uint8_t chatMessageVersion = 1;
+inline constexpr uint8_t mediaStateMessageVersion = 1;
+
+// Host -> guests with FeatureChat: the session's policy, the host's features and everyone's.
+struct PolicyMsg
+{
+    uint8_t version = policyMessageVersion;
+    uint32_t hostFeatures = 0;
+    SessionPolicy policy;
+    std::vector<std::pair<AuthorId, uint32_t>> features; // participant, Feature bits
+};
+
+// A chat line. Guest -> host: author and id are ignored, clientId is the sender's own counter. Host -> guests: the host
+// stamps author, id (its order), time and the sender's clientId (so the sender knows it arrived).
+struct ChatMsg
+{
+    uint8_t version = chatMessageVersion;
+    AuthorId author = 0;
+    uint64_t id = 0;
+    uint64_t clientId = 0;
+    int64_t timeMs = 0;     // host clock
+    bool history = false;   // sent to a joining guest: earlier conversation, not new
+    std::string text;
+};
+
+// Someone's own mic and camera switches (COL-7/8). Any -> host -> guests with voice; the host stamps the author and
+// sends everyone's to a joining guest.
+struct MediaStateMsg
+{
+    uint8_t version = mediaStateMessageVersion;
+    AuthorId author = 0;
+    bool micOn = false;
+    bool cameraOn = false;
+};
+
 using Message = std::variant<HelloMsg, WelcomeMsg, SnapshotMsg, CommitMsg, IntentMsg, RejectMsg, UndoMsg, ParticipantsMsg,
                              PresenceMsg, LiveMsg, PluginStateMsg, TransportMsg, ClockMsg, AssetRequestMsg, AssetChunkMsg,
-                             AssetAddMsg, UploadMsg, DropRequestMsg, RoleMsg, NoticeMsg, ByeMsg>;
+                             AssetAddMsg, UploadMsg, DropRequestMsg, RoleMsg, NoticeMsg, ByeMsg, PolicyMsg, ChatMsg, MediaStateMsg>;
 
 // COL-3c: chunks of big bodies (snapshot, commits, intents) that already crossed a link travel as 8-byte references,
 // so renaming a track whose header carries megabytes of source XML sends only the chunk that changed. One dictionary

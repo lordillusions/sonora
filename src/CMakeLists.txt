@@ -27,11 +27,14 @@ message(STATUS "Sonora version ${SONORA_APP_VERSION}")
 
 # ------------------------------------------------------------------ platform
 if(APPLE)
-    add_library(sonora_platform STATIC platform/HttpClientMac.mm platform/SecretStoreMac.mm)
+    add_library(sonora_platform STATIC platform/HttpClientMac.mm platform/HttpDownload.cpp platform/SecretStoreMac.mm
+                platform/MediaAccessMac.mm platform/VideoMac.mm)
     target_compile_options(sonora_platform PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
-    target_link_libraries(sonora_platform PUBLIC "-framework Security" "-framework Foundation" "-framework LocalAuthentication")
+    target_link_libraries(sonora_platform PUBLIC "-framework Security" "-framework Foundation" "-framework LocalAuthentication"
+                          "-framework AVFoundation" "-framework VideoToolbox" "-framework CoreMedia" "-framework CoreVideo")
 else()
-    add_library(sonora_platform STATIC platform/HttpClientJuce.cpp platform/SecretStoreFile.cpp)
+    add_library(sonora_platform STATIC platform/HttpClientJuce.cpp platform/HttpDownload.cpp platform/SecretStoreFile.cpp
+                platform/MediaAccessPortable.cpp platform/VideoPortable.cpp)
 endif()
 target_include_directories(sonora_platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(sonora_platform PUBLIC sonora::juce sonora_core) # Paths.h -> core/AppDataFolder (COM-4c folder name)
@@ -46,6 +49,7 @@ add_library(sonora_core STATIC
     core/OpJson.cpp
     core/ModelCodec.cpp
     core/Sha256.cpp
+    core/Ed25519.cpp
     core/InputRouting.cpp
     core/DeviceCatalog.cpp
     core/LiveColors.cpp
@@ -59,7 +63,7 @@ add_library(sonora_core STATIC
     io/midi/MidiFileExport.cpp
 )
 target_include_directories(sonora_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(sonora_core PUBLIC sonora::juce)
+target_link_libraries(sonora_core PUBLIC sonora::juce sonora_monocypher) # core/Ed25519 (COM-4l, LIB-1)
 if(APPLE)
     target_link_libraries(sonora_core PUBLIC "-framework Security") # core/Sha256 randomBytes
 elseif(WIN32)
@@ -75,6 +79,7 @@ add_library(sonora_engine STATIC
     engine/ClipRender.cpp
     engine/StripSilence.cpp
     engine/AudioCapture.cpp
+    engine/VoiceTap.cpp
     engine/AudioToMidi.cpp
     engine/TempoAnalysis.cpp
     engine/ResynthAnalysis.cpp
@@ -141,6 +146,8 @@ add_library(sonora_engine STATIC
     plugins/SerumPatch.cpp
     plugins/SerumLibrary.cpp
     plugins/PrismPreset.cpp
+    plugins/NativeReplacement.cpp
+    plugins/SonoraPluginState.cpp
     plugins/SerumEffectsImport.cpp
     midi/MidiManager.cpp
     midi/MidiCapture.cpp
@@ -188,9 +195,15 @@ add_library(sonora_collab STATIC
     collab/Transport.cpp
     collab/CollabSession.cpp
     collab/Net.cpp
+    collab/Voice.cpp
+    collab/Video.cpp
 )
 target_include_directories(sonora_collab PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(sonora_collab PUBLIC sonora_engine PRIVATE sonora_collab_net)
+target_link_libraries(sonora_collab PUBLIC sonora_engine sonora_opus sonora_platform PRIVATE sonora_collab_net) # opus PUBLIC: one supportedFeatures everywhere
+
+# LIB-1: optional sample-pack downloads (docs/SAMPLE_PACKS.md): signed catalogue, resumable download, install/remove.
+add_library(sonora_packs STATIC packs/PackManifest.cpp packs/PackLibrary.cpp packs/PackStore.cpp)
+target_link_libraries(sonora_packs PUBLIC sonora_platform sonora_core)
 
 # AGT-6a: provider framing, Keychain and cancellable HTTP stay outside the audio engine/UI.
 file(READ "${CMAKE_SOURCE_DIR}/schemas/control/v1/request.schema.json" SONORA_CONTROL_SCHEMA)
@@ -257,6 +270,7 @@ add_library(sonora_ui STATIC
     ui/views/PreferencesPanel.cpp
     ui/views/ExportPanel.cpp
     ui/views/CollabPanel.cpp
+    ui/views/CollabVideo.cpp
     ui/CollabOverlay.cpp
     ui/views/StatusBar.cpp
     ui/views/MainLayout.cpp
@@ -369,6 +383,12 @@ set(SONORA_UPDATE_CHANNEL "stable" CACHE STRING "stable (stable + beta items in 
 set_property(CACHE SONORA_UPDATE_CHANNEL PROPERTY STRINGS stable nightly)
 set(SONORA_UPDATE_FEED_URL "" CACHE STRING "Sparkle SUFeedURL (appcast.xml) for this channel; empty = updates off")
 set(SONORA_UPDATE_PUBLIC_KEY "" CACHE STRING "Sparkle SUPublicEDKey (base64 EdDSA public key from generate_keys); empty = updates off")
+# LIB-1 sample packs (docs/SAMPLE_PACKS.md): the signed catalogue and the Ed25519 public key of the pack-signing key
+# (tools/pack_tool keygen; not the update key). An empty feed or key turns pack downloads off. The private key was made on
+# 2026-11-05 and lives on the owner's machine (~/.sonora/pack-signing.key), never in the repository.
+# TODO(LIB-1b): default the feed to https://sonoradaw.com/packs.json in the release after the packs are uploaded (0.1.10 ships off).
+set(SONORA_PACKS_FEED_URL "" CACHE STRING "Sample-pack catalogue (packs.json; packs.json.sig next to it)")
+set(SONORA_PACKS_PUBLIC_KEY "oS+ffbaQwtk/fsetxAHVsfUnGWtm14rq/zdXPJu46lI=" CACHE STRING "base64 Ed25519 public key that signs packs.json (empty = pack downloads off)")
 set(SONORA_UPDATE_ALLOW_LOCAL_HTTP OFF CACHE BOOL "Allow a plain-HTTP localhost feed (local update tests only, never for releases)")
 set(SONORA_BUNDLE_ID "" CACHE STRING "Bundle id override (local update tests use their own so they never touch the real app's defaults)")
 set(SONORA_SPARKLE_DIR "${CMAKE_SOURCE_DIR}/third_party/sparkle" CACHE PATH "Sparkle 2 distribution (scripts/bootstrap.sh)")
@@ -428,7 +448,9 @@ juce_add_gui_app(Sonora
     BUILD_VERSION ${SONORA_APP_BUILD}
     PLIST_TO_MERGE "${_sonoraPlist}"
     MICROPHONE_PERMISSION_ENABLED TRUE
-    MICROPHONE_PERMISSION_TEXT "Sonora records audio from your inputs."
+    MICROPHONE_PERMISSION_TEXT "Sonora records audio from your inputs, and sends your voice in a shared session when you turn your mic on."
+    CAMERA_PERMISSION_ENABLED TRUE
+    CAMERA_PERMISSION_TEXT "Sonora shows your camera to the people in a shared session when you turn it on."
     DOCUMENT_EXTENSIONS als
     ICON_BIG "${CMAKE_SOURCE_DIR}/resources/brand/icon-1024.png" # UI-51: tools/brand_render writes it
     ICON_SMALL "${CMAKE_SOURCE_DIR}/resources/brand/icon-256.png")
@@ -446,6 +468,8 @@ target_sources(Sonora PRIVATE
     app/AppMediaEdits.cpp
     app/AppWarp.cpp
     app/AppResynth.cpp
+    app/AppNativeSwap.cpp
+    app/AppSamplePacks.cpp
     app/AppStems.cpp
 )
 if (SONORA_UPDATE_ALLOW_LOCAL_HTTP)
@@ -460,11 +484,11 @@ target_compile_definitions(Sonora PRIVATE SONORA_UPDATE_LOCAL_TEST=${_sonoraLoca
 set(SONORA_COLLAB_RELAY "https://relay.sonoradaw.com" CACHE STRING "Default collab relay origin, https://... (empty = a relay on this Mac)")
 set_property(SOURCE app/AppCollab.cpp APPEND PROPERTY COMPILE_DEFINITIONS "SONORA_COLLAB_DEFAULT_RELAY=\"${SONORA_COLLAB_RELAY}\"")
 if(APPLE)
-    target_sources(Sonora PRIVATE app/AssistantDock.mm app/WindowChrome.mm)
+    target_sources(Sonora PRIVATE app/AssistantDock.mm app/CollabChatDock.mm app/WindowChrome.mm)
 else()
-    target_sources(Sonora PRIVATE app/AssistantDockPortable.cpp app/WindowChromePortable.cpp)
+    target_sources(Sonora PRIVATE app/AssistantDockPortable.cpp app/CollabChatDockPortable.cpp app/WindowChromePortable.cpp)
 endif()
-target_link_libraries(Sonora PRIVATE sonora_collab sonora_agent sonora_ui)
+target_link_libraries(Sonora PRIVATE sonora_collab sonora_agent sonora_packs sonora_ui)
 if (SONORA_WITH_SPARKLE)
     # Sparkle.framework is linked from third_party and copied into Contents/Frameworks (ditto keeps its symlinks and signature).
     target_sources(Sonora PRIVATE app/UpdaterSparkle.mm)
@@ -493,8 +517,9 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
 else()
     target_sources(Sonora PRIVATE app/UpdaterStub.cpp)
 endif()
-target_sources(Sonora PRIVATE app/UpdateFeed.cpp)
-target_link_libraries(Sonora PRIVATE sonora_monocypher)
+target_sources(Sonora PRIVATE app/UpdateFeed.cpp) # Ed25519 comes with sonora_core (core/Ed25519)
+set_property(SOURCE app/AppSamplePacks.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    "SONORA_PACKS_FEED_URL_STRING=\"${SONORA_PACKS_FEED_URL}\"" "SONORA_PACKS_PUBLIC_KEY_STRING=\"${SONORA_PACKS_PUBLIC_KEY}\"")
 if (_sonoraUpdaterSource)
     # Windows and Linux have no Info.plist: the feed and key are compiled into the updater (empty = updates off).
     set_property(SOURCE ${_sonoraUpdaterSource} APPEND PROPERTY COMPILE_DEFINITIONS

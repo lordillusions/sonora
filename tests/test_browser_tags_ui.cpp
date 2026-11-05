@@ -58,7 +58,7 @@ struct BrowserRig
         context.browserTagsChanged = [&] { stored = context.browserTags.toJson(); };
         root = std::make_unique<ui::MainLayout>(context); root->setBounds({0, 0, 1300, 800}); root->layout();
         for (const auto& child : root->children()) if (auto* b = dynamic_cast<ui::BrowserPanel*>(child.get())) browser = b;
-        REQUIRE(browser); browser->showCategory(6);
+        REQUIRE(browser); browser->showCategory(ui::BrowserPanel::PlugIns);
     }
     ui::MouseEvent at(ui::Rect box)
     {
@@ -163,7 +163,7 @@ TEST_CASE("browser tags: sample and native-device tags use stable library keys a
     ui::BrowserTags saved; saved.loadJson(rig.stored);
     CHECK(ui::BrowserTags::matches(saved.tagsFor("file:/tmp/Kick.wav", {}), {{"User", "Drums"}}));
     CHECK(saved.tagsFor("file:/tmp/Kick.aif", {}).empty());
-    rig.browser->showCategory(3);
+    rig.browser->showCategory(ui::BrowserPanel::Instruments);
     CHECK(rig.browser->tagFilters().empty());
     rig.browser->toggleTagFilter({"Type", "Instrument"});
     rig.browser->toggleTagFilter({"Device", "Synthesizer"});
@@ -262,4 +262,123 @@ TEST_CASE("browser cache: tag reload and reset invalidate existing rows and face
     rig.context.browserTags.loadJson("[]");
     CHECK(! ui::BrowserTags::matches(rig.browser->selectedTags(), {{"Custom", "Bright"}}));
     CHECK(rig.browser->filterGroupBounds("Custom").isEmpty());
+}
+
+TEST_CASE("browser All (UI-64): every Library category in one list; search, facets and drags keep each row's identity")
+{
+    BrowserRig rig;
+    auto& ctx = rig.context;
+    std::vector<std::string> opened, expanded, indexed;
+    ctx.openBrowserFolder = [&](const std::string& path) {
+        opened.push_back(path);
+        ctx.browserFolder = path; ctx.browserSearchRoot.clear(); ctx.browserFolderChildren.clear();
+        ctx.browserFiles = {{"/tmp/AllSamples/Kicks", true}, {"/tmp/AllSamples/snare.wav", false}};
+        ++ctx.browserContentRevision;
+    };
+    ctx.expandBrowserFolder = [&](const std::string& path) { expanded.push_back(path); }; // a worker answers later
+    ctx.indexBrowserFolder = [&](const std::string& path) {
+        indexed.push_back(path);
+        ctx.browserSearchRoot = path;
+        ctx.browserSearchFiles = {{"/tmp/AllSamples/Kicks", true}, {"/tmp/AllSamples/Kicks/alpha_kick.wav", false},
+                                  {"/tmp/AllSamples/snare.wav", false}};
+        ++ctx.browserContentRevision;
+    };
+    auto rows = [&] {
+        std::vector<std::string> labels;
+        for (int i = 0; ! rig.browser->rowLabel(i).empty(); ++i) labels.push_back(rig.browser->rowLabel(i));
+        return labels;
+    };
+    auto indexOf = [&](const std::string& label) {
+        const auto all = rows();
+        const auto found = std::find(all.begin(), all.end(), label);
+        return found == all.end() ? -1 : (int) (found - all.begin());
+    };
+    auto drag = [&](int row) {
+        auto start = rig.at(rig.browser->listRowBounds(row));
+        rig.root->dispatchMouseDown(start);
+        auto end = start; end.x += 20; rig.root->dispatchMouseDrag(end);
+        auto payload = ctx.browserDrag;
+        rig.root->dispatchMouseUp(end);
+        ctx.browserDrag.reset();
+        return payload;
+    };
+
+    // All is the first Library entry; it reads the Samples folder through the same (worker) folder read as Samples.
+    CHECK(rig.browser->sidebarRowBounds(ui::BrowserPanel::AllItems).y < rig.browser->sidebarRowBounds(ui::BrowserPanel::Sounds).y);
+    rig.click(rig.browser->sidebarRowBounds(ui::BrowserPanel::AllItems));
+    const auto music = juce::File::getSpecialLocation(juce::File::userMusicDirectory).getFullPathName().toStdString();
+    REQUIRE(opened == std::vector<std::string>{music});
+
+    // Category headings in sidebar order, open; their own groups closed; Sounds (nothing to list) is left out.
+    CHECK(rows().front() == "Drums");
+    CHECK(indexOf("Drums") < indexOf("Instruments"));
+    CHECK(indexOf("Instruments") < indexOf("Audio Effects"));
+    CHECK(indexOf("Audio Effects") < indexOf("MIDI Effects"));
+    CHECK(indexOf("MIDI Effects") < indexOf("Plug-ins"));
+    CHECK(indexOf("Plug-ins") < indexOf("Samples"));
+    CHECK(indexOf("Sounds") < 0);
+    CHECK(indexOf("Maker") == indexOf("Plug-ins") + 1);
+    CHECK(indexOf("Alpha Synth") < 0);
+    CHECK(indexOf("Kicks") == indexOf("Samples") + 1);
+    CHECK(indexOf("snare.wav") == indexOf("Samples") + 2);
+    CHECK(rows().back() == "snare.wav");
+
+    // Search covers every category at once, and indexes the Samples folder once (UI-6b) instead of per paint.
+    ui::KeyEvent find; find.cmd = true; find.textChar = 'f'; rig.root->dispatchKey(find);
+    for (char ch : std::string("alpha")) rig.key(0, (uint32_t) ch);
+    CHECK(indexed == std::vector<std::string>{music});
+    CHECK(rows() == std::vector<std::string>({"Plug-ins", "Maker", "Alpha Synth", "Alpha Synth", "Samples", "alpha_kick.wav"}));
+    CHECK(opened.size() == 1);
+
+    // Drags carry the payload the row has in its own category; tags and facets are the combined list's.
+    const auto plugin = drag(2);
+    REQUIRE(plugin);
+    CHECK(plugin->kind == ui::BrowserDrag::Kind::Plugin);
+    CHECK(plugin->value == "synth3");
+    CHECK(ui::BrowserTags::matches(rig.browser->selectedTags(), {{"Creator", "Maker"}, {"Format", "VST3"}, {"Type", "Instrument"}}));
+    const auto sample = drag(5);
+    REQUIRE(sample);
+    CHECK(sample->kind == ui::BrowserDrag::Kind::Sample);
+    CHECK(sample->value == "/tmp/AllSamples/Kicks/alpha_kick.wav");
+    CHECK(ui::BrowserTags::matches(rig.browser->selectedTags(), {{"Type", "Sample"}, {"Format", "WAV"}}));
+    CHECK(! rig.browser->filterGroupBounds("Creator").isEmpty());
+    rig.browser->toggleTagFilter({"Format", "WAV"});
+    CHECK(rows() == std::vector<std::string>({"Samples", "alpha_kick.wav"}));
+    rig.click(rig.browser->filterChipBounds(0)); // the chip's click removes the filter
+    CHECK(rig.browser->tagFilters().empty());
+    CHECK(rows().size() == 6);
+
+    // Native devices: each listed once (the drum devices under Drums, not again under Instruments), dragged by tag.
+    rig.root->dispatchKey(find); // a click in the list took the focus from the field
+    for (int i = 0; i < 5; ++i) rig.key(juce::KeyPress::backspaceKey);
+    for (char ch : std::string("drum rack")) rig.key(0, (uint32_t) ch);
+    const auto found = rows();
+    CHECK(std::count(found.begin(), found.end(), std::string("Sonora Drum Rack")) == 1);
+    CHECK(found.front() == "Drums");
+    const auto device = drag(indexOf("Sonora Drum Rack"));
+    REQUIRE(device);
+    CHECK(device->kind == ui::BrowserDrag::Kind::NativeDevice);
+    CHECK(device->value == "DrumGroupDevice");
+
+    // Folders open in place on a worker; Left walks up to the folder, then to the Samples heading, then closes it.
+    rig.root->dispatchKey(find);
+    for (int i = 0; i < 9; ++i) rig.key(juce::KeyPress::backspaceKey);
+    rig.key(juce::KeyPress::returnKey);
+    const int kicks = indexOf("Kicks");
+    REQUIRE(kicks > 0);
+    auto arrow = rig.at(rig.browser->listRowBounds(kicks));
+    arrow.x = rig.browser->boundsInRoot().x + rig.browser->listRowBounds(kicks).x + 26; // depth-1 disclosure triangle
+    rig.root->dispatchMouseDown(arrow); rig.root->dispatchMouseUp(arrow);
+    CHECK(expanded == std::vector<std::string>{"/tmp/AllSamples/Kicks"});
+    ctx.browserFolderChildren["/tmp/AllSamples/Kicks"] = {{"/tmp/AllSamples/Kicks/kick.wav", false}};
+    ++ctx.browserContentRevision;
+    CHECK(indexOf("kick.wav") == kicks + 1);
+    rig.click(rig.browser->listRowBounds(kicks + 1));
+    rig.key(juce::KeyPress::leftKey); // to the folder
+    rig.key(juce::KeyPress::leftKey); // closes it
+    CHECK(indexOf("kick.wav") < 0);
+    rig.key(juce::KeyPress::leftKey); // to the Samples heading
+    rig.key(juce::KeyPress::leftKey); // closes it
+    CHECK(rows().back() == "Samples");
+    CHECK(opened.size() == 1);
 }

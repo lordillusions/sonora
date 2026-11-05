@@ -452,6 +452,8 @@ AppController::~AppController()
     collabTimer_.stopTimer();
     if (collab_) collab_->leave(); // tells the others before the links close
     engine_.transport().requestHook = nullptr;
+    voice_.reset(); // its worker reads the engine's voice tap
+    video_.reset();
     collab_.reset();
     delete audioSettingsWindow_.getComponent();
     controlEndpoint_.disable();
@@ -832,6 +834,7 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     for (const auto& line : ui_.buildLog)
         logf("  note: %s", line.c_str());
     ensureAudioInputs();
+    offerNativeReplacements();
 }
 
 // Hooks the preferences dialog up to the services it edits. Everything it changes is persisted.
@@ -858,6 +861,7 @@ void AppController::wirePreferences()
     ui_.userLibraryPath = settings().getValue("userLibraryPath", juce::File::getSpecialLocation(juce::File::userMusicDirectory)
                                                                  .getChildFile("Ableton/User Library").getFullPathName()).toStdString();
     ui_.packsPath = settings().getValue("packsPath", "/Users/Shared/Ableton/Factory Packs").toStdString();
+    setUpSamplePacks();
     ui_.temporaryProjectPath = untitledRoot().getFullPathName().toStdString();
     ui_.settingsPath = settings().getFile().getParentDirectory().getFullPathName().toStdString();
     ui_.pluginCachePath = plugins::PluginHost::cacheFile().getFullPathName().toStdString();

@@ -59,6 +59,9 @@ private:
     PreferencesPanel* prefs_;
     ExportPanel* export_;
     class CollabPanel* collab_ = nullptr;
+    class CollabVideoTiles* video_ = nullptr; // COL-8
+    size_t lastVideoTiles_ = 0;
+    bool lastShowVideo_ = true;
     bool lastExport_ = false, lastCollab_ = false;
     Rect mainBounds_;
     bool lastPrefs_ = false;

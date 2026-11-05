@@ -15,6 +15,7 @@
 #include "engine/RecordingManager.h"
 #include "engine/SampleCache.h"
 #include "engine/Transport.h"
+#include "engine/VoiceTap.h"
 #include "midi/InputBlock.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -100,6 +101,7 @@ public:
     Transport& transport() { return transport_; }
     AudioCapture& audioCapture() { return audioCapture_; } // TRK-4: last minute of the interface inputs
     const AudioCapture& audioCapture() const { return audioCapture_; }
+    VoiceTap& voiceTap() { return voiceTap_; } // COL-7: collab voice in/out on the live callback only
     MasterMonitor& monitor() { return monitor_; } // loudness / spectrum / scope of the Main output
     std::shared_ptr<ControlBank> controls() const { return controls_; }
 
@@ -178,6 +180,7 @@ private:
     Metronome metronome_;
     MasterMonitor monitor_;
     AudioCapture audioCapture_;
+    VoiceTap voiceTap_;
     RecordingManager recorder_;
     struct Preview
     {

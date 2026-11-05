@@ -13,6 +13,7 @@
 #include "devices/DeviceFactory.h"
 #include "devices/RackProcessor.h"
 #include "io/als/AlsReader.h"
+#include "platform/MediaAccess.h"
 #include "platform/SecretStore.h"
 #include "plugins/PluginDevice.h"
 #include "ui/SetView.h"
@@ -82,6 +83,63 @@ void AppController::initialiseCollab()
     settings().setValue("collabRelayMigrated", true);
     ui_.collab.relayUrl = settings().getValue("collabRelay", defaultRelay()).toStdString();
     ui_.collab.relayIsDefault = ui_.collab.relayUrl == defaultRelay();
+    // COL-9: what the next session allows; the host's latest choice is kept as the default.
+    ui_.collab.policy.chat = settings().getBoolValue("collabAllowChat", true);
+    ui_.collab.policy.voice = settings().getBoolValue("collabAllowVoice", true);
+    ui_.collab.policy.video = settings().getBoolValue("collabAllowVideo", true);
+    ui_.collab.voiceSupported = (collab::supportedFeatures & collab::FeatureVoice) != 0;
+    ui_.collab.videoSupported = (collab::supportedFeatures & collab::FeatureVideo) != 0;
+    ui_.collabSetPolicy = [this](ui::CollabView::Policy p) {
+        if (collab_ && inCollabSession() && ! collab_->isHost()) return;
+        settings().setValue("collabAllowChat", p.chat);
+        settings().setValue("collabAllowVoice", p.voice);
+        settings().setValue("collabAllowVideo", p.video);
+        settings().saveIfNeeded();
+        ui_.collab.policy = p;
+        if (collab_ && inCollabSession())
+        {
+            collab_->setPolicy({p.chat, p.voice, p.video});
+            collabNotice(p.chat ? "Chat is on for everyone in the session" : "Chat is off for everyone in the session");
+        }
+        refreshCollabView();
+    };
+    // COL-7: voice options are this person's; the mic always starts off.
+    ui_.collab.pushToTalk = settings().getBoolValue("collabPushToTalk", false);
+    engine_.voiceTap().testToneHz = juce::SystemStats::getEnvironmentVariable("SONORA_COLLAB_VOICE_TONE", {}).getFloatValue();
+    ui_.collab.duck = settings().getBoolValue("collabDuck", true);
+    ui_.collabSetMic = [this](bool on) { setCollabMic(on); };
+    ui_.collabSetVoiceOption = [this](int option, bool on) {
+        if (option == 0) ui_.collab.pushToTalk = on;
+        else ui_.collab.duck = on;
+        settings().setValue(option == 0 ? "collabPushToTalk" : "collabDuck", on);
+        settings().saveIfNeeded();
+        if (option == 0 && on) collabNotice("Push to talk: hold the ` key (left of 1) while you speak");
+        pollVoice();
+        refreshCollabView();
+    };
+    ui_.collabMuteVoice = [this](int id, bool mute) {
+        const auto who = static_cast<collab::AuthorId>(id);
+        if (mute) mutedVoices_.insert(who);
+        else mutedVoices_.erase(who);
+        if (voice_) voice_->setMuted(who, mute);
+        refreshCollabView();
+    };
+    ui_.collabPushToTalkKey = [this](bool down) {
+        pushToTalkHeld_ = down;
+        ui_.collab.pushToTalkHeld = down;
+        pollVoice();
+        refreshCollabView();
+    };
+    // COL-8: the camera always starts off; whether the tiles show is this machine's choice.
+    ui_.collab.showVideo = settings().getBoolValue("collabShowVideo", true);
+    ui_.collabSetCamera = [this](bool on) { setCollabCamera(on); };
+    ui_.collabShowVideo = [this](bool show) {
+        ui_.collab.showVideo = show;
+        settings().setValue("collabShowVideo", show);
+        settings().saveIfNeeded();
+        if (! show) collabNotice("Video tiles hidden. Show them again in the Collaborate panel.");
+        refreshCollabView();
+    };
     ui_.collabShare = [this](bool lan) { shareSession(lan); };
     ui_.collabJoinLink = [this] { joinSessionDialog(); };
     ui_.collabJoinNearby = [this](const std::string& address) { joinNearbySession(address); };
@@ -192,6 +250,7 @@ void AppController::startCollabAutotest(const std::string& spec)
     const auto role = spec.substr(0, colon);
     const juce::File file(juce::String::fromUTF8(colon == std::string::npos ? "" : spec.substr(colon + 1).c_str()));
     auto log = [](const std::string& text) { std::fprintf(stderr, "[sonora] collab autotest: %s\n", text.c_str()); };
+    collabAutotest_ = true;
     auto report = [this, log] {
         if (! song_) return;
         std::string all = model::codec::encodeDocument(*song_);
@@ -199,7 +258,23 @@ void AppController::startCollabAutotest(const std::string& spec)
         const auto digest = crypto::toHex(crypto::sha256(all));
         log("state tempo=" + std::to_string(song_->tempo) + " track0=" + (song_->tracks.empty() ? std::string() : song_->tracks[0].name)
             + " seq=" + std::to_string(collab_ ? collab_->seq() : 0) + " people=" + std::to_string(collab_ ? collab_->participants().size() : 0)
-            + " hash=" + digest.substr(0, 16));
+            + " chat=" + std::to_string(collab_ ? collab_->chat().size() : 0) + " hash=" + digest.substr(0, 16));
+        if (voice_)
+        {
+            const auto st = voice_->stats();
+            log("voice sent=" + std::to_string(st.sent) + " received=" + std::to_string(st.received) + " decoded=" + std::to_string(st.decoded)
+                + " concealed=" + std::to_string(st.concealed) + " late=" + std::to_string(st.late) + " underruns="
+                + std::to_string(engine_.voiceTap().underruns()) + " media=" + (collab_ && collab_->voiceAvailable() ? "ok" : "off"));
+        }
+        if (video_)
+        {
+            const auto st = video_->stats();
+            size_t tiles = 0;
+            for (const auto& t : ui_.collab.videoTiles) tiles += t.self ? 0 : 1;
+            log("video framesSent=" + std::to_string(st.framesSent) + " packetsSent=" + std::to_string(st.packetsSent) + " packetsReceived="
+                + std::to_string(st.packetsReceived) + " decoded=" + std::to_string(st.framesDecoded) + " dropped=" + std::to_string(st.framesDropped)
+                + " remoteTiles=" + std::to_string(tiles) + " relayed=" + (collab_ && ! collab_->videoAvailable() ? collab_->videoUnavailableReason() : "no"));
+        }
     };
     if (role == "host")
     {
@@ -222,6 +297,18 @@ void AppController::startCollabAutotest(const std::string& spec)
                 juce::Timer::callAfterDelay(1500, [this, poll, log] {
                     applyEdit(model::setTempo(*song_, 111.0));
                     log("host set tempo 111");
+                    const auto why = sendCollabChat(juce::String::fromUTF8("hello from the host \xf0\x9f\x8e\xb9").toStdString());
+                    log(why.empty() ? "host sent a chat line" : "host chat refused: " + why);
+                    if (juce::SystemStats::getEnvironmentVariable("SONORA_COLLAB_VIDEO_TEST", {}).getIntValue() > 0)
+                    {
+                        setCollabCamera(true); // a moving test pattern instead of the camera
+                        log(collabCameraOn_ ? "host camera on (test pattern)" : "host camera refused: " + collab_->videoUnavailableReason());
+                    }
+                    if (engine_.voiceTap().testToneHz.load() > 0.0f)
+                    {
+                        setCollabMic(true); // SONORA_COLLAB_VOICE_TONE: the host talks with a test tone
+                        log(collabMicOn_ ? "host mic on (test tone)" : "host mic refused: " + collab_->voiceUnavailableReason());
+                    }
                     juce::Timer::callAfterDelay(4000, [poll] { (*poll)(2); });
                 });
                 return;
@@ -265,6 +352,8 @@ void AppController::startCollabAutotest(const std::string& spec)
                 juce::Timer::callAfterDelay(500, [this, poll, log] {
                     if (! song_->tracks.empty()) applyEdit(model::renameTrack(*song_, 0, "Renamed by guest"));
                     log("guest renamed track 0");
+                    const auto why = sendCollabChat("hello from the guest");
+                    log(why.empty() ? "guest sent a chat line" : "guest chat refused: " + why);
                     juce::Timer::callAfterDelay(5000, [poll] { (*poll)(2); });
                 });
                 return;
@@ -310,6 +399,11 @@ void AppController::startCollab(std::unique_ptr<collab::CollabSession> session)
     pluginStateHash_.clear();
     collabTicks_ = 0;
     ui_.collab.followTransport = true;
+    ui_.collab.unread = 0;
+    collabMicOn_ = false;
+    pushToTalkHeld_ = false;
+    mutedVoices_.clear();
+    collabCameraOn_ = false;
     ui_.collab.notices.clear();
     ui_.collab.endedReason.clear();
     ui_.collabOpen = true;
@@ -334,6 +428,7 @@ void AppController::shareSession(bool lan)
     if (! transport) { collabNotice("Could not start sharing."); return; }
     collab::CollabSession::Options options;
     options.name = collabName();
+    options.policy = {ui_.collab.policy.chat, ui_.collab.policy.voice, ui_.collab.policy.video};
     options.sessionName = net.sessionName;
     options.appVersion = appVersion();
     options.projectDirectory = source.getParentDirectory();
@@ -416,6 +511,11 @@ void AppController::leaveSession()
 void AppController::collabEnded(const std::string& reason)
 {
     engine_.transport().requestHook = nullptr;
+    voice_.reset();
+    video_.reset(); // the camera light goes off with the session
+    collabMicOn_ = false;
+    collabCameraOn_ = false;
+    ui_.collab.videoTiles.clear();
     ui_.collab.endedReason = reason;
     collabNotice(reason);
     // Remote changes were interleaved with this person's own: the local history no longer matches the song.
@@ -429,6 +529,11 @@ void AppController::collabEnded(const std::string& reason)
 void AppController::endCollabDocument()
 {
     engine_.transport().requestHook = nullptr;
+    voice_.reset();
+    video_.reset();
+    collabMicOn_ = false;
+    collabCameraOn_ = false;
+    ui_.collab.videoTiles.clear();
     collab_.reset(); // a guest's sample resolver goes with it
     collabPort_->guestReady = true;
     ui_.collab.state = ui::CollabView::State::None;
@@ -438,7 +543,213 @@ void AppController::endCollabDocument()
     ui_.collab.invite.clear();
     ui_.collab.status.clear();
     ui_.collab.progress = -1.0f;
+    ui_.collab.chat.clear();
+    ui_.collab.unread = 0;
+    ui_.collab.chatAvailable = false;
+    ui_.collab.policy.chat = settings().getBoolValue("collabAllowChat", true); // back to the defaults
+    ui_.collab.policy.voice = settings().getBoolValue("collabAllowVoice", true);
+    ui_.collab.policy.video = settings().getBoolValue("collabAllowVideo", true);
+    if (onCollabChatChanged) onCollabChatChanged();
     if (ui_.requestRepaint) ui_.requestRepaint();
+}
+
+// ------------------------------------------------------------------------------------------------ voice (COL-7)
+
+void AppController::collabVoiceArrived(collab::AuthorId speaker, const std::string& rtp)
+{
+    if (voice_) voice_->receive(speaker, rtp);
+}
+
+void AppController::setCollabMic(bool on)
+{
+    if (! collab_ || ! inCollabSession()) return;
+    const auto camera = collabCameraOn_;
+    if (! on)
+    {
+        collabMicOn_ = false;
+        collab_->setMediaState({false, camera});
+        pollVoice();
+        refreshCollabView();
+        return;
+    }
+    if (! collab_->voiceAvailable()) { collabNotice(collab_->voiceUnavailableReason()); return; }
+    auto enable = [this, camera] {
+        if (! collab_ || ! inCollabSession()) return;
+        if (engine_.inputChannelCount() == 0)
+        {
+            // The mic is an input of the audio device: turn the first one on when none is (Settings > Audio picks others).
+            const auto error = engine_.enableRecordingInputs(1);
+            if (error.isNotEmpty())
+            {
+                collabNotice("No microphone: " + error.toStdString());
+                return;
+            }
+        }
+        collabMicOn_ = true;
+        collab_->setMediaState({true, camera});
+        if (ui_.collab.pushToTalk) collabNotice("Your mic is on: hold the ` key to talk");
+        pollVoice();
+        refreshCollabView();
+    };
+    if (juce::SystemStats::getEnvironmentVariable("SONORA_COLLAB_VOICE_TONE", {}).getFloatValue() > 0.0f) { enable(); return; } // autotest
+    platform::requestMediaAccess(platform::MediaKind::Microphone, [this, enable, alive = std::weak_ptr<bool>(alive_)](bool granted) {
+        if (alive.expired()) return;
+        if (! granted)
+        {
+            collabNotice("Sonora may not use the microphone. Allow it in System Settings > Privacy & Security > Microphone.");
+            return;
+        }
+        enable();
+    });
+}
+
+void AppController::pollVoice()
+{
+    const bool wanted = collab_ && collab_->state() == collab::CollabSession::State::Active && collab_->voiceAvailable();
+    if (! wanted)
+    {
+        voice_.reset();
+        return;
+    }
+    if (! voice_)
+    {
+        voice_ = std::make_unique<collab::VoiceChannel>(engine_.voiceTap(), collab_->self());
+        for (const auto who : mutedVoices_) voice_->setMuted(who, true);
+    }
+    voice_->setSelf(collab_->self());
+    voice_->setTransmit(collabMicOn_ && (! ui_.collab.pushToTalk || pushToTalkHeld_));
+    engine_.voiceTap().duckGain = ui_.collab.duck ? 0.5f : 1.0f;
+    for (const auto& packet : voice_->takeOutgoing()) collab_->sendVoice(packet);
+}
+
+// ------------------------------------------------------------------------------------------------ camera (COL-8)
+
+void AppController::collabVideoArrived(collab::AuthorId speaker, const std::string& rtp)
+{
+    if (video_) video_->receive(speaker, rtp);
+}
+
+void AppController::setCollabCamera(bool on)
+{
+    if (! collab_ || ! inCollabSession()) return;
+    if (! on)
+    {
+        collabCameraOn_ = false;
+        if (video_) video_->stopCamera();
+        collab_->setMediaState({collabMicOn_, false});
+        refreshCollabView();
+        return;
+    }
+    if (! collab_->videoAvailable()) { collabNotice(collab_->videoUnavailableReason()); return; }
+    const bool pattern = juce::SystemStats::getEnvironmentVariable("SONORA_COLLAB_VIDEO_TEST", {}).getIntValue() > 0; // autotests
+    auto start = [this, pattern] {
+        if (! collab_ || ! inCollabSession()) return;
+        pollVideo();
+        if (! video_ || ! video_->startCamera(pattern))
+        {
+            collabNotice("No camera could be opened.");
+            return;
+        }
+        collabCameraOn_ = true;
+        collab_->setMediaState({collabMicOn_, true});
+        refreshCollabView();
+    };
+    if (pattern) { start(); return; }
+    platform::requestMediaAccess(platform::MediaKind::Camera, [this, start, alive = std::weak_ptr<bool>(alive_)](bool granted) {
+        if (alive.expired()) return;
+        if (! granted)
+        {
+            collabNotice("Sonora may not use the camera. Allow it in System Settings > Privacy & Security > Camera.");
+            return;
+        }
+        start();
+    });
+}
+
+void AppController::pollVideo()
+{
+    const bool wanted = collab_ && collab_->state() == collab::CollabSession::State::Active && collab_->videoAvailable();
+    if (! wanted)
+    {
+        if (video_)
+        {
+            video_.reset(); // switched off by the host, or the link went through TURN: the camera stops too
+            if (collabCameraOn_ && collab_) collabNotice(collab_->videoUnavailableReason());
+            collabCameraOn_ = false;
+            ui_.collab.videoTiles.clear();
+            if (collab_ && collab_->state() == collab::CollabSession::State::Active) collab_->setMediaState({collabMicOn_, false});
+        }
+        return;
+    }
+    if (! video_) video_ = std::make_unique<collab::VideoChannel>(collab_->self());
+    video_->setSelf(collab_->self());
+    video_->setSending(collabCameraOn_);
+    for (const auto& packet : video_->takeOutgoing()) collab_->sendVideo(packet);
+}
+
+void AppController::refreshCollabVideo()
+{
+    auto& tiles = ui_.collab.videoTiles;
+    const size_t before = tiles.size();
+    uint64_t changed = 0;
+    tiles.clear();
+    if (video_ && collab_)
+    {
+        const auto now = juce::Time::currentTimeMillis();
+        for (const auto& tile : video_->tiles())
+        {
+            const bool self = tile.author == collab_->self();
+            const auto* p = collab_->participant(tile.author);
+            if (! p || ! tile.image) continue;
+            if (! self && (! collab_->mediaState(tile.author).cameraOn || now - tile.updatedMs > 3000)) continue; // they stopped
+            if (self && ! collabCameraOn_) continue;
+            ui::CollabView::VideoTile v;
+            v.id = (int) tile.author;
+            v.name = p->name;
+            v.color = p->color;
+            v.self = self;
+            v.micOn = self ? collabMicOn_ : collab_->mediaState(tile.author).micOn;
+            v.talking = voice_ && (self ? voice_->micTalking() : voice_->talking(tile.author));
+            v.width = tile.image->width;
+            v.height = tile.image->height;
+            v.pixels = std::shared_ptr<const std::vector<uint32_t>>(tile.image, &tile.image->bgra); // shares the decoded frame
+            v.serial = tile.serial;
+            changed += tile.serial;
+            tiles.push_back(std::move(v));
+        }
+    }
+    if ((changed != videoSerial_ || tiles.size() != before) && ui_.requestRepaint) ui_.requestRepaint();
+    videoSerial_ = changed;
+}
+
+std::string AppController::sendCollabChat(const std::string& text)
+{
+    if (! collab_) return "Not in a session.";
+    return collab_->sendChat(text);
+}
+
+void AppController::setCollabChatOpen(bool open)
+{
+    ui_.collabChatOpen = open;
+    if (open) ui_.collab.unread = 0;
+    if (ui_.requestRepaint) ui_.requestRepaint();
+}
+
+void AppController::collabChatArrived(const collab::ChatEntry& e)
+{
+    if (collabAutotest_) std::fprintf(stderr, "[sonora] collab autotest: chat from %s: %s\n", e.name.c_str(), e.text.c_str());
+    if (ui_.collabChatOpen) return;
+    ++ui_.collab.unread;
+    // Closed chat: the line shows in the status bar (first line, shortened) and the people button counts it.
+    auto first = e.text.substr(0, e.text.find('\n'));
+    if (first.size() > 80)
+    {
+        first.resize(80);
+        while (! first.empty() && (static_cast<unsigned char>(first.back()) & 0xc0) == 0x80) first.pop_back();
+        if (! first.empty() && (static_cast<unsigned char>(first.back()) & 0xc0) == 0xc0) first.pop_back();
+        first += "...";
+    }
+    ui_.statusText = e.name + ": " + first;
 }
 
 // ------------------------------------------------------------------------------------------------ the joined set
@@ -756,6 +1067,9 @@ void AppController::pollCollab()
     }
     collab_->poll();
     if (! collab_) return;
+    pollVoice();
+    pollVideo();
+    if (video_ && collabTicks_ % 4 == 0) refreshCollabVideo(); // ~25 frames a second at most
     if (collabAuthorForNextEdit_ != collab::hostAuthor && juce::Time::getMillisecondCounter() - collabAttributionSetMs_ > 10000)
         collabAuthorForNextEdit_ = collab::hostAuthor;
     if (collab_->state() == collab::CollabSession::State::Active)
@@ -763,7 +1077,7 @@ void AppController::pollCollab()
         ++collabTicks_;
         if (collabTicks_ % 3 == 0) pollLiveValues(collabTicks_ % 9 == 0);
         if (collabTicks_ % 200 == 0) pollPluginStates();
-        if (collabTicks_ % 10 == 0 && ! ui_.collab.cursors.empty()) refreshCollabView(); // fade idle cursors
+        if (collabTicks_ % 10 == 0 && (! ui_.collab.cursors.empty() || voice_)) refreshCollabView(); // fade cursors; who talks
     }
 }
 
@@ -796,7 +1110,7 @@ void AppController::refreshCollabView()
         juce::SystemClipboard::copyTextToClipboard(juce::String::fromUTF8(v.invite.c_str()));
         collabNotice("Invite link copied. Paste it to the people you want to work with.");
     }
-    if (! v.host && ! collab_->sourceName().empty()) v.sessionName = juce::File(collab_->sourceName()).getFileNameWithoutExtension().toStdString();
+    if (! v.host && ! collab_->sourceName().empty()) v.sessionName = juce::String::fromUTF8(collab_->sourceName().c_str()).upToLastOccurrenceOf(".", false, false).toStdString(); // a bare name: juce::File asserts
     v.participants.clear();
     for (const auto& p : collab_->participants())
     {
@@ -807,9 +1121,43 @@ void AppController::refreshCollabView()
         row.color = p.color;
         row.self = p.id == collab_->self();
         if (! row.self && (v.host || p.id == collab::hostAuthor)) row.safetyCode = collab_->safetyCode(p.id);
+        row.hasChat = row.self || (collab_->featuresOf(p.id) & collab::FeatureChat) != 0;
+        row.micOn = row.self ? collabMicOn_ : collab_->mediaState(p.id).micOn;
+        row.talking = voice_ && (row.self ? voice_->micTalking() : voice_->talking(p.id));
+        row.mutedHere = mutedVoices_.count(p.id) > 0;
+        row.cameraOn = row.self ? collabCameraOn_ : collab_->mediaState(p.id).cameraOn;
         v.participants.push_back(row);
     }
     v.joinRequests = collab_->joinRequests();
+    const auto& policy = collab_->policy();
+    v.policy = {policy.chat, policy.voice, policy.video};
+    v.chatAvailable = collab_->chatAvailable();
+    v.voiceAvailable = collab_->voiceAvailable();
+    v.voiceUnavailable = collab_->voiceUnavailableReason();
+    v.micOn = collabMicOn_;
+    v.talking = voice_ && voice_->micTalking();
+    v.micLevel = voice_ && collabMicOn_ ? voice_->micLevel() : 0.0f;
+    v.noMicInput = voice_ && collabMicOn_ && ! engine_.voiceTap().hasInput();
+    v.videoAvailable = collab_->videoAvailable();
+    v.videoUnavailable = collab_->videoUnavailableReason();
+    v.cameraOn = collabCameraOn_;
+    v.chatUnavailable = collab_->chatUnavailableReason();
+    v.chat.clear();
+    for (const auto& e : collab_->chat())
+    {
+        ui::CollabView::ChatLine line;
+        line.author = (int) e.author;
+        line.name = e.name;
+        line.color = e.color;
+        line.text = e.text;
+        line.timeMs = e.timeMs;
+        line.self = e.author == collab_->self();
+        line.pending = line.self && e.id == 0;
+        line.history = e.history;
+        line.failed = e.failed;
+        v.chat.push_back(std::move(line));
+    }
+    if (onCollabChatChanged) onCollabChatChanged();
     v.cursors.clear();
     const auto now = juce::Time::currentTimeMillis();
     for (const auto& [author, remote] : collab_->presence())

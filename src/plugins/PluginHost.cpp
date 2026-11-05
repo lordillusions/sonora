@@ -197,9 +197,15 @@ std::optional<juce::PluginDescription> PluginHost::findMatch(const model::Plugin
         for (const auto& d : types)
             if (d.pluginFormatName == format && d.name.equalsIgnoreCase(wanted))
                 return d;
-        // Live often stores names with suffixes like "_x64" or "-1.1" for VST2.
+        // Live often stores names with suffixes like "_x64" or "-1.1" for VST2. A further word is another product
+        // (PLG-16): "Serum 2" must not load Serum, "Massive X" not Massive, "Serum 2 FX" not Serum 2.
+        const auto suffixed = [](const juce::String& longer, const juce::String& shorter) {
+            if (shorter.isEmpty() || longer.length() <= shorter.length() || ! longer.startsWithIgnoreCase(shorter)) return false;
+            const auto rest = longer.substring(shorter.length());
+            return rest[0] == '_' || rest[0] == '-' || rest[0] == '.' || rest[0] == '(' || rest.startsWith(" (");
+        };
         for (const auto& d : types)
-            if (d.pluginFormatName == format && (wanted.startsWithIgnoreCase(d.name) || d.name.startsWithIgnoreCase(wanted)))
+            if (d.pluginFormatName == format && (suffixed(wanted, d.name) || suffixed(d.name, wanted)))
                 return d;
         return std::nullopt;
     };

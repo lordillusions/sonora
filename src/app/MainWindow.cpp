@@ -84,24 +84,26 @@ enum MenuIds
     InsertTakeLane, FreezeTrack, BounceTrack, BounceNew, ConsolidateClips, ConvertMelody, ConvertHarmony, ConvertDrums, SliceMidi, ResynthesizeClip,
     DeactivateTrack, HideTrack, ShowHiddenTracks, StripSilence, NextTransient, PreviousTransient,
     CheckForUpdates, AboutSonora,
-    ShareSession, JoinSession, LeaveSession,
+    ShareSession, JoinSession, LeaveSession, SessionChat,
     RecentBase = 1000,
 };
 class Workspace final : public juce::Component
 {
 public:
-    Workspace(juce::Component* canvas, juce::Component* assistant) : canvas_(canvas), assistant_(assistant)
-    { addAndMakeVisible(canvas_); addChildComponent(assistant_); }
+    Workspace(juce::Component* canvas, juce::Component* assistant, juce::Component* chat) : canvas_(canvas), assistant_(assistant), chat_(chat)
+    { addAndMakeVisible(canvas_); addChildComponent(assistant_); addChildComponent(chat_); }
     ~Workspace() override { deleteAllChildren(); }
     void resized() override
     {
         auto area = getLocalBounds();
+        if (chat_->isVisible()) chat_->setBounds(area.removeFromRight(std::min(CollabChatDock::preferredWidth, getWidth() / 3)));
         if (assistant_->isVisible()) assistant_->setBounds(area.removeFromRight(std::min(420, getWidth() / 2)));
         canvas_->setBounds(area);
     }
 private:
     juce::Component* canvas_;
     juce::Component* assistant_;
+    juce::Component* chat_;
 };
 // First widget of type T in the tree (depth first). A plain function template: MSVC 14.51 crashed (C1001) on the
 // templated lambda holding a recursive std::function that this replaced.
@@ -149,7 +151,13 @@ MainWindow::MainWindow(AppController& app)
     app_.onControlActivity = [this](const juce::String& operation, const juce::var& result) {
         if (assistant_) assistant_->showResult("MCP", operation, result);
     };
-    setContentOwned(new Workspace(canvas_, assistant_), false);
+    chat_ = new CollabChatDock();
+    chat_->onSend = [this](const std::string& text) { return app_.sendCollabChat(text); };
+    chat_->onClose = [this] { showChat(false); };
+    chat_->onFocus = [this] { layout_->releaseMappedKeys(); };
+    app_.ui().collabToggleChat = [this] { showChat(! chat_->isVisible()); };
+    app_.onCollabChatChanged = [this] { refreshChat(); };
+    setContentOwned(new Workspace(canvas_, assistant_, chat_), false);
     setResizable(true, false);
     setResizeLimits(900, 560, 10000, 10000);
     centreWithSize(1440, 900);
@@ -197,6 +205,8 @@ MainWindow::~MainWindow()
     updater_.reset();
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
     app_.onControlActivity = nullptr;
+    app_.onCollabChatChanged = nullptr;
+    app_.ui().collabToggleChat = nullptr;
 #if JUCE_MAC
     juce::MenuBarModel::setMacMainMenu(nullptr);
 #else
@@ -214,6 +224,7 @@ MainWindow::~MainWindow()
     clearContentComponent(); // canvas references layout_, destroy it first
     canvas_ = nullptr;
     assistant_ = nullptr;
+    chat_ = nullptr;
 }
 
 // COM-4: the platform updater (Sparkle on macOS) asks the session before it restarts; Settings > Updates drives it.
@@ -299,6 +310,55 @@ void MainWindow::toggleAssistant()
     if (assistant_->isVisible()) assistant_->focusEditor(); else canvas_->grabKeyboardFocus();
 }
 
+void MainWindow::showChat(bool visible)
+{
+    if (visible && ! app_.inCollabSession() && app_.ui().collab.chat.empty()) return;
+    if (chat_->isVisible() != visible)
+    {
+        chat_->setVisible(visible);
+        getContentComponent()->resized();
+    }
+    app_.setCollabChatOpen(visible);
+    if (visible)
+    {
+        refreshChat();
+        chat_->focusComposer();
+    }
+    else canvas_->grabKeyboardFocus();
+    menuItemsChanged();
+}
+
+void MainWindow::refreshChat()
+{
+    const auto& v = app_.ui().collab;
+    if (! v.active() && v.state != ui::CollabView::State::Ended)
+    {
+        if (chat_->isVisible()) showChat(false); // the session's document is gone
+        return;
+    }
+    if (! chat_->isVisible()) return;
+    std::vector<CollabChatDock::Line> lines;
+    lines.reserve(v.chat.size());
+    for (const auto& c : v.chat)
+    {
+        CollabChatDock::Line l;
+        l.name = c.name;
+        l.text = c.text;
+        l.time = juce::Time(c.timeMs).formatted("%H:%M").toStdString();
+        l.color = ui::collabColor(c.color);
+        l.self = c.self;
+        l.pending = c.pending;
+        l.history = c.history;
+        l.failed = c.failed;
+        lines.push_back(std::move(l));
+    }
+    chat_->setLines(lines);
+    chat_->setComposer(v.chatAvailable, v.chatAvailable ? std::string() : v.chatUnavailable);
+    const auto people = v.participants.size();
+    chat_->setSubtitle((v.sessionName.empty() ? std::string("Session") : v.sessionName) + " · " + std::to_string(people)
+                       + (people == 1 ? " person" : " people"));
+}
+
 void MainWindow::closeButtonPressed()
 {
     juce::JUCEApplication::getInstance()->systemRequestedQuit();
@@ -374,6 +434,7 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         m.addItem(ShareSession, inSession ? "Session and People..." : "Share Session...", loaded || inSession, ui.collabOpen);
         m.addItem(JoinSession, "Join Session...", ! inSession);
         m.addItem(LeaveSession, app_.collabGuest() ? "Leave Session" : "End Session", inSession);
+        m.addItem(SessionChat, "Session Chat", inSession || chat_->isVisible(), chat_->isVisible());
     }
     else if (index == 1)
     {
@@ -698,6 +759,7 @@ void MainWindow::menuItemSelected(int itemId, int)
         case ShareSession: ui.collabOpen = ! ui.collabOpen; if (ui.requestRepaint) ui.requestRepaint(); break;
         case JoinSession: app_.joinSessionDialog(); break;
         case LeaveSession: app_.leaveSession(); break;
+        case SessionChat: showChat(! chat_->isVisible()); break;
         case Undo: app_.undo(); break;
         case Redo: app_.redo(); break;
         case DuplicateClip:

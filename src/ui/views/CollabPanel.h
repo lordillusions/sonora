@@ -3,10 +3,11 @@
 //
 // Before a session: your name, Start Sharing with one choice of where people are (anywhere over the internet, the
 // default, or this Wi-Fi), Join with an invite link, the sessions other Sonoras advertise on this network, and the
-// server under Connection Settings. During one: the invite link to copy, everyone
-// with their colour, role and safety code, join requests to allow, the shared-transport switch, recent notices and
-// Leave / End Session. Text is typed in native prompts (the app's callbacks); this widget only shows UiContext::collab
-// and calls UiContext::collab* callbacks.
+// server under Connection Settings, and what sessions allow by default. During one: the invite link to copy, everyone
+// with their colour, role and safety code, join requests to allow, the shared-transport switch, what the session allows
+// (chat, voice, camera: the host's switches, COL-9), recent notices, Leave / End Session and the Chat button. Text is
+// typed in native prompts (the app's callbacks) and the chat dock; this widget only shows UiContext::collab and calls
+// UiContext::collab* callbacks.
 
 #include "ui/Widget.h"
 
@@ -33,6 +34,8 @@ private:
     };
     void button(SkCanvas& c, const Theme& t, const Rect& r, const std::string& label, std::function<void()> action, bool enabled = true,
                 bool primary = false);
+    void toggle(SkCanvas& c, const Theme& t, const Rect& area, const std::string& label, bool on, bool enabled, std::function<void()> action);
+    void policyRow(SkCanvas& c, const Theme& t, Rect line, bool editable);
     void close();
 
     std::vector<Hit> hits_;

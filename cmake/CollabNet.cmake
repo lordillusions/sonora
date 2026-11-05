@@ -69,7 +69,7 @@ endif()
 # block() keeps these switches out of the rest of Sonora's build (BUILD_SHARED_LIBS in particular).
 block()
     set(BUILD_SHARED_LIBS OFF)
-    set(NO_MEDIA ON)
+    set(NO_MEDIA OFF) # COL-7: SRTP audio tracks (libsrtp from libdatachannel's deps, on OpenSSL)
     set(NO_WEBSOCKET OFF)
     set(NO_EXAMPLES ON)
     set(NO_TESTS ON)
@@ -86,14 +86,14 @@ block()
         # include dir from another OpenSSL can never pair with these libraries.
         set(OPENSSL_INCLUDE_DIR "${SONORA_OPENSSL_ROOT}/include" CACHE PATH "" FORCE)
     endif()
-    # EXCLUDE_FROM_ALL: only what sonora_collab_net pulls in gets built (datachannel-static, juice, usrsctp).
+    # EXCLUDE_FROM_ALL: only what sonora_collab_net pulls in gets built (datachannel-static, juice, usrsctp, srtp2).
     # SYSTEM: consumers see libdatachannel's headers as system headers, so they never warn in Sonora code.
     add_subdirectory("${_sonora_dc_dir}" "${CMAKE_BINARY_DIR}/third_party/libdatachannel" EXCLUDE_FROM_ALL SYSTEM)
 endblock()
 
 # Sonora's warning flags live on its own targets (juce_recommended_warning_flags), never on these.
 # Silence the third-party code's own -Wall -Wextra so the build log stays warning-free.
-foreach(_sonora_dc_target IN ITEMS datachannel-static juice-static usrsctp)
+foreach(_sonora_dc_target IN ITEMS datachannel-static juice-static usrsctp srtp2)
     if(TARGET ${_sonora_dc_target})
         if(MSVC)
             target_compile_options(${_sonora_dc_target} PRIVATE /w)
@@ -104,6 +104,10 @@ foreach(_sonora_dc_target IN ITEMS datachannel-static juice-static usrsctp)
 endforeach()
 
 target_link_libraries(sonora_collab_net INTERFACE datachannel-static)
+if(APPLE)
+    # COL-7: libsrtp and libdatachannel both link the static libcrypto; Apple's linker warns about the repeat.
+    target_link_options(sonora_collab_net INTERFACE "LINKER:-no_warn_duplicate_libraries")
+endif()
 target_compile_definitions(sonora_collab_net INTERFACE SONORA_COLLAB_NET=1)
 get_target_property(_sonora_dc_version datachannel-static VERSION)
 if(APPLE)

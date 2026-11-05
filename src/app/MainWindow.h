@@ -3,6 +3,7 @@
 
 #include "app/AppController.h"
 #include "app/AssistantDock.h"
+#include "app/CollabChatDock.h"
 #include "app/Updater.h"
 #include "gfx/SkiaCanvasComponent.h"
 #include "ui/views/MainLayout.h"
@@ -24,6 +25,7 @@ public:
 
     void closeButtonPressed() override;
     void toggleAssistant();
+    void showChat(bool visible); // COL-9: the Session Chat dock
 
 private:
     // juce::MenuBarModel
@@ -45,6 +47,8 @@ private:
     std::unique_ptr<ui::MainLayout> layout_;
     gfx::SkiaCanvasComponent* canvas_ = nullptr; // owned by the window (content component)
     AssistantDock* assistant_ = nullptr;
+    CollabChatDock* chat_ = nullptr;     // owned by the Workspace
+    void refreshChat();
     void createUpdater(); // COM-4
     std::unique_ptr<Updater> updater_;
 };

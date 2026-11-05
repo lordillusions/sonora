@@ -25,12 +25,36 @@ namespace sonora::ui
 namespace
 {
 constexpr float kRow = 19, kSearch = 28, kFooter = 24, kColumnHead = 18, kHeaderRow = 24, kTags = 24, kFacet = 21;
+
+// The folder the Samples category (and All's Samples section) lists.
+std::string samplesRoot()
+{
+    return juce::File::getSpecialLocation(juce::File::userMusicDirectory).getFullPathName().toStdString();
+}
+
+// LIB-1 Packs list helpers.
+const UiContext::SamplePack* findPack(const UiContext& context, const std::string& id)
+{
+    for (const auto& pack : context.samplePacks)
+        if (pack.id == id) return &pack;
+    return nullptr;
+}
+
+std::string megabytes(int64_t bytes)
+{
+    char text[32];
+    std::snprintf(text, sizeof text, bytes < 10'000'000 ? "%.1f MB" : "%.0f MB", (double) bytes / 1.0e6);
+    return text;
+}
+
+// The Packs row's button and status column: the status column only when the list is wide enough to keep the name readable.
+constexpr float kPackButton = 64, kPackInfo = 104, kPackWide = 360;
 }
 
 const std::vector<BrowserPanel::Category>& BrowserPanel::categories()
 {
     static const std::vector<Category> categories{
-        {"Library", true}, {"Sounds", false}, {"Drums", false}, {"Instruments", false},
+        {"Library", true}, {"All", false}, {"Sounds", false}, {"Drums", false}, {"Instruments", false},
         {"Audio Effects", false}, {"MIDI Effects", false}, {"Plug-ins", false}, {"Samples", false},
         {"Places", true}, {"Projects", false}, {"Current Project", false}, {"User Library", false}, {"Packs", false},
     };
@@ -306,6 +330,12 @@ Rect BrowserPanel::listRowBounds(int index) const
     return {list.x, list.y + 2 + (float) index * kRow - scroll_, list.w, kRow};
 }
 
+std::string BrowserPanel::rowLabel(int index) const
+{
+    const auto& entries = items();
+    return index >= 0 && (size_t) index < entries.size() ? entries[(size_t) index].label : std::string{};
+}
+
 const std::vector<BrowserPanel::Item>& BrowserPanel::items(bool filtered, bool groupRows) const
 {
     const auto& context = ctx();
@@ -326,14 +356,11 @@ const std::vector<BrowserPanel::Item>& BrowserPanel::items(bool filtered, bool g
     return *cached;
 }
 
-std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool groupRows) const
+// The rows of one category before tags, search and grouping. Every folder view lists ctx().browserFolder as Samples does.
+void BrowserPanel::appendCategory(int category, std::vector<Item>& result, bool indexed) const
 {
     const auto& context = ctx();
-    std::vector<Item> result;
-    // UI-6b: a search in a folder lists matches from every subfolder once the recursive index of that folder is in.
-    const bool indexed = folderMode_ && ! query_.empty() && ! context.browserSearchLoading
-                         && ! context.browserSearchRoot.empty() && context.browserSearchRoot == context.browserFolder;
-    if (folderMode_)
+    if (category == Samples)
     {
         std::function<void(const std::vector<UiContext::BrowserFile>&, int, const std::string&)> append;
         append = [&](const auto& files, int depth, const std::string& parent) {
@@ -363,7 +390,7 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
         else
             append(context.browserFiles, 0, {});
     }
-    else if (selectedCategory_ == 6)
+    else if (category == PlugIns)
     {
         for (const auto& plugin : context.browserPlugins)
         {
@@ -379,19 +406,21 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
             item.tags.push_back({"Type", plugin.instrument ? "Instrument" : "Audio Effect"});
         }
     }
-    else if (selectedCategory_ == 9)
+    else if (category == Projects)
         for (const auto& file : context.projectFiles)
             result.push_back({juce::File(file).getFileNameWithoutExtension().toStdString(), file, false, false, {}});
-    else if (selectedCategory_ >= 2 && selectedCategory_ <= 5)
+    else if (category >= Drums && category <= MidiEffects)
     {
-        const auto role = selectedCategory_ <= 3 ? model::DeviceRole::Instrument
-                           : selectedCategory_ == 4 ? model::DeviceRole::AudioEffect : model::DeviceRole::MidiEffect;
+        const auto role = category <= Instruments ? model::DeviceRole::Instrument
+                           : category == AudioEffects ? model::DeviceRole::AudioEffect : model::DeviceRole::MidiEffect;
         std::vector<model::CatalogEntry> entries(model::deviceCatalog().begin(), model::deviceCatalog().end());
         entries.insert(entries.end(), model::maxForLiveReplacements().begin(), model::maxForLiveReplacements().end());
         for (const auto& entry : entries)
         {
             if (! entry.implemented || entry.role != role || entry.xmlTag == "AutoFilter") continue; // one Auto Filter: the 12.4 device
-            if (selectedCategory_ == 2 && entry.xmlTag != "DrumGroupDevice" && entry.xmlTag != "SonoraImpulse") continue;
+            const bool drum = entry.xmlTag == "DrumGroupDevice" || entry.xmlTag == "SonoraImpulse";
+            if (category == Drums && ! drum) continue;
+            if (category == Instruments && drum && selectedCategory_ == AllItems) continue; // UI-64: once, under Drums
             const std::string name(entry.displayName), tag(entry.xmlTag);
             result.push_back({name, {}, false, false, BrowserDrag{BrowserDrag::Kind::NativeDevice, tag, name},
                               std::string(model::deviceCategory(entry))});
@@ -400,9 +429,28 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
                                   {"Device", result.back().group == "Synthesis" ? "Synthesizer" : result.back().group}};
         }
     }
+}
+
+std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool groupRows) const
+{
+    const auto& context = ctx();
+    std::vector<Item> result;
+    // UI-6b: a search in a folder lists matches from every subfolder once the recursive index of that folder is in.
+    const bool indexed = listsFolder() && ! query_.empty() && ! context.browserSearchLoading
+                         && ! context.browserSearchRoot.empty() && context.browserSearchRoot == context.browserFolder;
+    if (folderMode_) appendCategory(Samples, result, indexed);
+    else if (selectedCategory_ == AllItems)
+        for (int category = Sounds; category <= Samples; ++category)
+        {
+            const auto first = result.size();
+            appendCategory(category, result, indexed);
+            for (auto i = first; i < result.size(); ++i) result[i].section = category;
+        }
+    else if (packList()) appendPacks(result);
+    else appendCategory(selectedCategory_, result, indexed);
     for (auto& item : result)
     {
-        if (item.directory) continue;
+        if (item.directory || ! item.packId.empty()) continue;
         item.key = item.drag && item.drag->kind != BrowserDrag::Kind::Sample
                        ? (item.drag->kind == BrowserDrag::Kind::Plugin ? "plugin:" : "native:") + item.drag->value : "file:" + item.path;
         if (item.tags.empty())
@@ -410,6 +458,8 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
             item.tags = {{"Type", item.sample ? "Sample" : "Set"}};
             const auto extension = juce::File(item.path).getFileExtension().substring(1).toUpperCase().toStdString();
             if (! extension.empty()) item.tags.push_back({"Format", extension});
+            if (const auto pack = context.samplePackFileTags.find(item.path); pack != context.samplePackFileTags.end())
+                item.tags.insert(item.tags.end(), pack->second.begin(), pack->second.end()); // LIB-1: Style, Sound, Pack...
         }
         item.suggestedTags = item.tags;
         item.tags = context.browserTags.tagsFor(item.key, std::move(item.tags));
@@ -431,7 +481,8 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
     }
     if (filtered && ! filters_.empty())
         std::erase_if(result, [&](const Item& item) { return item.directory || ! BrowserTags::matches(item.tags, filters_); });
-    if (groupRows && ! folderMode_ && selectedCategory_ >= 2 && selectedCategory_ <= 6)
+    if (groupRows && ! folderMode_ && selectedCategory_ == AllItems) return groupAll(std::move(result));
+    if (groupRows && ! folderMode_ && selectedCategory_ >= Drums && selectedCategory_ <= PlugIns)
     {
         std::sort(result.begin(), result.end(), [](const Item& a, const Item& b) {
             const int groups = juce::String(a.group).compareIgnoreCase(juce::String(b.group));
@@ -451,6 +502,49 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
         return grouped;
     }
     return result;
+}
+
+// UI-64: one heading per Library category (open the first time All is shown) over that category's own groups, or over
+// the folder rows for Samples. Rows keep their identity, drag and icon; only their indent and group key change.
+std::vector<BrowserPanel::Item> BrowserPanel::groupAll(std::vector<Item> result) const
+{
+    const bool searching = ! query_.empty() || ! filters_.empty();
+    std::vector<Item> grouped;
+    for (int category = Sounds; category <= Samples; ++category)
+    {
+        std::vector<Item> rows;
+        for (auto& item : result) if (item.section == category) rows.push_back(std::move(item));
+        if (rows.empty()) continue;
+        const std::string name = categories()[(size_t) category].name, key = "All/" + name;
+        grouped.push_back({name, {}, false, false, {}, key, true});
+        grouped.back().section = category;
+        if (! searching && ! expandedGroups_.contains(key)) continue;
+        if (category == Samples)
+        {
+            for (auto& item : rows) { ++item.depth; grouped.push_back(std::move(item)); }
+            continue;
+        }
+        std::stable_sort(rows.begin(), rows.end(), [](const Item& a, const Item& b) {
+            const int groups = juce::String(a.group).compareIgnoreCase(juce::String(b.group));
+            return groups == 0 ? juce::String(a.label).compareIgnoreCase(juce::String(b.label)) < 0 : groups < 0;
+        });
+        std::string previous, subgroup;
+        for (auto& item : rows)
+        {
+            if (subgroup.empty() || juce::String(item.group).compareIgnoreCase(juce::String(previous)) != 0)
+            {
+                previous = item.group;
+                subgroup = key + "/" + previous;
+                grouped.push_back({previous, {}, false, false, {}, subgroup, true, 1});
+                grouped.back().section = category;
+            }
+            if (! searching && ! expandedGroups_.contains(subgroup)) continue;
+            item.group = subgroup;
+            item.depth = 1;
+            grouped.push_back(std::move(item));
+        }
+    }
+    return grouped;
 }
 
 namespace
@@ -482,7 +576,7 @@ void drawPluginIcon(SkCanvas& c, const Rect& box, const std::string& format, boo
     }
 }
 
-enum class Glyph { None, Library, Sounds, Drums, Instruments, AudioEffects, MidiEffects, PlugIn, Samples, Folder, Pack, Add };
+enum class Glyph { None, Library, All, Sounds, Drums, Instruments, AudioEffects, MidiEffects, PlugIn, Samples, Folder, Pack, Add };
 
 void drawGlyph(SkCanvas& c, Glyph g, const Rect& box, SkColor color)
 {
@@ -504,6 +598,21 @@ void drawGlyph(SkCanvas& c, Glyph g, const Rect& box, SkColor color)
             }
             c.drawLine(x + 10.5f, y + 2, x + w - 1.5f, y + h - 2, line);
             break;
+        case Glyph::All:
+        {
+            // A shelf: three upright spines of different heights, a banded middle one, a fourth leaning on them.
+            const float base = y + h - 1.5f;
+            c.drawLine(x + 0.5f, base, x + w - 0.5f, base, line);
+            const float tops[] = {2.5f, 4.5f, 3.2f};
+            for (int i = 0; i < 3; ++i)
+            {
+                const float px = x + 2.5f + (float) i * 2.9f;
+                c.drawLine(px, y + tops[i], px, base, line);
+            }
+            c.drawRect(SkRect::MakeXYWH(x + 4.6f, y + 7.5f, 1.6f, 1.6f), solid);
+            c.drawLine(x + 9.6f, y + 4, x + 12.8f, base, line);
+            break;
+        }
         case Glyph::Sounds:
             c.drawOval(SkRect::MakeXYWH(x + 1.5f, y + h - 5.5f, 5, 4), solid);
             c.drawLine(x + 6.2f, y + h - 3.5f, x + 6.2f, y + 2, line);
@@ -564,6 +673,7 @@ void drawGlyph(SkCanvas& c, Glyph g, const Rect& box, SkColor color)
 
 Glyph glyphFor(const std::string& name)
 {
+    if (name == "All") return Glyph::All;
     if (name == "Sounds") return Glyph::Sounds;
     if (name == "Drums") return Glyph::Drums;
     if (name == "Instruments") return Glyph::Instruments;
@@ -684,13 +794,14 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
                            selected ? selectedBg : theme.color("SurfaceBackground"));
             inset += 24;
         }
+        if (! item.packId.empty()) { paintPack(canvas, theme, item, row, selected); continue; }
         paint::text(canvas, item.label, Rect{row.x + inset, row.y, row.w - inset - 4, row.h}, fg,
                     theme.metrics.fontSize, Align::Left, item.heading);
     }
     if (entries.empty())
     {
         const char* note = ctx().browserLoading && folderMode_ ? "Loading..."
-                           : folderMode_ && ! query_.empty() && ctx().browserSearchLoading ? "Searching..." : "No results";
+                           : listsFolder() && ! query_.empty() && ctx().browserSearchLoading ? "Searching..." : "No results";
         paint::text(canvas, note, {list.x + 8, list.y, list.w - 12, 30}, theme.color("TextDisabled"), theme.metrics.fontSize);
     }
     canvas.restore();
@@ -748,7 +859,13 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
     canvas.drawLine(button.x + 3, button.y + 5.5f, button.x + 3, button.y + 8, p);
     canvas.drawLine(button.x + 9, button.y + 5.5f, button.x + 9, button.y + 8, p);
     const bool selected = selectedItem_ >= 0 && (size_t) selectedItem_ < entries.size();
-    paint::text(canvas, selected ? "1 item selected" : "0 items selected",
+    std::string footerText = selected ? "1 item selected" : "0 items selected";
+    if (selected && ! entries[(size_t) selectedItem_].packId.empty())
+        for (const auto& pack : ctx().samplePacks)
+            if (pack.id == entries[(size_t) selectedItem_].packId)
+                footerText = ! pack.message.empty() ? pack.message
+                             : megabytes(pack.bytes) + (pack.licence == "CC0-1.0" ? ", free to use, no credit needed (CC0)" : ", " + pack.licence);
+    paint::text(canvas, footerText,
                 {button.right() + 6, footer.y, std::max(0.0f, footer.right() - button.right() - 12), footer.h},
                 fg, theme.metrics.fontSize, Align::Centre);
 
@@ -770,10 +887,19 @@ void BrowserPanel::selectCategory(int index)
     scroll_ = 0;
     folderMode_ = false;
     if (index >= (int) categories().size()) navigate(ctx().browserPlaces[(size_t) index - categories().size()]);
-    else if (index == 10 && ctx().song) navigate(juce::File(ctx().song->sourcePath).getParentDirectory().getFullPathName().toStdString());
-    else if (index == 11) navigate(ctx().userLibraryPath.empty() ? juce::File::getSpecialLocation(juce::File::userMusicDirectory).getChildFile("Ableton/User Library").getFullPathName().toStdString() : ctx().userLibraryPath);
-    else if (index == 12) navigate(ctx().packsPath.empty() ? "/Users/Shared/Ableton/Factory Packs" : ctx().packsPath);
-    else if (index == 7) navigate(juce::File::getSpecialLocation(juce::File::userMusicDirectory).getFullPathName().toStdString());
+    else if (index == CurrentProject && ctx().song) navigate(juce::File(ctx().song->sourcePath).getParentDirectory().getFullPathName().toStdString());
+    else if (index == UserLibrary) navigate(ctx().userLibraryPath.empty() ? juce::File::getSpecialLocation(juce::File::userMusicDirectory).getChildFile("Ableton/User Library").getFullPathName().toStdString() : ctx().userLibraryPath);
+    else if (index == Packs && ctx().refreshSamplePacks) ctx().refreshSamplePacks(); // LIB-1: the Packs list
+    else if (index == Samples) navigate(samplesRoot());
+    else if (index == AllItems)
+    {
+        if (! allOpened_)
+            for (int category = Sounds; category <= Samples; ++category)
+                expandedGroups_.insert(std::string("All/") + categories()[(size_t) category].name);
+        allOpened_ = true;
+        // The Samples section reads the same folder on the same workers as the Samples category (no folder mode).
+        if (ctx().openBrowserFolder) ctx().openBrowserFolder(samplesRoot());
+    }
 }
 
 void BrowserPanel::disclose(const Item& item, bool open)
@@ -798,7 +924,13 @@ void BrowserPanel::disclose(const Item& item, bool open)
 
 void BrowserPanel::activate(const Item& item)
 {
-    if (item.heading)
+    if (! item.packId.empty())
+    {
+        if (! item.path.empty()) navigate(item.path); // an installed pack opens like a folder; Up comes back here
+        else packAction(item);
+    }
+    else if (item.directory && packList()) navigate(item.path); // the factory packs folder: rows expand only in folders
+    else if (item.heading)
     {
         if (! expandedGroups_.erase(item.group)) expandedGroups_.insert(item.group);
         repaint();
@@ -811,6 +943,7 @@ void BrowserPanel::activate(const Item& item)
 
 void BrowserPanel::showItemMenu(Item item)
 {
+    if (! item.packId.empty()) { showPackMenu(item); return; }
     juce::PopupMenu menu;
     if (item.heading || item.directory)
     {
@@ -856,7 +989,12 @@ void BrowserPanel::mouseDown(const MouseEvent& event)
             filtersVisible_ = ! filtersVisible_; scroll_ = 0;
         }
         else if (event.x >= 5 && event.x < 23 && folderMode_)
-            navigate(juce::File(ctx().browserFolder).getParentDirectory().getFullPathName().toStdString());
+        {
+            const auto parentFolder = juce::File(ctx().browserFolder).getParentDirectory().getFullPathName().toStdString();
+            if (selectedCategory_ == packsCategory() && (parentFolder == ctx().samplePacksRoot || ctx().browserFolder == ctx().packsPath))
+            { folderMode_ = false; selectedItem_ = -1; scroll_ = 0; } // LIB-1: back to the Packs list
+            else navigate(parentFolder);
+        }
         repaint();
         return;
     }
@@ -917,6 +1055,7 @@ void BrowserPanel::mouseDown(const MouseEvent& event)
         if (! event.right && selectedItem_ >= 0 && (size_t) selectedItem_ < entries.size())
         {
             const auto& item = entries[(size_t) selectedItem_];
+            if (! item.packId.empty() && packButtonBounds(selectedItem_).contains(event.x, event.y)) { packAction(item); repaint(); return; }
             if (item.heading || (item.directory && event.x < listArea().x + 22 + (float) item.depth * 14)) activate(item);
             else pendingDrag_ = item.drag;
         }
@@ -966,7 +1105,7 @@ void BrowserPanel::tick()
     // Blink the caret, and (re)index the shown folder while a search is typed in it (UI-6b).
     if ((searchFocused_ || tagEditing_) && caretVisible() != caretShown_) { caretShown_ = ! caretShown_; repaint(); }
     const auto& context = ctx();
-    if (folderMode_ && ! query_.empty() && context.indexBrowserFolder && ! context.browserFolder.empty()
+    if (listsFolder() && ! query_.empty() && context.indexBrowserFolder && ! context.browserFolder.empty()
         && context.browserSearchRoot != context.browserFolder)
         context.indexBrowserFolder(context.browserFolder);
 }
@@ -1042,7 +1181,8 @@ bool BrowserPanel::keyPressed(const KeyEvent& key)
             else
                 for (int i = selectedItem_ - 1; i >= 0; --i)
                     if ((! item.parentFolder.empty() && entries[(size_t) i].path == item.parentFolder)
-                        || (! item.group.empty() && entries[(size_t) i].heading && entries[(size_t) i].group == item.group))
+                        || (! item.group.empty() && entries[(size_t) i].heading && entries[(size_t) i].group == item.group)
+                        || (item.parentFolder.empty() && entries[(size_t) i].heading && entries[(size_t) i].depth < item.depth))
                     { selectedItem_ = i; break; }
         }
         repaint();
@@ -1057,7 +1197,7 @@ bool BrowserPanel::keyPressed(const KeyEvent& key)
         else if (key.keyCode == juce::KeyPress::returnKey) searchFocused_ = false;
         else return false;
         // A new search re-reads the folder tree so it also finds files added since the last one.
-        if (starting && ! query_.empty() && folderMode_ && ctx().indexBrowserFolder) ctx().indexBrowserFolder(ctx().browserFolder);
+        if (starting && ! query_.empty() && listsFolder() && ctx().indexBrowserFolder) ctx().indexBrowserFolder(ctx().browserFolder);
         selectedItem_ = -1;
         scroll_ = 0;
         repaint();
@@ -1078,6 +1218,170 @@ bool BrowserPanel::mouseWheel(const MouseEvent& event)
     scroll_ = std::clamp(scroll_ - event.wheelDeltaY * kWheelPixels, 0.0f, maximum);
     repaint();
     return true;
+}
+
+// ---- LIB-1 Packs list (docs/SAMPLE_PACKS.md) -------------------------------------------------------------------------
+// One row per Sonora pack (installed first; the app keeps that order), tagged by Style and Type so the facets filter them,
+// plus the reference factory packs folder when it exists and a status row for the catalogue. Downloads only start from
+// the row's button, its menu or a double-click; an installed pack opens like a folder.
+
+int BrowserPanel::packsCategory()
+{
+    return Packs;
+}
+
+
+void BrowserPanel::appendPacks(std::vector<Item>& result) const
+{
+    const auto& context = ctx();
+    using List = UiContext::SamplePackList;
+    std::string status;
+    switch (context.samplePackList)
+    {
+        case List::Off: status = "Free Sonora sample packs: coming in a later version"; break;
+        case List::Hidden: status = "Get Packs...  free CC0 sample packs, downloaded only when you ask"; break;
+        case List::Loading: status = "Loading the pack list..."; break;
+        case List::Failed: status = context.samplePackListMessage + "  (double-click to retry)"; break;
+        case List::Ready: break;
+    }
+    if (! status.empty())
+    {
+        result.push_back({status, {}, false, false, {}});
+        result.back().packId = "@list";
+    }
+    if (! context.packsPath.empty() && juce::File(juce::String::fromUTF8(context.packsPath.c_str())).isDirectory())
+        result.push_back({juce::File(context.packsPath).getFileName().toStdString(), context.packsPath, true, false, {}});
+    for (const auto& pack : context.samplePacks)
+    {
+        Item item{pack.name, pack.folder, false, false, {}};
+        item.packId = pack.id;
+        item.key = "pack:" + pack.id;
+        for (const auto& style : pack.styles) item.tags.push_back({"Style", style});
+        for (const auto& type : pack.types) item.tags.push_back({"Type", type});
+        item.tags.push_back({"Pack", pack.folder.empty() ? "Available" : "Installed"});
+        item.suggestedTags = item.tags;
+        item.tags = context.browserTags.tagsFor(item.key, std::move(item.tags));
+        result.push_back(std::move(item));
+    }
+}
+
+Rect BrowserPanel::packButtonBounds(int listRow) const
+{
+    const auto row = listRowBounds(listRow);
+    return {row.right() - kPackButton - 6, row.y + 2, kPackButton, row.h - 4};
+}
+
+void BrowserPanel::paintPack(SkCanvas& canvas, const Theme& theme, const Item& item, const Rect& row, bool selected) const
+{
+    const SkColor fg = theme.color("ControlForeground"), dim = theme.color("TextDisabled");
+    const float font = theme.metrics.fontSize;
+    if (item.packId == "@list")
+    {
+        paint::text(canvas, item.label, row.reduced(10, 0), dim, font);
+        return;
+    }
+    drawGlyph(canvas, Glyph::Pack, {row.x + 8, row.centreY() - 7, 14, 14}, fg);
+    const auto* pack = findPack(ctx(), item.packId);
+    const bool wide = row.w >= kPackWide;
+    const Rect button{row.right() - kPackButton - 6, row.y + 2, kPackButton, row.h - 4};
+    const Rect info{button.x - kPackInfo - 6, row.y, kPackInfo, row.h};
+    using State = UiContext::SamplePack::State;
+    const bool failed = pack != nullptr && pack->state == State::Failed;
+    const float nameRight = wide ? info.x - 4 : button.x - 6;
+    paint::text(canvas, item.label, Rect{row.x + 28, row.y, std::max(0.0f, nameRight - row.x - 28), row.h},
+                failed ? theme.color("ChosenAlert") : fg, font);
+    if (pack == nullptr) return;
+    const float fraction = pack->bytes > 0 ? std::clamp((float) pack->received / (float) pack->bytes, 0.0f, 1.0f) : 0.0f;
+    const std::string percent = std::to_string((int) std::floor(fraction * 100.0f)) + "%";
+    auto drawButton = [&](const std::string& label, float progress) {
+        ctl::framed(canvas, theme, button, theme.color(selected ? "ControlTextBack" : "SurfaceBackground"));
+        if (progress > 0) paint::fill(canvas, {button.x + 1, button.y + 1, (button.w - 2) * progress, button.h - 2}, theme.color("ChosenDefault"));
+        paint::text(canvas, label, button, fg, font, Align::Centre);
+    };
+    auto status = [&](const std::string& text, SkColor colour) { if (wide) paint::text(canvas, text, info, colour, font, Align::Right); };
+    switch (pack->state)
+    {
+        case State::Available:
+            status(pack->received > 0 ? percent + " of " + megabytes(pack->bytes) : megabytes(pack->bytes), dim);
+            drawButton(pack->received > 0 ? "Resume" : "Download", 0);
+            break;
+        case State::Queued:
+            status("Waiting...", dim);
+            drawButton("Cancel", 0);
+            break;
+        case State::Downloading:
+            status(percent + " of " + megabytes(pack->bytes), dim);
+            drawButton(wide ? "Cancel" : percent, std::max(fraction, 0.02f)); // the bar is the button: a click cancels
+            break;
+        case State::Verifying:
+        case State::Installing:
+            paint::text(canvas, pack->state == State::Verifying ? "Checking..." : "Installing...", button, dim, font, Align::Centre);
+            break;
+        case State::Installed:
+            paint::text(canvas, "Installed", button, dim, font, Align::Centre);
+            break;
+        case State::Update:
+            status("Installed " + pack->version, dim);
+            drawButton("Update", 0);
+            break;
+        case State::Failed:
+            status("Failed", theme.color("ChosenAlert"));
+            drawButton(pack->received > 0 ? "Resume" : "Retry", 0);
+            break;
+    }
+}
+
+void BrowserPanel::packAction(const Item& item)
+{
+    auto& context = ctx();
+    if (item.packId == "@list")
+    {
+        if (context.samplePackList != UiContext::SamplePackList::Off && context.showSamplePackList) context.showSamplePackList();
+        return;
+    }
+    const auto* pack = findPack(context, item.packId);
+    if (pack == nullptr) return;
+    using State = UiContext::SamplePack::State;
+    switch (pack->state)
+    {
+        case State::Available: case State::Update: case State::Failed:
+            if (context.downloadSamplePack) context.downloadSamplePack(pack->id);
+            break;
+        case State::Queued: case State::Downloading:
+            if (context.cancelSamplePack) context.cancelSamplePack(pack->id);
+            break;
+        case State::Verifying: case State::Installing: case State::Installed:
+            break;
+    }
+}
+
+void BrowserPanel::showPackMenu(const Item& item)
+{
+    if (item.packId == "@list") { packAction(item); return; }
+    const auto* pack = findPack(ctx(), item.packId);
+    if (pack == nullptr) return;
+    using State = UiContext::SamplePack::State;
+    juce::PopupMenu menu;
+    auto add = [&](const juce::String& label, bool enabled, std::function<void()> run) {
+        juce::PopupMenu::Item entry(label);
+        entry.isEnabled = enabled;
+        entry.action = [this, task = std::move(run)] { if (Widget::isAlive(this)) task(); };
+        menu.addItem(std::move(entry));
+    };
+    const std::string id = pack->id, folder = pack->folder;
+    if (! folder.empty()) add("Open Pack", true, [this, folder] { navigate(folder); repaint(); });
+    const bool busy = pack->state == State::Queued || pack->state == State::Downloading;
+    if (busy) add("Cancel Download", true, [this, id] { if (ctx().cancelSamplePack) ctx().cancelSamplePack(id); });
+    else if (pack->state != State::Installed && pack->state != State::Verifying && pack->state != State::Installing)
+        add(pack->state == State::Update ? "Update Pack" : pack->received > 0 ? "Resume Download" : "Download Pack (" + juce::String(megabytes(pack->bytes)) + ")",
+            true, [this, id] { if (ctx().downloadSamplePack) ctx().downloadSamplePack(id); });
+    if (! folder.empty())
+    {
+        menu.addSeparator();
+        add("Show in Finder", static_cast<bool>(ctx().revealInFinder), [this, folder] { if (ctx().revealInFinder) ctx().revealInFinder(folder); });
+        add("Remove Pack (moves it to the Trash)", ! busy, [this, id] { if (ctx().removeSamplePack) ctx().removeSamplePack(id); });
+    }
+    menu.showMenuAsync(juce::PopupMenu::Options());
 }
 
 } // namespace sonora::ui

@@ -89,6 +89,35 @@ struct CollabView
         int color = 0;      // index into collabColor()
         bool self = false;
         std::string safetyCode; // four words to compare with this person ("" for yourself)
+        bool hasChat = true;    // false: an older Sonora that can't see the chat (COL-9)
+        bool micOn = false, talking = false, mutedHere = false; // COL-7 voice (mutedHere: only on this machine)
+        bool cameraOn = false;                                  // COL-8
+    };
+    // COL-8: the latest frame of someone's camera (opaque BGRA rows; shared with the decoder, never copied).
+    struct VideoTile
+    {
+        int id = 0;
+        std::string name;
+        int color = 0;
+        bool self = false, micOn = false, talking = false;
+        int width = 0, height = 0;
+        std::shared_ptr<const std::vector<uint32_t>> pixels;
+        uint64_t serial = 0; // new frame when it changes
+    };
+    // COL-9: one line of the session chat.
+    struct ChatLine
+    {
+        int author = 0;
+        std::string name, text;
+        int color = 0;
+        int64_t timeMs = 0;
+        bool self = false, pending = false, history = false;
+        std::string failed; // own line the host did not pass on, and why
+    };
+    // What the host allows (COL-9). Before a session: the saved defaults for the next one.
+    struct Policy
+    {
+        bool chat = true, voice = true, video = true;
     };
     // Another participant's pointer and selection, in musical coordinates.
     struct Cursor
@@ -122,6 +151,21 @@ struct CollabView
     std::string displayName, relayUrl;
     bool relayIsDefault = true; // relayUrl is the project's server (the panel then names no address)
     bool shareOnLan = false;    // the panel's choice before sharing: internet (default) or this Wi-Fi
+    Policy policy;              // in a session: the session's; before: the defaults
+    std::vector<ChatLine> chat; // oldest first
+    int unread = 0;             // lines from others since the chat was last open
+    bool chatAvailable = false;
+    std::string chatUnavailable; // why the composer is off
+    bool voiceSupported = false, videoSupported = false; // COL-7 / COL-8 built in
+    // COL-7 voice: this person's mic and options.
+    bool voiceAvailable = false;
+    std::string voiceUnavailable;
+    bool micOn = false, pushToTalk = false, pushToTalkHeld = false, duck = true, talking = false, noMicInput = false;
+    float micLevel = 0.0f; // linear peak
+    // COL-8 camera.
+    bool videoAvailable = false, cameraOn = false, showVideo = true;
+    std::string videoUnavailable;
+    std::vector<VideoTile> videoTiles; // this person's preview first
     bool active() const { return state != State::None && state != State::Ended; }
 };
 
@@ -455,6 +499,23 @@ struct UiContext
     bool browserSearchLoading = false;
     std::function<void(const std::string&)> openBrowserFolder, expandBrowserFolder, indexBrowserFolder, previewSample;
     std::function<void()> addBrowserFolder;
+    // ---- LIB-1 sample packs (docs/SAMPLE_PACKS.md): the Browser's Packs list, filled by app/AppSamplePacks.cpp.
+    struct SamplePack
+    {
+        enum class State { Available, Queued, Downloading, Verifying, Installing, Installed, Update, Failed };
+        std::string id, name, version, description, licence, folder, message; // folder: set when installed
+        std::vector<std::string> styles, types;
+        int64_t bytes = 0, received = 0; // archive size; downloaded so far (a paused download keeps it)
+        State state = State::Available;
+    };
+    // Off: no feed/key in this build. Hidden: nothing fetched until the user asks ("Get Packs...").
+    enum class SamplePackList { Off, Hidden, Loading, Ready, Failed };
+    SamplePackList samplePackList = SamplePackList::Off;
+    std::string samplePackListMessage, samplePacksRoot;
+    std::vector<SamplePack> samplePacks;
+    std::map<std::string, BrowserTags::Tags> samplePackFileTags; // installed file path -> its pack's and pack.json's tags
+    std::function<void()> showSamplePackList, refreshSamplePacks;
+    std::function<void(const std::string& id)> downloadSamplePack, cancelSamplePack, removeSamplePack;
     std::function<void()> insertMidiClip, toggleFullScreen;
 
     // ---- editing (UI-3 / UI-10): the selected Arrangement/Session clip and the document commands
@@ -565,6 +626,15 @@ struct UiContext
     std::function<void(int id)> collabRemove;
     std::function<void(const std::string& peer, bool allow)> collabAnswerJoin;
     std::function<void(bool)> collabSetFollowTransport;
+    std::function<void(CollabView::Policy)> collabSetPolicy; // host (or the defaults before a session)
+    std::function<void()> collabToggleChat;                  // show or hide the Session Chat dock
+    std::function<void(bool)> collabSetMic;                  // COL-7: this person's mic (asks for permission first)
+    std::function<void(int option, bool)> collabSetVoiceOption; // 0 push to talk, 1 duck the music
+    std::function<void(int id, bool)> collabMuteVoice;      // hear someone or not, on this machine only
+    std::function<void(bool down)> collabPushToTalkKey;     // the ` key held / released
+    std::function<void(bool)> collabSetCamera;               // COL-8: this person's camera (asks for permission first)
+    std::function<void(bool)> collabShowVideo;               // the picture-in-picture tiles on this machine
+    bool collabChatOpen = false;
     // Views report where the pointer is (view 0 Arrangement, 1 Session, 2 clip editor; beat < 0 outside the timeline).
     std::function<void(int view, int trackIndex, double beat, int pitch)> collabPointer;
 

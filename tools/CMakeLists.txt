@@ -7,6 +7,8 @@ target_link_libraries(als_dump PRIVATE sonora_core)
 if(SONORA_WITH_UI)
 add_executable(ui_snapshot ui_snapshot/main.cpp)
 target_link_libraries(ui_snapshot PRIVATE sonora_ui)
+# LIB-1 --browser-packs reads installed packs (no network: not sonora_packs, whose JUCE link order clashes with Skia's HarfBuzz).
+target_sources(ui_snapshot PRIVATE ../src/packs/PackManifest.cpp ../src/packs/PackLibrary.cpp)
 target_compile_definitions(ui_snapshot PRIVATE
     SONORA_DEFAULT_FIXTURE="${CMAKE_SOURCE_DIR}/tests/fixtures/minimal_set.xml")
 endif()
@@ -61,6 +63,17 @@ endif()
 add_executable(collab_probe collab_probe/main.cpp)
 target_link_libraries(collab_probe PRIVATE sonora_collab)
 target_compile_definitions(collab_probe PRIVATE SONORA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# --chat-dock captures the native Session Chat dock (COL-9): macOS with the UI only.
+if(APPLE AND SONORA_WITH_UI)
+    target_sources(collab_probe PRIVATE ../src/app/CollabChatDock.mm)
+    target_link_libraries(collab_probe PRIVATE sonora_ui)
+    target_compile_options(collab_probe PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+    target_compile_definitions(collab_probe PRIVATE SONORA_PROBE_CHAT_DOCK=1)
+endif()
+
+# LIB-1: build/sign sample packs and drive the app's PackStore against a feed (docs/SAMPLE_PACKS.md).
+add_executable(pack_tool pack_tool/main.cpp)
+target_link_libraries(pack_tool PRIVATE sonora_packs) # Monocypher (signing) via sonora_core
 
 # PLG-14: render any effect plug-in over a WAV with named parameter settings (black-box measurements, A/B renders).
 add_executable(fx_render fx_render/main.cpp)

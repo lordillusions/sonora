@@ -38,6 +38,8 @@
 #include "io/als/AlsReader.h"
 #include "plugins/PluginDevice.h"
 #include "plugins/PluginHost.h"
+#include "plugins/PrismPreset.h"
+#include "plugins/SonoraPluginState.h"
 
 namespace sonora::devices
 {
@@ -160,15 +162,50 @@ std::unique_ptr<DeviceProcessor> createSimpler(const model::Device& d, BuildCont
     return dev;
 }
 
+// COL-4c: one of Sonora's own VST3s that is not installed here (a collab guest, a set made on another computer). The
+// built-in device plays its saved state; the model keeps the plug-in reference and state as they were (see
+// captureDeviceState), so saving or syncing the set changes nothing for computers that have the VST3.
+std::unique_ptr<DeviceProcessor> createSonoraStandIn(const model::Device& d, BuildContext& ctx)
+{
+    using plugins::SonoraPlugin;
+    const auto which = plugins::sonoraPluginFor(*d.plugin, d.kind);
+    if (which != SonoraPlugin::Prism && which != SonoraPlugin::CurveLfo) return nullptr;
+    const auto body = plugins::juceVst3StateBody(d.plugin->state);
+    std::string error;
+    std::unique_ptr<DeviceProcessor> dev;
+    if (which == SonoraPlugin::Prism)
+    {
+        model::Device native = nativeDeviceModel("SonoraWavetable");
+        native.id = d.id;
+        if (! body.empty() && ! plugins::decodePrismPreset(body, native, error))
+            note(ctx, d.plugin->name + ": the saved sound could not be read (" + error + "), playing the default");
+        std::vector<std::string> warnings;
+        dev = createNative(native, &warnings);
+        for (auto& warning : warnings) note(ctx, d.plugin->name + ": " + warning);
+    }
+    else
+    {
+        auto lfo = std::make_unique<CurveLfo>();
+        if (! body.empty() && ! plugins::decodeCurveLfoState(body.data(), body.size(), *lfo, error))
+            note(ctx, d.plugin->name + ": the saved curves could not be read (" + error + "), using the defaults");
+        dev = std::move(lfo);
+    }
+    if (! dev) return nullptr;
+    dev->setBypassed(! d.enabled);
+    note(ctx, d.plugin->name + ": VST3 not installed here, played by Sonora's built-in device");
+    return dev;
+}
+
 std::unique_ptr<DeviceProcessor> createPlugin(const model::Device& d, BuildContext& ctx)
 {
-    if (ctx.pluginHost == nullptr || ! d.plugin)
+    if (! d.plugin)
         return placeholderIfInstrument(d, ctx);
 
-    const auto match = ctx.pluginHost->findMatch(*d.plugin, d.kind);
+    const auto match = ctx.pluginHost ? ctx.pluginHost->findMatch(*d.plugin, d.kind) : std::nullopt;
     if (! match)
     {
-        note(ctx, "Plugin not installed/scanned: " + d.plugin->name);
+        if (auto standIn = createSonoraStandIn(d, ctx)) return standIn;
+        if (ctx.pluginHost != nullptr) note(ctx, "Plugin not installed/scanned: " + d.plugin->name);
         return placeholderIfInstrument(d, ctx);
     }
 
@@ -361,6 +398,7 @@ void captureDeviceState(model::Device& d, DeviceProcessor* processor)
     if (! processor) return;
     d.enabled = ! processor->isBypassed();
     if (auto* plugin = dynamic_cast<plugins::PluginDevice*>(processor)) plugin->captureState(d);
+    else if (d.plugin) return; // a placeholder or built-in stand-in (COL-4c): the plug-in's saved state stays as it was
     if (const auto* synth = dynamic_cast<WavetableSynth*>(processor); synth && synth->hasEffectsConfiguration())
     {
         std::string error;

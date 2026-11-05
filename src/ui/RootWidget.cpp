@@ -293,6 +293,18 @@ bool RootWidget::dispatchKey(const KeyEvent& k)
 {
     if (ctx_.trackDrag && k.keyCode == juce::KeyPress::escapeKey)
     { ctx_.trackDrag.reset(); trackDrop_.reset(); captured_ = nullptr; movingTracks_ = false; cursor_ = Cursor::Default; markDirty(); return true; }
+    // COL-7: hold ` (backquote) to talk while push-to-talk is on in a session; not while a name is typed.
+    if (ctx_.collab.active() && ctx_.collab.pushToTalk && ctx_.collabPushToTalkKey && ! k.cmd && ! k.alt && ! k.ctrl
+        && (k.textChar == '`' || k.keyCode == '`') && ! ctx_.trackRename.active())
+    {
+        if (pttKey_ == 0)
+        {
+            pttKey_ = k.keyCode != 0 ? k.keyCode : '`';
+            ctx_.collabPushToTalkKey(true);
+            markDirty();
+        }
+        return true;
+    }
     if (ctx_.preferencesOpen || ctx_.exportOpen || ctx_.collabOpen) return keyPressed(k);
     // UI-58: an open in-place name field takes every key (letters are text, never notes or shortcuts).
     if (ctx_.trackRename.active()) { trackRenameKey(ctx_, k); markDirty(); return true; }
@@ -399,6 +411,13 @@ bool RootWidget::handleComputerKeyboard(const KeyEvent& k)
 
 bool RootWidget::dispatchKeyUp(int keyCode)
 {
+    if (pttKey_ != 0 && keyCode == pttKey_)
+    {
+        pttKey_ = 0;
+        if (ctx_.collabPushToTalkKey) ctx_.collabPushToTalkKey(false);
+        markDirty();
+        return true;
+    }
     if (const auto note = std::find_if(heldNotes_.begin(), heldNotes_.end(), [&](const HeldNote& h) { return h.keyCode == keyCode; });
         note != heldNotes_.end())
     {
@@ -423,6 +442,7 @@ void RootWidget::releaseMappedKeys()
     if (isAlive(keyboardFocus_)) keyboardFocus_->focusLost();
     while (! heldNotes_.empty()) dispatchKeyUp(heldNotes_.back().keyCode);
     while (! heldKeys_.empty()) dispatchKeyUp(heldKeys_.back().keyCode);
+    if (pttKey_ != 0) dispatchKeyUp(pttKey_);
 }
 
 std::vector<int> RootWidget::heldLaunchKeys() const
@@ -430,6 +450,7 @@ std::vector<int> RootWidget::heldLaunchKeys() const
     std::vector<int> keys;
     for (const auto& held : heldNotes_) keys.push_back(held.keyCode);
     for (const auto& held : heldKeys_) keys.push_back(held.keyCode);
+    if (pttKey_ != 0) keys.push_back(pttKey_);
     return keys;
 }
 

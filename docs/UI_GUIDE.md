@@ -181,6 +181,13 @@ compared with Live's mono file display.
 
 ## Browser
 
+**All (UI-64)** is the first Library entry: every Library category in one list, a heading per category in sidebar order
+(Sounds is left out while it has nothing to list) over that category's own groups or, for Samples, the Samples folder's
+rows. Rows keep the icon, tags and drag of their own category (Drum Rack and Impulse appear once, under Drums); search,
+facets and chips cover the whole list, and Left walks from a row to its group, then to its category heading.
+Categories the reference has but Sonora does not (Modulators, Max for Live, Clips, Grooves, Tunings, Templates) are not
+shown (UI-64b).
+
 Cmd+F searches the selected category/current folder. Add Folder stores a custom Place; disclosure arrows or double-click expand folders inline,
 and the toolbar Up button changes the browser root to its parent. Selecting a sample auditions it when Preview is on; the footer toggle stops preview.
 While a clip is moved, resized, trimmed, stretched or a fade is dragged, a line runs from the edge being placed up into
@@ -344,8 +351,9 @@ coverage in Sonora; reference-app acceptance is still unverified. Functional ref
 [racks](https://www.ableton.com/en/manual/instrument-drum-and-effect-racks/),
 [LFOTool](https://www.xferrecords.com/products/lfo-tool). No proprietary code, presets or assets are included.
 
-Reviewed snapshots: `screenshots/plugins-by-vendor.png` and `screenshots/native-{fm,sampler,drum-rack,instrument-rack,lfo}.png`.
-`ui_snapshot --browser-category 2|3|4|5|6 --browser-query TEXT` selects/searches a category; `--rack-chain N`
+Reviewed snapshots: `screenshots/browser-all.png`, `browser-all-search.png` (UI-64), `screenshots/plugins-by-vendor.png` and `screenshots/native-{fm,sampler,drum-rack,instrument-rack,lfo}.png`.
+`ui_snapshot --browser-category all|drums|instruments|audio-effects|midi-effects|plug-ins --browser-query TEXT` selects/searches
+a category (the old numbers 2..6 still mean Drums..Plug-ins; with `all`, `--browser-folder` stands in for the Samples folder); `--rack-chain N`
 selects the chain shown in the device area. Plugin browsing reads the real cache without scanning/instantiating.
 
 ## Pixel comparison (UI-13)
@@ -533,6 +541,13 @@ Theme & Colors, Audio, Tempo & MIDI, File & Folder, Library, Plug-Ins, and Recor
 aligned labels/value fields, section rules, clipped content and bounded scrolling follow the reference layout. Escape,
 Cmd+comma or the close button closes it. Outside clicks stay modal; panel contents cannot trigger hidden underlying UI.
 The main-view focus frame and browser-drag label are suppressed over modal Settings/export panels.
+Look (UI-63): Settings is drawn like the app prompts (UI-44), not with the theme's colors: the brand panel (dark
+gradient, 12 pt corners, hairline border, faint ghost S at the bottom right), app icon and bold 15 pt "Settings" title,
+a darker sidebar whose chosen row is a rounded light tint, 12.5 pt labels (secondary values in the prompt's message
+grey), prompt buttons (chosen/default = white primary, others dark with a hairline; hover lifts), pop-up buttons with a
+chevron, pill switches for on/off settings, a text well for the shortcut filter and the one warm `panel::alert` for
+failures and "press the new key". Colors and metrics come from `gfx::brand::panel` and the shared `gfx::brand`
+drawers, so a change there restyles splash, prompts, About and Settings together.
 
 - Display: zoom 80–200%, reset to 100%, existing Computer MIDI Keyboard toggle and octave/velocity readouts.
 - Theme: built-in Light/Dark and custom `.ask` import; changing themes retains dragged panel sizes. Built-in colors are

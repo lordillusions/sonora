@@ -73,6 +73,7 @@ private:
     bool dirty_ = true;
     Cursor cursor_ = Cursor::Default;
     std::vector<midi::Mapping> heldKeys_; // message-thread targets retained through key release
+    int pttKey_ = 0;                       // COL-7: the push-to-talk key while it is held
     struct HeldNote { int keyCode; int note; };
     std::vector<HeldNote> heldNotes_; // Computer MIDI Keyboard notes sounding until their key is released
     bool handleComputerKeyboard(const KeyEvent& k);

@@ -11,6 +11,7 @@
 
 #include "collab/CollabSession.h"
 #include "collab/Net.h"
+#include "collab/Video.h"
 #include "core/Edit.h"
 #include "control/ControlService.h"
 #include "control/LocalEndpoint.h"
@@ -26,6 +27,8 @@
 #include "midi/MidiManager.h"
 #include "midi/MappingStore.h"
 #include "plugins/PluginHost.h"
+#include "plugins/NativeReplacement.h"
+#include "packs/PackStore.h"
 #include "ui/UiContext.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -109,6 +112,10 @@ public:
     void leaveSession();
     bool inCollabSession() const { return collab_ && collab_->state() != collab::CollabSession::State::Ended; }
     bool collabGuest() const { return collab_ && ! collab_->isHost(); }
+    // COL-9 chat: "" when the line went out, else why not. The window says when its chat dock opens or closes.
+    std::string sendCollabChat(const std::string& text);
+    void setCollabChatOpen(bool open);
+    std::function<void()> onCollabChatChanged; // the session's lines, policy or availability changed
 
     // ---- Export Audio (AppExport.cpp): asks for the destination, then renders offline on a worker while the dialog shows progress.
     void startExport(const ui::ExportSettings& settings);
@@ -146,6 +153,14 @@ private:
     void refreshCollabView();
     void collabNotice(const std::string& text);
     void collabEnded(const std::string& reason);
+    void collabChatArrived(const collab::ChatEntry&);
+    void collabVoiceArrived(collab::AuthorId speaker, const std::string& rtp);
+    void setCollabMic(bool on);
+    void pollVoice();
+    void collabVideoArrived(collab::AuthorId speaker, const std::string& rtp);
+    void setCollabCamera(bool on);
+    void pollVideo();
+    void refreshCollabVideo();
     void startCollab(std::unique_ptr<collab::CollabSession>);
     void endCollabDocument(); // a new document replaces the session's
     void saveCollabCopy();
@@ -154,6 +169,12 @@ private:
     bool pluginEditorOpen(const juce::AudioPluginInstance*) const;
     std::unique_ptr<CollabPort> collabPort_;
     std::unique_ptr<collab::CollabSession> collab_;
+    std::unique_ptr<collab::VoiceChannel> voice_; // COL-7: while the session has voice; reset before engine_
+    bool collabMicOn_ = false, pushToTalkHeld_ = false;
+    std::set<collab::AuthorId> mutedVoices_;      // people this machine does not hear
+    std::unique_ptr<collab::VideoChannel> video_; // COL-8: while the session has video
+    bool collabCameraOn_ = false;
+    uint64_t videoSerial_ = 0; // sum of the shown frames' serials: repaint when it moves
     std::unique_ptr<collab::LanBrowser> lanBrowser_;
     struct CollabTimer : juce::Timer
     {
@@ -168,6 +189,7 @@ private:
     collab::AuthorId collabAuthorForNextEdit_ = collab::hostAuthor; // host: a guest's dropped file
     juce::uint32 collabAttributionSetMs_ = 0;
     bool installingCollabSong_ = false;
+    bool collabAutotest_ = false; // SONORA_COLLAB_AUTOTEST: chat lines are logged
 
     void initialiseControl();
     control::State controlState();
@@ -226,6 +248,13 @@ private:
     void importOscillatorMedia(int track, int device, int oscillator, const std::string& path, int chain, int child);
     void importWavetablePreset(int track, int device, const std::string& path, int chain, int child);
     void importResynth(int track, int device, const std::string& path, int chain, int child, double limitSeconds = 0);
+    // LIB-1 (AppSamplePacks.cpp): the Browser's Packs list and downloads.
+    void setUpSamplePacks();
+    void publishSamplePacks();
+    // PLG-16 (AppNativeSwap.cpp): after a load, offer Sonora Prism / Curve LFO for missing Serum 2 / LFOTool instances.
+    void offerNativeReplacements();
+    void showNativeReplacementOffer(std::shared_ptr<std::vector<plugins::NativeReplacement>> found, int generation, int attempt);
+    void replaceWithNativeDevices(const std::vector<plugins::NativeReplacement>& replacements);
     void createResynthPhrase(int track, int device, int chain, int child);
     void editWavetableLfo(int track, int device, int lfo, const dsp::CurveGraph&, int chain, int child);
     void editWavetableModulationCurve(int track, int device, int slot, bool auxiliary, const dsp::CurveGraph&, bool enabled, int chain, int child);
@@ -321,6 +350,10 @@ private:
     std::unique_ptr<juce::PropertiesFile> settings_;
     std::atomic<bool> scanning_{false};
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
+    std::atomic<bool> samplePacksPublishPending_{false};
+    bool samplePacksFetched_ = false, samplePacksPublished_ = false;
+    std::set<std::string> samplePacksInstalled_, samplePacksFailed_;
+    std::unique_ptr<packs::PackStore> packStore_; // last: its worker stops before anything above goes away
 };
 
 } // namespace sonora::app

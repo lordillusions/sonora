@@ -32,6 +32,9 @@ public:
     {
         return app_.performCollabDrop(author, file, m);
     }
+    void chatArrived(const collab::ChatEntry& e) override { app_.collabChatArrived(e); }
+    void voiceArrived(collab::AuthorId speaker, const std::string& rtp) override { app_.collabVoiceArrived(speaker, rtp); }
+    void videoArrived(collab::AuthorId speaker, const std::string& rtp) override { app_.collabVideoArrived(speaker, rtp); }
     void changed() override { app_.refreshCollabView(); }
     void notify(const std::string& text) override { app_.collabNotice(text); }
     void ended(const std::string& reason) override { app_.collabEnded(reason); }

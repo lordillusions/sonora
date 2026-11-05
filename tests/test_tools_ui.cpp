@@ -364,7 +364,7 @@ TEST_CASE("browser: Up/Down walk the samples and audition them, the content-colu
         root.dispatchMouseDown(mouseAt(origin.x + x, origin.y + y));
         root.dispatchMouseUp(mouseAt(origin.x + x, origin.y + y));
     };
-    const auto place = browser->sidebarRowBounds(13); // the custom Place
+    const auto place = browser->sidebarRowBounds(ui::BrowserPanel::Packs + 1); // the custom Place
     click(place.centreX(), place.centreY());
     const auto first = browser->listRowBounds(0);
     click(first.centreX(), first.centreY());
@@ -450,6 +450,7 @@ TEST_CASE("tempo field: double-click and type a value, Enter commits, Escape can
     special(juce::KeyPress::escapeKey);
 }
 
+#include "gfx/Brand.h"
 #include "ui/views/PreferencesPanel.h"
 #include "ui/views/ArrangementView.h"
 
@@ -468,7 +469,20 @@ TEST_CASE("Settings: category sidebar routes real controls and modal clipping pr
     draw();
     const auto frame = findWidget<ui::ArrangementView>(root)->boundsInRoot();
     const auto settingsImage = juce::ImageFileFormat::loadFrom(file.getFile());
-    CHECK(settingsImage.getPixelAt((int) frame.x + 1, (int) settings->panelRect().bottom() - 10).getARGB() == ctx.theme.color("SurfaceBackground"));
+    // No focus frame over the panel: its column matches the pixels beside it. UI-63: the panel is the prompts' dark one
+    // whatever the theme.
+    const int frameY = (int) settings->panelRect().bottom() - 10;
+    const auto underFrame = settingsImage.getPixelAt((int) frame.x + 1, frameY), beside = settingsImage.getPixelAt((int) frame.x + 6, frameY);
+    CHECK(std::abs(underFrame.getRed() - beside.getRed()) <= 2); CHECK(std::abs(underFrame.getGreen() - beside.getGreen()) <= 2);
+    CHECK(underFrame.getRed() < 0x30 && underFrame.getGreen() < 0x30 && underFrame.getBlue() < 0x30);
+    {
+        // Hover lifts a button like the prompt's (buttonHot), and leaving the panel drops it again.
+        const auto r = settings->controlBounds("Reset Zoom"); REQUIRE(! r.isEmpty());
+        auto fillAt = [&] { draw(); return juce::ImageFileFormat::loadFrom(file.getFile()).getPixelAt((int) r.x + 4, (int) r.centreY()).getARGB(); };
+        CHECK(fillAt() == gfx::brand::panel::button);
+        root.dispatchMouseMove(mouseAt(r.centreX(), r.centreY())); CHECK(fillAt() == gfx::brand::panel::buttonHot);
+        root.dispatchMouseExit(); CHECK(fillAt() == gfx::brand::panel::button);
+    }
     int scans = 0, auScans = 0, retries = 0, folder = -1, config = 0;
     ctx.setUiZoom = [&](float zoom) { ctx.uiZoom = zoom; };
     click("Zoom In"); CHECK_NEAR(ctx.uiZoom, 1.1, 1e-6);
@@ -531,7 +545,7 @@ TEST_CASE("browser disclosure: folder arrows expand inline, Right is idempotent,
         root.dispatchMouseDown(e); root.dispatchMouseUp(e);
     };
     auto key = [&](int code) { root.dispatchKey({.keyCode = code}); };
-    click(browser->sidebarRowBounds(13));
+    click(browser->sidebarRowBounds(ui::BrowserPanel::Packs + 1));
     click(browser->listRowBounds(0), true);
     CHECK(ctx.browserFolder == "/tmp/Tree"); CHECK(requests == 0); // cached children
     key(juce::KeyPress::rightKey); key(juce::KeyPress::rightKey);
@@ -543,7 +557,7 @@ TEST_CASE("browser disclosure: folder arrows expand inline, Right is idempotent,
     key(juce::KeyPress::downKey);
     CHECK(preview == "/tmp/Tree/last.wav");
     CHECK(drops == 0);
-    browser->showCategory(4); // device group: Right must never load a device
+    browser->showCategory(ui::BrowserPanel::AudioEffects); // device group: Right must never load a device
     click(browser->listRowBounds(0), true);
     key(juce::KeyPress::rightKey); key(juce::KeyPress::downKey); key(juce::KeyPress::rightKey);
     CHECK(drops == 0);

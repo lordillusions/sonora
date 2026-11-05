@@ -201,6 +201,38 @@ TEST_CASE("plugin matching prefers VST3 class identity over duplicate display na
     CHECK(match->name == "Twin"); // name fallback remains available when a set has no uid
 }
 
+TEST_CASE("plugin name fallback accepts file suffixes but not another product of the same family")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    plugins::PluginHost host;
+    const auto add = [&](const char* name, const char* format, const char* file) {
+        juce::PluginDescription d;
+        d.name = name; d.pluginFormatName = format; d.fileOrIdentifier = file; d.uniqueId = 1;
+        host.knownPlugins().addType(d);
+    };
+    add("Serum", "VST3", "/tmp/Serum.vst3");
+    add("Serum", "VST", "/tmp/Serum.vst");
+    add("Spire", "VST", "/tmp/Spire.vst");
+    add("Massive", "VST3", "/tmp/Massive.vst3");
+    model::PluginInfo info;
+    info.name = "Serum 2"; // PLG-16: Serum 2 missing must not load Serum (1) with Serum 2's state
+    info.vst3Uid = {0x56534558, 0x66735073, 0x6572756D, 0x20320000};
+    CHECK(! host.findMatch(info, model::DeviceKind::PluginVst3));
+    info.name = "Massive X"; info.vst3Uid = {9, 9, 9, 9};
+    CHECK(! host.findMatch(info, model::DeviceKind::PluginVst3));
+    model::PluginInfo vst2;
+    for (const char* name : {"Serum_x64", "Spire-1.1", "Serum (x64)"})
+    {
+        vst2.name = name;
+        const auto match = host.findMatch(vst2, model::DeviceKind::PluginVst2);
+        REQUIRE(match);
+        CHECK(match->pluginFormatName == "VST");
+        CHECK(juce::String(name).startsWith(match->name));
+    }
+    vst2.name = "Serum 2";
+    CHECK(! host.findMatch(vst2, model::DeviceKind::PluginVst2));
+}
+
 TEST_CASE("device insertion preserves existing processors controls and transport across undo")
 {
     juce::ScopedJuceInitialiser_GUI gui;

@@ -1,6 +1,7 @@
 // collab_probe: a headless collab session over the real network (COL-3, docs/collab/PEER_PROTOCOL.md).
 //
 //   collab_probe <set.als|.xml> [--lan] [--relay URL [--token KEY] | --spawn-relay] [--guests N] [--edits N]
+//   collab_probe <set.als|.xml> --chat-dock DIR      (macOS UI builds: PNGs of the native Session Chat dock)
 //
 // Runs a host and N guests in one process: WebRTC data channels through a relay (a local open-mode relay it starts
 // itself with --spawn-relay, the default) and/or directly on the local network (--lan). It checks that every guest
@@ -11,11 +12,17 @@
 
 #include "collab/BarePort.h"
 #include "collab/Net.h"
+#include "collab/Video.h"
 #include "core/AppDataFolder.h"
 #include "core/ModelCodec.h"
 #include "io/als/AlsReader.h"
 
 #include <juce_core/juce_core.h>
+
+#if SONORA_PROBE_CHAT_DOCK
+#include "app/CollabChatDock.h"
+#include "ui/UiContext.h"
+#endif
 
 #if SONORA_PROBE_SCTP_STATS
 #include <usrsctp.h>
@@ -282,6 +289,116 @@ void scenario(const char* title, const model::Song& set, const collab::HostNetOp
     check(relayed, "presence and a guest's Play reach the host and the other guests (clock offset "
                        + std::to_string(g0.session->clockOffsetMs()) + " ms, round trip " + std::to_string(g0.session->roundTripMs()) + " ms)");
 
+    // COL-9 chat: every guest and the host say something; everyone reads everyone else's line, own lines are confirmed.
+    {
+        const double chatStart = juce::Time::getMillisecondCounterHiRes();
+        bool sent = run.host.session->sendChat(juce::String::fromUTF8("host says hi \xf0\x9f\x8e\xb9").toStdString()).empty();
+        for (size_t i = 0; i < run.guests.size(); ++i)
+            sent = run.guests[i].session->sendChat("guest " + std::to_string(i) + " says hi").empty() && sent;
+        const size_t lines = run.guests.size() + 1;
+        auto confirmed = [](const collab::CollabSession& s) {
+            return std::all_of(s.chat().begin(), s.chat().end(), [](const collab::ChatEntry& e) { return e.id != 0 && e.failed.empty(); });
+        };
+        const bool chatted = run.pumpUntil([&] {
+            if (run.host.session->chat().size() != lines || run.host.port->chats.size() != lines - 1) return false;
+            for (auto& g : run.guests)
+                if (g.session->chat().size() != lines || g.port->chats.size() != lines - 1 || ! confirmed(*g.session)) return false;
+            return true;
+        }, budget.stepMs(5000, 10));
+        // Others' lines arrive in the host's order; a guest's own line stays where it was typed.
+        bool sameOrder = chatted;
+        for (auto& g : run.guests)
+        {
+            std::vector<uint64_t> mine, host;
+            for (const auto& e : g.session->chat()) if (e.author != g.session->self()) mine.push_back(e.id);
+            for (const auto& e : run.host.session->chat()) if (e.author != g.session->self()) host.push_back(e.id);
+            sameOrder = sameOrder && mine == host;
+        }
+        check(sent && chatted && sameOrder, "chat: " + std::to_string(lines) + " lines reached everyone in the host's order and were confirmed in "
+                                   + std::to_string((int) (juce::Time::getMillisecondCounterHiRes() - chatStart)) + " ms");
+        run.host.session->setPolicy({false, true, true});
+        const bool off = run.pumpUntil([&] {
+            return std::all_of(run.guests.begin(), run.guests.end(), [](const auto& g) { return ! g.session->chatAvailable(); });
+        }, budget.stepMs(5000, 4));
+        const bool refused = ! g0.session->sendChat("muted?").empty();
+        run.host.session->setPolicy({true, true, true});
+        const bool on = run.pumpUntil([&] { return g0.session->chatAvailable(); }, budget.stepMs(5000, 4));
+        check(off && refused && on, "chat: the host turns chat off and on for everyone");
+    }
+
+    // COL-7 voice: RTP over each link's SRTP audio track; the host forwards guest 0's packets to the other guests.
+    if (collab::voiceBuiltIn())
+    {
+        const bool ready = run.pumpUntil([&] {
+            return run.host.session->voiceAvailable()
+                && std::all_of(run.guests.begin(), run.guests.end(), [](const auto& g) { return g.session->voiceAvailable(); });
+        }, budget.stepMs(5000, 4));
+        check(ready, "voice: every link has an open audio track" + (ready ? std::string() : " (" + g0.session->voiceUnavailableReason() + ")"));
+        if (ready)
+        {
+            run.host.port->voices.clear();
+            for (auto& g : run.guests) g.port->voices.clear();
+            const double voiceStart = juce::Time::getMillisecondCounterHiRes();
+            constexpr int frames = 50; // one second of 20 ms frames
+            for (int i = 0; i < frames; ++i)
+            {
+                collab::RtpPacket rtp;
+                rtp.seq = (uint16_t) i;
+                rtp.timestamp = (uint32_t) i * collab::voiceFrameSamples;
+                rtp.ssrc = collab::voiceSsrc(g0.session->self());
+                rtp.payload = std::string(60, (char) i); // the size of a 24 kbit/s Opus frame
+                g0.session->sendVoice(collab::encodeRtp(rtp));
+                run.pumpUntil([] { return false; }, 20);
+            }
+            auto heard = [&](collab::BarePort& port) {
+                return (int) std::count_if(port.voices.begin(), port.voices.end(), [&](const auto& v) { return v.first == g0.session->self(); });
+            };
+            const bool arrived = run.pumpUntil([&] {
+                bool all = heard(*run.host.port) >= frames * 9 / 10;
+                for (size_t i = 1; i < run.guests.size(); ++i) all = all && heard(*run.guests[i].port) >= frames * 9 / 10;
+                return all;
+            }, budget.stepMs(3000, 4));
+            std::string counts = "host " + std::to_string(heard(*run.host.port));
+            for (size_t i = 1; i < run.guests.size(); ++i) counts += ", guest " + std::to_string(i) + " " + std::to_string(heard(*run.guests[i].port));
+            check(arrived && g0.port->voices.empty(), "voice: a guest's 50 frames reached the host and were forwarded (" + counts + " in "
+                                                          + std::to_string((int) (juce::Time::getMillisecondCounterHiRes() - voiceStart)) + " ms)");
+        }
+    }
+
+    // COL-8 video: a guest's H.264 packets (synthetic, 30 frames of 3 KiB: FU-A) on the video track, forwarded by the host.
+    if (collab::supportedFeatures & collab::FeatureVideo)
+    {
+        const bool ready = run.pumpUntil([&] { return g0.session->videoAvailable(); }, budget.stepMs(5000, 4));
+        check(ready, "video: the links carry video" + (ready ? std::string() : " (" + g0.session->videoUnavailableReason() + ")"));
+        if (ready)
+        {
+            const auto hostBefore = run.host.session->stats().videoIn;
+            std::vector<uint64_t> guestsBefore;
+            for (auto& g : run.guests) guestsBefore.push_back(g.session->stats().videoIn);
+            uint16_t seq = 0;
+            size_t sent = 0;
+            for (int f = 0; f < 30; ++f)
+            {
+                std::string idr(3000, (char) f);
+                idr[0] = 0x65;
+                for (const auto& packet : collab::packetizeH264({idr}, collab::videoSsrc(g0.session->self()), seq, (uint32_t) f * 6000))
+                {
+                    g0.session->sendVideo(packet);
+                    ++sent;
+                }
+                run.pumpUntil([] { return false; }, 30);
+            }
+            const bool arrived = run.pumpUntil([&] {
+                bool all = run.host.session->stats().videoIn - hostBefore >= sent * 9 / 10;
+                for (size_t i = 1; i < run.guests.size(); ++i) all = all && run.guests[i].session->stats().videoIn - guestsBefore[i] >= sent * 9 / 10;
+                return all;
+            }, budget.stepMs(3000, 4));
+            std::string counts = "host " + std::to_string(run.host.session->stats().videoIn - hostBefore) + " of " + std::to_string(sent);
+            for (size_t i = 1; i < run.guests.size(); ++i) counts += ", guest " + std::to_string(i) + " " + std::to_string(run.guests[i].session->stats().videoIn - guestsBefore[i]);
+            check(arrived, "video: a guest's packets reached the host and were forwarded (" + counts + ")");
+        }
+    }
+
     // Refusals.
     if (net.mode != collab::HostNetOptions::Mode::Lan)
     {
@@ -524,16 +641,117 @@ struct RelayProcess
 };
 } // namespace
 
+#if SONORA_PROBE_CHAT_DOCK
+// --chat-dock DIR (COL-9, ADR 0008): a host, a guest and an older guest chat over memory links; the guest's lines go
+// into the native chat dock, which is captured as PNGs and checked for IME composition, Unicode, Return and
+// Shift+Return. ui_snapshot cannot see native views.
+static int chatDock(const juce::File& folder, const std::string& setPath)
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    folder.createDirectory();
+    auto loaded = io::loadAls(juce::File(juce::String::fromUTF8(setPath.c_str())));
+    if (! loaded) { std::printf("FAIL: can't load %s\n", setPath.c_str()); return 1; }
+    auto hub = collab::MemoryHub::create();
+    Replica host, ana, old;
+    host.port->document = std::make_unique<model::Song>(*loaded.song);
+    collab::CollabSession::Options o;
+    o.name = "Hana";
+    o.sessionName = "Groove Sketch";
+    host.session = collab::CollabSession::host(*host.port, hub->hostSide(), o);
+    host.port->session = host.session.get();
+    ana.session = makeGuest(*ana.port, hub->guestSide(), "Ana");
+    collab::CollabSession::Options oldOptions;
+    oldOptions.name = "Ben (0.1.9)";
+    oldOptions.features = 0;
+    old.session = collab::CollabSession::guest(*old.port, hub->guestSide(), oldOptions);
+    old.port->session = old.session.get();
+    std::unique_ptr<Replica> cleo; // joins after the first line: it arrives as history
+    auto pump = [&](int rounds) {
+        for (int i = 0; i < rounds; ++i)
+        {
+            host.session->poll();
+            ana.session->poll();
+            old.session->poll();
+            if (cleo) cleo->session->poll();
+            juce::Thread::sleep(1);
+        }
+    };
+    pump(80);
+    host.session->sendChat("Welcome! The bass is on track 2, have a listen.");
+    pump(20);
+    cleo = std::make_unique<Replica>();
+    cleo->session = makeGuest(*cleo->port, hub->guestSide(), "Cleo");
+    pump(80);
+    ana.session->sendChat(juce::String::fromUTF8("Love it \xf0\x9f\x8e\xb9 Can we try the chorus an octave up?\nAlso: swing 56%?").toStdString());
+    pump(20);
+    cleo->session->sendChat(juce::String::fromUTF8("\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e works too").toStdString());
+    pump(20);
+    host.session->setPolicy({false, true, true});
+    cleo->session->sendChat("this one races the switch");
+    pump(40);
+
+    auto linesOf = [](const collab::CollabSession& s) {
+        std::vector<app::CollabChatDock::Line> lines;
+        for (const auto& e : s.chat())
+        {
+            app::CollabChatDock::Line l;
+            l.name = e.name;
+            l.text = e.text;
+            l.time = juce::Time(e.timeMs).formatted("%H:%M").toStdString();
+            l.color = ui::collabColor(e.color);
+            l.self = e.author == s.self();
+            l.pending = l.self && e.id == 0;
+            l.history = e.history;
+            l.failed = e.failed;
+            lines.push_back(l);
+        }
+        return lines;
+    };
+    const bool oldOk = old.session->state() == collab::CollabSession::State::Active && old.session->chat().empty();
+    check(oldOk, "the 0.1.9 guest stays connected and gets no chat");
+    check(cleo->session->chat().size() == 4 && cleo->session->chat()[0].history && ! cleo->session->chat().back().failed.empty(),
+          "Cleo sees the history, the new lines and her refused line");
+
+    juce::DocumentWindow window("Session Chat verification", juce::Colours::darkgrey, juce::DocumentWindow::allButtons);
+    auto* dock = new app::CollabChatDock();
+    window.setUsingNativeTitleBar(true);
+    window.setContentOwned(dock, false);
+    window.centreWithSize(app::CollabChatDock::preferredWidth, 640);
+    window.setVisible(true);
+    bool captured = false, input = false;
+    juce::Timer::callAfterDelay(400, [&] {
+        dock->setSubtitle("Groove Sketch · 4 people");
+        dock->setLines(linesOf(*cleo->session));
+        dock->setComposer(cleo->session->chatAvailable(), cleo->session->chatUnavailableReason());
+        captured = dock->writeSnapshot(folder.getChildFile("chat-dock-off.png"));
+        host.session->setPolicy({true, true, true});
+        pump(40);
+        dock->setLines(linesOf(*ana.session));
+        dock->setComposer(ana.session->chatAvailable(), ana.session->chatUnavailableReason());
+        captured = dock->writeSnapshot(folder.getChildFile("chat-dock.png")) && captured;
+        input = dock->verifyNativeInput();
+        juce::MessageManager::getInstance()->stopDispatchLoop();
+    });
+    juce::MessageManager::getInstance()->runDispatchLoop();
+    check(captured, "native chat dock captured: " + folder.getChildFile("chat-dock.png").getFullPathName().toStdString());
+    check(input, "chat composer: marked text / Unicode / Return / Shift+Return");
+    std::printf("\n%s (%d failed)\n", failures == 0 ? "PASS" : "FAIL", failures);
+    return failures == 0 ? 0 : 1;
+}
+#endif
+
 int main(int argc, char** argv)
 {
     std::setvbuf(stdout, nullptr, _IOLBF, 0); // progress shows up in logs even when a watchdog kills a slow run
     std::string setPath, relayUrl, token;
     bool lan = false, relay = false, spawn = false;
     int guests = 2, edits = 60, benchMb = 0, backlogKb = 1024, benchSeconds = 900;
+    std::string chatDockDir;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
-        if (a == "--lan") lan = true;
+        if (a == "--chat-dock" && i + 1 < argc) chatDockDir = argv[++i];
+        else if (a == "--lan") lan = true;
         else if (a == "--relay" && i + 1 < argc) { relay = true; relayUrl = argv[++i]; }
         else if (a == "--token" && i + 1 < argc) token = argv[++i];
         else if (a == "--spawn-relay") { relay = spawn = true; }
@@ -549,6 +767,15 @@ int main(int argc, char** argv)
         std::printf("usage: collab_probe <set.als|.xml> [--lan] [--relay URL [--token KEY] | --spawn-relay] [--guests N] [--edits N]\n"
                     "       collab_probe --bench MB [--backlog KB] [--seconds S] [--lan] [--relay URL [--token KEY] | --spawn-relay]\n");
         return 2;
+    }
+    if (! chatDockDir.empty())
+    {
+#if SONORA_PROBE_CHAT_DOCK
+        return chatDock(juce::File(juce::String::fromUTF8(chatDockDir.c_str())), setPath);
+#else
+        std::printf("FAIL: --chat-dock needs a macOS build with the UI\n");
+        return 1;
+#endif
     }
     if (! lan && ! relay) lan = relay = spawn = true;
     if (! collab::networkAvailable())

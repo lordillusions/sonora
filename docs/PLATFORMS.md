@@ -72,7 +72,7 @@ existed before COM-7, moved without behaviour changes.
 |---|---|---|---|
 | `platform/CNumeric.h` — C-locale `strtod` (Serum JSON, SFZ) | `newlocale` + `strtod_l` | same | `_create_locale` + `_strtod_l` |
 | `platform/Paths.h` — `appDataFolder()` | `~/Library/Application Support/Sonora` | `~/.config/Sonora` | `%APPDATA%\Sonora` |
-| `platform/HttpClient.h` — no-redirect HTTPS POST (agent providers) | `HttpClientMac.mm` (NSURLSession, ephemeral) | `HttpClientJuce.cpp` (JUCE + libcurl) | `HttpClientJuce.cpp` (JUCE + WinINet) |
+| `platform/HttpClient.h` — no-redirect HTTPS POST (agent providers); resumable GET into a file (LIB-1 sample packs) | `HttpClientMac.mm` (NSURLSession, ephemeral) | `HttpClientJuce.cpp` (JUCE + libcurl) | `HttpClientJuce.cpp` (JUCE + WinINet) |
 | `platform/SecretStore.h` — provider API keys | `SecretStoreMac.mm` (Keychain) | `SecretStoreFile.cpp` (`Secrets.json`, mode 0600) | `SecretStoreFile.cpp` (profile ACL only) |
 | `gfx/MetalRenderer.h` — GPU canvas | `MetalLayerView.mm` | `MetalRendererNone.cpp` → raster | same |
 | `gfx/Fonts.cpp` — Skia font manager | CoreText | fontconfig + FreeType | DirectWrite |
@@ -112,8 +112,10 @@ and the WebSocket signalling client/server. It is optional on every platform.
   `third_party/libdatachannel`. `SONORA_FETCH_COLLAB_NET=0` skips it on Linux/Windows.
 - `cmake/CollabNet.cmake` defines option `SONORA_WITH_COLLAB_NET`: ON by default when the checkout and OpenSSL 3 are
   present, otherwise OFF with a `Sonora: collab network OFF (...)` status line. An existing build directory keeps its cached
-  value; pass `-DSONORA_WITH_COLLAB_NET=ON|OFF` to change it. ON builds only `datachannel-static` (no media/SRTP, no
-  examples/tests, WebSocket on) and only when something links it; its warnings are silenced and its headers are SYSTEM.
+  value; pass `-DSONORA_WITH_COLLAB_NET=ON|OFF` to change it. ON builds only `datachannel-static` (media on since COL-7:
+  libsrtp from its `deps/` on the same OpenSSL; no examples/tests, WebSocket on) and only when something links it; its
+  warnings are silenced and its headers are SYSTEM. On macOS the link passes `-no_warn_duplicate_libraries` (libsrtp and
+  libdatachannel both name the static libcrypto).
 - Code links `sonora_collab_net` (INTERFACE, always exists) and tests `#if SONORA_COLLAB_NET` (1 = libdatachannel linked, 0 = off).
 
 | | macOS arm64 | Linux x64 | Windows x64 |
@@ -128,8 +130,20 @@ The app's Info.plist (`src/CMakeLists.txt`) carries `NSLocalNetworkUsageDescript
 (`_sonora-collab._tcp`): macOS 15+ asks for Local Network access the first time collab traffic reaches the LAN
 (Apple TN3179). Command-line tools such as `collab_probe` are allowed automatically.
 
-Licences: libdatachannel and its bundled libjuice/usrsctp/plog are MPL-2.0/BSD/MIT, compatible with Sonora's AGPL;
-OpenSSL 3 is Apache-2.0. Ship their licence texts with the app when collab networking is enabled.
+Licences: libdatachannel and its bundled libjuice/usrsctp/plog/libsrtp are MPL-2.0/BSD/MIT, compatible with Sonora's
+AGPL; OpenSSL 3 is Apache-2.0. Ship their licence texts with the app when collab networking is enabled.
+
+## Collab voice (libopus) and camera
+
+Voice (COL-7, owner decision 2026-11-05: on every platform) needs **libopus** (BSD-3-Clause). `scripts/bootstrap.sh`
+downloads the pinned release (`OPUS_VERSION`, 1.5.2, SHA-256 from xiph's SHA256SUMS) into `third_party/opus`;
+`cmake/Opus.cmake` builds it static (`-w`, SYSTEM) and defines `sonora_opus` with `SONORA_HAVE_OPUS` 1 or 0. Without it
+the app announces no voice feature and the panel says "This build has no voice". The microphone is an input of the app's
+audio device (JUCE), so capture is the same on every OS; macOS asks for permission through AVFoundation
+(`platform/MediaAccess*`), Windows/Linux need no prompt. Opus's configure prints `ERRORRuntime cpu capability detection
+needed for MAY_HAVE_NEON` on macOS arm64: it is a status line (NEON is presumed), not an error. Ship Opus's `COPYING`.
+
+The camera (COL-8) is macOS only: AVFoundation capture and VideoToolbox H.264. Windows and Linux show it disabled.
 
 ## Not available per platform
 

@@ -30,7 +30,7 @@ TEST_CASE("plugin browser: vendor folders include AU and VST3 with stable search
                               {"Compressor (VST3)", "vst-comp", "Acme", "VST3"}, {"Unknown (AudioUnit)", "au-other", "", "AudioUnit"}};
     ui::MainLayout root(context); root.setBounds({0, 0, 1200, 800}); root.layout();
     std::vector<ui::BrowserPanel*> browsers; collect(root, browsers); REQUIRE(browsers.size() == 1); auto& browser = *browsers[0];
-    browser.showCategory(6);
+    browser.showCategory(ui::BrowserPanel::PlugIns);
     auto header = centre(browser, browser.listRowBounds(0)); root.dispatchMouseDown(header); root.dispatchMouseUp(header);
     auto au = centre(browser, browser.listRowBounds(2)); root.dispatchMouseDown(au);
     auto end = au; end.x += 20; root.dispatchMouseDrag(end);

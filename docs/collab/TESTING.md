@@ -81,6 +81,18 @@ Things to try:
   name, your selected clip outlined and your time selection.
 - In A's panel: make B a listener (B can no longer edit), remove B, compare the safety words.
 - Drag a sample from Finder onto an audio track in B: it's uploaded to A's project and appears for both.
+- Chat (COL-9): **File > Session Chat** or **Chat** in the Collaborate panel opens the chat beside the canvas. Return
+  sends, Shift+Return adds a line, Japanese/emoji input works. With the chat closed, a line from the other side shows in
+  the status bar and as a red count on the people button. In A's panel, switch **Allow: Chat** off: B's composer says
+  the host turned chat off; the switch is A's default for the next session.
+- Voice (COL-7): in the Collaborate panel, **Mic Off** turns your mic on (macOS asks for microphone access the first
+  time; the first audio input is turned on if none is). The other window hears you after Main (use headphones on one
+  Mac, or the two instances feed back). Your avatar gets a green ring while you talk; the other side can **Mute** you
+  for themselves. **Push to talk (`)**: hold the backquote key. **Duck music**: the set plays 6 dB lower while
+  someone talks. In A's panel, **Allow: Voice** off stops all voice.
+- Camera (COL-8, macOS): **Camera Off** in the panel turns your camera on (macOS asks for camera access the first time).
+  Tiles appear at the top right of both windows; the x hides them here (**Show video** brings them back). Over a relayed
+  (TURN) link the camera is refused with "Camera needs a direct connection".
 - In B: **File > Save a Copy** writes the set with all samples next to it.
 - Quit B and start it again with the same command, then join again: the session continues (A keeps the set).
 
@@ -99,7 +111,20 @@ SONORA_COLLAB_AUTOTEST="host:/tmp/invite.txt" SONORA_DATA_FOLDER="Sonora Collab 
 SONORA_COLLAB_AUTOTEST="join:/tmp/invite.txt" SONORA_DATA_FOLDER="Sonora Collab B" SONORA_COLLAB_BIND_ADDRESS=127.0.0.1 build/src/Sonora_artefacts/Debug/Sonora.app/Contents/MacOS/Sonora
 ```
 
-Look for `[sonora] collab autotest: state tempo=111.000000 track0=Renamed by guest ... hash=...` in both outputs.
+Look for `[sonora] collab autotest: state tempo=111.000000 track0=Renamed by guest ... chat=2 hash=...` in both outputs,
+and `chat from ...` lines: each side sends one chat line and logs the other's (only autotest runs log chat).
+With `SONORA_COLLAB_VOICE_TONE=440` on the host, the host's mic is a -12 dBFS test tone (no microphone, no permission
+prompt) and both sides log `voice sent=... received=... decoded=...`: the guest's `decoded` grows by 50 a second. The
+guest plays the tone on its output. With `SONORA_COLLAB_VIDEO_TEST=1` on the host its camera is a moving test pattern
+(no camera, no prompt) and the guest logs `video ... decoded=N remoteTiles=1`.
+
+The native chat dock (ADR 0008: `ui_snapshot` draws only the Skia canvas) has its own check: three sessions chat over
+memory links, including an emulated 0.1.9 guest, and the dock is captured with their lines and tested for IME
+composition, Unicode, Return and Shift+Return:
+
+```bash
+./build/tools/collab_probe tests/fixtures/two_tracks.xml --chat-dock /tmp/chat-dock
+```
 
 ## 4. Two Macs on one network
 

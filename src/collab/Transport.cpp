@@ -37,6 +37,8 @@ public:
         hub_->push(self_ == hostPeer ? peer : hostPeer, std::move(e));
     }
     size_t buffered(const PeerId&, Channel) const override { return 0; }
+    bool mediaReady(const PeerId&) const override { return true; }
+    bool relayed(const PeerId&) const override { return hub_->relayed(); }
     void disconnect(const PeerId& peer, const std::string& reason) override
     {
         TransportEvent e;
@@ -96,6 +98,18 @@ void MemoryHub::setBlackhole(bool on)
 {
     const std::lock_guard<std::mutex> l(lock_);
     blackhole_ = on;
+}
+
+void MemoryHub::setRelayed(bool on)
+{
+    const std::lock_guard<std::mutex> l(lock_);
+    relayed_ = on;
+}
+
+bool MemoryHub::relayed() const
+{
+    const std::lock_guard<std::mutex> l(lock_);
+    return relayed_;
 }
 
 size_t MemoryHub::delivered() const

@@ -1,19 +1,15 @@
 #include "plugin/CurveLfoPlugin.h"
 
 #include "plugin/CurveLfoPluginEditor.h"
+#include "plugins/SonoraPluginState.h"
 
 #include <algorithm>
 #include <cmath>
-#include <unordered_map>
 
 namespace sonora::plugin
 {
 namespace
 {
-using L = devices::CurveLfo;
-const juce::Identifier kStateTag{"SonoraCurveLfo"}, kParamTag{"Param"}, kId{"id"}, kValue{"value"}, kVersion{"version"};
-constexpr int kStateVersion = 1;
-
 bool isNote(const juce::MidiMessageMetadata& event)
 {
     const int status = event.numBytes >= 3 ? event.data[0] & 0xF0 : 0;
@@ -150,58 +146,13 @@ juce::AudioProcessorEditor* CurveLfoPlugin::createEditor()
 
 juce::MemoryBlock CurveLfoPlugin::encodeState(const devices::CurveLfo& lfo)
 {
-    juce::XmlElement root(kStateTag);
-    root.setAttribute(kVersion, kStateVersion);
-    const auto& infos = lfo.parameters();
-    for (size_t i = 0; i < infos.size(); ++i)
-    {
-        auto* param = root.createNewChildElement(kParamTag);
-        param->setAttribute(kId, juce::String::fromUTF8(infos[i].id.c_str()));
-        param->setAttribute(kValue, (double) lfo.getParameter((int) i)); // shortest exact text of the float
-    }
-    juce::MemoryBlock block;
-    copyXmlToBinary(root, block);
-    return block;
+    const auto bytes = plugins::encodeCurveLfoState(lfo); // shared with the app's built-in stand-in (COL-4c)
+    return {bytes.data(), bytes.size()};
 }
 
 bool CurveLfoPlugin::decodeState(const void* data, size_t size, devices::CurveLfo& lfo, std::string& error)
 {
-    if (data == nullptr || size == 0) { error = "empty state"; return false; }
-    const auto root = getXmlFromBinary(data, (int) size);
-    if (root == nullptr || ! root->hasTagName(kStateTag)) { error = "not a Sonora Curve LFO state"; return false; }
-    if (root->getIntAttribute(kVersion) > kStateVersion)
-    {
-        error = "saved by a newer Sonora Curve LFO (state version " + root->getStringAttribute(kVersion).toStdString() + ")";
-        return false;
-    }
-    const auto& infos = lfo.parameters();
-    std::unordered_map<std::string, size_t> byId;
-    for (size_t i = 0; i < infos.size(); ++i) byId.emplace(infos[i].id, i);
-    std::vector<float> values(infos.size());
-    for (size_t i = 0; i < infos.size(); ++i) values[i] = infos[i].defaultValue;
-    for (const auto* param : root->getChildWithTagNameIterator(kParamTag))
-    {
-        const auto found = byId.find(param->getStringAttribute(kId).toStdString());
-        if (found == byId.end()) continue;
-        const double value = param->getDoubleAttribute(kValue, infos[found->second].defaultValue);
-        if (std::isfinite(value)) values[found->second] = (float) value;
-    }
-    // Controls first, then each graph through setGraph, which publishes the point count after the points.
-    for (int i = 0; i < L::GraphStart; ++i) lfo.setParameter(i, values[(size_t) i]);
-    for (int g = 0; g < L::kGraphs; ++g)
-    {
-        dsp::CurveGraph graph;
-        graph.count = (int) std::lround(values[(size_t) L::countParam(g)]);
-        for (int p = 0; p < L::kMaxPoints; ++p)
-        {
-            graph.x[p] = values[(size_t) L::pointParam(g, p, L::X)];
-            graph.y[p] = values[(size_t) L::pointParam(g, p, L::Y)];
-            graph.curve[p] = values[(size_t) L::pointParam(g, p, L::Curve)];
-        }
-        lfo.setGraph(g, graph);
-        lfo.setParameter(L::warpParam(g), values[(size_t) L::warpParam(g)]);
-    }
-    return true;
+    return plugins::decodeCurveLfoState(data, size, lfo, error);
 }
 
 void CurveLfoPlugin::getStateInformation(juce::MemoryBlock& destination)

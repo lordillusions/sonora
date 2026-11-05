@@ -8,6 +8,7 @@
 //                       [--wavetable-browser] [--wavetable-preset NAME] [--wavetable-search TEXT]
 //                       [--collab share|share-wifi|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N]
 //                       [--bench N [--gpu] [--warmup N] [--no-sweep|--device-sweep]]
+//                       [--native-swap-prompt]
 // Benchmarks exclude 20 warm-up frames by default; --warmup 0 includes first-use work.
 //
 // --play-at plays the transport from that song beat, or with --clip/--scene from that many beats into the Session clip,
@@ -16,13 +17,23 @@
 // --collab (COL-5) fills a synthetic session: "share" opens the Collaborate panel before a session (internet chosen, a
 // failed share's reason), "share-wifi" with Wi-Fi chosen and two nearby sessions, "host"/"guest" open it during one
 // (three people, an invite, a join request), "presence" closes it and draws
-// two collaborators' pointers and selections over the Arrangement (or Session with --session).
+// two collaborators' pointers and selections over the Arrangement (or Session with --session). The sessions also show
+// COL-9's chat switches (the guest's host turned chat off), an older participant without chat and unread chat lines
+// on the top-bar badge.
 //
 // Sonora Prism editors render docked by default here; --floating-wavetables shows the app's default (a stub in the
 // chain) and --wavetable-window renders the floating editor window of the selected track's first Wavetable (UI-27).
 // --wavetable-browser opens the first Wavetable editor's preset browser (UI-28i); --wavetable-preset marks an installed
 // Serum 2 preset as the loaded one (navigation state only: no importer runs here) and --wavetable-search types TEXT into
 // the search field through RootWidget::dispatchKey.
+//
+// --native-swap-prompt (PLG-16) renders only the prompt the app shows after loading the set, as if every Serum 2 and
+// LFOTool were missing: its instances, the Sonora devices offered and their note counts. Stdout lists every instance with
+// its notes and the peak level the converted device plays (a C3 note through Prism, a 220 Hz tone through Curve LFO).
+//
+// --browser-packs ROOT (LIB-1) opens Places > Packs with demo rows in every state (downloading, paused, failed, available)
+// and, as installed, every pack in ROOT (a pack_tool client --root folder); a following --browser-folder into one of
+// them shows its files with their pack tags.
 //
 // Without a .als it renders tests/fixtures/minimal_set.xml.
 
@@ -38,11 +49,17 @@
 #include "gfx/MetalRenderer.h"
 #include "gfx/SkiaCanvasComponent.h"
 #include "include/core/SkCanvas.h"
+#include "gfx/Brand.h"
 #include "gfx/Fonts.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkStream.h"
+#include "include/core/SkSurface.h"
+#include "include/encode/SkPngEncoder.h"
 #include "include/core/SkString.h"
 #include "io/als/AlsReader.h"
 #include "midi/MappingStore.h"
 #include "midi/MidiManager.h"
+#include "plugins/NativeReplacement.h"
 #include "plugins/PluginHost.h"
 #include "ui/SetView.h"
 #include "ui/Shortcuts.h"
@@ -54,6 +71,7 @@
 #include "ui/views/ResynthEditor.h"
 #include "ui/views/CurveLfoEditor.h"
 #include "ui/views/BrowserPanel.h"
+#include "packs/PackLibrary.h"
 #include "ui/views/MonitorPanel.h"
 #include "ui/views/PreferencesPanel.h"
 #include "ui/views/WavetableWindowView.h"
@@ -109,7 +127,7 @@ int main(int argc, char** argv)
     int benchWarmup = 20;
     bool wavetableWindow = false, wavetableBrowser = false;
     std::string wavetablePreset, wavetableSearch;
-    bool trackMenu = false, arrangementMenu = false;
+    bool trackMenu = false, arrangementMenu = false, nativeSwapPrompt = false;
     double deviceDemoBeats = 0;
     std::string collabMode;
     float fileDragX = -1, fileDragY = -1;
@@ -154,7 +172,7 @@ int main(int argc, char** argv)
     std::string browserFolder;
     std::string regionDrag;
     int browserCategory = -1, browserSelection = -1;
-    std::string browserQuery;
+    std::string browserQuery, browserPacks;
     ui::BrowserTags::Tags browserFilters;
     std::vector<int> selectedTracks;
     bool setView = false;
@@ -166,6 +184,7 @@ int main(int argc, char** argv)
         const std::string a = argv[i];
         auto next = [&] { return i + 1 < argc ? std::string(argv[++i]) : std::string(); };
         if (a == "--track-menu") trackMenu = true;
+        else if (a == "--native-swap-prompt") nativeSwapPrompt = true;
         else if (a == "--arrangement-menu") arrangementMenu = true;
         else if (a == "--fold-scale") { ctx.scaleFold = ctx.scaleHighlight = true; }
         else if (a == "--session")
@@ -234,11 +253,24 @@ int main(int argc, char** argv)
             browserFilters.push_back({value.substr(0, separator), value.substr(separator + 1)});
         }
         else if (a == "--browser-category")
-            browserCategory = std::stoi(next());
+        {
+            // A category name (all, drums, instruments, audio-effects, midi-effects, plug-ins, packs), or the numbers
+            // 2..6 = Drums..Plug-ins this option took before All was added (UI-64).
+            const auto name = juce::String(next()).toLowerCase().replaceCharacter(' ', '-');
+            using B = ui::BrowserPanel;
+            const std::map<juce::String, int> names{{"all", B::AllItems}, {"drums", B::Drums}, {"instruments", B::Instruments},
+                {"audio-effects", B::AudioEffects}, {"midi-effects", B::MidiEffects}, {"plug-ins", B::PlugIns}, {"plugins", B::PlugIns},
+                {"packs", B::Packs}};
+            if (const auto found = names.find(name); found != names.end()) browserCategory = found->second;
+            else if (name.containsOnly("0123456789")) browserCategory = std::clamp(name.getIntValue(), 2, 6) + 1;
+            else { std::fprintf(stderr, "--browser-category: unknown category %s\n", name.toRawUTF8()); return 2; }
+        }
         else if (a == "--browser-select")
             browserSelection = std::stoi(next());
         else if (a == "--browser-query")
             browserQuery = next();
+        else if (a == "--browser-packs")
+            browserPacks = next();
         else if (a == "--rack-chain")
             ctx.selectedRackChain = std::stoi(next());
         else if (a == "--no-browser")
@@ -348,6 +380,52 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "error: %s\n", loaded.error.c_str());
         return 1;
     }
+    if (nativeSwapPrompt)
+    {
+        const auto found = plugins::findNativeReplacements(*loaded.song, [](const model::Device&) { return false; });
+        for (const auto& r : found)
+        {
+            // The converted device must play: one second of C3 (Prism) or of a 220 Hz tone through Curve LFO, peak in dB.
+            float peak = 0;
+            if (auto device = devices::createNative(r.device))
+            {
+                device->prepare(48000.0, 512);
+                juce::AudioBuffer<float> block(2, 512);
+                for (int done = 0; done < 48000; done += 512)
+                {
+                    juce::MidiBuffer midi;
+                    if (done == 0) midi.addEvent(juce::MidiMessage::noteOn(1, 48, (juce::uint8) 100), 0);
+                    block.clear();
+                    if (r.alternative == plugins::NativeAlternative::CurveLfo)
+                        for (int i = 0; i < 512; ++i)
+                            for (int channel = 0; channel < 2; ++channel)
+                                block.setSample(channel, i, 0.5f * (float) std::sin(2 * 3.14159265 * 220 * (done + i) / 48000.0));
+                    device->process(block, midi);
+                    peak = std::max(peak, block.getMagnitude(0, 512));
+                }
+            }
+            std::printf("%s: %s -> %s, plays at %.1f dBFS\n", r.trackName.c_str(), r.pluginName.c_str(),
+                        plugins::nativeAlternativeName(r.alternative), (double) juce::Decibels::gainToDecibels(peak, -120.0f));
+            for (const auto& note : r.notes) std::printf("    %s\n", note.c_str());
+        }
+        if (found.empty()) { std::fprintf(stderr, "no Serum 2 or LFOTool instances to offer\n"); return 1; }
+        const auto offer = plugins::describeNativeReplacements(found);
+        gfx::brand::PromptState prompt; // as AppController::showNativeReplacementOffer builds it
+        prompt.title = offer.title;
+        prompt.message = offer.message;
+        prompt.buttons = {{found.size() == 1 ? "Replace" : "Replace All", true, false}, {"Keep", false, false}};
+        prompt.focused = 0;
+        const float h = gfx::brand::promptHeight(prompt);
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul((int) (gfx::brand::promptWidth * scale), (int) (h * scale)));
+        if (! surface) return 1;
+        surface->getCanvas()->scale(scale, scale);
+        gfx::brand::drawPrompt(*surface->getCanvas(), gfx::brand::promptWidth, h, prompt);
+        SkPixmap pixmap;
+        SkFILEWStream stream(out.c_str());
+        if (! surface->peekPixels(&pixmap) || ! stream.isValid() || ! SkPngEncoder::Encode(&stream, pixmap, {})) return 1;
+        std::printf("wrote native swap prompt %s (%zu instances)\n", out.c_str(), found.size());
+        return 0;
+    }
     for (int track : selectedTracks)
         if (track >= 0 && (size_t) track < loaded.song->tracks.size())
         {
@@ -423,7 +501,7 @@ int main(int argc, char** argv)
     }
     ctx.statusText = "Snapshot of " + juce::File(juce::String::fromUTF8(als.c_str())).getFileName().toStdString();
     ctx.projectFiles = {als};
-    if (browserCategory == 6)
+    if (browserCategory == ui::BrowserPanel::PlugIns || browserCategory == ui::BrowserPanel::AllItems)
     {
         plugins::PluginHost host; host.loadCache();
         for (const auto& p : host.knownPlugins().getTypes())
@@ -458,6 +536,37 @@ int main(int argc, char** argv)
                               {1, host ? "Ben Laurent" : "Hana Okafor", ui::CollabView::Role::Editor, 1, ! host, host ? "amber-tiger-river-nine" : ""},
                               {2, "Chiara Rossi", ui::CollabView::Role::Listener, 2, false, host ? "pearl-orbit-maple-zinc" : ""}};
             if (host) v.joinRequests = {{"lan-4", "Dmitri"}};
+            v.participants[2].hasChat = false; // COL-9: Chiara runs an older Sonora
+            // COL-7: the host has the mic on and talks, Ben's mic is on and he is muted on this machine (host view).
+            v.voiceSupported = true;
+            v.voiceAvailable = true;
+            v.micOn = host;
+            v.micLevel = host ? 0.3f : 0.0f;
+            v.talking = host;
+            v.participants[0].micOn = true;
+            v.participants[0].talking = true;
+            v.participants[1].micOn = true;
+            v.participants[1].mutedHere = host;
+            // COL-8: the host's camera and Ben's are on (synthetic frames: a gradient and colour bars).
+            v.videoAvailable = true;
+            v.cameraOn = host;
+            v.participants[0].cameraOn = true;
+            v.participants[1].cameraOn = true;
+            auto frame = [](int kind) {
+                auto pixels = std::make_shared<std::vector<uint32_t>>((size_t) 480 * 360);
+                for (int y = 0; y < 360; ++y)
+                    for (int x = 0; x < 480; ++x)
+                        (*pixels)[(size_t) y * 480 + (size_t) x] = kind == 0
+                            ? 0xff000000u | (uint32_t) (x * 255 / 480) << 16 | (uint32_t) (y * 200 / 360) << 8 | 0x60u
+                            : std::array<uint32_t, 6>{0xffeb5757u, 0xfff2994au, 0xff27ae60u, 0xff2f80edu, 0xff9b51e0u, 0xffe0e0e0u}[(size_t) (x / 80)];
+                return std::shared_ptr<const std::vector<uint32_t>>(std::move(pixels));
+            };
+            v.videoTiles = {{0, v.participants[0].name, 0, host, true, true, 480, 360, frame(0), 1},
+                            {1, v.participants[1].name, 1, ! host, true, false, 480, 360, frame(1), 1}};
+            v.unread = 3;
+            v.chatAvailable = host;
+            v.policy.chat = host; // the guest's host turned chat off
+            if (! host) v.chatUnavailable = "The host turned chat off for this session.";
             v.notices = {"Ben Laurent joined the session", "Chiara Rossi joined the session",
                          host ? "Your edit was undone: Ben Laurent changed the same thing first" : "Downloading samples (12 of 48 MB)..."};
             if (! host) { v.status = "Downloading samples (12 of 48 MB)..."; v.progress = 0.25f; }
@@ -475,6 +584,7 @@ int main(int argc, char** argv)
                 chiara.selectionStart = 10.0; chiara.selectionEnd = 14.0;
                 v.cursors = {ben, chiara};
             }
+            if (collabMode == "presence") v.unread = 12;
         }
     }
 
@@ -578,20 +688,22 @@ int main(int argc, char** argv)
             mappingInput.addMapping(mapping);
             ctx.mapSelection = *target;
         }
-    if (! browserFolder.empty())
+    if (! browserFolder.empty() || browserCategory == ui::BrowserPanel::AllItems) // All lists the Samples folder too
     {
-        ctx.openBrowserFolder = [&](const std::string& path) {
+        // With --browser-category all, --browser-folder stands in for the Samples folder (~/Music otherwise).
+        const auto listed = [&](const std::string& path) { return browserCategory == ui::BrowserPanel::AllItems && ! browserFolder.empty() ? browserFolder : path; };
+        ctx.openBrowserFolder = [&, listed](const std::string& path) {
             ctx.browserFolder = path;
             ctx.browserFiles.clear();
-            for (const auto& file : juce::File(path).findChildFiles(juce::File::findFilesAndDirectories, false))
+            for (const auto& file : juce::File(listed(path)).findChildFiles(juce::File::findFilesAndDirectories, false))
                 if (file.isDirectory() || file.hasFileExtension("als") || sonora::engine::isAudioFile(file))
                     ctx.browserFiles.push_back({file.getFullPathName().toStdString(), file.isDirectory()});
             ++ctx.browserContentRevision;
         };
-        ctx.indexBrowserFolder = [&](const std::string& path) {
+        ctx.indexBrowserFolder = [&, listed](const std::string& path) {
             ctx.browserSearchRoot = path;
             ctx.browserSearchFiles.clear();
-            for (const auto& file : juce::File(path).findChildFiles(juce::File::findFilesAndDirectories | juce::File::ignoreHiddenFiles, true))
+            for (const auto& file : juce::File(listed(path)).findChildFiles(juce::File::findFilesAndDirectories | juce::File::ignoreHiddenFiles, true))
                 if (file.isDirectory() || file.hasFileExtension("als") || sonora::engine::isAudioFile(file))
                     ctx.browserSearchFiles.push_back({file.getFullPathName().toStdString(), file.isDirectory()});
             ++ctx.browserContentRevision;
@@ -705,18 +817,59 @@ int main(int argc, char** argv)
                 if (! stream.openedOk() || ! juce::PNGImageFormat().writeImageToStream(image, stream)) return 1;
                 std::printf("wrote arrangement menu preview %s\n", out.c_str()); return 0;
             }
+    if (! browserPacks.empty())
+    {
+        using State = ui::UiContext::SamplePack::State;
+        struct Demo { const char* id; const char* name; const char* style; std::vector<std::string> types; int64_t bytes; State state; double done; const char* message; };
+        const std::vector<Demo> demo{
+            {"sonora-house-kit", "Sonora House Kit", "House", {"Drums", "One-shots", "Loops"}, 5564248, State::Available, 0, ""},
+            {"sonora-techno-kit", "Sonora Techno Kit", "Techno", {"Drums", "One-shots", "Loops"}, 6078135, State::Downloading, 0.42, ""},
+            {"sonora-hip-hop-kit", "Sonora Hip-Hop Kit", "Hip-Hop", {"Drums", "One-shots", "Loops", "Bass"}, 7136845, State::Available, 0, ""},
+            {"sonora-ambient-textures", "Sonora Ambient Textures", "Ambient", {"Pads", "Textures", "Drones"}, 35310950, State::Available, 0.3, ""},
+            {"sonora-cinematic-fx", "Sonora Cinematic FX", "Cinematic", {"FX"}, 11572172, State::Available, 0, ""},
+            {"sonora-synth-multisamples", "Sonora Synth Multisamples", "Electronic", {"Instruments", "Multisamples", "Bass"}, 6066563, State::Failed, 0.1,
+             "Download stopped: the network connection failed. Download again to resume."}};
+        const packs::PackLibrary library{juce::File(juce::String::fromUTF8(browserPacks.c_str()))};
+        const auto installed = library.installed();
+        ctx.samplePackList = ui::UiContext::SamplePackList::Ready;
+        ctx.samplePacksRoot = library.root().getFullPathName().toStdString();
+        for (int pass = 0; pass < 2; ++pass) // installed first, like the app
+            for (const auto& d : demo)
+            {
+                const auto pack = std::find_if(installed.begin(), installed.end(), [&](const auto& p) { return p.contents.info.id == d.id; });
+                if ((pack != installed.end()) != (pass == 0)) continue;
+                ui::UiContext::SamplePack row{d.id, d.name, "1.0", {}, "CC0-1.0", {}, d.message, {d.style}, d.types, d.bytes,
+                                              (int64_t) (d.done * (double) d.bytes), d.state};
+                if (pack != installed.end())
+                {
+                    row.folder = pack->folder.getFullPathName().toStdString();
+                    row.state = State::Installed;
+                    row.received = 0;
+                    for (const auto& file : pack->contents.files)
+                    {
+                        ui::BrowserTags::Tags tags{{"Style", d.style}, {"Pack", d.name}};
+                        for (const auto& [group, value] : file.tags) tags.push_back({group, value});
+                        ctx.samplePackFileTags[pack->folder.getChildFile(juce::String::fromUTF8(file.path.c_str())).getFullPathName().toStdString()] = tags;
+                    }
+                }
+                ctx.samplePacks.push_back(row);
+            }
+        if (browserFolder.empty())
+            for (auto& child : root.children())
+                if (auto* browser = dynamic_cast<ui::BrowserPanel*>(child.get())) browser->showCategory(ui::BrowserPanel::packsCategory());
+    }
     if (browserCategory >= 0)
         for (auto& child : root.children())
             if (auto* browser = dynamic_cast<ui::BrowserPanel*>(child.get()))
             {
-                browser->showCategory(std::clamp(browserCategory, 2, 6));
+                browser->showCategory(browserCategory);
                 if (! browserQuery.empty())
                 {
                     browser->focusSearch();
                     for (const auto ch : browserQuery) { ui::KeyEvent key; key.textChar = (uint32_t) (unsigned char) ch; browser->keyPressed(key); }
                 }
             }
-    if (! browserFolder.empty())
+    if (! browserFolder.empty() && browserCategory != ui::BrowserPanel::AllItems)
         for (auto& child : root.children())
             if (auto* browser = dynamic_cast<ui::BrowserPanel*>(child.get()))
             {

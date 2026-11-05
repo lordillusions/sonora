@@ -2,6 +2,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstring>
@@ -123,10 +124,41 @@ template <class IO> void io(IO& c, AssetEntry& a)
     c.text(a.extension, 32);
 }
 
+// COL-9: the features ride at the end of appVersion, which no released Sonora reads, so older hosts still accept the
+// hello (and keep their 64-byte limit: the version is shortened to fit, never the tag).
+constexpr std::string_view featureTag = " +features=";
+
 template <class IO> void io(IO& c, HelloMsg& m)
 {
     c.v(m.protocol);
-    c.text(m.appVersion, 64);
+    if constexpr (IO::decoding)
+    {
+        c.text(m.appVersion, 64);
+        m.features = 0;
+        if (const auto at = m.appVersion.rfind(featureTag); at != std::string::npos)
+        {
+            const auto digits = std::string_view(m.appVersion).substr(at + featureTag.size());
+            uint64_t value = 0;
+            bool ok = ! digits.empty() && digits.size() <= 10;
+            for (char ch : digits) ok = ok && ch >= '0' && ch <= '9' && (value = value * 10 + static_cast<uint64_t>(ch - '0')) <= UINT32_MAX;
+            if (ok)
+            {
+                m.features = static_cast<uint32_t>(value);
+                m.appVersion.resize(at);
+            }
+        }
+    }
+    else
+    {
+        std::string wire = m.appVersion;
+        if (m.features != 0)
+        {
+            const auto tag = std::string(featureTag) + std::to_string(m.features);
+            if (wire.size() + tag.size() > 64) wire.resize(64 - tag.size());
+            wire += tag;
+        }
+        c.text(wire, 64);
+    }
     c.text(m.name, maxNameLength * 4);
     c.v(m.rejoinAs);
     c.text(m.rejoinToken, 128);
@@ -539,6 +571,53 @@ template <class IO> void io(IO& c, RoleMsg& m)
 template <class IO> void io(IO& c, NoticeMsg& m) { c.text(m.text); }
 template <class IO> void io(IO& c, ByeMsg& m) { c.text(m.reason); }
 
+// COL-9 extension messages: version byte first; fields of later versions are skipped (they only append).
+template <class IO> void version(IO& c, uint8_t& v)
+{
+    c.v(v);
+    if (v == 0) throw CodecError("message version 0");
+}
+template <class IO> void tail(IO& c, uint8_t& v, uint8_t known)
+{
+    if constexpr (IO::decoding)
+    {
+        if (v > known) (void) c.r.view(c.r.remaining());
+        v = std::min(v, known); // relayed and re-encoded with the fields this build knows
+    }
+}
+
+template <class IO> void io(IO& c, PolicyMsg& m)
+{
+    version(c, m.version);
+    c.v(m.hostFeatures);
+    c.v(m.policy.chat);
+    c.v(m.policy.voice);
+    c.v(m.policy.video);
+    c.vec(m.features, [&](std::pair<AuthorId, uint32_t>& f) { c.v(f.first); c.v(f.second); }, 2);
+    tail(c, m.version, policyMessageVersion);
+}
+
+template <class IO> void io(IO& c, ChatMsg& m)
+{
+    version(c, m.version);
+    c.v(m.author);
+    c.v(m.id);
+    c.v(m.clientId);
+    c.v(m.timeMs);
+    c.v(m.history);
+    c.text(m.text, maxChatBytes);
+    tail(c, m.version, chatMessageVersion);
+}
+
+template <class IO> void io(IO& c, MediaStateMsg& m)
+{
+    version(c, m.version);
+    c.v(m.author);
+    c.v(m.micOn);
+    c.v(m.cameraOn);
+    tail(c, m.version, mediaStateMessageVersion);
+}
+
 template <size_t I = 0> Message decodeIndex(size_t index, Dec& d)
 {
     if constexpr (I < std::variant_size_v<Message>)
@@ -556,7 +635,7 @@ template <size_t I = 0> Message decodeIndex(size_t index, Dec& d)
 
 constexpr const char* names[] = {"hello", "welcome", "snapshot", "commit", "intent", "reject", "undo", "participants", "presence",
                                  "live", "plugin-state", "transport", "clock", "asset-request", "asset-chunk", "asset-add",
-                                 "upload", "drop-request", "role", "notice", "bye"};
+                                 "upload", "drop-request", "role", "notice", "bye", "policy", "chat", "media-state"};
 static_assert(std::size(names) == std::variant_size_v<Message>);
 } // namespace
 
@@ -569,6 +648,79 @@ const char* toString(Role r)
         case Role::Listener: return "Listener";
     }
     return "?";
+}
+
+std::string cleanChatText(std::string_view in)
+{
+    std::string out;
+    size_t chars = 0, newlines = 0;
+    auto put = [&](uint32_t cp) {
+        if (cp < 0x80) out.push_back(static_cast<char>(cp));
+        else if (cp < 0x800)
+        {
+            out.push_back(static_cast<char>(0xc0 | (cp >> 6)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+        }
+        else if (cp < 0x10000)
+        {
+            out.push_back(static_cast<char>(0xe0 | (cp >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+        }
+        else
+        {
+            out.push_back(static_cast<char>(0xf0 | (cp >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+        }
+    };
+    for (size_t i = 0; i < in.size() && chars < maxChatChars;)
+    {
+        const auto b = static_cast<uint8_t>(in[i]);
+        uint32_t cp = 0;
+        size_t n = 0;
+        if (b < 0x80) { cp = b; n = 1; }
+        else if (b >= 0xc2 && b < 0xe0) { cp = b & 0x1fu; n = 2; }
+        else if (b >= 0xe0 && b < 0xf0) { cp = b & 0x0fu; n = 3; }
+        else if (b >= 0xf0 && b < 0xf5) { cp = b & 0x07u; n = 4; }
+        else { ++i; continue; } // stray continuation or invalid lead byte
+        if (i + n > in.size()) break;
+        bool valid = true;
+        for (size_t k = 1; k < n; ++k)
+        {
+            const auto cb = static_cast<uint8_t>(in[i + k]);
+            if ((cb & 0xc0) != 0x80) { valid = false; break; }
+            cp = (cp << 6) | (cb & 0x3fu);
+        }
+        if (! valid || (n == 3 && cp < 0x800) || (n == 4 && (cp < 0x10000 || cp > 0x10ffff)) || (cp >= 0xd800 && cp <= 0xdfff))
+        {
+            ++i; // overlong, surrogate or out of range: drop the lead byte and resync
+            continue;
+        }
+        i += n;
+        if (cp == '\r')
+        {
+            if (i < in.size() && in[i] == '\n') continue; // CR LF
+            cp = '\n';
+        }
+        if (cp == '\t') cp = ' ';
+        if (cp == '\n')
+        {
+            if (++newlines > 3 || out.empty()) continue; // at most two blank lines; none at the start
+            put(cp);
+            ++chars;
+            continue;
+        }
+        // Other controls, C1 controls and bidirectional overrides (they can make a line read as something else).
+        if (cp < 0x20 || (cp >= 0x7f && cp < 0xa0) || (cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069)) continue;
+        if (cp == ' ' && out.empty()) continue;
+        newlines = 0;
+        put(cp);
+        ++chars;
+    }
+    while (! out.empty() && (out.back() == ' ' || out.back() == '\n')) out.pop_back();
+    return out;
 }
 
 bool usesDictionary(const Message& m)

@@ -78,6 +78,53 @@ float promptHeight(const PromptState& state);
 std::vector<SkRect> promptButtonRects(const PromptState& state, float width, float height); // one per button
 void drawPrompt(SkCanvas& canvas, float width, float height, const PromptState& state);
 
+// The panel look shared by the splash, the prompts, About and the Settings panel (UI-63): palette and metrics.
+namespace panel
+{
+constexpr float cornerRadius = 12;                    // the window's corners
+constexpr float buttonHeight = 28, buttonRadius = 7;  // a button's corners are a quarter of its height, at most buttonRadius
+constexpr float titleSize = 15, textSize = 12.5f;     // prompt title, prompt message and button labels
+constexpr SkColor backgroundTop = SkColorSetRGB(0x22, 0x22, 0x22), backgroundBottom = SkColorSetRGB(0x0b, 0x0b, 0x0b);
+constexpr SkColor border = SkColorSetARGB(40, 255, 255, 255);
+constexpr SkColor hairline = SkColorSetARGB(46, 255, 255, 255); // button edges and separators
+constexpr SkColor title = SkColorSetRGB(0xf4, 0xf4, 0xf4);
+constexpr SkColor text = SkColorSetRGB(0xd8, 0xd8, 0xd8);
+constexpr SkColor message = SkColorSetRGB(0xa4, 0xa4, 0xa4);  // secondary text
+constexpr SkColor dim = SkColorSetRGB(0x6e, 0x6e, 0x6e);      // hints and disabled text
+constexpr SkColor alert = SkColorSetRGB(0xff, 0xa0, 0x5a);    // the one warm colour: failures, "press the new key"
+constexpr SkColor button = SkColorSetRGB(0x2c, 0x2c, 0x2c), buttonHot = SkColorSetRGB(0x3a, 0x3a, 0x3a),
+                  buttonDown = SkColorSetRGB(0x1c, 0x1c, 0x1c), buttonText = SkColorSetRGB(0xe8, 0xe8, 0xe8);
+constexpr SkColor primary = SkColorSetRGB(0xec, 0xec, 0xec), primaryHot = SK_ColorWHITE,
+                  primaryDown = SkColorSetRGB(0xc4, 0xc4, 0xc4), primaryText = SkColorSetRGB(0x11, 0x11, 0x11);
+constexpr SkColor focusRing = SkColorSetARGB(150, 255, 255, 255);
+constexpr SkColor well = SkColorSetARGB(110, 0, 0, 0);        // text fields
+constexpr SkColor sidebar = SkColorSetARGB(64, 0, 0, 0);
+constexpr SkColor separator = SkColorSetARGB(24, 255, 255, 255);
+constexpr SkColor selection = SkColorSetARGB(30, 255, 255, 255); // the chosen sidebar row
+constexpr SkColor scrollbar = SkColorSetARGB(70, 255, 255, 255);
+} // namespace panel
+
+// The panel background (black, lit slightly from the top-left, rounded like a macOS window) and its hairline border,
+// drawn last. `bounds` may sit anywhere on the canvas.
+void drawPanel(SkCanvas& canvas, const SkRect& bounds);
+void drawPanelBorder(SkCanvas& canvas, const SkRect& bounds);
+// The splash's ghost S in `box`, fading from topAlpha at its top to bottomAlpha at fadeBottom (white).
+void drawGhostMark(SkCanvas& canvas, const SkRect& box, float fadeBottom, uint8_t topAlpha, uint8_t bottomAlpha);
+
+// Panel controls: the primary button is white on black, the others dark with a hairline; hover lifts, press sinks.
+struct ButtonLook
+{
+    bool primary = false, hot = false, down = false, focused = false, enabled = true;
+};
+void drawButtonFrame(SkCanvas& canvas, const SkRect& rect, const ButtonLook& look);
+SkColor buttonTextColor(const ButtonLook& look);
+void drawButton(SkCanvas& canvas, const SkRect& rect, const std::string& label, const ButtonLook& look,
+                float textSize = panel::textSize);
+// An on/off switch filling `rect` (a pill; the knob slides right and the track turns white when on).
+void drawSwitch(SkCanvas& canvas, const SkRect& rect, bool on, bool hot, bool enabled = true);
+// A text field's well.
+void drawField(SkCanvas& canvas, const SkRect& rect);
+
 // About Sonora (COM-8): the splash's panel with the wordmark, version, licence, the author's credit and the supporters by
 // tier (or an invitation when there are none), and four buttons.
 enum AboutButton { AboutWebsite, AboutGitHub, AboutClose, AboutSupport, aboutButtonCount };

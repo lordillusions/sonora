@@ -5,10 +5,13 @@
 #include "ui/UiContext.h"
 
 #include "include/core/SkPaint.h"
+#include "include/core/SkPath.h"
+#include "include/core/SkRRect.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace sonora::ui
 {
@@ -31,15 +34,51 @@ std::string initials(const std::string& name)
     return out.empty() ? std::string("?") : out;
 }
 
-void avatar(SkCanvas& c, float cx, float cy, float radius, int color, const std::string& name, SkColor ring)
+constexpr SkColor kTalking = SkColorSetRGB(39, 174, 96);
+
+void avatar(SkCanvas& c, float cx, float cy, float radius, int color, const std::string& name, SkColor ring, bool talking = false)
 {
     SkPaint p;
     p.setAntiAlias(true);
+    if (talking) // COL-7: a green ring while their voice is heard
+    {
+        p.setColor(kTalking);
+        c.drawCircle(cx, cy, radius + 3.5f, p);
+    }
     p.setColor(ring);
     c.drawCircle(cx, cy, radius + 1.5f, p);
     p.setColor(collabColor(color));
     c.drawCircle(cx, cy, radius, p);
     paint::text(c, initials(name), {cx - radius, cy - radius, radius * 2, radius * 2}, SK_ColorWHITE, radius * 0.95f, Align::Centre, true);
+}
+
+// COL-7: a small microphone after a name: drawn when the mic is on (green while talking, struck through when muted here).
+void micIcon(SkCanvas& c, float x, float cy, SkColor color, bool muted)
+{
+    SkPaint p;
+    p.setAntiAlias(true);
+    p.setColor(color);
+    c.drawRRect(SkRRect::MakeRectXY(SkRect::MakeXYWH(x + 2, cy - 7, 6, 9), 3, 3), p);
+    p.setStyle(SkPaint::kStroke_Style);
+    p.setStrokeWidth(1.2f);
+    c.drawArc(SkRect::MakeXYWH(x, cy - 4, 10, 8), 0, 180, false, p);
+    c.drawLine(x + 5, cy + 4, x + 5, cy + 6.5f, p);
+    if (muted) c.drawLine(x - 1, cy - 7, x + 11, cy + 6, p);
+}
+
+// COL-8: a small camera after a name while the camera is on.
+void cameraIcon(SkCanvas& c, float x, float cy, SkColor color)
+{
+    SkPaint p;
+    p.setAntiAlias(true);
+    p.setColor(color);
+    c.drawRRect(SkRRect::MakeRectXY(SkRect::MakeXYWH(x, cy - 4, 9, 8), 2, 2), p);
+    SkPath lens;
+    lens.moveTo(x + 9, cy);
+    lens.lineTo(x + 13, cy - 3.5f);
+    lens.lineTo(x + 13, cy + 3.5f);
+    lens.close();
+    c.drawPath(lens, p);
 }
 
 const char* roleText(CollabView::Role r)
@@ -58,7 +97,7 @@ Rect CollabPanel::panelRect() const
 {
     // Before a session the panel only offers Share and Join: shorter, unless nearby sessions need rows.
     const auto& v = ctx().collab;
-    const float wanted = v.active() || ! v.networkAvailable ? kPanelH : 335.0f + 26.0f * (float) std::min<size_t>(v.lanSessions.size(), 5)
+    const float wanted = v.active() || ! v.networkAvailable ? kPanelH : 367.0f + 26.0f * (float) std::min<size_t>(v.lanSessions.size(), 5)
                          + (v.lanSessions.empty() ? 0.0f : 30.0f) + (v.endedReason.empty() ? 0.0f : 36.0f);
     const float w = std::min(kPanelW, width() - 40), h = std::min(wanted, height() - 40);
     return {(width() - w) * 0.5f, (height() - h) * 0.5f, w, h};
@@ -72,6 +111,42 @@ void CollabPanel::button(SkCanvas& c, const Theme& t, const Rect& r, const std::
     paint::text(c, label, r.reduced(4, 0), enabled ? (primary ? paint::contrastText(bg) : t.color("ControlForeground")) : t.color("TextDisabled"),
                 t.metrics.fontSize, Align::Centre);
     if (enabled) hits_.push_back({r, std::move(action)});
+}
+
+void CollabPanel::toggle(SkCanvas& c, const Theme& t, const Rect& area, const std::string& label, bool on, bool enabled,
+                         std::function<void()> action)
+{
+    // A small switch and its label; disabled ones (not built yet, or set by the host) are drawn dim.
+    const Rect track{area.x, area.centreY() - 7, 26, 14};
+    SkPaint p;
+    p.setAntiAlias(true);
+    const SkColor fill = on ? t.color("ChosenDefault") : t.color("ControlBackground");
+    p.setColor(enabled ? fill : paint::withAlpha(fill, 110));
+    c.drawRRect(SkRRect::MakeRectXY(SkRect::MakeXYWH(track.x, track.y, track.w, track.h), 7, 7), p);
+    p.setStyle(SkPaint::kStroke_Style);
+    p.setStrokeWidth(1.0f);
+    p.setColor(t.color("ControlContrastFrame"));
+    c.drawRRect(SkRRect::MakeRectXY(SkRect::MakeXYWH(track.x, track.y, track.w, track.h), 7, 7), p);
+    p.setStyle(SkPaint::kFill_Style);
+    p.setColor(enabled ? SK_ColorWHITE : paint::withAlpha(SK_ColorWHITE, 150));
+    c.drawCircle(on ? track.right() - 7 : track.x + 7, track.centreY(), 5.0f, p);
+    paint::text(c, label, {area.x + 32, area.y, area.w - 32, area.h}, enabled ? t.color("ControlForeground") : t.color("TextDisabled"),
+                t.metrics.fontSize, Align::Left);
+    if (enabled) hits_.push_back({area, std::move(action)});
+}
+
+void CollabPanel::policyRow(SkCanvas& c, const Theme& t, Rect line, bool editable)
+{
+    // Chat, voice and camera for the session (COL-9). Voice and camera are drawn off until COL-7 / COL-8 build them.
+    auto& x = ctx();
+    const auto& v = x.collab;
+    auto set = [&x](CollabView::Policy p) { if (x.collabSetPolicy) x.collabSetPolicy(p); };
+    auto policy = v.policy;
+    toggle(c, t, line.removeFromLeft(100), "Chat", policy.chat, editable, [set, policy]() mutable { policy.chat = ! policy.chat; set(policy); });
+    toggle(c, t, line.removeFromLeft(150), v.voiceSupported ? std::string("Voice") : std::string("Voice (COL-7)"), policy.voice && v.voiceSupported,
+           editable && v.voiceSupported, [set, policy]() mutable { policy.voice = ! policy.voice; set(policy); });
+    toggle(c, t, line.removeFromLeft(160), v.videoSupported ? std::string("Camera") : std::string("Camera (COL-8)"), policy.video && v.videoSupported,
+           editable && v.videoSupported, [set, policy]() mutable { policy.video = ! policy.video; set(policy); });
 }
 
 void CollabPanel::close()
@@ -170,6 +245,12 @@ void CollabPanel::paint(SkCanvas& c, const Theme& t)
             indented("You get an invite link (already copied) to send by chat or email.", dim);
             indented("The music goes directly between you, encrypted.", dim);
         }
+        {
+            r.removeFromTop(4);
+            auto line = r.removeFromTop(kRowH).reduced(0, 2);
+            paint::text(c, "Allow", line.removeFromLeft(110), dim, fs, Align::Left);
+            policyRow(c, t, line, true);
+        }
         if (! v.endedReason.empty())
         {
             // Word-wrapped: a failed share's reason says what to do and must be read whole.
@@ -255,10 +336,18 @@ void CollabPanel::paint(SkCanvas& c, const Theme& t)
     {
         if (r.h < 60) break;
         auto line = r.removeFromTop(kRowH + 6);
-        avatar(c, line.x + 11, line.centreY(), 10, p.color, p.name, t.color("SurfaceBackground"));
+        avatar(c, line.x + 11, line.centreY(), 10, p.color, p.name, t.color("SurfaceBackground"), p.talking);
         line.removeFromLeft(28);
         auto nameBox = line.removeFromLeft(170);
-        paint::text(c, p.name + (p.self ? " (you)" : std::string()), nameBox, ink, fs, Align::Left, true);
+        const auto label = p.name + (p.self ? " (you)" : std::string());
+        paint::text(c, label, nameBox, ink, fs, Align::Left, true);
+        float iconX = std::min(nameBox.x + gfx::measureText(label, fs, true) + 6, nameBox.right() - 12);
+        if (p.micOn)
+        {
+            micIcon(c, iconX, nameBox.centreY(), p.talking ? kTalking : dim, p.mutedHere);
+            iconX += 14;
+        }
+        if (p.cameraOn && iconX < nameBox.right() - 12) cameraIcon(c, iconX, nameBox.centreY(), dim);
         auto roleBox = line.removeFromLeft(90).reduced(0, 5);
         if (v.host && ! p.self && p.role != CollabView::Role::Host)
         {
@@ -271,11 +360,74 @@ void CollabPanel::paint(SkCanvas& c, const Theme& t)
         {
             const auto remove = line.removeFromRight(70).reduced(0, 5);
             button(c, t, remove, "Remove", [&x, id = p.id] { if (x.collabRemove) x.collabRemove(id); });
+            line.removeFromRight(6);
         }
-        if (! p.safetyCode.empty()) paint::text(c, p.safetyCode, line, dim, fs - 1, Align::Left);
+        if (! p.self && p.micOn && v.voiceAvailable)
+        {
+            // Mute is local: this machine stops playing them; nobody else is affected.
+            const auto mute = line.removeFromRight(70).reduced(0, 5);
+            button(c, t, mute, p.mutedHere ? "Unmute" : "Mute", [&x, id = p.id, muted = p.mutedHere] {
+                if (x.collabMuteVoice) x.collabMuteVoice(id, ! muted);
+            });
+            line.removeFromRight(6);
+        }
+        std::string detail = p.safetyCode;
+        if (! p.self && ! p.hasChat) detail += std::string(detail.empty() ? "" : "  ") + "(older: no chat)";
+        if (! detail.empty()) paint::text(c, detail, line, dim, fs - 1, Align::Left);
     }
     if (std::any_of(v.participants.begin(), v.participants.end(), [](const auto& p) { return ! p.safetyCode.empty(); }))
         note("Compare the four words with each person once, by voice: when they match, nobody sits in between.", dim);
+
+    {
+        // What the session allows: the host switches it for everyone, guests see it.
+        r.removeFromTop(4);
+        auto line = r.removeFromTop(kRowH).reduced(0, 2);
+        paint::text(c, v.host ? "Allow" : "Host allows", line.removeFromLeft(110), dim, fs, Align::Left);
+        policyRow(c, t, line, v.host);
+    }
+    if (v.voiceSupported)
+    {
+        // COL-7: this person's mic, push to talk and ducking.
+        auto line = r.removeFromTop(kRowH).reduced(0, 2);
+        paint::text(c, "Your mic", line.removeFromLeft(110), dim, fs, Align::Left);
+        if (! v.voiceAvailable && ! v.micOn) paint::text(c, v.voiceUnavailable, line, dim, fs - 1, Align::Left);
+        else
+        {
+            button(c, t, line.removeFromLeft(96), v.micOn ? "Mic On" : "Mic Off", [&x, on = v.micOn] { if (x.collabSetMic) x.collabSetMic(! on); },
+                   v.voiceAvailable || v.micOn, v.micOn);
+            line.removeFromLeft(8);
+            const auto meter = line.removeFromLeft(56).reduced(0, 8);
+            paint::fill(c, meter, t.color("RetroDisplayBackground"));
+            const float level = v.micOn ? std::clamp(std::sqrt(v.micLevel) * 1.4f, 0.0f, 1.0f) : 0.0f;
+            const bool sending = v.micOn && (! v.pushToTalk || v.pushToTalkHeld);
+            paint::fill(c, {meter.x, meter.y, meter.w * level, meter.h}, sending ? kTalking : t.color("TextDisabled"));
+            line.removeFromLeft(12);
+            toggle(c, t, line.removeFromLeft(150), "Push to talk (`)", v.pushToTalk, true,
+                   [&x, on = v.pushToTalk] { if (x.collabSetVoiceOption) x.collabSetVoiceOption(0, ! on); });
+            toggle(c, t, line.removeFromLeft(120), "Duck music", v.duck, true,
+                   [&x, on = v.duck] { if (x.collabSetVoiceOption) x.collabSetVoiceOption(1, ! on); });
+        }
+        if (v.micOn && ! v.voiceAvailable) note(v.voiceUnavailable, alert);
+        else if (v.micOn && v.noMicInput) note("No audio input is on: choose your microphone in Settings > Audio.", alert);
+        else if (v.micOn && v.pushToTalk && ! v.pushToTalkHeld) note("Hold the ` key (left of 1) to talk. Use headphones: no echo cancellation yet.", dim);
+        else if (v.micOn) note("Use headphones: Sonora has no echo cancellation yet (COL-9).", dim);
+    }
+    {
+        // COL-8: this person's camera and whether the tiles show here.
+        auto line = r.removeFromTop(kRowH).reduced(0, 2);
+        paint::text(c, "Your camera", line.removeFromLeft(110), dim, fs, Align::Left);
+        if (! v.videoSupported) paint::text(c, "Camera: macOS only for now (COL-8)", line, dim, fs - 1, Align::Left);
+        else if (! v.videoAvailable && ! v.cameraOn) paint::text(c, v.videoUnavailable, line, dim, fs - 1, Align::Left);
+        else
+        {
+            button(c, t, line.removeFromLeft(96), v.cameraOn ? "Camera On" : "Camera Off",
+                   [&x, on = v.cameraOn] { if (x.collabSetCamera) x.collabSetCamera(! on); }, v.videoAvailable || v.cameraOn, v.cameraOn);
+            line.removeFromLeft(76);
+            toggle(c, t, line.removeFromLeft(150), "Show video", v.showVideo, true,
+                   [&x, on = v.showVideo] { if (x.collabShowVideo) x.collabShowVideo(! on); });
+        }
+        if (v.cameraOn && ! v.videoAvailable) note(v.videoUnavailable, alert);
+    }
 
     for (const auto& [peer, name] : v.joinRequests)
     {
@@ -307,6 +459,11 @@ void CollabPanel::paint(SkCanvas& c, const Theme& t)
     for (int i = (int) v.notices.size() - shown; i < (int) v.notices.size(); ++i, y += 16)
         paint::text(c, v.notices[(size_t) i], {bottom.x, y, bottom.w, 16}, dim, fs - 1, Align::Left);
     button(c, t, buttons.removeFromLeft(140), v.host ? "End Session" : "Leave Session", [&x, call] { call(x.collabLeave); });
+    buttons.removeFromLeft(10);
+    std::string chatLabel = x.collabChatOpen ? "Hide Chat" : "Chat";
+    if (v.unread > 0 && ! x.collabChatOpen) chatLabel += " (" + std::to_string(v.unread) + " new)";
+    button(c, t, buttons.removeFromLeft(140), chatLabel, [&x, call] { call(x.collabToggleChat); }, v.state != CollabView::State::Ended,
+           v.unread > 0 && ! x.collabChatOpen);
 }
 
 void CollabPanel::mouseDown(const MouseEvent& e)
@@ -334,7 +491,7 @@ float CollabBadge::preferredWidth() const
 {
     const auto& v = const_cast<CollabBadge*>(this)->ctx().collab;
     if (! v.active()) return 52.0f;
-    return 14.0f + 14.0f * (float) std::max<size_t>(1, std::min<size_t>(v.participants.size(), 4)) + 8.0f;
+    return 14.0f + 14.0f * (float) std::max<size_t>(1, std::min<size_t>(v.participants.size(), 4)) + 8.0f + (v.unread > 0 ? 8.0f : 0.0f);
 }
 
 void CollabBadge::paint(SkCanvas& c, const Theme& t)
@@ -358,8 +515,20 @@ void CollabBadge::paint(SkCanvas& c, const Theme& t)
     for (const auto& p : v.participants)
     {
         if (drawn++ == 4) break;
-        avatar(c, cx, r.centreY(), 7.5f, p.color, p.name, t.color("SurfaceBackground"));
+        avatar(c, cx, r.centreY(), 7.5f, p.color, p.name, t.color("SurfaceBackground"), p.talking);
         cx += 14;
+    }
+    if (v.unread > 0)
+    {
+        // Unread chat lines (COL-9): a count over the last avatar.
+        const auto count = v.unread > 9 ? std::string("9+") : std::to_string(v.unread);
+        const float w = count.size() > 1 ? 15.0f : 11.0f;
+        const Rect bubble{r.right() - w, r.y, w, 11};
+        SkPaint b;
+        b.setAntiAlias(true);
+        b.setColor(SkColorSetRGB(235, 87, 87));
+        c.drawRRect(SkRRect::MakeRectXY(SkRect::MakeXYWH(bubble.x, bubble.y, bubble.w, bubble.h), 5.5f, 5.5f), b);
+        paint::text(c, count, bubble, SK_ColorWHITE, 8.5f, Align::Centre, true);
     }
 }
 

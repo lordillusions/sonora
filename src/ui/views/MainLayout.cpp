@@ -12,6 +12,7 @@
 #include "ui/views/ResynthEditor.h"
 #include "ui/views/PreferencesPanel.h"
 #include "ui/views/CollabPanel.h"
+#include "ui/views/CollabVideo.h"
 #include "ui/views/ExportPanel.h"
 #include "ui/views/SessionView.h"
 #include "ui/views/StatusBar.h"
@@ -65,6 +66,7 @@ MainLayout::MainLayout(UiContext& ctx) : RootWidget(ctx)
         markDirty();
     };
     detailSplit_->finished = [this] { if (context().layoutChanged) context().layoutChanged(); };
+    video_ = add<CollabVideoTiles>(); // over the views, under the modal panels
     prefs_ = add<PreferencesPanel>();
     collab_ = add<CollabPanel>();
     export_ = add<ExportPanel>(); // last child: drawn and hit-tested on top
@@ -175,6 +177,16 @@ void MainLayout::layout()
                           static_cast<Widget*>(detail_)})
         panel->cornerRadius = m.panelRadius;
 
+    {
+        // COL-8: camera tiles in one column at the main view's top right, as tall as fits.
+        const auto& v = context().collab;
+        const size_t fit = (size_t) std::max(0.0f, (r.h - 12.0f + CollabVideoTiles::gap) / (CollabVideoTiles::tileH + CollabVideoTiles::gap));
+        const size_t shown = std::min(v.videoTiles.size(), fit);
+        video_->visible = v.showVideo && shown > 0 && v.active();
+        video_->setBounds({r.right() - CollabVideoTiles::tileW - 12, r.y + 12, CollabVideoTiles::tileW, CollabVideoTiles::columnHeight(shown)});
+        lastVideoTiles_ = v.videoTiles.size();
+        lastShowVideo_ = v.showVideo;
+    }
     prefs_->visible = context().preferencesOpen;
     prefs_->setBounds(r0);
     export_->visible = context().exportOpen;
@@ -265,7 +277,8 @@ void MainLayout::tick()
     RootWidget::tick();
     auto& x = context();
     if (compactDevices() != lastCompact_ || hasResynthEditor() != lastResynth_ || x.detailTab != lastTab_ || x.mainView != lastView_ || x.browserVisible != lastBrowser_ || x.detailVisible != lastDetail_
-        || x.preferencesOpen != lastPrefs_ || x.exportOpen != lastExport_ || x.collabOpen != lastCollab_)
+        || x.preferencesOpen != lastPrefs_ || x.exportOpen != lastExport_ || x.collabOpen != lastCollab_
+        || x.collab.videoTiles.size() != lastVideoTiles_ || x.collab.showVideo != lastShowVideo_)
     {
         layout();
         markDirty();

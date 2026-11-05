@@ -15,6 +15,7 @@ set(SONORA_TEST_SOURCES
     test_native_plugins.cpp
     test_compact_devices.cpp
     test_serum_state.cpp
+    test_native_replacement.cpp
     test_serum_effects_import.cpp
     test_wavetable.cpp
     test_wavetable_routing.cpp
@@ -38,6 +39,7 @@ set(SONORA_TEST_SOURCES
     test_prism_preset.cpp
     test_supporters.cpp
     test_curve_lfo.cpp
+    test_sonora_stand_in.cpp
     test_hush.cpp
     test_midi.cpp
     test_midi_release.cpp
@@ -68,12 +70,15 @@ set(SONORA_TEST_SOURCES
     test_model_codec.cpp
     test_collab_session.cpp
     test_collab_protocol.cpp
+    test_collab_voice.cpp
+    test_collab_video.cpp
     test_agent.cpp
     test_platform.cpp
+    test_sample_packs.cpp
 )
 if(SONORA_WITH_UI)
     list(APPEND SONORA_TEST_SOURCES test_resynth_ui.cpp test_transport_warp_ui.cpp test_sample_drop_ui.cpp)
-    list(APPEND SONORA_TEST_SOURCES test_device_faces.cpp test_editor_workflow_ui.cpp test_browser_tags_ui.cpp test_context_track_ui.cpp test_locators_ui.cpp test_inline_rename_ui.cpp test_drag_guide_ui.cpp test_ruler_zoom_ui.cpp test_track_state_ui.cpp test_set_view_ui.cpp test_shortcuts_ui.cpp test_updates_ui.cpp)
+    list(APPEND SONORA_TEST_SOURCES test_device_faces.cpp test_editor_workflow_ui.cpp test_browser_tags_ui.cpp test_sample_packs_ui.cpp test_context_track_ui.cpp test_locators_ui.cpp test_inline_rename_ui.cpp test_drag_guide_ui.cpp test_ruler_zoom_ui.cpp test_track_state_ui.cpp test_set_view_ui.cpp test_shortcuts_ui.cpp test_updates_ui.cpp)
     list(APPEND SONORA_TEST_SOURCES test_ui.cpp test_clip_envelope_ui.cpp test_audio_clip.cpp test_grid.cpp test_grid_ui.cpp test_tools_ui.cpp test_clip_launch_ui.cpp test_native_plugin_ui.cpp test_curve_lfo_ui.cpp test_wavetable_ui.cpp test_wavetable_fx_ui.cpp test_wavetable_modulation_ui.cpp test_wavetable_routing_ui.cpp test_wavetable_sub_ui.cpp test_wavetable_quality_ui.cpp test_wavetable_noise_ui.cpp test_wavetable_window_ui.cpp test_wavetable_drag_modulation_ui.cpp test_wavetable_preset_browser_ui.cpp test_brand_ui.cpp)
     # PLG-11: the VST3's processor and editor, built here against the app's JUCE (no plug-in wrapper needed).
     list(APPEND SONORA_TEST_SOURCES test_wavetable_plugin.cpp ../src/plugin/WavetablePlugin.cpp ../src/plugin/WavetablePluginEditor.cpp)
@@ -86,7 +91,7 @@ if(SONORA_WITH_UI)
 endif()
 
 add_executable(sonora_tests ${SONORA_TEST_SOURCES})
-target_link_libraries(sonora_tests PRIVATE sonora_agent sonora_collab sonora_monocypher)
+target_link_libraries(sonora_tests PRIVATE sonora_agent sonora_collab sonora_packs) # Monocypher via sonora_core
 if(SONORA_WITH_UI)
     target_link_libraries(sonora_tests PRIVATE sonora_ui)
 endif()
