@@ -43,6 +43,12 @@ void parameter(XmlElement& parent, const std::string& key, double number, int ta
     value(*result, "Manual", boolean ? juce::String(number >= 0.5 ? "true" : "false") : juce::String::formatted("%.17g", number));
     if (target >= 0) result->createNewChildElement("AutomationTarget")->setAttribute("Id", target);
 }
+// "%.17g": exact, and whole numbers come out as "0", "60"... The reference refuses a set whose int nodes hold
+// "0.00000000000000000" (juce::String(double, 17)), e.g. Delay DryWetMode or a Sampler part's KeyRange.
+juce::String number(double n)
+{
+    return juce::String::formatted("%.17g", n);
+}
 juce::String hex(const std::vector<uint8_t>& bytes)
 {
     return juce::String::toHexString(bytes.data(), (int) bytes.size(), 0).toUpperCase();
@@ -169,7 +175,7 @@ std::string deviceTemplate(const model::Device& device)
                     value(*key, "Channel", "16"); value(*key, "IsNote", "false");
                     value(*key, "NoteOrController", juce::String(param.macroIndex));
                     auto* range = target->createNewChildElement("MidiControllerRange");
-                    value(*range, "Min", juce::String(param.rangeMin, 17)); value(*range, "Max", juce::String(param.rangeMax, 17));
+                    value(*range, "Min", number(param.rangeMin)); value(*range, "Max", number(param.rangeMax));
                 }
             }
         if (device.type == "InstrumentVector" && ! device.sourceXml)
@@ -192,8 +198,8 @@ std::string deviceTemplate(const model::Device& device)
             auto* parent = slash == std::string::npos ? &root : path(root, key.substr(0, slash));
             const auto leaf = key.substr(slash == std::string::npos ? 0 : slash + 1);
             const bool boolean = leaf == "RetriggerMode" || leaf == "DisplayPitchInHz" || leaf == "StrobeMode" || leaf == "UseConstPowCrossfade"
-                                 || leaf == "MidSideBalanceOn" || leaf == "BassMonoAudition";
-            value(*parent, leaf.c_str(), boolean ? juce::String(number >= 0.5 ? "true" : "false") : juce::String(number, 17));
+                                 || leaf == "MidSideBalanceOn" || leaf == "BassMonoAudition" || leaf == "EcoProcessing";
+            value(*parent, leaf.c_str(), boolean ? juce::String(number >= 0.5 ? "true" : "false") : io::number(number));
         }
         if (! device.sampleParts.empty() || device.samplePartsEdited)
         {
@@ -211,7 +217,7 @@ std::string deviceTemplate(const model::Device& device)
                 auto leaf = [&](const std::string& key, double n) {
                     const auto slash = key.find_last_of('/');
                     value(slash == std::string::npos ? *p : *path(*p, key.substr(0, slash)),
-                          key.substr(slash == std::string::npos ? 0 : slash + 1).c_str(), juce::String(n, 17));
+                          key.substr(slash == std::string::npos ? 0 : slash + 1).c_str(), number(n));
                 };
                 value(*p, "Name", juce::String(part.name));
                 leaf("KeyRange/Min", part.keyMin); leaf("KeyRange/Max", part.keyMax);

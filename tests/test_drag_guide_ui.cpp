@@ -5,6 +5,7 @@
 #include "io/als/AlsReader.h"
 #include "ui/ClipEditing.h"
 #include "ui/views/MainLayout.h"
+#include "ui/views/ArrangementView.h"
 
 #include <juce_core/juce_core.h>
 #include <juce_graphics/juce_graphics.h>
@@ -64,7 +65,7 @@ TEST_CASE("drag guide: real mouse drags snap by the end with Shift and the statu
     root.setBounds({0, 0, 1200, 700});
     root.layout();
 
-    const float laneTop = ctx.theme.metrics.controlBarHeight + ctx.theme.metrics.arrangementRulerHeight;
+    const float laneTop = ctx.theme.metrics.controlBarHeight + ui::ArrangementView::rulerHeightFor(! song.locators.empty());
     auto beatX = [&](double b) { return ctx.theme.metrics.outerMargin + (float) (b * ctx.pixelsPerBeat); };
     auto mouse = [](float x, float y, bool shift = false) { ui::MouseEvent e; e.x = x; e.y = y; e.shift = shift; return e; };
     const auto clipUid = song.tracks[0].arrangementClips[0].uid;
@@ -125,7 +126,7 @@ TEST_CASE("deactivated clip: faded in a white frame; Main shows no empty name fi
     root.layout();
     const auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_tests");
     dir.createDirectory();
-    const float laneTop = ctx.theme.metrics.controlBarHeight + ctx.theme.metrics.arrangementRulerHeight;
+    const float laneTop = ctx.theme.metrics.controlBarHeight + ui::ArrangementView::rulerHeightFor(! song.locators.empty());
     const int px = (int) (ctx.theme.metrics.outerMargin + 8.0 * ctx.pixelsPerBeat), py = (int) laneTop + 40;
     auto pixelAt = [&](const char* name) {
         const auto file = dir.getChildFile(name);

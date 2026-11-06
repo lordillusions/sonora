@@ -218,7 +218,7 @@ TEST_CASE("arrangement editing: select, move, resize, delete, duplicate and undo
 
     const auto& clip0 = song.tracks[0].arrangementClips[0]; // beats 4..12 in the fixture
     const float topBar = ctx.theme.metrics.controlBarHeight;
-    const float laneTop = topBar + ctx.theme.metrics.arrangementRulerHeight; // track 0's lane starts here
+    const float laneTop = topBar + ui::ArrangementView::rulerHeightFor(! song.locators.empty()); // track 0's lane starts here
     auto mouse = [&](float x, float y) {
         ui::MouseEvent e;
         e.x = x;
@@ -318,7 +318,7 @@ TEST_CASE("arrangement editing: Delete removes every selected clip across tracks
     ui::MainLayout root(ctx);
     root.setBounds({0, 0, 1200, 700});
     root.layout();
-    const float laneTop = ctx.theme.metrics.controlBarHeight + ctx.theme.metrics.arrangementRulerHeight;
+    const float laneTop = ctx.theme.metrics.controlBarHeight + ui::ArrangementView::rulerHeightFor(! song.locators.empty());
     const float lane0 = laneTop + 30, lane1 = laneTop + ctx.theme.metrics.arrangementLaneHeight + 20;
     auto mouse = [&](double beat, float y, bool shift = false) {
         ui::MouseEvent e;
@@ -488,7 +488,7 @@ TEST_CASE("automation UI: toggle, select, move, add, delete and undo through rea
     CHECK(ctx.automationVisible);
     juce::TemporaryFile png(".png");
     REQUIRE(gfx::renderToPng(root, 1200, 700, 1, png.getFile().getFullPathName().toStdString()));
-    const float y0 = ctx.theme.metrics.controlBarHeight + ctx.theme.metrics.arrangementRulerHeight + ctx.theme.metrics.arrangementLaneHeight;
+    const float y0 = ctx.theme.metrics.controlBarHeight + ui::ArrangementView::rulerHeightFor(! song.locators.empty()) + ctx.theme.metrics.arrangementLaneHeight;
     auto mouse = [&](float x, float y, int clicks = 1) {
         ui::MouseEvent e;
         e.x = x; e.y = y0 + y; e.clicks = clicks;
@@ -679,7 +679,7 @@ TEST_CASE("browser: real drag events route stable filtered items and Escape canc
     start.x = listRow(0).first; start.y = listRow(0).second;
     root.dispatchMouseDown(start);
     auto end = start;
-    end.x = 600; end.y = ctx.theme.metrics.controlBarHeight + ctx.theme.metrics.arrangementRulerHeight + 12; // track 1's lane
+    end.x = 600; end.y = ctx.theme.metrics.controlBarHeight + ui::ArrangementView::rulerHeightFor(! song.locators.empty()) + 12; // track 1's lane
     root.dispatchMouseDrag(end);
     REQUIRE(ctx.browserDrag.has_value());
     REQUIRE(gfx::renderToPng(root, 1200, 700, 1, image.getFullPathName().toStdString()));
@@ -1226,7 +1226,7 @@ TEST_CASE("take UI: real gestures select ranges comp audition rename reorder and
     ui::KeyEvent key; key.cmd = key.alt = true; key.textChar = 'u'; CHECK(root.dispatchKey(key)); root.layout();
     CHECK(ctx.unfoldedTakeTracks == std::vector<int>{0});
     auto mouse = [](float x, float y, int clicks = 1) { ui::MouseEvent e; e.x = x; e.y = y; e.clicks = clicks; return e; };
-    const float takeY = ctx.theme.metrics.controlBarHeight + ctx.theme.metrics.arrangementRulerHeight + ctx.theme.metrics.arrangementLaneHeight;
+    const float takeY = ctx.theme.metrics.controlBarHeight + ui::ArrangementView::rulerHeightFor(! song.locators.empty()) + ctx.theme.metrics.arrangementLaneHeight;
     const float panelX = ctx.theme.metrics.outerMargin;
     root.dispatchMouseDown(mouse(panelX + 5 * 80, takeY + 30)); root.dispatchMouseDrag(mouse(panelX + 6 * 80, takeY + 30)); root.dispatchMouseUp(mouse(panelX + 6 * 80, takeY + 30));
     CHECK(ctx.selectedTakeLane == id); CHECK(ctx.selectedClip()->takeId == 24); CHECK(! history.canUndo());

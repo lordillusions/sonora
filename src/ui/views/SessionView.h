@@ -16,6 +16,8 @@ namespace sonora::ui
 class SessionView : public Widget
 {
 public:
+    // A group member's title (UI-69, measured from the reference): the group's colour band, then a dark rule.
+    static constexpr float kMemberBand = 4, kMemberRule = 2;
     std::optional<TrackDropTarget> trackDropTarget(const MouseEvent&) const override;
     void layout() override;
     void paint(SkCanvas& c, const Theme& t) override;

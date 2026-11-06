@@ -28,6 +28,9 @@ struct AlsLoadResult
 // Reads the raw XML DOM of a .als (gzip) or plain XML file. nullptr + `error` on failure. The writer starts from this.
 std::unique_ptr<juce::XmlElement> readAlsDom(const juce::File& file, std::string& error);
 
+// One device element (<Eq8>, <PluginDevice>, <SonoraCurveLfo>...) as the loader reads it (LiveCompat uses it).
+model::Device readDeviceXml(const juce::XmlElement& device, std::vector<std::string>& warnings);
+
 // Loads a .als file from disk. Also accepts an uncompressed XML file (handy for tests).
 AlsLoadResult loadAls(const juce::File& file);
 

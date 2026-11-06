@@ -2,7 +2,7 @@
 # without clicking around the GUI.
 
 add_executable(als_dump als_dump/main.cpp)
-target_link_libraries(als_dump PRIVATE sonora_core)
+target_link_libraries(als_dump PRIVATE sonora_engine) # devices: the Sonora VST3 state encoder (ALS-15)
 
 if(SONORA_WITH_UI)
 add_executable(ui_snapshot ui_snapshot/main.cpp)

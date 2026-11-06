@@ -17,6 +17,7 @@
 #include "io/als/AlsReader.h"
 #include "io/als/AlsTemplates.h"
 #include "io/als/AlsWriter.h"
+#include "devices/DeviceFactory.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_core/juce_core.h>
@@ -174,6 +175,7 @@ int dumpOne(const juce::File& f, bool notes, bool params, bool automation)
 
 int main(int argc, char** argv)
 {
+    devices::installSonoraVst3StateEncoder(); // ALS-15: resaved sets carry Prism/Curve LFO/Hush VST3 state
     if (argc < 2)
     {
         std::fprintf(stderr, "usage: als_dump <file.als> [--notes] [--params] [--automation]\n"

@@ -321,13 +321,30 @@ TEST_CASE("arrangement ruler: zoom on the numbers, resize over the loop brace ro
     MenuRig rig; rig.ctx.mainView = ui::MainView::Arrangement; rig.ctx.pixelsPerBeat = 20; rig.ctx.scrollBeats = 0;
     engine::Transport transport; transport.setLoop(true, 4, 8); transport.beginBlock();
     rig.ctx.transport = &transport; rig.root->layout();
-    const float y = ui::ArrangementView::kBraceRowTop + 6; // the loop brace has its own row above the locators
-    const float locatorRow = ui::ArrangementView::kLocatorRowTop + 6;
-    const float lanes = rig.ctx.theme.metrics.arrangementRulerHeight + 30;
+    // UI-68: without locators the brace row sits right under the numbers and the lanes start under it.
+    rig.song->locators.clear(); rig.root->layout();
+    CHECK(! rig.arrangement->hasLocatorRow());
+    CHECK_NEAR(rig.arrangement->braceRowTop(), ui::ArrangementView::kScrubTop, 1e-6);
+    CHECK(rig.arrangement->rulerHeight() < rig.ctx.theme.metrics.arrangementRulerHeight);
+    CHECK(rig.arrangement->cursorAt(8 * 20, ui::ArrangementView::kScrubTop + 6) == ui::Cursor::ResizeHorizontal);
+    CHECK(rig.arrangement->cursorAt(8 * 20, rig.arrangement->rulerHeight() + 4) == ui::Cursor::Default); // already a lane
+    // With a locator: the locator row first, the brace row right under it.
+    model::Locator locator; locator.id = 1; locator.time = 16; locator.name = "Drop";
+    rig.song->locators.push_back(locator);
+    rig.arrangement->tick(); // a locator appearing re-lays the view out
+    REQUIRE(rig.arrangement->hasLocatorRow());
+    CHECK_NEAR(rig.arrangement->locatorRowTop(), ui::ArrangementView::kScrubTop, 1e-6);
+    CHECK(rig.arrangement->braceRowTop() > rig.arrangement->locatorRowTop());
+    CHECK_NEAR(rig.arrangement->rulerHeight(), rig.ctx.theme.metrics.arrangementRulerHeight, 1e-6);
+    CHECK(rig.arrangement->locatorAt(16 * 20 + 3, rig.arrangement->locatorRowTop() + 6) == 1);
+    CHECK(rig.arrangement->locatorAt(16 * 20 + 3, rig.arrangement->braceRowTop() + 6) == -1); // the brace row is below it
+    const float y = rig.arrangement->braceRowTop() + 6;
+    const float locatorRow = rig.arrangement->locatorRowTop() + 6;
+    const float lanes = rig.arrangement->rulerHeight() + 30;
     CHECK(rig.arrangement->cursorAt(4 * 20 + 1, y) == ui::Cursor::ResizeHorizontal);
     CHECK(rig.arrangement->cursorAt(12 * 20 - 1, y) == ui::Cursor::ResizeHorizontal);
     CHECK(rig.arrangement->cursorAt(8 * 20, y) == ui::Cursor::ResizeHorizontal); // the whole brace (owner request)
-    CHECK(rig.arrangement->cursorAt(8 * 20, locatorRow) == ui::Cursor::Scrub); // under the brace: the locator row, no brace
+    CHECK(rig.arrangement->cursorAt(8 * 20, locatorRow) == ui::Cursor::Scrub); // above the brace: the locator row, no brace
     CHECK(rig.arrangement->cursorAt(8 * 20, 24) == ui::Cursor::Zoom);  // the numbers row is the beat-time ruler (UI-62)
     CHECK(rig.arrangement->cursorAt(8 * 20, 8) == ui::Cursor::Default); // the overview strip above it
     CHECK(rig.arrangement->cursorAt(20 * 20, y) == ui::Cursor::Scrub);  // the brace row outside the brace too
@@ -351,13 +368,13 @@ TEST_CASE("arrangement Follow: scrolling away while playing pauses it; the scrub
     playAt(0); rig.arrangement->tick(); REQUIRE(transport.isPlaying());
     moveTo(400); CHECK(rig.ctx.scrollBeats > 300); // the view follows the playhead out of view
 
-    ui::MouseEvent wheel; wheel.x = 100; wheel.y = rig.ctx.theme.metrics.arrangementRulerHeight + 20; wheel.shift = true; wheel.wheelDeltaY = 1.0f;
+    ui::MouseEvent wheel; wheel.x = 100; wheel.y = rig.arrangement->rulerHeight() + 20; wheel.shift = true; wheel.wheelDeltaY = 1.0f;
     rig.arrangement->mouseWheel(wheel); // Shift+wheel: scroll back to look at something else
     CHECK(rig.ctx.followPaused);
     const double looked = rig.ctx.scrollBeats;
     moveTo(800); CHECK_NEAR(rig.ctx.scrollBeats, looked, 1e-9); // no pulling back to the playhead
 
-    ui::MouseEvent click; click.x = 100; click.y = ui::ArrangementView::kLocatorRowTop + 6; // the scrub area (UI-62)
+    ui::MouseEvent click; click.x = 100; click.y = ui::ArrangementView::kScrubTop + 6; // the scrub area (UI-62)
     rig.arrangement->mouseDown(click); rig.arrangement->mouseUp(click);
     CHECK(! rig.ctx.followPaused);
 
@@ -429,4 +446,18 @@ TEST_CASE("arrangement track header: the rows of I/O and mixer controls follow t
     CHECK(rowsAt(87) == 5);  // Sonora's default: every I/O row
     CHECK(rowsAt(200) == 5);
     for (auto* in : inputs) CHECK(in->visible);
+}
+
+TEST_CASE("group members name their output like the reference: 3-Group for an automatic name, the name otherwise (UI-69)")
+{
+    model::Song song;
+    model::Track group; group.id = 10; group.kind = model::TrackKind::Group; group.name = "Group"; group.nameIsAutomatic = true;
+    model::Track member; member.id = 11; member.kind = model::TrackKind::Audio; member.groupId = 10; member.outputRouting = "AudioOut/GroupTrack";
+    model::Track other; other.id = 12; other.kind = model::TrackKind::Audio;
+    song.tracks = {other, other, group, member};
+    song.tracks[1].id = 13;
+    CHECK(ui::trackOutputName(song.tracks[3], &song) == "3-Group");
+    song.tracks[2].name = "Drums & Perc"; song.tracks[2].nameIsAutomatic = false;
+    CHECK(ui::trackOutputName(song.tracks[3], &song) == "Drums & Perc");
+    CHECK(ui::trackOutputName(song.tracks[3]) == "Group");
 }

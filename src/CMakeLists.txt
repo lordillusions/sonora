@@ -58,6 +58,7 @@ add_library(sonora_core STATIC
     io/als/AlsReader.cpp
     io/als/AlsWriter.cpp
     io/als/AlsTemplates.cpp
+    io/als/LiveCompat.cpp
     io/als/AlsNewSet.cpp
     io/als/SampleDrop.cpp
     io/midi/MidiFileExport.cpp

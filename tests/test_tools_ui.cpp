@@ -83,7 +83,7 @@ TEST_CASE("arrangement workflow: drag time selection, Cmd+L, Return then Space s
     BarRig rig;
     auto* arrangement = findWidget<ui::ArrangementView>(*rig.root); REQUIRE(arrangement);
     const auto bounds = arrangement->boundsInRoot();
-    const float y = bounds.y + rig.ctx.theme.metrics.arrangementRulerHeight + 20;
+    const float y = bounds.y + arrangement->rulerHeight() + 20;
     auto at = [&](double beat) { return mouseAt(bounds.x + (float) ((beat - rig.ctx.scrollBeats) * rig.ctx.pixelsPerBeat), y); };
     rig.root->dispatchMouseDown(at(20)); rig.root->dispatchMouseDrag(at(28)); rig.root->dispatchMouseUp(at(28));
     CHECK(rig.ctx.arrangementSelection.active);
@@ -703,7 +703,7 @@ TEST_CASE("shortcut focus: duplicate notes and velocity edits stay in the note e
     roll->keyPressed({.keyCode = juce::KeyPress::deleteKey});
     CHECK(rig.song.tracks[0].arrangementClips.size() == clips);
     const float headerX = rig.root->width() - ctx.theme.metrics.outerMargin - ctx.arrangementHeaderWidth() + 30;
-    const float headerY = ctx.theme.metrics.controlBarHeight + ctx.theme.metrics.arrangementRulerHeight + 8;
+    const float headerY = ctx.theme.metrics.controlBarHeight + ui::ArrangementView::rulerHeightFor(! rig.song.locators.empty()) + 8;
     rig.root->dispatchMouseDown(mouseAt(headerX, headerY)); rig.root->dispatchMouseUp(mouseAt(headerX, headerY));
     CHECK(ctx.selectedClipUid == -1);
     const auto remainingId = rig.song.tracks[1].id;

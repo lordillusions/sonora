@@ -33,6 +33,8 @@ private:
     int rowCount_ = 5;
 };
 
-// "Main", "Group", "No Output"... as the output chooser shows a track's output.
-std::string trackOutputName(const model::Track& track);
+// "Main", "3-Group", "Drums", "No Output"... as the output chooser shows a track's output. Into its group: the group's
+// name as the reference lists it, "3-Group" for an automatic name (number, dash), the name itself otherwise (UI-69);
+// "Group" when `song` is not given.
+std::string trackOutputName(const model::Track& track, const model::Song* song = nullptr);
 } // namespace sonora::ui

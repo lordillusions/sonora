@@ -17,7 +17,7 @@ namespace
 constexpr float kBox = 13.0f;
 } // namespace
 
-std::string trackOutputName(const model::Track& track)
+std::string trackOutputName(const model::Track& track, const model::Song* song)
 {
     if (model::isMidiOnly(track)) return "No Output";
     const auto& r = track.outputRouting;
@@ -26,7 +26,19 @@ std::string trackOutputName(const model::Track& track)
     if (r == "AudioOut/None")
         return "No Output";
     if (r.find("GroupTrack") != std::string::npos)
+    {
+        if (song != nullptr)
+            for (size_t i = 0; i < song->tracks.size(); ++i)
+                if (song->tracks[i].id == track.groupId)
+                {
+                    auto name = model::displayTrackName(*song, (int) i);
+                    const auto& group = song->tracks[i];
+                    if (group.nameIsAutomatic && ! group.name.starts_with('#'))
+                        if (const auto space = name.find(' '); space != std::string::npos) name[space] = '-';
+                    return name;
+                }
         return "Group";
+    }
     if (r.find("External") != std::string::npos)
         return "Ext. Out";
     const auto slash = r.find_last_of('/');
@@ -125,7 +137,7 @@ void InputControls::paint(SkCanvas& canvas, const Theme& theme)
             ctl::toggle(canvas, theme, monitorButton(mode), names[mode], selected, theme.color("ChosenDefault"),
                         monitorable || mode == 2);
         }
-    if (! r.output.isEmpty()) ctl::dropdown(canvas, theme, r.output, trackOutputName(*track));
+    if (! r.output.isEmpty()) ctl::dropdown(canvas, theme, r.output, trackOutputName(*track, ctx().song));
     if (! r.spare.isEmpty()) ctl::emptyBox(canvas, theme, r.spare);
 }
 

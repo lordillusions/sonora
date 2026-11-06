@@ -52,9 +52,15 @@ public:
     bool wantsTextInput() const override { return renaming_ || editingWaveformZoom_; }
     void focusLost() override { editingWaveformZoom_ = false; repaint(); }
     Cursor cursorAt(float x, float y) const override;
-    // Rows of the ruler below the overview (local y): the bar numbers (beat-time ruler, zoom), the loop brace row and,
-    // right under it, the locator row, so locator names never sit under the brace. The last two are the scrub area.
-    static constexpr float kNumbersTop = 16, kBraceRowTop = 31, kLocatorRowTop = 44;
+    // Rows of the ruler below the overview (local y): the bar numbers (beat-time ruler, zoom), then the scrub area: the
+    // locator row and, right under it, the loop brace row (UI-68: the brace right below the locators). Without locators the
+    // locator row takes no space and the brace row moves up; the lanes start at rulerHeight().
+    static constexpr float kNumbersTop = 16, kScrubTop = 31, kLocatorRowHeight = 14, kBraceRowHeight = 13;
+    bool hasLocatorRow() const;
+    float locatorRowTop() const { return kScrubTop; }
+    float braceRowTop() const { return hasLocatorRow() ? kScrubTop + kLocatorRowHeight : kScrubTop; }
+    float rulerHeight() const { return braceRowTop() + kBraceRowHeight; } // <= Theme::Metrics::arrangementRulerHeight
+    static constexpr float rulerHeightFor(bool withLocators) { return kScrubTop + (withLocators ? kLocatorRowHeight : 0) + kBraceRowHeight; }
     bool browserDrop(const BrowserDrag&, const MouseEvent&) override;
 
     // Lane order: tracks (skipping folded groups' children), returns, main.
@@ -179,6 +185,7 @@ private:
     const std::vector<model::Clip>* laneClips(const Lane&) const;
     const model::Song* builtFor_ = nullptr;
     uint64_t builtStructure_ = 0; // UiContext::trackStructure() the widgets were built for
+    bool laidOutLocatorRow_ = false; // hasLocatorRow() at the last layout (the lanes move when it changes)
     std::vector<Lane> lanes_;
     Widget* laneContainer_ = nullptr; // clips headers/editors below the ruler
     std::vector<Widget*> headers_;

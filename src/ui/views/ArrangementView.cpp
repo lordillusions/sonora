@@ -40,6 +40,7 @@ namespace
 // Live's Arrangement track header: a coloured title column, an I/O column, a mixer column
 // (activator / solo / arm, volume, pan, peak readouts) and a pair of level meters.
 constexpr float kTitleDefault = 103, kHeaderSep = 2, kIoW = 79, kMixW = 106, kMeterW = 14;
+constexpr float kRailW = 4, kRailRule = 1; // a group member's rail and its dark rule (UI-69)
 // Header rows (measured from the reference at 100 %): 13 px controls every 17.5 px from 3.5 px down. A lane shows as many
 // rows as fit, like the reference's track heights: 1 row (folded, returns), 2 (activator/solo + volume/pan, output type +
 // channel), and from 3 on the sends (three per row) and the full I/O chooser set.
@@ -129,6 +130,29 @@ public:
     float titleW() const { return std::max(40.0f, width() - (totalWidth(ctx().ioVisible, 0.0f))); }
     bool midiOnly() const { const auto* track = ctx().trackAt(index_); return track && model::isMidiOnly(*track); }
 
+    // UI-69: no shown lane of `groupIndex`'s members follows this one (its rail ends with this header).
+    bool lastShownMemberOf(int groupIndex) const
+    {
+        const auto& tracks = ctx().song->tracks;
+        const auto parentOf = [&](int index) {
+            const auto id = tracks[(size_t) index].groupId;
+            for (size_t k = 0; k < tracks.size(); ++k) if (tracks[k].id == id) return (int) k;
+            return -1;
+        };
+        for (int next = index_ + 1; next < (int) tracks.size(); ++next)
+        {
+            bool member = false, shown = true;
+            for (int parent = parentOf(next), guard = 0; parent >= 0 && guard < (int) tracks.size(); parent = parentOf(parent), ++guard)
+            {
+                if (parent == groupIndex) member = true;
+                if (tracks[(size_t) parent].kind == model::TrackKind::Group && tracks[(size_t) parent].folded) shown = false;
+            }
+            if (! member) return true;
+            if (shown) return false;
+        }
+        return true;
+    }
+
     // Local y of header row k (a single row is centred in the lane).
     float rowY(int k) const { return rows_ == 1 ? std::max(1.0f, (height() - kRowH) * 0.5f) : kRowTop + (float) k * kRowPitch; }
     int rows() const { return rows_; }
@@ -213,24 +237,36 @@ public:
         paint::fill(c, {meterX_ - 0.0f, 0, 1, h}, line);
         paint::fill(c, {0, 0, 2, h}, line); // left border: Live outlines every header
 
+        // Group members (measured from the reference, UI-69): per enclosing group a 4 pt rail of its colour and a 1 pt
+        // dark rule, then the member's own title. The rail runs on through the separators down to the group's last
+        // shown member, and starts in the group's own bottom separator.
         float indent = 0;
+        std::vector<std::pair<Rect, SkColor>> separatorRails; // painted over the bottom separator at the end
         if (track && ctx().song)
         {
-            auto groupId = track->groupId;
-            for (size_t depth = 0; groupId >= 0 && depth < ctx().song->tracks.size() && indent + 6 < kTitleW - 30; ++depth)
+            const auto& tracks = ctx().song->tracks;
+            const auto indexOf = [&](model::TrackId id) {
+                const auto found = std::find_if(tracks.begin(), tracks.end(), [id](const auto& candidate) { return candidate.id == id; });
+                return found == tracks.end() ? -1 : (int) std::distance(tracks.begin(), found);
+            };
+            const auto railColour = [&](int groupIndex) {
+                return ctx().sessionTrackSelection && ctx().isTrackSelected(groupIndex) ? t.color("SelectionBackground")
+                                                                                         : Theme::paletteColor(tracks[(size_t) groupIndex].colorIndex);
+            };
+            // Outermost group first, so the rails read from the left like the reference's.
+            std::vector<int> ancestors;
+            for (int parent = indexOf(track->groupId); parent >= 0 && ancestors.size() < tracks.size(); parent = indexOf(tracks[(size_t) parent].groupId))
+                ancestors.insert(ancestors.begin(), parent);
+            for (const int parent : ancestors)
             {
-                const auto parent = std::find_if(ctx().song->tracks.begin(), ctx().song->tracks.end(),
-                                                 [groupId](const auto& candidate) { return candidate.id == groupId; });
-                if (parent == ctx().song->tracks.end()) break;
-                const auto parentIndex = (int) std::distance(ctx().song->tracks.begin(), parent);
-                const auto frame = ctx().sessionTrackSelection && ctx().isTrackSelected(parentIndex)
-                                 ? t.color("SelectionBackground") : Theme::paletteColor(parent->colorIndex);
-                paint::fill(c, {indent + 2, 0, 4, h}, frame);
-                indent += 6;
-                paint::fill(c, {indent - 1, 0, 1, h}, line);
-                paint::fill(c, {indent, 0, kTitleW - indent, 2}, frame);
-                groupId = parent->groupId;
+                if (indent + kRailW + kRailRule + 30 > kTitleW) break;
+                paint::fill(c, {indent + kHeaderSep, 0, kRailW, h}, railColour(parent));
+                if (! lastShownMemberOf(parent)) separatorRails.push_back({{indent + kHeaderSep, h - kHeaderSep, kRailW, kHeaderSep}, railColour(parent)});
+                indent += kRailW + kRailRule;
+                paint::fill(c, {indent + kHeaderSep - kRailRule, 0, kRailRule, h - kHeaderSep}, line);
             }
+            if (isGroup_ && ! track->folded && index_ + 1 < (int) tracks.size() && tracks[(size_t) index_ + 1].groupId == track->id)
+                separatorRails.push_back({{indent + kHeaderSep, h - kHeaderSep, kRailW, kHeaderSep}, railColour(index_)});
         }
 
         // Title with fold/collapse ring
@@ -273,7 +309,7 @@ public:
                 ctl::dropdown(c, t, {ioX_ + 3, rowY(0), kIoW - 6, kRowH}, "1/2");
             else
             {
-                ctl::dropdown(c, t, {ioX_ + 3, rowY(0), kIoW - 6, kRowH}, track ? trackOutputName(*track) : std::string("Main"));
+                ctl::dropdown(c, t, {ioX_ + 3, rowY(0), kIoW - 6, kRowH}, track ? trackOutputName(*track, ctx().song) : std::string("Main"));
                 if (rows_ >= 2) ctl::emptyBox(c, t, {ioX_ + 3, rowY(1), kIoW - 6, kRowH});
             }
         }
@@ -314,6 +350,7 @@ public:
             }
         }
         paint::fill(c, {0, h - kHeaderSep, width(), kHeaderSep}, line);
+        for (const auto& [rail, colour] : separatorRails) paint::fill(c, rail, colour);
     }
 
     // The bottom edge of a header resizes that track's lane.
@@ -686,11 +723,16 @@ void ArrangementView::paintOverview(SkCanvas& c, const Theme& t, const Rect& r)
     paint::stroke(c, r.reduced(-1), t.color("SurfaceArea"));
 }
 
+bool ArrangementView::hasLocatorRow() const
+{
+    return ctx().song != nullptr && ! ctx().song->locators.empty();
+}
+
 Rect ArrangementView::timelineArea() const
 {
     const auto& m = ctx().theme.metrics;
-    return {0, m.arrangementRulerHeight, width() - ctx().arrangementHeaderWidth(),
-            height() - m.arrangementRulerHeight - m.arrangementFooterHeight};
+    return {0, rulerHeight(), width() - ctx().arrangementHeaderWidth(),
+            height() - rulerHeight() - m.arrangementFooterHeight};
 }
 
 Rect ArrangementView::waveformZoomBounds() const
@@ -732,8 +774,8 @@ void ArrangementView::showWaveformZoomMenu()
 
 bool ArrangementView::inBeatRuler(float x, float y) const
 {
-    // Between the overview and the scrub area (the loop brace row starts at kBraceRowTop, the locator row under it).
-    return x >= 0 && x < timelineArea().w && y >= overviewRect().bottom() + 1 && y < kBraceRowTop;
+    // Between the overview and the scrub area (the locator row, then the loop brace row).
+    return x >= 0 && x < timelineArea().w && y >= overviewRect().bottom() + 1 && y < kScrubTop;
 }
 
 double ArrangementView::arrangementEndBeat() const
@@ -821,7 +863,7 @@ void ArrangementView::computeLanes()
     if (x.song == nullptr)
         return;
     const auto& m = x.theme.metrics;
-    float y = m.arrangementRulerHeight - x.scrollTracksY;
+    float y = rulerHeight() - x.scrollTracksY;
 
     // Hide children of folded groups.
     std::vector<model::TrackId> folded;
@@ -935,6 +977,7 @@ void ArrangementView::layout()
 {
     if (builtFor_ != ctx().song || laneContainer_ == nullptr || builtStructure_ != ctx().trackStructure())
         rebuild();
+    laidOutLocatorRow_ = hasLocatorRow();
     computeLanes();
     const auto zoom = waveformZoomBounds();
     waveformButton_->setBounds({zoom.x - 28, zoom.y, 24, zoom.h});
@@ -942,14 +985,14 @@ void ArrangementView::layout()
     widthButton_->setBounds({zoom.right() + 34, zoom.y, 20, zoom.h});
     if (! lanes_.empty())
     {
-        const float total = lanes_.back().y + lanes_.back().h - ctx().theme.metrics.arrangementRulerHeight + ctx().scrollTracksY;
+        const float total = lanes_.back().y + lanes_.back().h - rulerHeight() + ctx().scrollTracksY;
         const float maximum = std::max(0.0f, total - timelineArea().h + 40);
         if (ctx().scrollTracksY > maximum) { ctx().scrollTracksY = maximum; computeLanes(); }
     }
     const auto& m = ctx().theme.metrics;
     if (headerSplit_ != nullptr)
-        headerSplit_->setBounds({width() - ctx().arrangementHeaderWidth() - 3, m.arrangementRulerHeight, 6, height() - m.arrangementRulerHeight - m.arrangementFooterHeight});
-    laneContainer_->setBounds({0, m.arrangementRulerHeight, width(), height() - m.arrangementRulerHeight - m.arrangementFooterHeight});
+        headerSplit_->setBounds({width() - ctx().arrangementHeaderWidth() - 3, rulerHeight(), 6, height() - rulerHeight() - m.arrangementFooterHeight});
+    laneContainer_->setBounds({0, rulerHeight(), width(), height() - rulerHeight() - m.arrangementFooterHeight});
     for (auto* h : headers_)
         h->visible = false;
     for (auto& editors : automationEditors_) for (auto* editor : editors) editor->visible = false;
@@ -964,18 +1007,18 @@ void ArrangementView::layout()
         {
             auto* editor = editors[(size_t) k];
             const float top = lane.y + clipHeight + (float) k * ui::UiContext::automationLaneHeight;
-            editor->visible = top + ui::UiContext::automationLaneHeight > m.arrangementRulerHeight && top < height();
-            editor->setBounds({0, top - m.arrangementRulerHeight, width(), ui::UiContext::automationLaneHeight});
+            editor->visible = top + ui::UiContext::automationLaneHeight > rulerHeight() && top < height();
+            editor->setBounds({0, top - rulerHeight(), width(), ui::UiContext::automationLaneHeight});
         }
         auto* h = headers_[(size_t) lane.controlIndex];
-        h->visible = lane.y + lane.h > m.arrangementRulerHeight && lane.y < height();
-        h->setBounds({width() - ctx().arrangementHeaderWidth(), lane.y - m.arrangementRulerHeight, ctx().arrangementHeaderWidth(), clipHeight});
+        h->visible = lane.y + lane.h > rulerHeight() && lane.y < height();
+        h->setBounds({width() - ctx().arrangementHeaderWidth(), lane.y - rulerHeight(), ctx().arrangementHeaderWidth(), clipHeight});
     }
 }
 
 void ArrangementView::tick()
 {
-    if (builtFor_ != ctx().song || builtStructure_ != ctx().trackStructure())
+    if (builtFor_ != ctx().song || builtStructure_ != ctx().trackStructure() || laidOutLocatorRow_ != hasLocatorRow())
     {
         layout();
         repaint();
@@ -1156,7 +1199,7 @@ void ArrangementView::paint(SkCanvas& c, const Theme& t)
     c.restore();
 
     // ---- ruler: overview strip, bar numbers, locators and the loop brace
-    Rect ruler{0, 0, area.w, m.arrangementRulerHeight};
+    Rect ruler{0, 0, area.w, rulerHeight()};
     paint::fill(c, ruler, t.color("SurfaceBackground"));
     paintOverview(c, t, overviewRect());
     if (x.transport != nullptr || x.song != nullptr)
@@ -1165,11 +1208,11 @@ void ArrangementView::paint(SkCanvas& c, const Theme& t)
         const double ll = x.transport ? x.transport->loopLength() : x.song->loopLength;
         const bool on = x.transport ? x.transport->loopEnabled() : x.song->loopOn;
         c.save(); c.clipRect(ruler.sk());
-        ctl::loopBrace(c, t, {beatToX(ls), kBraceRowTop + 2, (float) (ll * x.pixelsPerBeat), 10}, on);
+        ctl::loopBrace(c, t, {beatToX(ls), braceRowTop() + 2, (float) (ll * x.pixelsPerBeat), 10}, on);
         c.restore();
     }
     c.save();
-    c.clipRect(Rect{0, 16, area.w, m.arrangementRulerHeight - 16}.sk());
+    c.clipRect(Rect{0, 16, area.w, rulerHeight() - 16}.sk());
     // Live's time ruler: bars (1, 2), beats (1.2, 1.3) and finer positions (1.1.3) as the zoom allows, plus unlabelled ticks.
     for (const auto& mark : ui::rulerMarks(firstBeat, lastBeat, x.pixelsPerBeat, beatsPerBar, beatUnit))
     {
@@ -1228,7 +1271,7 @@ void ArrangementView::paint(SkCanvas& c, const Theme& t)
         paint::fill(c, zoomBox.reduced(1), t.color(waveformTextSelected_ ? "SelectionBackground" : "ControlTextBack"));
         paint::text(c, waveformZoomText_ + (waveformTextSelected_ ? "" : "|"), zoomBox, t.color("ControlForeground"), m.smallFontSize, Align::Centre);
     }
-    paint::fill(c, {area.w, 0, 2, m.arrangementRulerHeight}, t.color("SurfaceBackground"));
+    paint::fill(c, {area.w, 0, 2, rulerHeight()}, t.color("SurfaceBackground"));
     paintLocatorButtons(c, t);
     c.save(); c.clipRect({area.w, area.y, width(), height()});
     for (const auto& lane : lanes_) if (lane.takeLaneId >= 0 && lane.y + lane.h > area.y && lane.y < height())
@@ -1261,8 +1304,8 @@ Rect ArrangementView::locatorButtonBounds(LocatorButton which) const
     switch (which)
     {
         case LocatorButton::Set: return {x0, 18, 25, 13};
-        case LocatorButton::Previous: return {x0, kLocatorRowTop + 0.5f, 12, 12};
-        case LocatorButton::Next: return {x0 + 13, kLocatorRowTop + 0.5f, 12, 12};
+        case LocatorButton::Previous: return {x0, kScrubTop + 0.5f, 12, 12};
+        case LocatorButton::Next: return {x0 + 13, kScrubTop + 0.5f, 12, 12};
     }
     return {};
 }
@@ -1274,18 +1317,18 @@ Rect ArrangementView::locatorBounds(const model::Locator& locator) const
     const auto& label = editing ? renameText_ : locator.name;
     const float labelWidth = label.empty() && ! editing ? 0.0f : std::min(160.0f, gfx::measureText(label, m.smallFontSize) + (editing ? 12.0f : 6.0f));
     const float lx = beatToX(locator.time);
-    return {lx - 1, kLocatorRowTop, 9 + labelWidth, 13};
+    return {lx - 1, locatorRowTop(), 9 + labelWidth, 13};
 }
 
 int ArrangementView::locatorAt(float x, float y) const
 {
     const auto* song = ctx().song;
-    if (! song || x >= timelineArea().w || y < kLocatorRowTop - 1 || y >= ctx().theme.metrics.arrangementRulerHeight) return -1;
+    if (! song || ! hasLocatorRow() || x >= timelineArea().w || y < locatorRowTop() - 1 || y >= braceRowTop()) return -1;
     // Later locators draw on top, so they win the hit test.
     for (auto it = song->locators.rbegin(); it != song->locators.rend(); ++it)
     {
         const auto bounds = locatorBounds(*it);
-        if (Rect{bounds.x - 2, kLocatorRowTop - 1, bounds.w + 2, ctx().theme.metrics.arrangementRulerHeight - kLocatorRowTop + 1}.contains(x, y))
+        if (Rect{bounds.x - 2, locatorRowTop() - 1, bounds.w + 2, braceRowTop() - locatorRowTop() + 1}.contains(x, y))
             return it->id;
     }
     return -1;
@@ -1296,7 +1339,7 @@ void ArrangementView::paintLocators(SkCanvas& c, const Theme& t)
     const auto& x = ctx();
     const auto& m = t.metrics;
     c.save();
-    c.clipRect(Rect{0, 16, timelineArea().w, m.arrangementRulerHeight - 16}.sk());
+    c.clipRect(Rect{0, 16, timelineArea().w, rulerHeight() - 16}.sk());
     for (const auto& stored : x.song->locators)
     {
         auto locator = stored;
@@ -1561,7 +1604,7 @@ void ArrangementView::zoomAllTrackHeights(double factor)
     const auto& x = ctx();
     const Lane* anchor = nullptr;
     for (const auto& lane : lanes_)
-        if (lane.takeLaneId < 0 && lane.y + lane.h > x.theme.metrics.arrangementRulerHeight && lane.y < height()
+        if (lane.takeLaneId < 0 && lane.y + lane.h > rulerHeight() && lane.y < height()
             && (anchor == nullptr || lane.controlIndex == x.selectedTrack))
             anchor = &lane;
     if (anchor != nullptr) zoomTrackHeight(factor, anchor->y + anchor->h * 0.5f, true);
@@ -1679,7 +1722,7 @@ const model::Clip* ArrangementView::clipAt(float x, float y, model::ClipLocation
 
 int ArrangementView::laneEdgeAt(float x, float y) const
 {
-    if (x >= timelineArea().w || y < ctx().theme.metrics.arrangementRulerHeight)
+    if (x >= timelineArea().w || y < rulerHeight())
         return -1;
     for (const auto& lane : lanes_)
         if (lane.takeLaneId < 0 && std::fabs(y - (lane.y + lane.h - 1.0f)) <= 3.0f && ! ctx().showsAutomation(lane.controlIndex))
@@ -1718,7 +1761,7 @@ bool ArrangementView::fadeHandleAt(const model::Clip& clip, const model::ClipLoc
 
 ArrangementView::LoopDrag ArrangementView::loopZoneAt(float x, float y) const
 {
-    if (ctx().transport == nullptr || y < kBraceRowTop || y >= kLocatorRowTop || x >= timelineArea().w)
+    if (ctx().transport == nullptr || y < braceRowTop() || y >= rulerHeight() || x >= timelineArea().w)
         return LoopDrag::None;
     const double ls = ctx().transport->loopStart(), ll = ctx().transport->loopLength();
     const float bx0 = beatToX(ls), bx1 = beatToX(ls + ll);
@@ -1742,7 +1785,7 @@ Cursor ArrangementView::cursorAt(float x, float y) const
     // UI-62: the bar-number row is the beat-time ruler: a magnifying glass (drag zooms and scrolls).
     if ((rulerZoom_.active && ! draggingOverview_) || (! draggingRuler_ && inBeatRuler(x, y))) return Cursor::Zoom;
     // UI-52: the rest of the ruler is the scrub area (click plays from there): Live's speaker cursor.
-    if (draggingRuler_ || (y < ctx().theme.metrics.arrangementRulerHeight && x < timelineArea().w && ! overviewRect().reduced(-1).contains(x, y)))
+    if (draggingRuler_ || (y < rulerHeight() && x < timelineArea().w && ! overviewRect().reduced(-1).contains(x, y)))
         return Cursor::Scrub;
     model::ClipLocation location;
     float x0 = 0, x1 = 0;
@@ -1788,7 +1831,6 @@ void ArrangementView::mouseMove(const MouseEvent& e)
 void ArrangementView::mouseDown(const MouseEvent& e)
 {
     auto& x = ctx();
-    const auto& m = x.theme.metrics;
     if (waveformZoomBounds().contains(e.x, e.y))
     {
         if (e.right) { showWaveformZoomMenu(); return; }
@@ -1827,7 +1869,7 @@ void ArrangementView::mouseDown(const MouseEvent& e)
     selectingTime_ = false;
     const auto* hitLane = laneAt(e.y);
     if (renaming_ && renameLocator_ >= 0 && locatorAt(e.x, e.y) != renameLocator_) commitLocatorText();
-    if (e.x >= timelineArea().w && e.y < m.arrangementRulerHeight && ! e.right)
+    if (e.x >= timelineArea().w && e.y < rulerHeight() && ! e.right)
     {
         // UI-3b: Set / Del, previous and next locator.
         if (locatorButtonBounds(LocatorButton::Set).reduced(-1).contains(e.x, e.y)) setOrDeleteLocator(x);
@@ -1861,7 +1903,7 @@ void ArrangementView::mouseDown(const MouseEvent& e)
     }
 
     rulerZoom_ = {};
-    if (e.y < m.arrangementRulerHeight && overviewRect().reduced(-1).contains(e.x, e.y))
+    if (e.y < rulerHeight() && overviewRect().reduced(-1).contains(e.x, e.y))
     {
         // Live's Overview: drag left/right scrolls, up/down zooms; double-click shows the whole Arrangement.
         if (e.clicks >= 2) { zoomToWholeArrangement(); return; }
@@ -1885,7 +1927,7 @@ void ArrangementView::mouseDown(const MouseEvent& e)
         repaint();
         return;
     }
-    if (const int id = e.y < m.arrangementRulerHeight ? locatorAt(e.x, e.y) : -1; id >= 0)
+    if (const int id = e.y < rulerHeight() ? locatorAt(e.x, e.y) : -1; id >= 0)
     {
         // UI-3b: a click selects the locator and jumps there (quantised while playing); a double-click plays from it.
         const auto* locator = model::findLocator(*x.song, id);
@@ -1902,7 +1944,7 @@ void ArrangementView::mouseDown(const MouseEvent& e)
         repaint();
         return;
     }
-    if (e.y < m.arrangementRulerHeight)
+    if (e.y < rulerHeight())
     {
         // The loop brace occupies the bottom strip of the ruler: drag its body to move it, its ends to resize.
         const double ls = x.transport ? x.transport->loopStart() : 0.0, ll = x.transport ? x.transport->loopLength() : 4.0;
@@ -2066,7 +2108,7 @@ std::optional<TrackDropTarget> ArrangementView::trackDropTarget(const MouseEvent
 {
     const auto& x = ctx();
     const float headerX = timelineArea().right();
-    if (! x.song || e.x < headerX || e.x >= width() || e.y < x.theme.metrics.arrangementRulerHeight) return {};
+    if (! x.song || e.x < headerX || e.x >= width() || e.y < rulerHeight()) return {};
     const auto* lane = laneAt(e.y);
     if (! lane || lane->takeLaneId >= 0 || lane->controlIndex >= x.numTracks()) return {};
     const int index = lane->controlIndex;
@@ -2151,7 +2193,7 @@ std::vector<MenuAction> ArrangementView::gridContextActions(const MouseEvent& e)
 {
     auto& x = ctx();
     const auto* song = x.song;
-    const int lane = e.y >= x.theme.metrics.arrangementRulerHeight ? laneTrackAt(e.y) : -1;
+    const int lane = e.y >= rulerHeight() ? laneTrackAt(e.y) : -1;
     const auto* track = x.trackAt(lane);
     const auto id = track ? track->id : -1;
     const auto range = x.arrangementSelection;
@@ -2213,7 +2255,7 @@ std::vector<MenuAction> ArrangementView::gridContextActions(const MouseEvent& e)
 void ArrangementView::showContextMenu(const MouseEvent& e)
 {
     auto& x = ctx();
-    if (x.song && e.y < x.theme.metrics.arrangementRulerHeight && ! overviewRect().reduced(-1).contains(e.x, e.y))
+    if (x.song && e.y < rulerHeight() && ! overviewRect().reduced(-1).contains(e.x, e.y))
     {
         // UI-3b: the scrub strip's menus: a locator's own, or Add Locator at the clicked (snapped) position.
         if (const int id = locatorAt(e.x, e.y); id >= 0)

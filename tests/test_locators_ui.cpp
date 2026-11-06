@@ -148,7 +148,7 @@ TEST_CASE("locators ui: click selects and jumps, drag moves on the grid, keys nu
 
     // Clicking a lane deselects the locator.
     rig.ctx.selectedLocator = 1;
-    e = Rig::mouse(100, rig.ctx.theme.metrics.arrangementRulerHeight + 20);
+    e = Rig::mouse(100, rig.view->rulerHeight() + 20);
     rig.view->mouseDown(e); rig.view->mouseUp(e);
     CHECK(rig.ctx.selectedLocator == -1);
 

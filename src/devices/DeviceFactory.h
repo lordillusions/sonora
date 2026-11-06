@@ -24,6 +24,10 @@ namespace sonora::devices
 // Message thread: a fresh native device/rack with its editable parameter defaults. A "max:<patch>" key (DEV-23)
 // gives the MxDevice model of a Max for Live patch Sonora replaces natively.
 model::Device nativeDeviceModel(const std::string& type);
+
+// ALS-15: lets the .als writer store Sonora's VST3 state of Prism / Curve LFO / Hush in their reference-app wrappers.
+// Installed automatically wherever this file is linked; tools that only load and save call it to make sure.
+void installSonoraVst3StateEncoder();
 // Message thread, with the audio callback excluded by the caller. Recurses through rack identities.
 void captureDeviceState(model::Device& device, DeviceProcessor* processor);
 

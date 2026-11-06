@@ -637,10 +637,9 @@ void SessionView::paint(SkCanvas& c, const Theme& t)
         const SkColor trackColor = track->deactivated ? paint::mix(Theme::paletteColor(track->colorIndex), SkColorSetRGB(0x9a, 0x9a, 0x9a), 0.8f)
                                                       : Theme::paletteColor(track->colorIndex);
 
-        if (track->kind == model::TrackKind::Group)
-            paint::fill(c, {cx, m.sessionHeaderHeight, cw - 2, gridBottom - m.sessionHeaderHeight}, t.color("SurfaceHighlight"));
-
-        // Group members retain a narrow parent-colour rail above and to the left of their own title.
+        // Group members (measured from the reference, UI-69): a 4 pt band of the group's colour across the top of the
+        // whole group (it also covers the 2 pt column gaps up to the last member), a 2 pt dark rule, then the member's
+        // own title. No rail on the left: the column gap is the member's left edge.
         Rect title{cx, 0, cw - 2, m.sessionHeaderHeight};
         if (col < nTracks && track->groupId >= 0)
         {
@@ -651,10 +650,9 @@ void SessionView::paint(SkCanvas& c, const Theme& t)
                 const int parentIndex = (int) (parent - x.song->tracks.begin());
                 const auto frame = x.sessionTrackSelection && x.isTrackSelected(parentIndex)
                     ? t.color("SelectionBackground") : Theme::paletteColor(parent->colorIndex);
-                paint::fill(c, title, frame);
-                title.x += 3; title.w -= 3; title.y += 6; title.h -= 6;
-                paint::fill(c, {title.x - 1, title.y - 1, title.w + 1, 1}, line);
-                paint::fill(c, {title.x - 1, title.y, 1, title.h}, line);
+                paint::fill(c, {cx - 2, 0, cw, kMemberBand}, frame);
+                paint::fill(c, {cx, kMemberBand, cw - 2, kMemberRule}, line);
+                title.y += kMemberBand + kMemberRule; title.h -= kMemberBand + kMemberRule;
             }
         }
         const bool selected = x.sessionTrackSelection && x.isTrackSelected(col);
@@ -811,7 +809,6 @@ void SessionView::paint(SkCanvas& c, const Theme& t)
             paint::fill(c, {cx, stop.bottom(), cw - 2, 1}, rowLine);
         }
         paint::fill(c, {cx + cw - 2, 0, 2, gridBottom + MixerLayout::kStopRow + MixerLayout::kSep}, line);
-        if (track->groupId >= 0) paint::fill(c, {cx, 0, 1, gridBottom}, line);
         c.restore();
     }
 }

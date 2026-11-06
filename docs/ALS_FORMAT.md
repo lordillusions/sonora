@@ -446,6 +446,32 @@ save/reopen. Values 1–64 select examples and 0 clears the override. Continuous
 the model, rather than authored as MIDI bend data. State, MIDI and native behavior are documented in
 [RESYNTH.md](RESYNTH.md).
 
+## Sonora devices in the reference app (ALS-15)
+
+Verified 2026-11-06 with the reference app 12.4.6 on a copy of a real Sonora-saved project. The reference refuses a whole
+set as corrupt when a `Devices` list holds an element class it does not know (`Unknown class 'SonoraCurveLfo'
+encountered`), when an int node holds fractional text (`Unexpected value for int node: 0.00000000000000000`, written by
+templates through `juce::String(double, 17)`) and offers to "repair" it when two pointee elements share an id
+(`PointeeId 29834 is used 2 times`). `io/als/LiveCompat` handles all three:
+
+- **Writing** (`writeAlsDom`, on a copy of the DOM): every `Sonora*` device element directly in a `Devices` list becomes
+  `<PluginDevice Id="n">` (the template of a VST3 device, with the device's own `On` and `UserName`) whose
+  `Vst3PluginInfo` names Sonora's VST3 of that device: JUCE class id `{0xABCDEF01, 0x9182FAEB, 'Snra', code}`, codes
+  `SnPr` Prism (`SonoraWavetable`), `SnCl` Curve LFO, `SnHs` Hush, and unpublished ones (`SnFm`, `SnVc`, `SnRs`, `SnIm`,
+  `SnEc`, `SnLf`, `SnVl`) so the reference lists FM, Vector, ... as missing plug-ins. `ProcessorState` is what that VST3
+  saves (`DeviceFactory` installs the encoder: a `.prism` preset, the Curve LFO parameter XML, Hush's session bytes),
+  so the reference plays them when the VST3s are installed. The device itself follows, unchanged, as
+  `<SonoraNativeDevice Version="1"><SonoraCurveLfo Id="n">…</SonoraCurveLfo></SonoraNativeDevice>`, the wrapper's last
+  child; the reference ignores it (its ids are not counted as pointees). Values written as `<int>.00000000000000000`
+  are written as the whole number.
+- **Reading** (`readAlsDom`, `loadAls`): wrappers are replaced by their inner device before anything else reads the DOM,
+  so Sonora's model and the writer's patch DOM are exactly what Sonora wrote. Then repeated pointee ids
+  (`AutomationTarget`, `*ModulationTarget`, `Pointee`, `ControllerTargets.N`) after their first use get fresh ids from
+  `NextPointeeId` on (sets from before 0.1.14 repeated a duplicated track's `FreezeSequencer` modulation targets; track
+  duplication now renumbers them).
+- A set the reference saved again has no `SonoraNativeDevice` any more: Prism / Curve LFO / Hush come back as their
+  VST3s (played by the built-in stand-ins when not installed, COL-4c); FM, Echo, ... as missing plug-ins.
+
 ## Sonora track state, linked clips and inserted returns (TRK-1/2/5)
 
 Verified 2026-10-17 against the reference app 12.4.6 (sets opened through `open -b`, Log.txt + window title, no crash report):

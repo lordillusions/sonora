@@ -65,6 +65,7 @@ set(SONORA_TEST_SOURCES
     test_session_recording.cpp
     test_edit.cpp
     test_project.cpp
+    test_live_compat.cpp
     test_updates.cpp
     test_update_feed.cpp ../src/app/UpdateFeed.cpp
     test_control.cpp

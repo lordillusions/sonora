@@ -1,4 +1,5 @@
 #include "io/als/AlsWriter.h"
+#include "io/als/LiveCompat.h"
 #include "core/Scales.h"
 
 #include "io/als/AlsReader.h"
@@ -1745,8 +1746,7 @@ TrackDuplication prepareTrackDuplication(const model::Song& song, const std::vec
     for (int index : members) tracks[song.tracks[(size_t) index].id] = nextTrack++;
     int nextTarget = std::max(1, song.nextPointeeId);
     auto isTarget = [](const XmlElement& e) {
-        return e.hasTagName("AutomationTarget") || e.hasTagName("ModulationTarget") || e.hasTagName("Pointee")
-               || e.getTagName().startsWith("ControllerTargets.");
+        return isPointeeElement(e); // incl. a FreezeSequencer's VolumeModulationTarget... (they were copied unchanged)
     };
     std::function<void(const XmlElement&)> reserve = [&](const auto& e) {
         if (isTarget(e)) nextTarget = std::max(nextTarget, e.getIntAttribute("Id", -1) + 1);
@@ -2048,7 +2048,8 @@ bool writeAlsDom(const juce::XmlElement& root, const juce::File& destination, st
     juce::XmlElement::TextFormat format;
     format.newLineChars = "\n";
     format.lineWrapLength = 100000; // never wrap attribute lists: Live writes one element per line
-    const auto text = root.toString(format);
+    const auto compatible = liveCompatibleCopy(root); // ALS-15: what the reference app can open (LiveCompat.h)
+    const auto text = (compatible ? *compatible : root).toString(format);
     juce::TemporaryFile temp(destination);
     {
         std::unique_ptr<juce::FileOutputStream> file(temp.getFile().createOutputStream());

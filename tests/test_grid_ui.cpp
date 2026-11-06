@@ -295,8 +295,10 @@ TEST_CASE("arrangement: clicking the ruler plays from that position (snapped), l
     const auto& m = ctx.theme.metrics;
     auto xAt = [&](double beat) { return origin.x + (float) ((beat - ctx.scrollBeats) * ctx.pixelsPerBeat); };
 
-    // the scrub area is the strip below the ruler's numbers (the numbers row zooms, UI-62)
-    const float scrubY = origin.y + ui::ArrangementView::kLocatorRowTop + 6.0f;
+    // the scrub area is the strip below the ruler's numbers (the numbers row zooms, UI-62); without locators it is the
+    // loop brace row (UI-68), so the brace is moved out of the way
+    transport.setLoop(false, 64, 8); transport.beginBlock();
+    const float scrubY = origin.y + ui::ArrangementView::kScrubTop + 6.0f;
     root.dispatchMouseDown(mouseAt(xAt(8.1), scrubY)); // snaps to the 1/16 grid: 8.0
     root.dispatchMouseUp(mouseAt(xAt(8.1), scrubY));
     auto block = transport.beginBlock();
@@ -315,7 +317,7 @@ TEST_CASE("arrangement: clicking the ruler plays from that position (snapped), l
     // stop, then click empty lane space: the insert marker moves, playback stays stopped
     transport.stop();
     transport.beginBlock();
-    const float laneY = origin.y + m.arrangementRulerHeight + m.arrangementLaneHeight + 20.0f; // the empty MIDI lane
+    const float laneY = origin.y + arrangement->rulerHeight() + m.arrangementLaneHeight + 20.0f; // the empty MIDI lane
     root.dispatchMouseDown(mouseAt(xAt(20.2), laneY));
     root.dispatchMouseUp(mouseAt(xAt(20.2), laneY));
     block = transport.beginBlock();
@@ -397,7 +399,7 @@ TEST_CASE("arrangement: double-click on an empty MIDI lane creates a one-bar cli
     REQUIRE(arrangement != nullptr);
     const auto origin = arrangement->boundsInRoot();
     const auto& m = ctx.theme.metrics;
-    const float laneY = origin.y + m.arrangementRulerHeight + m.arrangementLaneHeight + 20.0f;
+    const float laneY = origin.y + arrangement->rulerHeight() + m.arrangementLaneHeight + 20.0f;
     auto xAt = [&](double beat) { return origin.x + (float) (beat * ctx.pixelsPerBeat); };
 
     root.dispatchMouseDown(mouseAt(xAt(9.9), laneY));
@@ -687,8 +689,8 @@ TEST_CASE("option+drag copies: a clip to another position or track, notes inside
     const auto origin = arrangement->boundsInRoot();
     const auto& m = ctx.theme.metrics;
     auto xAt = [&](double beat) { return origin.x + (float) (beat * ctx.pixelsPerBeat); };
-    const float lane0 = origin.y + m.arrangementRulerHeight + 30.0f;
-    const float lane1 = origin.y + m.arrangementRulerHeight + m.arrangementLaneHeight + 20.0f;
+    const float lane0 = origin.y + arrangement->rulerHeight() + 30.0f;
+    const float lane1 = origin.y + arrangement->rulerHeight() + m.arrangementLaneHeight + 20.0f;
     const auto original = song.tracks[0].arrangementClips[0]; // 4..12
     const int uid = original.uid;
 
@@ -730,7 +732,7 @@ TEST_CASE("option+drag copies: a clip to another position or track, notes inside
 
     // A plain title-bar drag still moves.
     root.layout();
-    plain.y = origin.y + m.arrangementRulerHeight + 6;
+    plain.y = origin.y + arrangement->rulerHeight() + 6;
     root.dispatchMouseDown(plain);
     root.dispatchMouseDrag(mouseAt(xAt(10.0), lane0));
     root.dispatchMouseUp(mouseAt(xAt(10.0), lane0));
@@ -865,7 +867,8 @@ TEST_CASE("arrangement: double-clicking the ruler plays from that position as we
     auto* arrangement = findWidget<ui::ArrangementView>(root);
     REQUIRE(arrangement != nullptr);
     const auto origin = arrangement->boundsInRoot();
-    const float y = origin.y + ui::ArrangementView::kLocatorRowTop + 6.0f; // the scrub area, below the numbers (UI-62)
+    transport.setLoop(false, 64, 8); transport.beginBlock(); // the brace row is the scrub area without locators (UI-68)
+    const float y = origin.y + ui::ArrangementView::kScrubTop + 6.0f; // the scrub area, below the numbers (UI-62)
     const float x = origin.x + (float) (12.0 * ctx.pixelsPerBeat);
     root.dispatchMouseDown(mouseAt(x, y, 1));
     root.dispatchMouseUp(mouseAt(x, y, 1));
@@ -1375,7 +1378,12 @@ TEST_CASE("Session group selection: selected parent frames its members in cyan w
     CHECK(pixel(m.sessionTrackWidth + 40, 2) == rig.context.theme.color("SelectionBackground"));
     CHECK(pixel(m.sessionTrackWidth + 40, 7) == ui::Theme::paletteColor(rig.song.tracks[1].colorIndex));
     CHECK(pixel(m.sessionTrackWidth + 2, 5) == rig.context.theme.color("SurfaceArea"));
-    CHECK(pixel(m.sessionTrackWidth, 10) == rig.context.theme.color("SurfaceArea"));
+    // UI-69, as the reference draws it: the group's band also covers the column gap; below it the gap is the member's
+    // only left edge (no extra rail or line), and the member's own colour starts right after it.
+    CHECK(pixel(m.sessionTrackWidth - 1, 2) == rig.context.theme.color("SelectionBackground"));
+    CHECK(pixel(m.sessionTrackWidth - 1, 10) == rig.context.theme.color("SurfaceArea"));
+    CHECK(pixel(m.sessionTrackWidth + 0.5f, 10) == ui::Theme::paletteColor(rig.song.tracks[1].colorIndex));
+    CHECK(pixel(m.sessionTrackWidth * 0.5f, m.sessionHeaderHeight + 40) == rig.context.theme.color("SurfaceBackground")); // no lighter group column
     rig.context.selectTrack(5, false, false); png = render();
     CHECK(pixel(m.sessionTrackWidth + 40, 2) == ui::Theme::paletteColor(rig.song.tracks[0].colorIndex));
     rig.context.selectedTrack = 0; rig.context.sessionTrackSelection = false; png = render();
@@ -1400,6 +1408,11 @@ TEST_CASE("Arrangement group selection: light group lane and cyan header continu
     CHECK(pixel(header + 4, lanes[1].y + 30) == rig.context.theme.color("SelectionBackground"));
     CHECK(pixel(header + 30, lanes[1].y + 30) == ui::Theme::paletteColor(rig.song.tracks[1].colorIndex));
     CHECK(pixel(10, lanes[0].y + 30) == rig.context.theme.color("SurfaceHighlight"));
+    // UI-69: the rail runs on through the separators (from the group's own) and ends with the group's last member.
+    CHECK(pixel(header + 4, lanes[1].y - 1) == rig.context.theme.color("SelectionBackground"));
+    CHECK(pixel(header + 4, lanes[2].y - 1) == rig.context.theme.color("SelectionBackground"));
+    CHECK(pixel(header + 4, lanes[5].y - 1) == rig.context.theme.color("SurfaceArea"));
+    CHECK(pixel(header + 6.5f, lanes[1].y + 30) == rig.context.theme.color("SurfaceArea")); // the 1 pt rule after the 4 pt rail
 }
 
 TEST_CASE("region UI: plain clip-body range duplicates immediately after the selected beats and repeats")
@@ -1408,7 +1421,7 @@ TEST_CASE("region UI: plain clip-body range duplicates immediately after the sel
     rig.ctx.detailVisible = false; rig.ctx.pixelsPerBeat = 40; rig.root->layout();
     auto* arrangement = findWidget<ui::ArrangementView>(*rig.root); REQUIRE(arrangement);
     const auto b = arrangement->boundsInRoot();
-    const float y = b.y + rig.ctx.theme.metrics.arrangementRulerHeight + 30;
+    const float y = b.y + arrangement->rulerHeight() + 30;
     rig.root->dispatchMouseDown(mouseAt(b.x + 6 * 40, y));
     rig.root->dispatchMouseDrag(mouseAt(b.x + 8 * 40, y));
     rig.root->dispatchMouseUp(mouseAt(b.x + 8 * 40, y));

@@ -1,4 +1,5 @@
 #include "io/als/AlsReader.h"
+#include "io/als/LiveCompat.h"
 #include "core/Scales.h"
 
 #include "io/als/AlsNewSet.h"
@@ -949,7 +950,7 @@ AlsLoadResult parseAls(const XmlElement& root, const std::string& sourcePath)
     song->inKey = boolean(liveSet, "InKey", false);
     song->nextPointeeId = integer(liveSet, "NextPointeeId", 1);
     std::function<void(const XmlElement*)> findTargetIds = [&](const auto* element) {
-        if (element->hasTagName("AutomationTarget") || element->hasTagName("ModulationTarget") || element->hasTagName("Pointee"))
+        if (isPointeeElement(*element))
             song->nextPointeeId = std::max(song->nextPointeeId, element->getIntAttribute("Id", -1) + 1);
         for (const auto* descendant : element->getChildIterator()) findTargetIds(descendant);
     };
@@ -1017,6 +1018,11 @@ AlsLoadResult parseAls(const XmlElement& root, const std::string& sourcePath)
     return result;
 }
 
+model::Device readDeviceXml(const juce::XmlElement& device, std::vector<std::string>& warnings)
+{
+    return readDevice(&device, warnings);
+}
+
 std::unique_ptr<juce::XmlElement> readAlsDom(const juce::File& file, std::string& error)
 {
     if (! file.existsAsFile())
@@ -1048,6 +1054,11 @@ std::unique_ptr<juce::XmlElement> readAlsDom(const juce::File& file, std::string
     auto root = doc.getDocumentElement();
     if (root == nullptr)
         error = "XML parse error: " + doc.getLastParseError().toStdString();
+    else
+    {
+        unwrapSonoraDevices(*root); // LiveCompat: the reference-safe wrappers back to Sonora's own device elements
+        repairDuplicatePointeeIds(*root);
+    }
     return root;
 }
 
@@ -1090,6 +1101,8 @@ AlsLoadResult loadAls(const juce::File& file)
         result.error = "XML parse error: " + doc.getLastParseError().toStdString();
         return result;
     }
+    unwrapSonoraDevices(*root);
+    repairDuplicatePointeeIds(*root);
     return parseAls(*root, file.getFullPathName().toStdString());
 }
 

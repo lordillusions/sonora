@@ -647,7 +647,7 @@ Modelled on Live 12 (measured in Live: adaptive grid, ruler labels and the corne
   pointer so dragging sideways scrolls; double-click zooms to the time selection, or to the whole Arrangement when there is
   none; Shift-click plays from there like the scrub area; a click while playing pauses Follow. The Overview strip zooms with
   a vertical drag too and a double-click there shows the whole Arrangement.
-- **Scrub area**: the strip below the numbers (locators, loop brace) plays from the clicked (grid-snapped) position and
+- **Scrub area**: the strip below the numbers (the locator row when the set has locators, then the loop brace row right under it, UI-68) plays from the clicked (grid-snapped) position and
   dragging moves it; a click on empty lane space moves the insert marker (play start) without playing. The loop brace drags as before.
 - **Note editor scrolling**: the wheel / two-finger scroll moves continuously over all 128 pitches (pitch 0 can sit at the
   bottom edge, 127 at the top), transposing or nudging keeps the selection in view and dragging notes near an edge scrolls.
@@ -699,8 +699,12 @@ track ids. Not yet: non-adjacent selections, renaming/colouring the group, Sessi
 
 Session group headers have a circular three-line fold icon; clicking it hides/shows all descendants, including their mixer
 strips, without changing model/control indices or moving the anchored returns/Main. Nested groups retain their own fold
-states. Folding shares Arrangement's undoable `TrackUnfolded` state and survives save/reopen. Member headers show a 6 px
-parent-color rail above and a 3 px rail on the left. Track labels sit in the lower 18 px of the 24 px header.
+states. Folding shares Arrangement's undoable `TrackUnfolded` state and survives save/reopen. Member headers (UI-69,
+measured from the reference) show a 4 px band of the group's colour across the whole group, also over the column gaps,
+then a 2 px dark rule; the column gap is their only left edge. In the Arrangement each enclosing group adds a 4 px rail
+and a 1 px rule left of the member's title, continuous through the lane separators down to the group's last shown
+member. A member's output reads "3-Group" (automatic group name) or the group's own name. Track labels sit in the lower
+18 px of the 24 px header.
 When a group header is selected, its member rails use the selection cyan while retaining each member's own header
 color and inner border. Nested groups remain supported. **UI-29**.
 Automatic track names use the current track order, including group tracks and folded members: inserting a group before

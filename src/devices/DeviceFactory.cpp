@@ -40,6 +40,7 @@
 #include "devices/native/Utility.h"
 #include "engine/SampleCache.h"
 #include "io/als/AlsReader.h"
+#include "io/als/LiveCompat.h"
 #include "plugins/PluginDevice.h"
 #include "plugins/PluginHost.h"
 #include "plugins/PrismPreset.h"
@@ -376,6 +377,34 @@ std::unique_ptr<DeviceProcessor> createNative(const model::Device& d, std::vecto
     }
     return dev;
 }
+
+// ALS-15: the state Sonora's VST3 of a native device would save, so a set opened in the reference app plays Prism,
+// Curve LFO and Hush with the same settings there (io/als/LiveCompat writes it into the device's PluginDevice wrapper).
+namespace
+{
+std::vector<uint8_t> sonoraVst3State(const model::Device& d)
+{
+    if (d.type == "SonoraWavetable") return plugins::encodePrismPreset(d);
+    if (d.type != "SonoraCurveLfo" && d.type != "SonoraHush") return {};
+    const auto dev = createNative(d);
+    if (const auto* lfo = dynamic_cast<const CurveLfo*>(dev.get())) return plugins::encodeCurveLfoState(*lfo);
+    if (auto* hush = dynamic_cast<HushDevice*>(dev.get())) return hush->session().encodeState();
+    return {};
+}
+} // namespace
+
+void installSonoraVst3StateEncoder()
+{
+    io::setSonoraVst3StateEncoder(sonoraVst3State);
+}
+
+namespace
+{
+[[maybe_unused]] const bool sonoraVst3StateInstalled = [] {
+    installSonoraVst3StateEncoder();
+    return true;
+}();
+} // namespace
 
 std::unique_ptr<DeviceProcessor> createDevice(const model::Device& d, BuildContext& ctx)
 {
