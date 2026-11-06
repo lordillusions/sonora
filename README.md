@@ -19,10 +19,10 @@ for starting new tracks, especially electronic music, and it can also open and s
 > breaks: the idea is to build it together with the people who use it.
 
 - Website: <https://sonoradaw.com>
-- Latest version: **0.1.16** — [macOS](https://github.com/lordillusions/sonora/releases/download/v0.1.16/Sonora-0.1.16.dmg) ·
-  [Windows](https://github.com/lordillusions/sonora/releases/download/v0.1.16/Sonora-0.1.16-windows-x64-setup.exe) ·
-  [Linux .deb](https://github.com/lordillusions/sonora/releases/download/v0.1.16/sonora_0.1.16_amd64.deb) ·
-  [AppImage](https://github.com/lordillusions/sonora/releases/download/v0.1.16/Sonora-0.1.16-x86_64.AppImage)
+- Latest version: **0.1.17** — [macOS](https://github.com/lordillusions/sonora/releases/download/v0.1.17/Sonora-0.1.17.dmg) ·
+  [Windows](https://github.com/lordillusions/sonora/releases/download/v0.1.17/Sonora-0.1.17-windows-x64-setup.exe) ·
+  [Linux .deb](https://github.com/lordillusions/sonora/releases/download/v0.1.17/sonora_0.1.17_amd64.deb) ·
+  [AppImage](https://github.com/lordillusions/sonora/releases/download/v0.1.17/Sonora-0.1.17-x86_64.AppImage)
 - Older downloads: [Releases](https://github.com/lordillusions/sonora/releases)
 - Everything it does today: [docs/ROADMAP.md](docs/ROADMAP.md)
 - User guide: [docs/UI_GUIDE.md](docs/UI_GUIDE.md)

@@ -4,6 +4,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Windows' curl (Schannel) refuses a download when the certificate's revocation server is offline
+# (CRYPT_E_REVOCATION_OFFLINE, downloads.xiph.org on 2026-11-07, twice). Skip only that check there: the certificate
+# chain is still verified, and the archives are checked against their pinned SHA-256.
+if command curl -V 2>/dev/null | grep -qi schannel; then
+    curl() { command curl --ssl-no-revoke "$@"; }
+fi
+
 JUCE_TAG="8.0.16-security"
 SKIA_RELEASE="m144-e2e6623374-4"
 SKIA_ZIP="Skia-${SKIA_RELEASE}-macos-Release-arm64.zip"
