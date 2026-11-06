@@ -148,6 +148,22 @@ public:
     // Hosted plugins: index into parameters() of the parameter with the plugin's own id (or, failing that,
     // the given name); -1 when unknown. Message thread.
     virtual int findParameterByHostId(int /*id*/, const std::string& /*name*/) const { return -1; }
+    // UI-65, hosted plugins: the plugin's own id (what the set stores as ParameterId) and full name of parameter `index`;
+    // false for native devices and parameters the plugin does not let a host automate. Message thread.
+    virtual bool hostParameter(int /*index*/, int& /*id*/, std::string& /*name*/) const { return false; }
+    // UI-65, hosted plugins: edits made in the plugin's own window (VST3 performEdit / AU parameter events), so automation
+    // can be recorded and overridden although the value cannot be read back. Lock-free; any thread.
+    struct HandEdit
+    {
+        uint32_t serial = 0;   // changes with every reported edit of the parameter
+        float value = 0.0f;    // the value it reported last
+        float before = 0.0f;   // the value when the gesture began (or before the last edit outside a gesture)
+        bool gesture = false;  // the user holds the control now
+    };
+    virtual uint32_t handEditTotal() const { return 0; } // changes with every reported edit of any parameter
+    virtual HandEdit handEdit(int /*index*/) const { return {}; }
+    // Audio thread (automation): true when `index` was edited by hand since the previous call for it.
+    virtual bool takeHandEdit(int /*index*/) { return false; }
     virtual float getParameter(int /*index*/) const { return 0.0f; }
     virtual void setParameter(int /*index*/, float /*value*/) {}
 

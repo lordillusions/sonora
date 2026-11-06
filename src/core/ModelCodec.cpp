@@ -428,6 +428,7 @@ template <class IO> void visit(IO& io, PluginParam& p)
     io.v(p.value);
     io.v(p.automationTargetId);
     io.v(p.valueEdited);
+    io.v(p.slotEdited);
 }
 
 template <class IO> void visit(IO& io, Device& d);

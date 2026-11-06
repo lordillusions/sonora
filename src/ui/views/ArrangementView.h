@@ -179,7 +179,7 @@ private:
     std::vector<Lane> lanes_;
     Widget* laneContainer_ = nullptr; // clips headers/editors below the ruler
     std::vector<Widget*> headers_;
-    std::vector<Widget*> automationEditors_;
+    std::vector<std::vector<Widget*>> automationEditors_; // per control index, one per automation lane (UI-65)
     double lastPlayhead_ = -1;
     bool wasPlaying_ = false; // UI-53: a playback start resumes Follow
     int hoverUid_ = -1, hoverTrack_ = -1; // clip under the pointer: its fade handles show

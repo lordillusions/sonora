@@ -3,15 +3,15 @@
   <channel>
     <title>Sonora</title>
     <item>
-      <title>Sonora 0.1.9</title>
-      <pubDate>Wed, 04 Nov 2026 14:02:25 GMT</pubDate>
+      <title>Sonora 0.1.10</title>
+      <pubDate>Thu, 05 Nov 2026 16:37:49 GMT</pubDate>
       <link>https://sonoradaw.com/download.html</link>
-      <sparkle:version>0.1.9</sparkle:version>
-      <sparkle:shortVersionString>0.1.9</sparkle:shortVersionString>
-      <description><![CDATA[<p>Sonora 0.1.9. <a href="https://github.com/lordillusions/sonora/releases/tag/v0.1.9">What is new in this version</a>.</p>]]></description>
-      <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.9/Sonora-0.1.9-windows-x64-setup.exe" length="10694088" type="application/octet-stream" sparkle:os="windows-x64"
+      <sparkle:version>0.1.10</sparkle:version>
+      <sparkle:shortVersionString>0.1.10</sparkle:shortVersionString>
+      <description><![CDATA[<p>Sonora 0.1.10. <a href="https://github.com/lordillusions/sonora/releases/tag/v0.1.10">What is new in this version</a>.</p>]]></description>
+      <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.10/Sonora-0.1.10-windows-x64-setup.exe" length="11017771" type="application/octet-stream" sparkle:os="windows-x64"
                  sparkle:installerArguments="/SILENT /SP- /SUPPRESSMSGBOXES /NOCANCEL /NORESTART /CLOSEAPPLICATIONS"
-                 sparkle:edSignature="Ar4PWGy8tC+aXOAodosRJOnaBvlRJGyM2I5ghNOxPLeclFuhlRXbvLxogIBkAjnVdC/pCMuuMNFmQuWhcvtpBQ=="/>
+                 sparkle:edSignature="bQtXf1dp/BAKgr9q9BZEasOM919HhXwl/oDxBnGwdioeDpxLaGRxxJU26wD0oWHJs5NHGKgxsyVn75fZ4O3BCA=="/>
     </item>
   </channel>
 </rss>

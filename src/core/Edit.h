@@ -232,6 +232,22 @@ EditCommand replaceDevice(const Song& song, int track, int device, Device replac
 void allocateDeviceIds(Song& song, Device& device);
 EditCommand setTrackInput(const Song& song, int track, std::string target, std::string upper, std::string lower, int monitoring);
 EditCommand setAutomation(const Song& song, int track, AutomationEnvelope envelope);
+// UI-65: removes the track's envelope for `targetId` (a control's "Delete Automation"); empty when it has none.
+EditCommand clearAutomation(const Song& song, int track, int targetId);
+// UI-65: automation targets for hosted plugin parameters on top-level device `device` of `track`. A parameter the set
+// already lists (by ParameterId) keeps its target. Others take a free slot of the plugin's list (Live keeps 128 entries;
+// unused ones have ParameterId -1 and no envelope) or a new entry with a fresh target id, with `value` as its manual value;
+// `command` (undoable, no device rebuild) puts them there and stays empty when nothing was added. Returns one target per
+// parameter, all -1 when the device is not a plugin. New ids come from `nextPointeeId` (start it at song.nextPointeeId and
+// reuse it for further calls before applying); applying the command raises the song's allocator past them.
+struct PluginParameterRequest
+{
+    int hostId = -1;
+    std::string name;
+    double value = 0.0;
+};
+std::vector<int> pluginParameterTargets(const Song& song, int& nextPointeeId, int track, int device,
+                                        const std::vector<PluginParameterRequest>& parameters, EditCommand& command);
 EditCommand setTempo(const Song& song, double bpm);
 EditCommand setTimeSignature(const Song&, int numerator, int denominator);
 EditCommand setGlobalQuantisation(const Song& song, int value);

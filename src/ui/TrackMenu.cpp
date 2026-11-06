@@ -1,4 +1,5 @@
 #include "ui/TrackMenu.h"
+#include "ui/views/AutomationEditor.h"
 #include "ui/UiContext.h"
 #include "ui/Widget.h"
 #include "ui/MenuLookAndFeel.h"
@@ -150,8 +151,23 @@ void showControlContextMenu(Widget& owner, UiContext& ctx, std::function<void()>
         menu.addItem(std::move(item));
         menu.addSeparator();
     }
-    for (const auto* label : {"Show Automation", "Show Automation in New Lane", "Delete Automation"})
-        menu.addItem(juce::PopupMenu::Item(label).setEnabled(false));
+    // UI-65: the control's own envelope, as in Live.
+    int automationTrack = -1;
+    const int targetId = owner.midiTarget ? AutomationEditor::targetFor(ctx, *owner.midiTarget, automationTrack) : -1;
+    const bool automated = AutomationEditor::isAutomated(ctx, automationTrack, targetId);
+    for (int which = 0; which < 3; ++which)
+    {
+        juce::PopupMenu::Item item(which == 0 ? "Show Automation" : which == 1 ? "Show Automation in New Lane" : "Delete Automation");
+        item.isEnabled = targetId != -1 && (which < 2 || (automated && ctx.applyEdit && ! ctx.recording));
+        item.action = [widget, &ctx, song, which, automationTrack, targetId] {
+            if (! Widget::isAlive(widget) || ctx.song != song) return;
+            if (which < 2) AutomationEditor::showTarget(ctx, automationTrack, targetId, which == 1);
+            else if (ctx.applyEdit)
+                if (auto edit = model::clearAutomation(*ctx.song, automationTrack, targetId); edit.apply) ctx.applyEdit(std::move(edit));
+            if (ctx.requestRepaint) ctx.requestRepaint();
+        };
+        menu.addItem(std::move(item));
+    }
     if (owner.midiTarget)
     {
         const auto target = *owner.midiTarget;
@@ -244,6 +260,16 @@ std::vector<MenuAction> trackContextActions(UiContext& ctx)
         if (ctx.modelChanged) ctx.modelChanged();
         if (ctx.requestRepaint) ctx.requestRepaint();
     }, content});
+    // UI-65: Live's Cmd-click on a lane's fold button, for every selected track.
+    bool automatedTracks = false;
+    for (int selected : ctx.selectedTrackIndices()) automatedTracks |= ! AutomationEditor::automatedTargets(ctx, selected).empty();
+    result.push_back({"Show Automated Lanes", [&ctx, valid] {
+        if (! valid()) return;
+        AutomationEditor::showAutomatedLanes(ctx, ctx.selectedTrackIndices());
+        ctx.mainView = MainView::Arrangement;
+        if (ctx.layoutChanged) ctx.layoutChanged();
+        if (ctx.requestRepaint) ctx.requestRepaint();
+    }, automatedTracks});
     const bool regular = track && (track->kind == model::TrackKind::Audio || track->kind == model::TrackKind::Midi);
     if (regular)
     {

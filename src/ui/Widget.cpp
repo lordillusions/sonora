@@ -1,6 +1,7 @@
 #include "ui/Widget.h"
 
 #include "ui/RootWidget.h"
+#include "ui/UiContext.h"
 
 #include "include/core/SkRRect.h"
 
@@ -85,6 +86,17 @@ void Widget::paintTree(SkCanvas& canvas, const Theme& theme)
     for (auto& c : children_)
         c->paintTree(canvas, theme);
     paintOverChildren(canvas, theme);
+    // UI-65: Live's LED on a control whose parameter has automation, in its upper-left corner.
+    const Widget* top = this;
+    while (midiTarget && top->parent_ != nullptr) top = top->parent_;
+    const auto* root = midiTarget ? dynamic_cast<const RootWidget*>(top) : nullptr;
+    if (root && bounds_.w >= 8 && bounds_.h >= 8 && isControlAutomated(root->context(), *midiTarget))
+    {
+        SkPaint led;
+        led.setAntiAlias(true);
+        led.setColor(theme.color("AutomationColor"));
+        canvas.drawRect(SkRect::MakeXYWH(1, 1, 4, 4), led);
+    }
     canvas.restore();
 }
 

@@ -1196,6 +1196,14 @@ void AppController::remapTrackUi(const std::vector<model::TrackId>& before)
     };
     remapList(ui_.unfoldedTakeTracks);
     remapList(ui_.collapsedTracks);
+    if (! ui_.automationTracks.empty())
+    {
+        remapList(ui_.automationTracks);
+        if (ui_.automationTracks.empty()) ui_.automationVisible = false; // empty would mean every track
+    }
+    std::map<int, std::vector<int>> lanes; // UI-65
+    for (auto& [index, targets] : ui_.automationLaneTargets) if (const int j = mapIndex(index); j >= 0) lanes[j] = std::move(targets);
+    ui_.automationLaneTargets = std::move(lanes);
     auto remapFloats = [&](std::vector<float>& values) {
         if (values.empty()) return;
         std::vector<float> mapped((size_t) song_->tracks.size() + song_->returns.size() + 1, 0.0f);
@@ -1285,6 +1293,28 @@ void AppController::finishAutomationRecording()
     if (touched.empty())
         return;
     std::vector<model::EditCommand> commands;
+    // UI-65: plugin parameters the set does not list yet get their place on the plugin's list first.
+    int nextPointee = song_->nextPointeeId;
+    std::map<std::pair<int, int>, std::vector<size_t>> unlisted;
+    for (size_t i = 0; i < touched.size(); ++i)
+        if (touched[i].hostedPlugin && touched[i].envelope.targetId < 0)
+            unlisted[{touched[i].track, touched[i].deviceSlot}].push_back(i);
+    for (const auto& [where, indices] : unlisted)
+    {
+        std::vector<model::PluginParameterRequest> requests;
+        for (auto i : indices)
+        {
+            const auto& points = touched[i].envelope.points;
+            requests.push_back({touched[i].hostParameterId, touched[i].hostParameterName, points.empty() ? 0.0 : points.front().value});
+        }
+        model::EditCommand assign;
+        const auto targets = model::pluginParameterTargets(*song_, nextPointee, where.first, where.second, requests, assign);
+        for (size_t k = 0; k < indices.size(); ++k) touched[indices[k]].envelope.targetId = targets[k];
+        if (assign.apply) commands.push_back(std::move(assign));
+    }
+    std::erase_if(touched, [](const auto& t) { return t.envelope.targetId < 0; });
+    if (touched.empty())
+        return;
     for (const auto& t : touched)
         commands.push_back(model::setAutomation(*song_, t.track, t.envelope));
     applyEdit(model::compose("Record Automation", std::move(commands)));

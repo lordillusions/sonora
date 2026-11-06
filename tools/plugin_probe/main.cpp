@@ -17,6 +17,7 @@
 //        [--text-sweep <hostId>=<2..4097 points>] ... (active hosted controller text, no writes)
 //        [--native-interfaces] (opt-in public VST3 method module-relative offsets on macOS)
 //        inspect/restore isolated instances and export state/audio (60 s watchdog; editor 180 s)
+//   plugin_probe --automate <set.als> <out.als>   UI-65: automate the first parameter of each hosted plug-in, save
 //   plugin_probe <set.als> [--render] [--params]                       for every plugin in the set:
 //        match against the cache, instantiate, restore Live's saved state, report the
 //        result, and (with --render) process one second of audio to check it runs. --params prints the first restored
@@ -27,7 +28,9 @@
 // --inspect-file leaves that cache untouched.
 
 #include "core/AppDataFolder.h"
+#include "core/Edit.h"
 #include "io/als/AlsReader.h"
+#include "io/als/AlsWriter.h"
 #include "plugins/PluginDevice.h"
 #include "plugins/PluginHost.h"
 #include "plugins/Vst3PresetBuilder.h"
@@ -46,6 +49,7 @@ JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE("-Wshadow-field-in-constructor")
 JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
 #include <cstdio>
+#include <set>
 #include <cmath>
 #include <initializer_list>
 #include <limits>
@@ -1334,6 +1338,40 @@ void probeSet(plugins::PluginHost& host, const juce::File& file, bool render, bo
                     fresh && plugins::capturePluginInfo(*fresh, d->kind, defaults))
                     std::printf(", restore %s the defaults", defaults.state == captured.state ? "KEPT" : "changed");
             }
+            // UI-65: what the automation choosers offer, through the engine's own wrapper.
+            juce::String again;
+            if (auto second = host.instantiate(*match, *d->plugin, d->kind, 48000.0, 512, again))
+            {
+                plugins::PluginDevice device(std::move(second));
+                int automatable = 0, listed = 0, matched = 0;
+                std::set<int> ids;
+                for (int i = 0; i < (int) device.parameters().size(); ++i)
+                {
+                    int id = -1;
+                    std::string name;
+                    if (device.hostParameter(i, id, name)) { ++automatable; ids.insert(id); }
+                }
+                for (const auto& p : d->pluginParams)
+                    if (p.parameterId != -1) { ++listed; matched += ids.count(p.parameterId) ? 1 : 0; }
+                std::printf("\n       automation: %d automatable parameters; the set lists %d, %d of them by id", automatable, listed, matched);
+                // What the plug-in's window does on a knob move (VST3 beginEdit / performEdit / endEdit through JUCE).
+                for (int i = 0; i < (int) device.parameters().size(); ++i)
+                {
+                    int id = -1;
+                    std::string name;
+                    if (! device.hostParameter(i, id, name)) continue;
+                    auto* p = device.instance().getParameters()[i];
+                    const auto before = device.handEdit(i);
+                    const float target = p->getValue() < 0.5f ? 0.75f : 0.25f;
+                    p->beginChangeGesture(); p->setValueNotifyingHost(target);
+                    const auto during = device.handEdit(i);
+                    p->endChangeGesture();
+                    std::printf("\n       hand edit of '%s': serial %u -> %u, value %.2f, gesture %s, taken by automation %s", name.c_str(),
+                                before.serial, during.serial, (double) during.value, during.gesture ? "held" : "missed",
+                                device.takeHandEdit(i) ? "yes" : "no");
+                    break;
+                }
+            }
             std::printf("\n");
         }
         ++ok;
@@ -1614,6 +1652,49 @@ static int runProbeCommand(int argc, char** argv)
         }
         std::printf("%d plugin(s) added\n", host.knownPlugins().getNumTypes() - before);
         host.saveCache();
+    }
+    else if (a == "--automate" && argc >= 4)
+    {
+        // UI-65: automate the first automatable parameter of every hosted plug-in through the app's own code
+        // (model::pluginParameterTargets) and save the set, to check that the reference app reads the new list entries.
+        auto loaded = io::loadAls(juce::File(juce::String::fromUTF8(argv[2])));
+        if (! loaded) { std::printf("cannot load %s\n", argv[2]); return 1; }
+        auto& song = *loaded.song;
+        model::EditHistory history;
+        int next = song.nextPointeeId, automated = 0;
+        for (int t = 0; t < (int) song.tracks.size(); ++t)
+            for (int d = 0; d < (int) song.tracks[(size_t) t].devices.size(); ++d)
+            {
+                const auto device = song.tracks[(size_t) t].devices[(size_t) d];
+                if (! device.plugin || (device.kind != model::DeviceKind::PluginVst3 && device.kind != model::DeviceKind::PluginAu)) continue;
+                const auto match = host.findMatch(*device.plugin, device.kind);
+                juce::String error;
+                auto inst = match ? host.instantiate(*match, *device.plugin, device.kind, 48000.0, 512, error) : nullptr;
+                if (! inst) continue;
+                plugins::PluginDevice wrapped(std::move(inst));
+                for (int i = 0; i < (int) wrapped.parameters().size(); ++i)
+                {
+                    int id = -1;
+                    std::string name;
+                    if (! wrapped.hostParameter(i, id, name)) continue;
+                    model::EditCommand assign;
+                    const auto ids = model::pluginParameterTargets(song, next, t, d, {{id, name, wrapped.getParameter(i)}}, assign);
+                    if (ids.empty() || ids[0] < 0) break;
+                    model::AutomationEnvelope env;
+                    env.targetId = ids[0];
+                    env.points = {{-63072000.0, wrapped.getParameter(i)}, {0.0, 0.0}, {16.0, 1.0}};
+                    std::vector<model::EditCommand> parts;
+                    if (assign.apply) parts.push_back(std::move(assign));
+                    parts.push_back(model::setAutomation(song, t, env));
+                    history.perform(song, model::compose("Automate", std::move(parts)));
+                    std::printf("track %d device %d %s: '%s' (id %d) -> target %d\n", t, d, device.plugin->name.c_str(), name.c_str(), id, ids[0]);
+                    ++automated;
+                    break;
+                }
+            }
+        const auto saved = io::saveAls(song, juce::File(juce::String::fromUTF8(argv[3])));
+        std::printf("%d plug-in parameters automated, save %s\n", automated, saved.ok ? "ok" : saved.error.c_str());
+        return saved.ok ? 0 : 1;
     }
     else if (a == "--list")
     {

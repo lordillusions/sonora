@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #if defined(__APPLE__)
  #include <CoreFoundation/CoreFoundation.h>
 #endif
@@ -82,13 +83,33 @@ PluginDevice::PluginDevice(std::unique_ptr<juce::AudioPluginInstance> instance) 
 {
     instrument_ = instance_->getPluginDescription().isInstrument;
     // Parameters are exposed normalised 0..1 (plugins define their own display units).
-    for (auto* p : instance_->getParameters())
+    const auto& params = instance_->getParameters();
+    hand_ = std::make_unique<HandSlot[]>((size_t) params.size());
+    automationSeen_ = std::make_unique<uint32_t[]>((size_t) params.size());
+    for (auto* p : params)
+    {
         infos_.push_back(devices::makeParam(std::to_string(p->getParameterIndex()), p->getName(16).toStdString(),
                                             0.0f, 1.0f, p->getDefaultValue(), "", p->isBoolean()));
+        int id = std::numeric_limits<int>::min();
+        // The plugin's own bypass switch is left out like the reference does: the device's On switch is the bypass.
+        if (auto* hosted = dynamic_cast<juce::AudioPluginInstance::HostedParameter*>(p);
+            hosted && p->isAutomatable() && p != instance_->getBypassParameter())
+        {
+            // VST3 ParamIDs are unsigned; the set stores them as a signed int (bit pattern kept).
+            const auto text = hosted->getParameterID();
+            id = text.containsOnly("0123456789") && text.isNotEmpty() ? (int) (uint32_t) text.getLargeIntValue() : p->getParameterIndex();
+        }
+        hostIds_.push_back(id);
+        names_.push_back(p->getName(64).toStdString());
+        auto& slot = hand_[(size_t) p->getParameterIndex()];
+        slot.value.store(p->getValue()); slot.before.store(p->getValue());
+    }
+    instance_->addListener(this);
 }
 
 PluginDevice::~PluginDevice()
 {
+    instance_->removeListener(this);
     instance_->setPlayHead(nullptr);
     instance_->releaseResources();
 }
@@ -197,6 +218,9 @@ int PluginDevice::findParameterByHostId(int id, const std::string& name) const
     }
     if (const auto it = idToIndex_.find(std::to_string(id)); it != idToIndex_.end())
         return it->second;
+    if (id < -1) // a VST3 ParamID above INT_MAX, stored with its bit pattern
+        if (const auto it = idToIndex_.find(std::to_string((uint32_t) id)); it != idToIndex_.end())
+            return it->second;
     if (! name.empty())
         if (const auto it = nameToIndex_.find(name); it != nameToIndex_.end())
             return it->second;
@@ -214,6 +238,58 @@ void PluginDevice::setParameter(int index, float value)
     const auto& params = instance_->getParameters();
     if (index >= 0 && index < params.size())
         params[index]->setValue(value); // automation / MIDI: no host round trip
+}
+
+bool PluginDevice::hostParameter(int index, int& id, std::string& name) const
+{
+    if (index < 0 || (size_t) index >= hostIds_.size() || hostIds_[(size_t) index] == std::numeric_limits<int>::min())
+        return false;
+    id = hostIds_[(size_t) index];
+    name = names_[(size_t) index];
+    return true;
+}
+
+devices::DeviceProcessor::HandEdit PluginDevice::handEdit(int index) const
+{
+    if (index < 0 || (size_t) index >= infos_.size()) return {};
+    const auto& slot = hand_[(size_t) index];
+    return {slot.serial.load(std::memory_order_acquire), slot.value.load(std::memory_order_relaxed),
+            slot.before.load(std::memory_order_relaxed), slot.gesture.load(std::memory_order_relaxed)};
+}
+
+bool PluginDevice::takeHandEdit(int index)
+{
+    if (index < 0 || (size_t) index >= infos_.size()) return false;
+    const uint32_t serial = hand_[(size_t) index].serial.load(std::memory_order_acquire);
+    const bool edited = serial != automationSeen_[(size_t) index];
+    automationSeen_[(size_t) index] = serial;
+    return edited;
+}
+
+void PluginDevice::audioProcessorParameterChanged(juce::AudioProcessor*, int index, float value)
+{
+    if (index < 0 || (size_t) index >= infos_.size()) return;
+    auto& slot = hand_[(size_t) index];
+    const float previous = slot.value.exchange(value, std::memory_order_relaxed);
+    if (! slot.gesture.load(std::memory_order_relaxed)) slot.before.store(previous, std::memory_order_relaxed);
+    slot.serial.fetch_add(1, std::memory_order_release);
+    handTotal_.fetch_add(1, std::memory_order_release);
+}
+
+void PluginDevice::audioProcessorParameterChangeGestureBegin(juce::AudioProcessor*, int index)
+{
+    if (index < 0 || (size_t) index >= infos_.size()) return;
+    auto& slot = hand_[(size_t) index];
+    slot.before.store(slot.value.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    slot.gesture.store(true, std::memory_order_relaxed);
+    handTotal_.fetch_add(1, std::memory_order_release);
+}
+
+void PluginDevice::audioProcessorParameterChangeGestureEnd(juce::AudioProcessor*, int index)
+{
+    if (index < 0 || (size_t) index >= infos_.size()) return;
+    hand_[(size_t) index].gesture.store(false, std::memory_order_relaxed);
+    handTotal_.fetch_add(1, std::memory_order_release);
 }
 
 bool PluginDevice::hasEditor() const

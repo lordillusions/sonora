@@ -906,7 +906,7 @@ void ArrangementView::rebuild()
         if (isReturn)
             h->setActivatorLabel(std::string(1, (char) ('A' + (i - nTracks))));
         headers_.push_back(h);
-        automationEditors_.push_back(laneContainer_->add<AutomationEditor>(i));
+        automationEditors_.push_back({laneContainer_->add<AutomationEditor>(i, 0)});
     }
 }
 
@@ -931,14 +931,21 @@ void ArrangementView::layout()
     laneContainer_->setBounds({0, m.arrangementRulerHeight, width(), height() - m.arrangementRulerHeight - m.arrangementFooterHeight});
     for (auto* h : headers_)
         h->visible = false;
-    for (auto* editor : automationEditors_) editor->visible = false;
+    for (auto& editors : automationEditors_) for (auto* editor : editors) editor->visible = false;
     for (const auto& lane : lanes_)
     {
         if (lane.takeLaneId >= 0) continue;
         const float clipHeight = lane.h - ctx().automationHeight(lane.controlIndex);
-        auto* editor = automationEditors_[(size_t) lane.controlIndex];
-        editor->visible = ctx().showsAutomation(lane.controlIndex) && lane.y + lane.h > m.arrangementRulerHeight && lane.y + clipHeight < height();
-        editor->setBounds({0, lane.y + clipHeight - m.arrangementRulerHeight, width(), ui::UiContext::automationLaneHeight});
+        auto& editors = automationEditors_[(size_t) lane.controlIndex];
+        const int count = ctx().showsAutomation(lane.controlIndex) ? ctx().automationLaneCount(lane.controlIndex) : 0;
+        while ((int) editors.size() < count) editors.push_back(laneContainer_->add<AutomationEditor>(lane.controlIndex, (int) editors.size()));
+        for (int k = 0; k < count; ++k)
+        {
+            auto* editor = editors[(size_t) k];
+            const float top = lane.y + clipHeight + (float) k * ui::UiContext::automationLaneHeight;
+            editor->visible = top + ui::UiContext::automationLaneHeight > m.arrangementRulerHeight && top < height();
+            editor->setBounds({0, top - m.arrangementRulerHeight, width(), ui::UiContext::automationLaneHeight});
+        }
         auto* h = headers_[(size_t) lane.controlIndex];
         h->visible = lane.y + lane.h > m.arrangementRulerHeight && lane.y < height();
         h->setBounds({width() - ctx().arrangementHeaderWidth(), lane.y - m.arrangementRulerHeight, ctx().arrangementHeaderWidth(), clipHeight});
@@ -2595,6 +2602,14 @@ bool ArrangementView::keyPressed(const KeyEvent& k)
             if (k.cmd && (k.keyCode == juce::KeyPress::upKey || k.keyCode == juce::KeyPress::downKey))
             { x.statusText = "Cycling comp takes is not implemented"; return true; }
         }
+    }
+    if (! k.cmd && ! k.alt && k.shift && (k.textChar == 'a' || k.textChar == 'A'))
+    {
+        AutomationEditor::toggleAllAutomation(x); // UI-65
+        if (x.automationVisible) takeRange_ = {};
+        layout();
+        repaint();
+        return true;
     }
     if (! k.cmd && ! k.alt && (k.textChar == 'a' || k.textChar == 'A'))
     {

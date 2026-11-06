@@ -7,6 +7,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -19,7 +20,7 @@ namespace sonora::plugins
 // Message thread.
 bool capturePluginInfo(juce::AudioPluginInstance& instance, model::DeviceKind kind, model::PluginInfo& info);
 
-class PluginDevice final : public devices::DeviceProcessor
+class PluginDevice final : public devices::DeviceProcessor, private juce::AudioProcessorListener
 {
 public:
     explicit PluginDevice(std::unique_ptr<juce::AudioPluginInstance> instance);
@@ -38,12 +39,22 @@ public:
     int findParameterByHostId(int id, const std::string& name) const override;
     float getParameter(int index) const override;
     void setParameter(int index, float value) override;
+    bool hostParameter(int index, int& id, std::string& name) const override;
+    uint32_t handEditTotal() const override { return handTotal_.load(std::memory_order_acquire); }
+    HandEdit handEdit(int index) const override;
+    bool takeHandEdit(int index) override;
 
     bool hasEditor() const override;
     juce::AudioPluginInstance& instance() { return *instance_; }
     bool captureState(model::Device& device) const; // message thread, with audio callback suspended
 
 private:
+    // UI-65: edits the plugin reports from its own window (performEdit and gestures); any thread.
+    void audioProcessorParameterChanged(juce::AudioProcessor*, int index, float value) override;
+    void audioProcessorChanged(juce::AudioProcessor*, const ChangeDetails&) override {}
+    void audioProcessorParameterChangeGestureBegin(juce::AudioProcessor*, int index) override;
+    void audioProcessorParameterChangeGestureEnd(juce::AudioProcessor*, int index) override;
+
     std::unique_ptr<juce::AudioPluginInstance> instance_;
     std::vector<devices::ParameterInfo> infos_;
     bool instrument_ = false; // cached: getPluginDescription() allocates
@@ -63,6 +74,18 @@ private:
     // thousands of parameters and the engine resolves every automation target, so a linear scan cost seconds on load.
     mutable std::unordered_map<std::string, int> idToIndex_, nameToIndex_;
     mutable bool lookupBuilt_ = false;
+    // UI-65: per parameter, written by the listener callbacks. `automationSeen_` belongs to the audio thread.
+    struct HandSlot
+    {
+        std::atomic<uint32_t> serial{0};
+        std::atomic<float> value{0.0f}, before{0.0f};
+        std::atomic<bool> gesture{false};
+    };
+    std::unique_ptr<HandSlot[]> hand_;
+    std::unique_ptr<uint32_t[]> automationSeen_;
+    std::vector<int> hostIds_;       // per parameter: the plugin's own id, INT_MIN when it is not automatable
+    std::vector<std::string> names_; // full names
+    std::atomic<uint32_t> handTotal_{0};
 };
 
 } // namespace sonora::plugins

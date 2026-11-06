@@ -1,6 +1,7 @@
 #include "engine/AutomationCapture.h"
 
 #include "core/Edit.h"
+#include "devices/DeviceProcessor.h"
 #include "engine/EngineGraph.h"
 
 #include <algorithm>
@@ -30,6 +31,7 @@ bool hasLane(const model::Track& track, int targetId)
 
 void AutomationCapture::begin()
 {
+    hosted_.clear();
     seen_.clear();
     prevDriven_.clear();
     wasOverridden_.clear();
@@ -108,7 +110,10 @@ void AutomationCapture::poll(const model::Song& song, const EngineGraph& graph, 
             const auto& device = track->devices[d];
             visit(device.enabledTargetId, Kind::DeviceOn, 0, (int) d, proc->isBypassed() ? 0.0 : 1.0);
             if (proc->isHostedPlugin())
-                continue; // plugin parameters change by themselves: not read back
+            {
+                pollHosted(ci, (int) d, *track, device, *proc, beat); // UI-65: edits the plugin reports
+                continue;
+            }
             const auto& infos = proc->parameters();
             for (const auto& p : device.parameters)
             {
@@ -119,6 +124,68 @@ void AutomationCapture::poll(const model::Song& song, const EngineGraph& graph, 
                     visit(p.automationTargetId, Kind::DeviceParam, (int) (info - infos.begin()), (int) d,
                           proc->getParameter((int) (info - infos.begin())));
             }
+        }
+    }
+}
+
+void AutomationCapture::pollHosted(int ci, int slot, const model::Track& track, const model::Device& device,
+                                   const devices::DeviceProcessor& processor, double beat)
+{
+    const int count = (int) processor.parameters().size();
+    auto& state = hosted_[{ci, slot}];
+    const uint32_t total = processor.handEditTotal();
+    if (state.processor != &processor || (int) state.serials.size() != count)
+    {
+        // First look at this instance: what it reported before the recording started is not a touch.
+        state.processor = &processor;
+        state.total = total;
+        state.serials.assign((size_t) count, 0);
+        for (int i = 0; i < count; ++i) state.serials[(size_t) i] = processor.handEdit(i).serial;
+        return;
+    }
+    if (total == state.total)
+        return;
+    state.total = total;
+    std::vector<std::pair<int, devices::DeviceProcessor::HandEdit>> changed;
+    for (int i = 0; i < count; ++i)
+    {
+        const auto edit = processor.handEdit(i);
+        if (edit.serial == state.serials[(size_t) i]) continue;
+        state.serials[(size_t) i] = edit.serial;
+        changed.emplace_back(i, edit);
+    }
+    const auto loose = std::count_if(changed.begin(), changed.end(), [](const auto& c) { return ! c.second.gesture; });
+    if (loose > 8)
+        return; // many parameters at once without a gesture: the plugin loaded a preset or program
+    for (const auto& [index, edit] : changed)
+    {
+        int hostId = -1;
+        std::string name;
+        if (! processor.hostParameter(index, hostId, name))
+            continue;
+        int targetId = -1;
+        for (const auto& p : device.pluginParams)
+            if (p.parameterId == hostId && p.automationTargetId >= 0) { targetId = p.automationTargetId; break; }
+        const Key key{ci, AutomationBinding::Kind::DeviceParam, index, slot};
+        auto& series = series_[key];
+        if (series.points.empty())
+        {
+            series.targetId = targetId;
+            series.hostedPlugin = true;
+            series.hostParameterId = hostId;
+            series.hostParameterName = name;
+            series.before = edit.before;
+            if (targetId >= 0)
+                for (const auto& env : track.automation)
+                    if (env.targetId == targetId && env.points.size() > 1)
+                        series.before = AutomationLane(env).valueAt(beat); // the lane held it until the touch
+            series.lastTime = beat;
+        }
+        if (series.points.empty() || std::fabs(series.last - edit.value) > 1e-12)
+        {
+            series.points.push_back({beat, edit.value});
+            series.last = edit.value;
+            series.lastTime = beat;
         }
     }
 }
@@ -134,15 +201,16 @@ std::vector<AutomationCapture::TouchedEnvelope> AutomationCapture::finish(const 
             continue;
         model::AutomationEnvelope env;
         for (const auto& existing : track->automation)
-            if (existing.targetId == series.targetId)
+            if (series.targetId >= 0 && existing.targetId == series.targetId)
                 env = existing;
-        if (env.targetId < 0)
+        const bool fresh = env.points.empty();
+        if (fresh)
         {
             env.targetId = series.targetId;
             const bool stepped = key.kind == Kind::Active || key.kind == Kind::DeviceOn;
             env.stepped = stepped;
             env.eventType = stepped ? "BoolEvent" : "FloatEvent";
-            if (key.kind == Kind::DeviceParam && (size_t) key.track < graph.nodes.size()
+            if (key.kind == Kind::DeviceParam && ! series.hostedPlugin && (size_t) key.track < graph.nodes.size()
                 && (size_t) key.slot < graph.nodes[(size_t) key.track].processorForModelDevice.size())
                 if (const auto* proc = graph.nodes[(size_t) key.track].processorForModelDevice[(size_t) key.slot])
                     if ((size_t) key.index < proc->parameters().size())
@@ -161,8 +229,10 @@ std::vector<AutomationCapture::TouchedEnvelope> AutomationCapture::finish(const 
             env.points.push_back(p);
         env.points.push_back({last, series.last}); // a touched control holds its value until the take ends
         std::stable_sort(env.points.begin(), env.points.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
-        out.push_back({key.track, std::move(env), key.kind, key.index, key.slot});
+        out.push_back({key.track, std::move(env), key.kind, key.index, key.slot, series.hostedPlugin, series.hostParameterId,
+                       series.hostParameterName});
     }
+    hosted_.clear();
     series_.clear();
     seen_.clear();
     prevDriven_.clear();

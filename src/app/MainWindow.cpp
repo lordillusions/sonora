@@ -12,6 +12,7 @@
 #include "ui/views/TopBar.h"
 #include "ui/views/SessionView.h"
 #include "ui/views/ArrangementView.h"
+#include "ui/views/AutomationEditor.h"
 #include "ui/views/DetailView.h"
 #include "engine/ClipLauncher.h"
 
@@ -75,7 +76,7 @@ enum MenuIds
     InsertAudioTrack, InsertMidiTrack, InsertReturnTrack, CaptureMidi, CaptureAudio, SeparateStems,
     ContinuePlayback, ReturnToStart, SessionRecord, Metronome, BackToArrangement, FollowPlayhead,
     ToggleViews, ShowClip, ShowDevices, ToggleClipDevice, SearchBrowser,
-    ToggleMixer, ToggleIo, ToggleSends, ToggleAutomation, HideGroupedTracks,
+    ToggleMixer, ToggleIo, ToggleSends, ToggleAutomation, ToggleAllAutomation, HideGroupedTracks,
     ZoomUiIn, ZoomUiOut, ZoomUiReset, FullScreen, ComputerKeyboard, BrowserPreview, DrawMode, Overdub,
     SmallerQuant, LargerQuant, ToggleQuant,
     FocusControlBar, FocusBrowser, FocusSession, FocusArrangement, FocusClip, FocusDevices,
@@ -569,6 +570,7 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         m.addSubMenu("Mixer Controls", controls);
         unavailable(m, {"Arrangement Track Controls", "Overview", "Scene Tempo and Time Signature"});
         m.addItem(ToggleAutomation, "Automation Mode    (A)", loaded, ui.showsAutomation(ui.selectedTrack));
+        m.addItem(ToggleAllAutomation, ui.automationVisible ? "Hide All Automation    (Shift+A)" : "Show All Automation    (Shift+A)", loaded);
         m.addItem(HideGroupedTracks, "Hide Grouped Tracks", loaded);
         m.addItem(UnfoldAllGroups, "Show All Grouped Tracks", loaded);
         int hiddenCount = 0;
@@ -932,6 +934,7 @@ void MainWindow::menuItemSelected(int itemId, int)
         case ToggleIo: ui.ioVisible = ! ui.ioVisible; break;
         case ToggleSends: ui.sendsVisible = ! ui.sendsVisible; if (ui.layoutChanged) ui.layoutChanged(); break;
         case ToggleAutomation: ui.toggleAutomationLane(ui.selectedTrack); ui.mainView = ui::MainView::Arrangement; break;
+        case ToggleAllAutomation: ui::AutomationEditor::toggleAllAutomation(ui); break;
         case HideGroupedTracks:
             if (ui.song && ui.applyEdit)
             {

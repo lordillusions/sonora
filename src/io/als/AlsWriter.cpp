@@ -122,6 +122,67 @@ void setManual(XmlElement* param, double v)
 
 // ---------------------------------------------------------------- devices
 
+// UI-65: parameters Sonora put on a plugin's list (model::pluginParameterTarget) get their ParameterId, name and visual
+// position in the slot holding their AutomationTarget, or a new <PluginFloatParameter> laid out like Live's. A new entry's
+// ModulationTarget takes the id after its AutomationTarget (allocated together).
+void patchPluginParameterList(XmlElement* x, const model::Device& d)
+{
+    auto* list = child(x, "ParameterList");
+    for (const auto& stored : d.pluginParams)
+    {
+        if (! stored.slotEdited || stored.automationTargetId < 0)
+            continue;
+        if (list == nullptr) list = x->createNewChildElement("ParameterList");
+        XmlElement* entry = nullptr;
+        int configured = 0, count = 0;
+        for (auto* parameter : list->getChildWithTagNameIterator("PluginFloatParameter"))
+        {
+            ++count;
+            if (const auto* target = at(parameter, "ParameterValue/AutomationTarget");
+                target && target->getIntAttribute("Id", -1) == stored.automationTargetId)
+                entry = parameter;
+            else if (const auto* id = child(parameter, "ParameterId"); id && id->getIntAttribute("Value", -1) != -1)
+                ++configured;
+        }
+        auto leaf = [](XmlElement* parent, const char* tag, const juce::String& value) {
+            auto* e = child(parent, tag);
+            if (e == nullptr) e = parent->createNewChildElement(tag);
+            e->setAttribute("Value", value);
+            return e;
+        };
+        if (entry == nullptr)
+        {
+            entry = list->createNewChildElement("PluginFloatParameter");
+            entry->setAttribute("Id", count);
+            leaf(entry, "ParameterName", {});
+            leaf(entry, "ParameterId", "-1");
+            leaf(entry, "ParameterIdFlankBool", "false");
+            leaf(entry, "VisualIndex", "0");
+            auto* value = entry->createNewChildElement("ParameterValue");
+            leaf(value, "LomId", "0");
+            leaf(value, "Manual", num(stored.value));
+            auto* range = value->createNewChildElement("MidiControllerRange");
+            leaf(range, "Min", "0");
+            leaf(range, "Max", "1");
+            auto* automation = value->createNewChildElement("AutomationTarget");
+            automation->setAttribute("Id", stored.automationTargetId);
+            leaf(automation, "LockEnvelope", "0");
+            auto* modulation = value->createNewChildElement("ModulationTarget");
+            modulation->setAttribute("Id", stored.automationTargetId + 1);
+            leaf(modulation, "LockEnvelope", "0");
+            auto* user = entry->createNewChildElement("LastUserRange");
+            leaf(user, "First", "Invalid");
+            leaf(user, "Last", "Invalid");
+            auto* internal = entry->createNewChildElement("LastInternalRange");
+            leaf(internal, "First", "0");
+            leaf(internal, "Last", "1");
+        }
+        leaf(entry, "ParameterName", juce::String::fromUTF8(stored.name.c_str()));
+        leaf(entry, "ParameterId", juce::String(stored.parameterId));
+        leaf(entry, "VisualIndex", juce::String(configured));
+    }
+}
+
 void patchDevice(XmlElement* x, const model::Device& d)
 {
     if (d.sidechain.edited)
@@ -201,6 +262,8 @@ void patchDevice(XmlElement* x, const model::Device& d)
     if (d.kind == model::DeviceKind::PluginAu && d.plugin && ! d.plugin->state.empty())
         if (auto* preset = at(x, "PluginDesc/AuPluginInfo/Preset/AuPreset"))
             patchBuffer(preset, d.plugin->state);
+    if (d.kind == model::DeviceKind::PluginVst3 || d.kind == model::DeviceKind::PluginVst2 || d.kind == model::DeviceKind::PluginAu)
+        patchPluginParameterList(x, d);
     if (auto* list = child(x, "ParameterList"))
         for (auto* parameter : list->getChildWithTagNameIterator("PluginFloatParameter"))
             if (const auto* id = child(parameter, "ParameterId"))

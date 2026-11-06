@@ -10,7 +10,8 @@
 // control, so faders/knobs follow the automation like in Live. A control that is moved by
 // hand stops following its lane (it is "overridden", the Re-Enable Automation button lights)
 // until engine::reEnableAutomation(): applyAutomation notices that the control no longer holds the
-// value the lane wrote last and keeps its hands off it. Hosted plugin parameters are not read back.
+// value the lane wrote last and keeps its hands off it. Hosted plugin parameters are not read back; their edits in the
+// plugin's own window are reported instead (DeviceProcessor::takeHandEdit, UI-65).
 
 #include "core/Model.h"
 

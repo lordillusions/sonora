@@ -2229,8 +2229,9 @@ TEST_CASE("automation choices: separate device and parameter menus disambiguate 
     ui::RootWidget root(ctx); root.setBounds({0, 0, 900, 70});
     auto* editor = root.add<ui::AutomationEditor>(0); editor->setBounds(root.localBounds());
     auto click = [&](float y) { ui::MouseEvent e; e.x = 900 - ctx.arrangementHeaderWidth() + 20; e.y = y; root.dispatchMouseDown(e); root.dispatchMouseUp(e); };
-    click(10); REQUIRE(labels.size() == 3); CHECK(labels[0] == "Mixer"); CHECK(labels[1] == "1 Utility"); CHECK(labels[2] == "2 Utility");
-    choose(2); click(30); REQUIRE(labels.size() == 2); CHECK(labels[0] == "On"); CHECK(labels[1] == "Gain"); choose(1);
+    click(10); REQUIRE(labels.size() == 4); CHECK(labels[0] == "Mixer"); CHECK(labels[1] == "1 Utility"); CHECK(labels[2] == "2 Utility");
+    CHECK(labels[3] == "Show Automated Parameters Only"); // UI-65
+    choose(2); click(30); REQUIRE(labels.size() == 3); CHECK(labels[0] == "On"); CHECK(labels[1] == "Gain"); choose(1);
     click(30); CHECK(ticks[1]); CHECK(! ticks[0]);
     // Creating a point now writes the second Utility's target, without cycling unrelated targets.
     ui::MouseEvent point; point.x = 160; point.y = 30; point.clicks = 2;

@@ -7,13 +7,24 @@
 // audio thread flagged them as overridden (see Automation.h), so the lane's own movement is never recorded.
 // finish() turns what was touched into envelopes: the recorded points replace the lane between the first touch and the
 // stop, a touched control holds its last value until the recording ends (like Live).
+//
+// Hosted plugins (UI-65) cannot be read back: their parameters are recorded from the edits the plugin reports from its own
+// window (DeviceProcessor::handEdit). A burst of more than a few edits outside a gesture is a preset or program change
+// and is not recorded. A parameter the set does not list yet comes back with targetId -1 and its host id: the caller
+// gives it a target (model::pluginParameterTarget) before storing the envelope.
 
 #include "core/Model.h"
 #include "engine/Automation.h"
 
 #include <map>
+#include <string>
 #include <tuple>
 #include <vector>
+
+namespace sonora::devices
+{
+class DeviceProcessor;
+}
 
 namespace sonora::engine
 {
@@ -34,6 +45,9 @@ public:
         model::AutomationEnvelope envelope;
         AutomationBinding::Kind kind = AutomationBinding::Kind::Volume;
         int index = 0, deviceSlot = 0;
+        bool hostedPlugin = false;  // a plugin parameter: hostParameterId/Name identify it when envelope.targetId < 0
+        int hostParameterId = -1;
+        std::string hostParameterName;
     };
     // The envelopes to store (existing lanes with the recorded stretch replaced) and forget what was captured.
     std::vector<TouchedEnvelope> finish(const model::Song& song, const EngineGraph& graph, double endBeat);
@@ -54,7 +68,19 @@ private:
         int targetId = -1;
         double before = 0.0, last = 0.0, lastTime = 0.0;
         std::vector<model::AutomationPoint> points;
+        bool hostedPlugin = false;
+        int hostParameterId = -1;
+        std::string hostParameterName;
     };
+    struct HostedState
+    {
+        const devices::DeviceProcessor* processor = nullptr;
+        uint32_t total = 0;
+        std::vector<uint32_t> serials;
+    };
+    void pollHosted(int ci, int slot, const model::Track& track, const model::Device& device,
+                    const devices::DeviceProcessor& processor, double beat);
+    std::map<std::pair<int, int>, HostedState> hosted_; // (control index, device slot)
     std::map<Key, double> seen_, prevDriven_;
     std::map<Key, bool> wasOverridden_;
     std::map<Key, Series> series_;

@@ -316,6 +316,9 @@ struct PluginParam
     double value = 0.0;
     int automationTargetId = -1;
     bool valueEdited = false; // AGT-7b: patch only explicit/captured live writes; preserve unsupported imported manuals
+    // UI-65: Sonora put this parameter on the list (a free slot, ParameterId -1, or a new entry): the writer writes its
+    // ParameterId / ParameterName / VisualIndex, and creates the <PluginFloatParameter> when the list has none for it.
+    bool slotEdited = false;
 };
 
 // DEV-18d: immutable native-device content, separate from editable scalar controls.

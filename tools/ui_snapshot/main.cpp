@@ -6,7 +6,7 @@
 //                       [--prefs plugins|midi|display|audio|keys|updates] [--zoom 1.25] [--midimap|--keymap] [--clip TRACK] [--scene N] [--count-in N]
 //                       [--floating-wavetables] [--wavetable-window] [--waveform-zoom FACTOR]
 //                       [--wavetable-browser] [--wavetable-preset NAME] [--wavetable-search TEXT]
-//                       [--collab share|share-wifi|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N]
+//                       [--collab share|share-wifi|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N] [--all-automation]
 //                       [--bench N [--gpu] [--warmup N] [--no-sweep|--device-sweep]]
 //                       [--native-swap-prompt]
 // Benchmarks exclude 20 warm-up frames by default; --warmup 0 includes first-use work.
@@ -65,6 +65,7 @@
 #include "ui/Shortcuts.h"
 #include "ui/views/MainLayout.h"
 #include "ui/views/ArrangementView.h"
+#include "ui/views/AutomationEditor.h"
 #include "ui/views/ClipControls.h"
 #include "ui/views/DetailView.h"
 #include "ui/views/DeviceFace.h"
@@ -176,6 +177,7 @@ int main(int argc, char** argv)
     ui::BrowserTags::Tags browserFilters;
     std::vector<int> selectedTracks;
     bool setView = false;
+    bool allAutomation = false; // UI-65: Shift+A, every automated parameter in its own lane
     struct RecordingState { int track = -1, scene = -1, phase = 0; };
     std::vector<RecordingState> recordingStates;
 
@@ -208,6 +210,8 @@ int main(int argc, char** argv)
         }
         else if (a == "--automation")
             ctx.automationVisible = true;
+        else if (a == "--all-automation")
+            allAutomation = true;
         else if (a == "--automation-track") // one track's automation lane, as the A key shows it (UI-46)
         {
             ctx.automationVisible = true;
@@ -481,6 +485,7 @@ int main(int argc, char** argv)
     ctx.graph = graph.graph.get();
     ctx.buildLog = graph.log;
     if (setView) ui::applySetView(ctx);
+    if (allAutomation) ui::AutomationEditor::toggleAllAutomation(ctx);
     if (trackMenu)
     {
         ctx.applyEdit = [](model::EditCommand) {};

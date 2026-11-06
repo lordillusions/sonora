@@ -1256,6 +1256,84 @@ EditCommand setAutomation(const Song& song, int track, AutomationEnvelope envelo
     return c;
 }
 
+EditCommand clearAutomation(const Song& song, int track, int targetId)
+{
+    EditCommand c;
+    const Track* t = trackAt(song, track);
+    if (t == nullptr || targetId < 0) return c;
+    const auto before = t->automation;
+    auto after = before;
+    std::erase_if(after, [targetId](const AutomationEnvelope& e) { return e.targetId == targetId; });
+    if (after.size() == before.size()) return c;
+    c.label = "Delete Automation";
+    c.tracks = {track};
+    c.apply = [track, after](Song& s) { if (auto* dst = trackAt(s, track)) dst->automation = after; };
+    c.revert = [track, before](Song& s) { if (auto* dst = trackAt(s, track)) dst->automation = before; };
+    return c;
+}
+
+std::vector<int> pluginParameterTargets(const Song& song, int& nextPointeeId, int track, int device,
+                                        const std::vector<PluginParameterRequest>& parameters, EditCommand& command)
+{
+    command = {};
+    std::vector<int> targets(parameters.size(), -1);
+    const auto* t = trackAt(song, track);
+    if (t == nullptr || device < 0 || (size_t) device >= t->devices.size()) return targets;
+    const auto& d = t->devices[(size_t) device];
+    if (d.kind != DeviceKind::PluginVst3 && d.kind != DeviceKind::PluginVst2 && d.kind != DeviceKind::PluginAu) return targets;
+    // A slot is free when nothing on the track points at it.
+    std::set<int> used;
+    for (const auto& env : t->automation) used.insert(env.targetId);
+    auto clipEnvelopes = [&](const Clip& clip) { for (const auto& env : clip.envelopes) used.insert(env.targetId); };
+    for (const auto& clip : t->arrangementClips) clipEnvelopes(clip);
+    for (const auto& slot : t->slots) if (slot.clip) clipEnvelopes(*slot.clip);
+    for (const auto& lane : t->takeLanes) for (const auto& clip : lane.clips) clipEnvelopes(clip);
+    auto after = d.pluginParams;
+    bool added = false;
+    const int firstNew = nextPointeeId;
+    for (size_t i = 0; i < parameters.size(); ++i)
+    {
+        const auto& request = parameters[i];
+        if (request.hostId == -1) continue;
+        const auto listed = std::find_if(after.begin(), after.end(), [&](const PluginParam& p) {
+            return p.parameterId == request.hostId && p.automationTargetId >= 0;
+        });
+        if (listed != after.end()) { targets[i] = listed->automationTargetId; continue; }
+        auto slot = std::find_if(after.begin(), after.end(), [&](const PluginParam& p) {
+            return p.parameterId == -1 && p.automationTargetId >= 0 && ! used.count(p.automationTargetId);
+        });
+        if (slot == after.end())
+        {
+            after.emplace_back();
+            slot = after.end() - 1;
+            slot->automationTargetId = nextPointeeId; // and the next id for the entry's ModulationTarget (AlsWriter)
+            nextPointeeId += 2;
+        }
+        slot->parameterId = request.hostId;
+        slot->name = request.name;
+        slot->value = request.value;
+        slot->slotEdited = true;
+        used.insert(slot->automationTargetId);
+        targets[i] = slot->automationTargetId;
+        added = true;
+    }
+    if (! added) return targets;
+    const auto before = d.pluginParams;
+    const int id = d.id, end = nextPointeeId;
+    command.label = parameters.size() == 1 ? "Automate " + parameters.front().name : "Automate Plug-in Parameters";
+    command.tracks = {track};
+    auto put = [track, device, id](Song& s, const std::vector<PluginParam>& params) {
+        if (auto* x = trackAt(s, track); x && (size_t) device < x->devices.size() && x->devices[(size_t) device].id == id)
+            x->devices[(size_t) device].pluginParams = params;
+    };
+    command.apply = [put, after, end, firstNew](Song& s) {
+        put(s, after);
+        if (end > firstNew) { s.nextPointeeId = std::max(s.nextPointeeId, end); s.pointeeIdsAllocated = true; }
+    };
+    command.revert = [put, before](Song& s) { put(s, before); };
+    return targets;
+}
+
 EditCommand setTrackColor(const Song& song, const std::vector<int>& tracks, int color)
 {
     EditCommand command;

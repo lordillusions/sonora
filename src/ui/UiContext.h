@@ -216,7 +216,20 @@ struct UiContext
         return automationVisible
                && (automationTracks.empty() || std::find(automationTracks.begin(), automationTracks.end(), controlIndex) != automationTracks.end());
     }
-    float automationHeight(int controlIndex) const { return showsAutomation(controlIndex) ? automationLaneHeight : 0.0f; }
+    // UI-65: each track's automation lanes, top to bottom, as the target id each one shows (Live's lanes below the track).
+    // A track without an entry has one lane that picks its own target. Ids below -1 are plugin parameters the set does not
+    // list yet (AutomationEditor::pendingTargetId). Kept while lanes are hidden, like Live keeps them folded.
+    std::map<int, std::vector<int>> automationLaneTargets;
+    bool automationAutomatedOnly = false; // "Show Automated Parameters Only" at the bottom of the lane choosers
+    int automationLaneCount(int controlIndex) const
+    {
+        const auto it = automationLaneTargets.find(controlIndex);
+        return it == automationLaneTargets.end() || it->second.empty() ? 1 : (int) it->second.size();
+    }
+    float automationHeight(int controlIndex) const
+    {
+        return showsAutomation(controlIndex) ? automationLaneHeight * (float) automationLaneCount(controlIndex) : 0.0f;
+    }
     // Shows or hides the automation lane of one track (the A key and View > Automation Mode).
     void toggleAutomationLane(int controlIndex)
     {
@@ -765,5 +778,8 @@ struct UiContext
         return nullptr;
     }
 };
+
+// UI-65: whether the control a widget maps (its midiTarget) drives a parameter with automation (AutomationEditor.cpp).
+bool isControlAutomated(const UiContext& ctx, const midi::ControlTarget& control);
 
 } // namespace sonora::ui

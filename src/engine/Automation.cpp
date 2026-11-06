@@ -184,8 +184,16 @@ void applyAutomation(const std::vector<AutomationBinding>& bindings, TrackContro
         const int key = automationOverrideKey(b.kind, b.index, b.deviceSlot);
         if (key >= 0)
         {
+            // UI-65: a hosted plugin's parameter cannot be read back, but the plugin reports edits made in its window.
+            const bool handEdited = b.hostedPlugin && b.kind == AutomationBinding::Kind::DeviceParam && b.device != nullptr
+                                    && b.device->takeHandEdit(b.index);
             if (isAutomationOverridden(controls, key))
                 continue; // moved by hand: leave it where the user put it
+            if (handEdited && controls.automationWrote.test((size_t) key))
+            {
+                setAutomationOverridden(controls, key, true);
+                continue;
+            }
             double current = 0.0;
             if (controls.automationWrote.test((size_t) key) && readBindingValue(b, controls, current)
                 && std::fabs(current - (double) controls.automationLast[(size_t) key]) > 1e-6 + 1e-4 * std::fabs(current))
@@ -201,6 +209,8 @@ void applyAutomation(const std::vector<AutomationBinding>& bindings, TrackContro
             controls.automationLast[(size_t) key] = (float) written;
             controls.automationWrote.set((size_t) key);
         }
+        else if (key >= 0 && b.hostedPlugin)
+            controls.automationWrote.set((size_t) key); // UI-65: hand edits are reported, not read back
     }
 }
 
