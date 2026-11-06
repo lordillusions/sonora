@@ -372,10 +372,19 @@ struct Device
         int keyMin = 0, keyMax = 127;
         int velMin = 1, velMax = 127;
         int selMin = 0, selMax = 127;
+        int color = -1;    // UI-66: <Color> palette index of the chain (its name field in the chain list), -1 none
+        bool solo = false; // UI-66: <IsSoloed>; while any chain is soloed only soloed chains sound
     };
     std::vector<Chain> chains; // racks only
     std::vector<std::string> macroNames; // racks: MacroDisplayNames.0..15
     int numVisibleMacros = 8;
+    // UI-66: racks' <MacroColor.N> (palette index shading the macro's name header, -1 none) and
+    // <ExcludeMacroFromRandomization.N> (Rand leaves the macro alone).
+    std::array<int, 16> macroColors{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+    std::array<bool, 16> macroNoRandom{};
+    // UI-66: the rack's view switches as the set stores them (<AreMacroControlsVisible>, <IsBranchesListVisible>,
+    // <AreDevicesVisible>, <IsRangesEditorVisible>). The UI copies them into its own view state on first display.
+    bool macrosVisible = true, chainListVisible = false, chainDevicesVisible = false, zonesVisible = false;
 
     // Convenience lookup for native parameters by path; returns fallback when absent.
     double param(const std::string& path, double fallback) const

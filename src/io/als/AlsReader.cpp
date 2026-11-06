@@ -552,6 +552,8 @@ Device readDevice(const XmlElement* x, std::vector<std::string>& warnings)
                 chain.selMin = integer(br, "BranchSelectorRange/Min", 0);
                 chain.selMax = integer(br, "BranchSelectorRange/Max", 127);
                 chain.chokeGroup = integer(br, "BranchInfo/ChokeGroup", 0);
+                chain.color = integer(br, "Color", -1);
+                chain.solo = boolean(br, "IsSoloed", false);
                 if (br->hasTagName("DrumBranch"))
                 {
                     // Inferred encoding: stored value == 128 - MIDI note (92 == C1 == 36). ALS-8.
@@ -566,6 +568,15 @@ Device readDevice(const XmlElement* x, std::vector<std::string>& warnings)
             d.macroNames.push_back(str(x, ("MacroDisplayNames." + juce::String(i)).toRawUTF8(), "Macro " + juce::String(i + 1))
                                        .toStdString());
         d.numVisibleMacros = integer(x, "NumVisibleMacroControls", 8);
+        for (int i = 0; i < 16; ++i)
+        {
+            d.macroColors[(size_t) i] = integer(x, ("MacroColor." + juce::String(i)).toRawUTF8(), -1);
+            d.macroNoRandom[(size_t) i] = boolean(x, ("ExcludeMacroFromRandomization." + juce::String(i)).toRawUTF8(), false);
+        }
+        d.macrosVisible = boolean(x, "AreMacroControlsVisible", true);
+        d.chainListVisible = boolean(x, "IsBranchesListVisible", false);
+        d.chainDevicesVisible = boolean(x, "AreDevicesVisible", false);
+        d.zonesVisible = boolean(x, "IsRangesEditorVisible", false);
     }
     else
     {
@@ -587,6 +598,30 @@ Device readDevice(const XmlElement* x, std::vector<std::string>& warnings)
                     d.plain[key] = value.equalsIgnoreCase("true") ? 1.0 : value.equalsIgnoreCase("false") ? 0.0 : value.getDoubleValue();
                 }
         d.sidechain = readSidechain(x);
+        if (d.type == "InstrumentVector") // DEV-28b: root enum/user leaves and the modulation matrix (docs/ALS_FORMAT.md)
+            for (const auto* leaf : x->getChildIterator())
+            {
+                const auto tag = leaf->getTagName();
+                if (tag == "ModulationConnections")
+                {
+                    int index = 0; // "#n": the n-th connection; the writer addresses the same element
+                    for (const auto* connection : leaf->getChildIterator())
+                    {
+                        for (int source = 0; source < 13; ++source)
+                            if (const auto* amount = connection->getChildByName("ModulationAmounts." + juce::String(source)))
+                                d.plain[(tag + "/" + connection->getTagName() + "#" + juce::String(index) + "/ModulationAmounts."
+                                         + juce::String(source)).toStdString()] = amount->getDoubleAttribute("Value");
+                        ++index;
+                    }
+                }
+                else if (leaf->getNumChildElements() == 0 && leaf->hasAttribute("Value")
+                         && (tag.startsWith("Voice_") || tag.startsWith("UseRawUserWavetable") || tag.endsWith("DisplayMode")
+                             || tag == "MonoPoly" || tag == "PolyVoices" || tag == "HiQ" || tag == "SelectedOscillatorBreakout"))
+                {
+                    const auto value = leaf->getStringAttribute("Value");
+                    d.plain[tag.toStdString()] = value.equalsIgnoreCase("true") ? 1.0 : value.equalsIgnoreCase("false") ? 0.0 : value.getDoubleValue();
+                }
+            }
         if (const auto* state = x->getChildByName("SonoraState"))
         {
             auto content = std::make_shared<NativeContent>();

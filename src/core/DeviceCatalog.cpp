@@ -40,7 +40,7 @@ constexpr std::array kCatalog{
     CatalogEntry{"AutoPan2", "Auto Pan-Tremolo", R::AudioEffect, false},
     CatalogEntry{"Roar", "Roar", R::AudioEffect, false},
     CatalogEntry{"DrumCell", "Drum Sampler", R::Instrument, false},
-    CatalogEntry{"InstrumentVector", "Wavetable", R::Instrument, false},
+    CatalogEntry{"InstrumentVector", "Wavetable", R::Instrument, true},
     CatalogEntry{"MultiSampler", "Sonora Sampler", R::Instrument, true},
     CatalogEntry{"SonoraFm", "Sonora FM", R::Instrument, true},
     CatalogEntry{"SonoraVector", "Sonora Vector", R::Instrument, true},
@@ -50,6 +50,7 @@ constexpr std::array kCatalog{
     CatalogEntry{"SonoraWavetable", "Sonora Prism", R::Instrument, true}, // tag kept: sets saved before the rename
     CatalogEntry{"SonoraLfo", "Sonora LFO", R::AudioEffect, true},
     CatalogEntry{"SonoraCurveLfo", "Sonora Curve LFO", R::AudioEffect, true},
+    CatalogEntry{"SonoraHush", "Sonora Hush", R::AudioEffect, true},
     CatalogEntry{"SonoraVelocity", "Sonora Velocity", R::MidiEffect, true},
     CatalogEntry{"InstrumentGroupDevice", "Sonora Instrument Rack", R::Instrument, true},
     CatalogEntry{"DrumGroupDevice", "Sonora Drum Rack", R::Instrument, true},
@@ -63,7 +64,7 @@ constexpr std::array kCatalog{
     CatalogEntry{"AutoShift", "Auto Shift", R::AudioEffect, false},
     CatalogEntry{"BeatRepeat", "Beat Repeat", R::AudioEffect, false},
     CatalogEntry{"Cabinet", "Cabinet", R::AudioEffect, false},
-    CatalogEntry{"ChannelEq", "Channel EQ", R::AudioEffect, false},
+    CatalogEntry{"ChannelEq", "Channel EQ", R::AudioEffect, true},
     CatalogEntry{"Chorus", "Chorus (Legacy)", R::AudioEffect, false},
     CatalogEntry{"Collision", "Collision", R::Instrument, false},
     CatalogEntry{"Corpus", "Corpus", R::AudioEffect, false},
@@ -148,9 +149,11 @@ std::string_view deviceCategory(const CatalogEntry& entry)
     if (entry.role == DeviceRole::Instrument)
         return tag == "OriginalSimpler" || tag == "MultiSampler" || tag == "SonoraImpulse" ? "Sampling" : "Synthesis";
     if (entry.role == DeviceRole::MidiEffect) return "Note & Velocity";
-    if (tag == "Eq8" || tag == "FilterEQ3" || tag == "AutoFilter" || tag == "AutoFilter2") return "EQ & Filters";
+    if (tag == "Eq8" || tag == "FilterEQ3" || tag == "ChannelEq" || tag == "AutoFilter" || tag == "AutoFilter2") return "EQ & Filters";
     if (tag == "Reverb" || tag == "Delay" || tag == "SonoraEcho") return "Delay & Reverb";
-    if (tag == "Compressor2" || tag == "GlueCompressor" || tag == "Limiter" || tag == "MultibandDynamics" || tag == "Gate") return "Dynamics";
+    if (tag == "Compressor2" || tag == "GlueCompressor" || tag == "Limiter" || tag == "MultibandDynamics" || tag == "Gate"
+        || tag == "SonoraHush")
+        return "Dynamics";
     if (tag == "SonoraLfo" || tag == "SonoraCurveLfo" || tag == "AutoPan" || tag == "AutoPan2") return "Modulation";
     return "Utilities";
 }

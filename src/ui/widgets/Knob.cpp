@@ -152,10 +152,12 @@ void Knob::paint(SkCanvas& c, const Theme& t)
         // marker triangle (7 x 4.5, centred at 17) sits under the label and moves the ring and value 8 units down.
         const bool triangle = marker >= 0 && markerTriangle;
         const float q = r.h / (triangle ? 71.5f : 63.5f), shift = triangle ? 8.0f * q : 0.0f;
-        const bool enabled = ! isEnabled || isEnabled();
+        const bool follows = mapped && mapped();
+        const bool enabled = (! isEnabled || isEnabled()) && ! follows;
         const SkColor ink = t.color(enabled ? "ControlForeground" : "TextDisabled"), cyan = t.color("RangeDefault");
+        const SkColor text = follows ? t.color("ControlForeground") : ink;
         const float size = fontSize > 0 ? fontSize : t.metrics.smallFontSize;
-        if (showLabel) paint::text(c, label_, {r.x, r.y, r.w, 14 * q}, ink, size, Align::Centre);
+        if (showLabel) paint::text(c, label_, {r.x, r.y, r.w, 14 * q}, text, size, Align::Centre);
         const float stroke = deviceStroke * q, d = (36 - deviceStroke) * q; // outside 36 across; d = stroke centre line
         const float cx = r.centreX(), cy = r.y + 31.5f * q + shift;
         const SkRect oval = SkRect::MakeXYWH(cx - d / 2, cy - d / 2, d, d);
@@ -165,22 +167,30 @@ void Knob::paint(SkCanvas& c, const Theme& t)
         pen.setStrokeWidth(stroke);
         pen.setStrokeCap(SkPaint::kButt_Cap);
         pen.setColor(ink);
-        c.drawArc(oval, kStartDeg, kSweepDeg, false, pen);
         const float from = marker >= 0 ? marker : 0.0f;
-        const float sweep = kSweepDeg * std::abs(norm - from);
+        const float slot = marker >= 0 ? markerGap : 0.0f, slotAt = kStartDeg + kSweepDeg * from;
+        if (slot > 0) // two arcs either side of the marker's slot
+        {
+            c.drawArc(oval, kStartDeg, std::max(0.0f, slotAt - slot - kStartDeg), false, pen);
+            c.drawArc(oval, slotAt + slot, std::max(0.0f, kStartDeg + kSweepDeg - slotAt - slot), false, pen);
+        }
+        else
+            c.drawArc(oval, kStartDeg, kSweepDeg, false, pen);
+        const float sweep = std::max(0.0f, kSweepDeg * std::abs(norm - from) - slot);
         if (enabled && sweep > 0.1f)
         {
             pen.setColor(cyan);
-            c.drawArc(oval, kStartDeg + kSweepDeg * std::min(from, norm), sweep, false, pen);
+            c.drawArc(oval, norm >= from ? slotAt + slot : slotAt - slot - sweep, sweep, false, pen);
         }
         if (triangle)
         {
             SkPathBuilder tri;
             const float ty = r.y + 17.0f * q;
-            tri.moveTo(cx - 3.5f * q, ty - 2.25f * q).lineTo(cx + 3.5f * q, ty - 2.25f * q).lineTo(cx, ty + 2.25f * q).close();
+            const float half = markerWidth * 0.5f * q;
+            tri.moveTo(cx - half, ty - 2.25f * q).lineTo(cx + half, ty - 2.25f * q).lineTo(cx, ty + 2.25f * q).close();
             SkPaint fill;
             fill.setAntiAlias(true);
-            fill.setColor(enabled && sweep > 0.1f ? cyan : ink);
+            fill.setColor(follows ? t.color("ControlTextBack") : enabled && sweep > 0.1f ? cyan : ink);
             c.drawPath(tri.detach(), fill);
         }
         const float angle = (kStartDeg + kSweepDeg * norm) * (float) M_PI / 180.0f;
@@ -189,8 +199,22 @@ void Knob::paint(SkCanvas& c, const Theme& t)
         const float reach = d / 2 + stroke * 0.5f;
         c.drawLine(cx, cy, cx + std::cos(angle) * reach, cy + std::sin(angle) * reach, pen);
         if (showValue)
-            paint::text(c, src_.format ? src_.format(value) : std::to_string(value), {r.x, r.y + 49.5f * q + shift, r.w, 14 * q}, ink,
+            paint::text(c, src_.format ? src_.format(value) : std::to_string(value), {r.x, r.y + 49.5f * q + shift, r.w, 14 * q}, text,
                         size, Align::Centre);
+        if (follows) // the macro mark: measured 15 x 14.3 units up-left of the ring centre, 3.1 across with a dark rim
+        {
+            if (slot > 0) // a light square in the marker's slot
+            {
+                const float a = slotAt * (float) M_PI / 180.0f, side = stroke * 0.9f;
+                paint::fill(c, {cx + std::cos(a) * d / 2 - side / 2, cy + std::sin(a) * d / 2 - side / 2, side, side}, t.color("ControlTextBack"));
+            }
+            SkPaint dot;
+            dot.setAntiAlias(true);
+            dot.setColor(t.color("ControlForeground"));
+            c.drawCircle(cx - 15.1f * q, cy - 14.3f * q, 3.8f * q, dot);
+            dot.setColor(t.color("MacroAssignment"));
+            c.drawCircle(cx - 15.1f * q, cy - 14.3f * q, 3.0f * q, dot);
+        }
         return;
     }
 
@@ -245,7 +269,7 @@ void Knob::paint(SkCanvas& c, const Theme& t)
 
 bool Knob::keyPressed(const KeyEvent& key)
 {
-    if (key.cmd || key.alt || key.ctrl || ! src_.set) return false;
+    if (key.cmd || key.alt || key.ctrl || ! src_.set || (mapped && mapped())) return false;
     if (key.keyCode == juce::KeyPress::deleteKey || key.keyCode == juce::KeyPress::backspaceKey)
         src_.set(src_.defaultValue);
     else if (key.keyCode == juce::KeyPress::upKey || key.keyCode == juce::KeyPress::downKey)
@@ -282,7 +306,7 @@ void Knob::mouseUp(const MouseEvent& e)
 
 void Knob::mouseDrag(const MouseEvent& e)
 {
-    if (e.right || labelPressed_) return;
+    if (e.right || labelPressed_ || (mapped && mapped())) return;
     const float sensitivity = e.shift ? 1000.0f : 200.0f; // pixels for full range
     const float n = dragStartNorm_ + (dragStartY_ - e.y) / sensitivity;
     if (src_.set)
@@ -293,14 +317,14 @@ void Knob::mouseDrag(const MouseEvent& e)
 void Knob::mouseDoubleClick(const MouseEvent& event)
 {
     if (event.right) { mouseDown(event); return; }
-    if (src_.set)
+    if (src_.set && ! (mapped && mapped()))
         src_.set(src_.defaultValue);
     repaint();
 }
 
 bool Knob::mouseWheel(const MouseEvent& e)
 {
-    if (! src_.set || ! src_.get)
+    if (! src_.set || ! src_.get || (mapped && mapped()))
         return false;
     if (std::abs(e.wheelDeltaX) > std::abs(e.wheelDeltaY))
         return false; // a sideways swipe over a knob scrolls the device chain, it does not turn the knob

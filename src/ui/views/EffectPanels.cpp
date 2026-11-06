@@ -33,7 +33,7 @@ std::string parameterText(Processor* p, int index)
     if (! info.choices.empty()) return info.choices[(size_t) std::clamp((int) std::lround(v), 0, (int) info.choices.size() - 1)];
     if (dynamic_cast<R*>(p))
     {
-        if (index == R::Diffusion || index == R::Scale) return number(v * 100, "%.0f %%");
+        if (index == R::Diffusion || index == R::Scale || index == R::MixDirect) return number(v * 100, "%.0f %%"); // "14 %" (UI-66)
         if (index == R::Shape) return number(v, "%.2f");
     }
     if (info.unit == "Hz") return v >= 1000 ? number(v / 1000, "%.2f kHz") : number(v, v < 10 ? "%.2f Hz" : "%.0f Hz");
@@ -363,4 +363,6 @@ void EffectPanel::paint(SkCanvas& c, const Theme& t)
         paint::line(c, 435 * sx, 0, 435 * sx, height(), t.color("ControlContrastFrame"));
     }
 }
+std::string effectParameterText(devices::DeviceProcessor* processor, int index) { return parameterText(processor, index); }
+
 } // namespace sonora::ui

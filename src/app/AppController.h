@@ -238,6 +238,10 @@ private:
     void closeWavetableWindow(const ui::UiContext::WavetableKey&);
     void closeWavetableWindows();
     void followWavetableIds(); // device edits give track-level devices fresh ids: placements and windows follow
+    void openHushWindow(const ui::UiContext::WavetableKey&); // PLG-14g (AppHushWindow.cpp)
+    void closeHushWindows();
+    void syncHushWindows();
+    void renameHushWindows(model::TrackId track, int oldId, int newId);
     void openInsertedWavetable(model::TrackId track, int deviceId, int childIdFrom);
     std::map<model::TrackId, std::vector<int>> deviceIdsBeforeEdit_; // ui::DeviceIdsByTrack
     void refreshPluginNames();
@@ -346,6 +350,7 @@ private:
     std::unique_ptr<juce::FileChooser> chooser_;
     juce::OwnedArray<juce::DocumentWindow> pluginWindows_;
     juce::OwnedArray<juce::DocumentWindow> wavetableWindows_; // UI-27, survive device edits (unlike pluginWindows_)
+    juce::OwnedArray<juce::DocumentWindow> hushWindows_;      // PLG-14g, like wavetableWindows_
     juce::ThreadPool pool_{juce::ThreadPoolOptions{}.withNumberOfThreads(2)};
     std::unique_ptr<juce::PropertiesFile> settings_;
     std::atomic<bool> scanning_{false};

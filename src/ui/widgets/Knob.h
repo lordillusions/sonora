@@ -43,11 +43,17 @@ public:
     float marker = -1; // Ring / Device: normalized origin of the value arc, marked by a triangle; < 0 = arc from the start
     bool markerTriangle = true; // Device: draw the triangle above the ring (the reference's EQ gain), or only start the arc there
     float deviceStroke = 3.0f; // Device: ring thickness in knob units (Auto Filter's large Freq knob is thinner: 2.45)
+    // Device: the ring leaves a slot of +-markerGap degrees at the marker, and the triangle's width in knob units (DEV-30:
+    // the reference's Channel EQ capture shows a 16-degree slot and a 9.5-unit triangle; the UI-42 faces keep 0 / 7).
+    float markerGap = 0.0f, markerWidth = 7.0f;
     std::function<void()> onLabelClick; // Ring: a click on the label (e.g. Width <-> Mid/Side) instead of a drag
     void setLabel(std::string label) { label_ = std::move(label); }
     bool showLabel = true;
     bool showValue = true;
     std::function<bool()> isEnabled; // Compact / Device: drawn without the value arc when false (Device also ignores input)
+    // Device: the parameter follows a rack macro (DEV-30, as the reference draws it): grey ring and needle, no value arc,
+    // a light marker triangle and a green dot at the upper left; hand edits are ignored (the macro owns the value).
+    std::function<bool()> mapped;
     std::function<void()> onRightClick;
 
 private:

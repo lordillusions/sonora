@@ -148,6 +148,7 @@ AppController::AppController() : engine_(host_, midi_)
     ui_.wavetableFloatingDefault = true; // UI-27: the dashboard opens in its own window unless docked by hand
     ui_.openWavetableWindow = [this](const ui::UiContext::WavetableKey& key) { openWavetableWindow(key); };
     ui_.closeWavetableWindow = [this](const ui::UiContext::WavetableKey& key) { closeWavetableWindow(key); };
+    ui_.openHushWindow = [this](const ui::UiContext::WavetableKey& key) { openHushWindow(key); };
     auto launchQuant = [this] {
         return song_ ? engine::quantisationBeats(song_->globalQuantisation, song_->timeSigNumerator, song_->timeSigDenominator) : 0.0;
     };
@@ -273,6 +274,7 @@ AppController::AppController() : engine_(host_, midi_)
         { (*controls)[(size_t) track].armed.store(armed); ensureAudioInputs(); }
     };
     ui_.applyEdit = [this](model::EditCommand c) { applyEdit(std::move(c)); };
+    ui_.capturePluginStates = [this] { syncModelFromEngine(); }; // PLG-16f: live plug-in states before a swap
     engine_.beforeReprepare = [this] { beginDeviceEdit(); };
     engine_.afterReprepare = [this] { afterEdit({}, false, true); };
     ui_.undo = [this] { undo(); };
@@ -796,6 +798,8 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     ui_.selectedClipTrack = ui_.selectedClipUid = ui_.selectedClipScene = ui_.selectedTakeLane = -1;
     ui_.unfoldedTakeTracks.clear();
     ui_.drumPadBanks.clear();
+    ui_.rackViews.clear();
+    ui_.rackMapId = -1;
     ui_.wavetableFxViews.clear();
     ui_.wavetableModulationViews.clear();
     ui_.wavetableRoutingViews.clear();
@@ -2466,6 +2470,8 @@ void AppController::editDeviceIf(int trackIndex, int index, const std::function<
     device.id = -1; // a structural edit needs a fresh processor, preserving the rest of the track
     model::allocateDeviceIds(*song_, device);
     if (const auto bank = ui_.drumPadBanks.find(oldId); bank != ui_.drumPadBanks.end()) ui_.drumPadBanks[device.id] = bank->second;
+    if (const auto view = ui_.rackViews.find(oldId); view != ui_.rackViews.end()) ui_.rackViews[device.id] = view->second; // UI-66
+    if (ui_.rackMapId == oldId) ui_.rackMapId = device.id;
     if (const auto view = ui_.wavetableFxViews.find(oldId); view != ui_.wavetableFxViews.end())
         ui_.wavetableFxViews[device.id] = view->second;
     if (const auto view = ui_.wavetableModulationViews.find(oldId); view != ui_.wavetableModulationViews.end())
@@ -2998,12 +3004,14 @@ void AppController::closeWavetableWindow(const ui::UiContext::WavetableKey& key)
 void AppController::closeWavetableWindows()
 {
     wavetableWindows_.clear();
+    closeHushWindows(); // the built-in Hush's windows follow the same lifetime (PLG-14g)
 }
 
 void AppController::syncWavetableWindows()
 {
     for (auto* window : wavetableWindows_)
         if (window->isVisible()) static_cast<WavetableWindow*>(window)->sync();
+    syncHushWindows();
 }
 
 void AppController::followWavetableIds()
@@ -3013,6 +3021,7 @@ void AppController::followWavetableIds()
     for (const auto& replaced : ui::replacedDevices(deviceIdsBeforeEdit_, *song_))
     {
         ui_.renameWavetableDevice(replaced.track, replaced.oldId, replaced.newId);
+        renameHushWindows(replaced.track, replaced.oldId, replaced.newId);
         for (auto* window : wavetableWindows_)
             if (auto* w = static_cast<WavetableWindow*>(window); w->key().trackId == replaced.track && w->key().deviceId == replaced.oldId)
             {

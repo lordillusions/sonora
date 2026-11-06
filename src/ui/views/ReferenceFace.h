@@ -120,4 +120,9 @@ void titleIcon(SkCanvas&, TitleIcon, float cx, float cy, float diameter, SkColor
 ReferenceFace* addReferenceFace(Widget& parent, const model::Device&, devices::DeviceProcessor*, ReferenceFace::Tag tag);
 // Auto Filter (`AutoFilter2`) face, AutoFilterFace.cpp; nullptr for any other processor.
 ReferenceFace* addAutoFilterFace(Widget& parent, devices::DeviceProcessor*, ReferenceFace::Tag tag);
+// Wavetable (`InstrumentVector`, DEV-28b) face, WavetableFace.cpp; also adds its title tabs to `parent` (the device box).
+ReferenceFace* addWavetableFace(Widget& parent, const model::Device&, devices::DeviceProcessor*, ReferenceFace::Tag tag);
+// Channel EQ (`ChannelEq`, DEV-30) face, ChannelEqFace.cpp; nullptr for any other processor. `model` marks the knobs that
+// follow a rack macro.
+ReferenceFace* addChannelEqFace(Widget& parent, const model::Device& model, devices::DeviceProcessor*, ReferenceFace::Tag tag);
 } // namespace sonora::ui

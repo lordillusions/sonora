@@ -2,10 +2,15 @@
 
 #include "ui/Widget.h"
 
+#include <string>
+
 namespace sonora::devices { class DeviceProcessor; }
 
 namespace sonora::ui
 {
+// A Delay / Reverb parameter's value text as these faces show it (rack macros reuse it, UI-66).
+std::string effectParameterText(devices::DeviceProcessor*, int index);
+
 // Dedicated compact Delay/Reverb faces. Controls bind to the existing processors.
 class EffectPanel : public Widget
 {

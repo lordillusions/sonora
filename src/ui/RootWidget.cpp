@@ -151,6 +151,21 @@ void RootWidget::dispatchMouseUp(MouseEvent e)
     if (captured_ != nullptr && captured_ != this)
         captured_->mouseUp(localise(e, capturedOrigin_));
     captured_ = nullptr;
+    refreshCursor(e);
+}
+
+void RootWidget::refreshCursor(MouseEvent e)
+{
+    // After a gesture the pointer shape follows what is under the mouse again (a scrub or drag no longer holds it).
+    float lx = 0, ly = 0;
+    auto* w = findAt(e.x, e.y, lx, ly);
+    if (w != nullptr && w != this && isAlive(w))
+    {
+        const auto local = localise(e, w->boundsInRoot());
+        cursor_ = w->cursorAt(local.x, local.y);
+    }
+    else
+        cursor_ = Cursor::Default;
 }
 
 void RootWidget::dropBrowserPayload(BrowserDrag payload, const MouseEvent& e)

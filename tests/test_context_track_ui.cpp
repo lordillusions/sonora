@@ -177,6 +177,8 @@ TEST_CASE("audio gestures: fade diamond drags, title-bar edge resize cursor and 
     const auto lane = rig.arrangement->lanes()[2];
     CHECK(rig.arrangement->cursorAt(493, lane.y + 6) == ui::Cursor::ResizeHorizontal); // UI-45: edges in the title bar
     CHECK(rig.arrangement->cursorAt(493, lane.y + 35) != ui::Cursor::ResizeHorizontal); // the body selects time
+    CHECK(rig.arrangement->cursorAt(250, lane.y + 6) == ui::Cursor::Move);   // the rest of the title bar: the hand
+    CHECK(rig.arrangement->cursorAt(250, lane.y + 35) == ui::Cursor::Default); // the body: the arrow
     // The diamond is halfway through a two-beat fade, at the displayed curve's gain.
     ui::MouseEvent e; e.x = 400; e.y = lane.y + 13 + (lane.h - 15) * 0.25f;
     rig.arrangement->mouseDown(e); e.y += 20; rig.arrangement->mouseDrag(e); rig.arrangement->mouseUp(e);
@@ -314,20 +316,29 @@ TEST_CASE("arrangement A key: shows the automation lane of the selected track on
     CHECK(! rig.ctx.automationVisible); CHECK_NEAR(height(1), plain1, 1e-3);
 }
 
-TEST_CASE("arrangement loop brace: resize cursor on its ends, move cursor on its body (UI-45), speaker cursor on the scrub area")
+TEST_CASE("arrangement ruler: zoom on the numbers, resize over the loop brace row, speaker on the scrub area, arrow after a scrub")
 {
     MenuRig rig; rig.ctx.mainView = ui::MainView::Arrangement; rig.ctx.pixelsPerBeat = 20; rig.ctx.scrollBeats = 0;
     engine::Transport transport; transport.setLoop(true, 4, 8); transport.beginBlock();
     rig.ctx.transport = &transport; rig.root->layout();
-    const float y = rig.ctx.theme.metrics.arrangementRulerHeight - 5; // the brace strip at the bottom of the ruler
+    const float y = ui::ArrangementView::kBraceRowTop + 6; // the loop brace has its own row above the locators
+    const float locatorRow = ui::ArrangementView::kLocatorRowTop + 6;
+    const float lanes = rig.ctx.theme.metrics.arrangementRulerHeight + 30;
     CHECK(rig.arrangement->cursorAt(4 * 20 + 1, y) == ui::Cursor::ResizeHorizontal);
     CHECK(rig.arrangement->cursorAt(12 * 20 - 1, y) == ui::Cursor::ResizeHorizontal);
-    CHECK(rig.arrangement->cursorAt(8 * 20, y) == ui::Cursor::Move);
+    CHECK(rig.arrangement->cursorAt(8 * 20, y) == ui::Cursor::ResizeHorizontal); // the whole brace (owner request)
+    CHECK(rig.arrangement->cursorAt(8 * 20, locatorRow) == ui::Cursor::Scrub); // under the brace: the locator row, no brace
     CHECK(rig.arrangement->cursorAt(8 * 20, 24) == ui::Cursor::Zoom);  // the numbers row is the beat-time ruler (UI-62)
-    CHECK(rig.arrangement->cursorAt(8 * 20, 33) == ui::Cursor::Scrub); // below it, above the brace: the scrub area
     CHECK(rig.arrangement->cursorAt(8 * 20, 8) == ui::Cursor::Default); // the overview strip above it
-    CHECK(rig.arrangement->cursorAt(20 * 20, y) == ui::Cursor::Scrub);  // the brace strip outside the brace too
-    CHECK(rig.arrangement->cursorAt(8 * 20, rig.ctx.theme.metrics.arrangementRulerHeight + 30) != ui::Cursor::Scrub);
+    CHECK(rig.arrangement->cursorAt(20 * 20, y) == ui::Cursor::Scrub);  // the brace row outside the brace too
+    CHECK(rig.arrangement->cursorAt(8 * 20, lanes) == ui::Cursor::Default);
+    // A click in the scrub area plays from there; once released, the lanes show the arrow again (it used to stay the speaker).
+    ui::MouseEvent click; click.x = 20 * 20; click.y = locatorRow;
+    rig.arrangement->mouseDown(click);
+    CHECK(rig.arrangement->cursorAt(8 * 20, lanes) == ui::Cursor::Scrub); // while the scrub is held
+    rig.arrangement->mouseUp(click);
+    CHECK(rig.arrangement->cursorAt(8 * 20, lanes) == ui::Cursor::Default);
+    CHECK(rig.arrangement->cursorAt(8 * 20, 24) == ui::Cursor::Zoom);
 }
 
 TEST_CASE("arrangement Follow: scrolling away while playing pauses it; the scrub area or a new start resumes it (UI-53)")
@@ -346,7 +357,7 @@ TEST_CASE("arrangement Follow: scrolling away while playing pauses it; the scrub
     const double looked = rig.ctx.scrollBeats;
     moveTo(800); CHECK_NEAR(rig.ctx.scrollBeats, looked, 1e-9); // no pulling back to the playhead
 
-    ui::MouseEvent click; click.x = 100; click.y = 33; // the scrub area (below the numbers, UI-62)
+    ui::MouseEvent click; click.x = 100; click.y = ui::ArrangementView::kLocatorRowTop + 6; // the scrub area (UI-62)
     rig.arrangement->mouseDown(click); rig.arrangement->mouseUp(click);
     CHECK(! rig.ctx.followPaused);
 
@@ -390,4 +401,32 @@ TEST_CASE("arrangement clip move: dragging an audio clip onto a MIDI track says 
     rig.arrangement->mouseUp(e);
     CHECK(rig.song->tracks[(size_t) audio].arrangementClips.size() == 1);
     CHECK(rig.song->tracks[(size_t) midi].arrangementClips.empty());
+}
+
+#include "ui/views/InputControls.h"
+
+TEST_CASE("arrangement track header: the rows of I/O and mixer controls follow the lane height, like the reference")
+{
+    MenuRig rig; rig.ctx.mainView = ui::MainView::Arrangement; rig.ctx.ioVisible = true;
+    std::vector<ui::InputControls*> inputs;
+    auto rowsAt = [&](float height) {
+        rig.ctx.laneHeights.assign((size_t) rig.ctx.numControlTracks(), height); rig.root->layout();
+        inputs.clear();
+        auto find = [&](const ui::Widget& widget, auto&& self) -> void {
+            for (const auto& child : widget.children())
+            {
+                if (auto* in = dynamic_cast<ui::InputControls*>(child.get())) inputs.push_back(in);
+                self(*child, self);
+            }
+        };
+        find(*rig.arrangement, find);
+        REQUIRE(! inputs.empty());
+        return inputs.front()->rowCount();
+    };
+    CHECK(rowsAt(18) == 1);  // folded: one centred row
+    CHECK(rowsAt(36) == 2);  // the reference's small height: two rows
+    CHECK(rowsAt(70) == 4);  // four rows (input with the type grip, monitor, output type and channel)
+    CHECK(rowsAt(87) == 5);  // Sonora's default: every I/O row
+    CHECK(rowsAt(200) == 5);
+    for (auto* in : inputs) CHECK(in->visible);
 }

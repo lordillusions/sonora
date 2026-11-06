@@ -16,6 +16,14 @@ RackProcessor::RackProcessor(std::string displayName, bool instrument, bool isDr
     for (auto& v : values_)
         v.store(0.0f);
     chainMidi_.resize(chains_.size());
+    mix_ = std::make_unique<ChainMix[]>(chains_.size());
+    for (size_t i = 0; i < chains_.size(); ++i)
+    {
+        mix_[i].volume.store(chains_[i].volume);
+        mix_[i].pan.store(chains_[i].pan);
+        mix_[i].active.store(chains_[i].active);
+        mix_[i].solo.store(chains_[i].solo);
+    }
 }
 
 void RackProcessor::setMacros(const std::vector<std::string>& names, const std::array<float, kNumMacros>& defaults,
@@ -68,7 +76,11 @@ void RackProcessor::applyMacro(int macro)
             continue;
         const auto& info = l.target->parameters()[(size_t) l.paramIndex];
         float v;
-        if (info.unit == "Hz" && l.min > 0.0f && l.max > 0.0f)
+        // Times move on a log scale too (UI-66: the reference's Release macro at 93.4 of 1..6000 ms reads 600 ms).
+        // A linear gain with a positive floor is a dB knob (Channel EQ, DEV-30: the piano rack's Tone macro at 72 of
+        // 127 between 0.18 and 5.6 reads +2.0 dB in the reference): it moves on the same log (= dB-linear) law.
+        const bool decibels = info.unit == "lin" && info.minValue > 0.0f;
+        if ((info.unit == "Hz" || info.unit == "ms" || info.unit == "s" || decibels) && l.min > 0.0f && l.max > 0.0f)
             v = l.min * std::pow(l.max / l.min, norm);
         else
             v = l.min + (l.max - l.min) * norm;
@@ -189,12 +201,17 @@ void RackProcessor::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& m
         }
     }
 
-    // 2) Run the chains and sum them.
+    // 2) Run the chains and sum them. While any chain is soloed only soloed chains sound (UI-66).
     sum_.clear(0, n);
+    bool anySolo = false;
+    for (size_t ci = 0; ci < chains_.size(); ++ci)
+        anySolo = anySolo || mix_[ci].solo.load(std::memory_order_relaxed);
     for (size_t ci = 0; ci < chains_.size(); ++ci)
     {
         auto& chain = chains_[ci];
-        if (! chain.active || ! chainSelected(chain, selector))
+        auto& mix = mix_[ci];
+        if (! mix.active.load(std::memory_order_relaxed) || (anySolo && ! mix.solo.load(std::memory_order_relaxed))
+            || ! chainSelected(chain, selector))
         {
             chain.alignDelay.pushSilence(n);
             continue;
@@ -217,10 +234,15 @@ void RackProcessor::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& m
         }
         chain.alignDelay.processInPlace(scratch_, n);
 
-        const float gl = chain.volume * juce::jmin(1.0f, 1.0f - chain.pan);
-        const float gr = chain.volume * juce::jmin(1.0f, 1.0f + chain.pan);
+        const float volume = mix.volume.load(std::memory_order_relaxed), pan = mix.pan.load(std::memory_order_relaxed);
+        const float gl = volume * juce::jmin(1.0f, 1.0f - pan);
+        const float gr = volume * juce::jmin(1.0f, 1.0f + pan);
         sum_.addFrom(0, 0, scratch_, 0, 0, n, gl);
         sum_.addFrom(1, 0, scratch_, 1, 0, n, gr);
+        juce::AudioBuffer<float> chainOut(scratch_.getArrayOfWritePointers(), 2, n);
+        chainOut.applyGain(0, 0, n, gl);
+        chainOut.applyGain(1, 0, n, gr);
+        mix.meter.measure(chainOut, n); // post-fader, like the reference's chain meter
     }
 
     for (int ch = 0; ch < 2; ++ch)

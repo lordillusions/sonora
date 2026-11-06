@@ -25,7 +25,7 @@
 namespace sonora::devices
 {
 
-class Hush final : public NativeDevice
+class Hush : public NativeDevice // HushDevice (HushSession.h) adds the face's session
 {
 public:
     enum Param
@@ -88,6 +88,7 @@ public:
     // Latency for a configuration (the plug-in tells the host when it changes).
     static int latencyFor(double sampleRate, bool linearPhase, bool lowLatency);
     int currentLatency() const; // from the current parameter values
+    double sampleRate() const { return sampleRate_; }
     // Settings shared by every instance: quality forced while rendering offline (-1 = none), low latency for all.
     void setOverrides(int quality, bool lowLatency);
     bool lowLatencyActive() const;

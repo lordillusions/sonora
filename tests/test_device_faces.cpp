@@ -17,6 +17,7 @@
 #include "devices/native/EqEight.h"
 #include "devices/native/Limiter.h"
 #include "devices/native/Bands.h"
+#include "devices/native/ChannelEq.h"
 #include "ui/views/NativeEditors.h"
 #include "ui/views/MainLayout.h"
 #include "ui/views/BrowserPanel.h"
@@ -28,6 +29,8 @@
 #include "io/als/AlsReader.h"
 #include "io/als/AlsWriter.h"
 #include "io/als/AlsTemplates.h"
+#include "ui/Theme.h"
+#include "include/core/SkSurface.h"
 
 using namespace sonora;
 namespace
@@ -379,20 +382,23 @@ ui::ReferenceFace* referenceFace(ui::RootWidget& root, const model::Device& mode
 }
 }
 
-TEST_CASE("device faces: Live 12 reference faces exist for EQ Eight, EQ Three, Compressor, Limiter and Auto Filter only")
+TEST_CASE("device faces: Live 12 reference faces exist for EQ Eight, EQ Three, Compressor, Limiter, Auto Filter and Channel EQ only")
 {
-    for (const auto* type : {"Eq8", "FilterEQ3", "Compressor2", "Limiter", "AutoFilter2", "AutoFilter", "GlueCompressor", "Reverb", "SonoraFm"})
+    for (const auto* type : {"Eq8", "FilterEQ3", "Compressor2", "Limiter", "AutoFilter2", "ChannelEq", "AutoFilter", "GlueCompressor", "Reverb", "SonoraFm"})
     {
         auto model = devices::nativeDeviceModel(type); devices::BuildContext build; auto processor = devices::createDevice(model, build);
         REQUIRE(processor);
         ui::UiContext context; ui::RootWidget root(context);
         auto* face = ui::addReferenceFace(root, model, processor.get(), {});
         const std::string name = type;
-        CHECK((face != nullptr) == (name == "Eq8" || name == "FilterEQ3" || name == "Compressor2" || name == "Limiter" || name == "AutoFilter2"));
+        CHECK((face != nullptr) == (name == "Eq8" || name == "FilterEQ3" || name == "Compressor2" || name == "Limiter" || name == "AutoFilter2"
+                                    || name == "ChannelEq"));
         if (! face) continue;
         // Widths are the capture's device widths (Compressor with its sidechain section folded), scaled with the body.
         // Auto Filter's capture is at another zoom: 886 wide for a 342-px body (UI-43b).
-        const float expected = name == "Eq8" ? 675 : name == "FilterEQ3" ? 210 : name == "Compressor2" ? 574 : name == "Limiter" ? 397 : 886 * 239 / 342.0f;
+        // Channel EQ (DEV-30): 290 wide for a 198-px body.
+        const float expected = name == "Eq8" ? 675 : name == "FilterEQ3" ? 210 : name == "Compressor2" ? 574 : name == "Limiter" ? 397
+                             : name == "ChannelEq" ? 290 * 239 / 198.0f : 886 * 239 / 342.0f;
         CHECK_NEAR(face->preferredWidth(239), expected, 0.01);
         CHECK_NEAR(face->preferredWidth(119.5f), expected / 2, 0.01);
     }
@@ -400,7 +406,7 @@ TEST_CASE("device faces: Live 12 reference faces exist for EQ Eight, EQ Three, C
 
 TEST_CASE("device faces: reference faces reach every shown parameter, inside the face, with MIDI targets")
 {
-    for (const auto* type : {"Eq8", "FilterEQ3", "Compressor2", "Limiter", "AutoFilter2"})
+    for (const auto* type : {"Eq8", "FilterEQ3", "Compressor2", "Limiter", "AutoFilter2", "ChannelEq"})
     {
         auto model = devices::nativeDeviceModel(type); devices::BuildContext build; auto processor = devices::createDevice(model, build);
         ui::UiContext context; ui::RootWidget root(context);
@@ -680,4 +686,47 @@ TEST_CASE("device faces: Limiter ceiling drag uses the written scale; EQ Three s
         auto k = localEvent(knobs[0]->boundsInRoot()); root.dispatchMouseDown(k); k.y += 400; root.dispatchMouseDrag(k); root.dispatchMouseUp(k);
         CHECK_NEAR(processor->getParameter(Q::GainLow), 0, 0);
     }
+}
+
+TEST_CASE("device faces: Channel EQ switch, frequency readout, knobs and macro-mapped shelves (DEV-30)")
+{
+    using C = devices::ChannelEq;
+    auto model = devices::nativeDeviceModel("ChannelEq");
+    for (auto& p : model.parameters) // the piano rack's Tone macro drives both shelves
+        if (p.path == "LowShelfGain" || p.path == "HighShelfGain") { p.macroIndex = 6; p.rangeMin = 0.18; p.rangeMax = 5.6; }
+    devices::BuildContext build; auto processor = devices::createDevice(model, build);
+    ui::UiContext context; ui::RootWidget root(context);
+    auto* face = referenceFace(root, model, processor.get(), [&](auto* widget, int parameter) { tagControl(widget, parameter, processor.get()); });
+    // HP 80 Hz key (capture x 1076.5..1101.5, y 133.5..150) toggles the high-pass.
+    click(root, localEvent(face->at(1076.5f, 133.5f, 1101.5f, 150)));
+    CHECK_NEAR(processor->getParameter(C::HighpassOn), 1, 0);
+    click(root, localEvent(face->at(1076.5f, 133.5f, 1101.5f, 150)));
+    CHECK_NEAR(processor->getParameter(C::HighpassOn), 0, 0);
+    // The readout drags the Mid frequency on its log law; a double click returns to 1.5 kHz.
+    auto readout = localEvent(face->at(1136, 133.5f, 1201, 150));
+    auto drag = readout;
+    root.dispatchMouseDown(drag); drag.y -= 50; root.dispatchMouseDrag(drag); root.dispatchMouseUp(drag);
+    CHECK_NEAR(processor->getParameter(C::MidFrequency), 1500 * std::pow(7500.0 / 120.0, 0.25), 1); // a quarter of the travel up
+    readout.clicks = 2; root.dispatchMouseDown(readout); root.dispatchMouseUp(readout);
+    CHECK_NEAR(processor->getParameter(C::MidFrequency), 1500, 0.01);
+    // Knobs: Low / Mid / High / Output with dB text; the mapped shelves ignore hand edits, Mid and Output turn.
+    std::vector<ui::Knob*> knobs; collect(*face, knobs);
+    REQUIRE(knobs.size() == 4);
+    processor->setParameter(C::LowShelfGain, std::pow(10.0f, -2.0f / 20));
+    CHECK(knobs[0]->mapped && knobs[0]->mapped());
+    CHECK(! knobs[1]->mapped);
+    for (auto* knob : knobs)
+    {
+        auto k = localEvent(knob->boundsInRoot()); root.dispatchMouseDown(k); k.y -= 50; root.dispatchMouseDrag(k); root.dispatchMouseUp(k);
+    }
+    CHECK_NEAR(20 * std::log10(processor->getParameter(C::LowShelfGain)), -2, 0.001);
+    CHECK_NEAR(processor->getParameter(C::HighShelfGain), 1, 0);
+    CHECK_NEAR(20 * std::log10(processor->getParameter(C::MidGain)), 6, 0.05);  // 50 px of 200 = a quarter of +-12 dB
+    CHECK_NEAR(20 * std::log10(processor->getParameter(C::Gain)), 6, 0.05);
+    // The graph spans the measured display; painting it (curve and spectrum) leaves the face intact.
+    CHECK(face->graphBounds().w > face->width() * 0.9f);
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul((int) face->width() + 1, (int) face->height() + 1));
+    const ui::Theme theme;
+    root.paintTree(*surface->getCanvas(), theme);
+    CHECK(face->visible);
 }

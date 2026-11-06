@@ -37,9 +37,19 @@ public:
         int keyMin = 0, keyMax = 127;
         int velMin = 1, velMax = 127;
         int selMin = 0, selMax = 127;
+        bool solo = false;
         engine::DelayLine alignDelay; // plugin delay compensation between chains (ENG-12)
         int latency = 0;
         bool midiOverflow = false;
+    };
+
+    // UI-66: a chain's mixer as the chain list edits it while the rack plays (message thread writes, audio thread reads),
+    // and its output level for the chain list's meter (audio thread writes, message thread takes).
+    struct ChainMix
+    {
+        std::atomic<float> volume{1.0f}, pan{0.0f};
+        std::atomic<bool> active{true}, solo{false};
+        OutputMeter meter;
     };
 
     // "parameter `paramIndex` of `target` follows macro `macro`, from `min` to `max` (its own units)".
@@ -73,6 +83,12 @@ public:
     static constexpr int kChainSelector = kNumMacros;
 
     const std::vector<Chain>& chains() const { return chains_; }
+    const std::vector<MacroLink>& macroLinks() const { return links_; }
+    // UI-66: live chain mixer (message thread). Out-of-range chains are ignored / read as nullptr.
+    ChainMix* chainMix(int chain) const
+    {
+        return chain >= 0 && (size_t) chain < chains_.size() ? &mix_[(size_t) chain] : nullptr;
+    }
 
 private:
     void applyMacro(int macro);
@@ -87,6 +103,7 @@ private:
     std::vector<ParameterInfo> infos_;
     std::array<std::atomic<float>, kNumMacros + 1> values_{};
     std::vector<MacroLink> links_;
+    std::unique_ptr<ChainMix[]> mix_; // one per chain, fixed at construction
     juce::AudioBuffer<float> scratch_, sum_;
     std::vector<juce::MidiBuffer> chainMidi_; // one per chain, built before the chains are processed
 };

@@ -108,6 +108,8 @@ add_library(sonora_engine STATIC
     devices/native/Simpler.cpp
     devices/native/FmSynth.cpp
     devices/native/VectorSynth.cpp
+    devices/native/WavetableInstrument.cpp
+    devices/native/WavetableSprites.cpp
     devices/native/Resynth.cpp
     devices/native/Impulse.cpp
     devices/native/Echo.cpp
@@ -125,9 +127,11 @@ add_library(sonora_engine STATIC
     devices/native/CurveLfo.cpp
     devices/native/Hush.cpp
     devices/native/HushCurve.cpp
+    devices/native/HushSession.cpp
     devices/native/Compressor.cpp
     devices/native/Limiter.cpp
     devices/native/Bands.cpp
+    devices/native/ChannelEq.cpp
     devices/native/Delay.cpp
     devices/native/MidiNoteEffects.cpp
     devices/native/Arpeggiator.cpp
@@ -147,6 +151,7 @@ add_library(sonora_engine STATIC
     plugins/SerumLibrary.cpp
     plugins/PrismPreset.cpp
     plugins/NativeReplacement.cpp
+    plugins/LfoToolState.cpp
     plugins/SonoraPluginState.cpp
     plugins/SerumEffectsImport.cpp
     midi/MidiManager.cpp
@@ -246,9 +251,13 @@ add_library(sonora_ui STATIC
     ui/views/DeviceFace.cpp
     ui/views/ReferenceFace.cpp
     ui/views/AutoFilterFace.cpp
+    ui/views/ChannelEqFace.cpp
+    ui/views/RackFace.cpp
+    ui/views/WavetableFace.cpp
     ui/views/EffectFaces.cpp
     ui/views/ResynthEditor.cpp
     ui/views/CurveLfoEditor.cpp
+    ui/views/HushFace.cpp
     ui/views/WavetableEditor.cpp
     ui/views/WavetableWindowView.cpp
     ui/views/WavetablePresetBrowser.cpp
@@ -261,6 +270,7 @@ add_library(sonora_ui STATIC
     ui/InlineEdit.cpp
     ui/SetView.cpp
     ui/TrackMenu.cpp
+    ui/DeviceMenu.cpp
     ui/Shortcuts.cpp
     ui/views/ClipControls.cpp
     ui/views/ClipEnvelopeEditor.cpp
@@ -469,6 +479,7 @@ target_sources(Sonora PRIVATE
     app/AppWarp.cpp
     app/AppResynth.cpp
     app/AppNativeSwap.cpp
+    app/AppHushWindow.cpp
     app/AppSamplePacks.cpp
     app/AppStems.cpp
 )

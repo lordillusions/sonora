@@ -1,4 +1,5 @@
 #include "plugins/PluginDevice.h"
+#include "plugins/NativeReplacement.h"
 #include "plugins/Vst2Bank.h"
 #include "plugins/Vst3PresetBuilder.h"
 
@@ -36,6 +37,19 @@ std::vector<uint8_t> xmlPlist(const juce::MemoryBlock& binary)
 #endif
 } // namespace
 
+bool pluginChunkUnreported(model::DeviceKind kind, const std::vector<uint8_t>& captured, const std::vector<uint8_t>& stored)
+{
+    const auto chunk = [kind](const std::vector<uint8_t>& state) {
+        auto bytes = kind == model::DeviceKind::PluginAu ? plistData(state, "vstdata") : state;
+        if (bytes.size() > 60 && std::equal(bytes.begin(), bytes.begin() + 4, "CcnK")) bytes.erase(bytes.begin(), bytes.begin() + 60);
+        return bytes;
+    };
+    if (kind != model::DeviceKind::PluginVst2 && kind != model::DeviceKind::PluginAu) return false;
+    const auto zero = [](const std::vector<uint8_t>& b) { return std::all_of(b.begin(), b.end(), [](uint8_t v) { return v == 0; }); };
+    const auto now = chunk(captured), before = chunk(stored);
+    return ! now.empty() && zero(now) && ! before.empty() && ! zero(before);
+}
+
 bool capturePluginInfo(juce::AudioPluginInstance& instance, model::DeviceKind kind, model::PluginInfo& info)
 {
     const auto format = instance.getPluginDescription().pluginFormatName;
@@ -56,6 +70,8 @@ bool capturePluginInfo(juce::AudioPluginInstance& instance, model::DeviceKind ki
         model::PluginInfo read = info;
         read.vst2ParameterCount = instance.getParameters().size();
         if (bank.isEmpty() || ! readVst2Bank({bytes, bytes + bank.getSize()}, read)) return false;
+        const bool chunk = read.vst2PresetType == 0x46424368u || read.vst2PresetType == 0x46504368u; // 'FBCh' / 'FPCh'
+        if (chunk && pluginChunkUnreported(kind, read.state, info.state)) return false; // keep the set's state
         read.vst2ProgramNumber = std::max(0, instance.getCurrentProgram());
         info = std::move(read);
         return true;
@@ -66,7 +82,7 @@ bool capturePluginInfo(juce::AudioPluginInstance& instance, model::DeviceKind ki
         juce::MemoryBlock state;
         instance.getStateInformation(state);
         auto xml = xmlPlist(state);
-        if (xml.empty()) return false;
+        if (xml.empty() || pluginChunkUnreported(kind, xml, info.state)) return false;
         info.state = std::move(xml);
         return true;
     }

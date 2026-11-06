@@ -1,0 +1,76 @@
+# DEV-30 Channel EQ law probes: white noise through each band at several gains, the 80 Hz high-pass, Output.
+# Transfer functions = Welch cross-spectrum of the reference stems against src-noise (same export).
+case src-noise sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+case q-flat sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=1 MidFrequency=1500 HighShelfGain=1 Gain=1
+case q-hp sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=true LowShelfGain=1 MidGain=1 MidFrequency=1500 HighShelfGain=1 Gain=1
+case q-lo+15 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=5.6 MidGain=1 MidFrequency=1500 HighShelfGain=1 Gain=1
+case q-lo+9 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=2.818382931 MidGain=1 MidFrequency=1500 HighShelfGain=1 Gain=1
+case q-lo+3 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1.412537545 MidGain=1 MidFrequency=1500 HighShelfGain=1 Gain=1
+case q-lo-3 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=0.707945784 MidGain=1 MidFrequency=1500 HighShelfGain=1 Gain=1
+case q-lo-9 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=0.354813389 MidGain=1 MidFrequency=1500 HighShelfGain=1 Gain=1
+case q-lo-15 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=0.18 MidGain=1 MidFrequency=1500 HighShelfGain=1 Gain=1
+case q-mid+12-1k5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=4 MidFrequency=1500 HighShelfGain=1 Gain=1
+case q-mid+6-1k5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=1.995262315 MidFrequency=1500 HighShelfGain=1 Gain=1
+case q-mid-12-1k5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=0.25 MidFrequency=1500 HighShelfGain=1 Gain=1
+case q-mid-6-1k5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=0.501187234 MidFrequency=1500 HighShelfGain=1 Gain=1
+case q-mid+12-120 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=4 MidFrequency=120 HighShelfGain=1 Gain=1
+case q-mid+12-7k5 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=4 MidFrequency=7500 HighShelfGain=1 Gain=1
+case q-mid+12-400 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=4 MidFrequency=400 HighShelfGain=1 Gain=1
+case q-hi+15 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=1 MidFrequency=1500 HighShelfGain=5.6 Gain=1
+case q-hi+9 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=1 MidFrequency=1500 HighShelfGain=2.818382931 Gain=1
+case q-hi+3 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=1 MidFrequency=1500 HighShelfGain=1.412537545 Gain=1
+case q-hi-3 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=1 MidFrequency=1500 HighShelfGain=0.707945784 Gain=1
+case q-hi-9 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=1 MidFrequency=1500 HighShelfGain=0.354813389 Gain=1
+case q-hi-15 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=1 MidFrequency=1500 HighShelfGain=0.18 Gain=1
+case q-out+6 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=false LowShelfGain=1 MidGain=1 MidFrequency=1500 HighShelfGain=1 Gain=1.995262315
+case q-piano sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=true LowShelfGain=0.794328235 MidGain=1 MidFrequency=1500 HighShelfGain=1.258925412 Gain=1
+case q-hp-lo+15 sample=noise notes=long
+  device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
+  device "Devices/Audio Effects/Channel EQ/Low Cut.adv" HighpassOn=true LowShelfGain=5.6 MidGain=1 MidFrequency=1500 HighShelfGain=1 Gain=1

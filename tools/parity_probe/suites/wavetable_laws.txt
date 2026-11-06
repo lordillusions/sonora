@@ -1,0 +1,43 @@
+# DEV-28b Wavetable (InstrumentVector) law probes. Device XML: the reference's default preset read at run time from the
+# installed library (factory table "Basic Shapes"), one variable per case. The default patch has velocity -> Amp 50 %.
+case wt-default notes=long
+  device Defaults/Instruments/Wavetable.adv
+case wt-velocities notes=velocities
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1
+case wt-keys notes=keys
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Unison_Amount=0
+case wt-pos033 notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Oscillator1_Wavetables_WavePosition=0.333333 Voice_Filter1_On=false
+case wt-pos066 notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Oscillator1_Wavetables_WavePosition=0.666667 Voice_Filter1_On=false
+case wt-pos1 notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Oscillator1_Wavetables_WavePosition=1 Voice_Filter1_On=false
+case wt-lp1k notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Oscillator1_Wavetables_WavePosition=0.666667 Voice_Filter1_Frequency=1000
+case wt-lp1k-res05-24 notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Oscillator1_Wavetables_WavePosition=0.666667 Voice_Filter1_Frequency=1000 Voice_Filter1_Resonance=0.5 Voice_Filter1_Slope=1
+case wt-ms2-drive12 notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Oscillator1_Wavetables_WavePosition=0.666667 Voice_Filter1_Frequency=1000 Voice_Filter1_CircuitLpHp=2 Voice_Filter1_Drive=12
+case wt-attack1s notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Times_Attack=1 Voice_Modulators_AmpEnvelope_Sustain=1
+case wt-decay notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Times_Decay=1 Voice_Modulators_AmpEnvelope_Sustain=0.1
+case wt-release notes=single
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Modulators_AmpEnvelope_Times_Release=1
+case wt-sub notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Oscillator1_On=false Voice_SubOscillator_On=true Voice_SubOscillator_Gain=1
+case wt-sub-tone notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Oscillator1_On=false Voice_SubOscillator_On=true Voice_SubOscillator_Gain=1 Voice_SubOscillator_Tone=1
+case wt-unison-classic notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Unison_Mode=1 Voice_Unison_VoiceCount=4 Voice_Unison_Amount=0.5
+case wt-fm notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Oscillator1_Effects_EffectMode=1 Voice_Oscillator1_Effects_Effect1=0.5 Voice_Oscillator1_Effects_Effect2=0.5
+case wt-classic notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Oscillator1_Wavetables_WavePosition=0.666667 Voice_Oscillator1_Effects_EffectMode=2 Voice_Oscillator1_Effects_Effect1=0.5 Voice_Oscillator1_Effects_Effect2=0.5
+case wt-modern notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Voice_Oscillator1_Effects_EffectMode=3 Voice_Oscillator1_Effects_Effect1=0.5 Voice_Oscillator1_Effects_Effect2=0.5
+case wt-mono-glide notes=legato
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 MonoPoly=0 Voice_Global_Glide=0.2
+case wt-volume0 notes=long
+  device Defaults/Instruments/Wavetable.adv Voice_Modulators_AmpEnvelope_Sustain=1 Volume=1
+presets Devices/Instruments/Wavetable max=12

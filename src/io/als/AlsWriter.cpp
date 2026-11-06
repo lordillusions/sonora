@@ -27,6 +27,23 @@ XmlElement* child(XmlElement* e, const char* name)
     return e != nullptr ? e->getChildByName(name) : nullptr;
 }
 
+// One path step: "Tag", or "Tag#n" for the n-th child with that tag (repeated list items such as the modulation
+// connections of InstrumentVector, DEV-28b). `create` appends missing elements.
+XmlElement* pathChild(XmlElement* e, const juce::String& token, bool create)
+{
+    if (e == nullptr) return nullptr;
+    const int hash = token.indexOfChar('#');
+    const auto name = hash < 0 ? token : token.substring(0, hash);
+    const int index = hash < 0 ? 0 : token.substring(hash + 1).getIntValue();
+    int seen = 0;
+    for (auto* c : e->getChildWithTagNameIterator(name))
+        if (seen++ == index) return c;
+    if (! create) return nullptr;
+    XmlElement* made = nullptr;
+    for (; seen <= index; ++seen) made = e->createNewChildElement(name);
+    return made;
+}
+
 // "A/B/C" -> element, or nullptr.
 XmlElement* at(XmlElement* e, const juce::String& path)
 {
@@ -34,7 +51,7 @@ XmlElement* at(XmlElement* e, const juce::String& path)
     parts.addTokens(path, "/", "");
     for (const auto& p : parts)
     {
-        e = child(e, p.toRawUTF8());
+        e = pathChild(e, p, false);
         if (e == nullptr)
             return nullptr;
     }
@@ -196,6 +213,14 @@ void patchDevice(XmlElement* x, const model::Device& d)
 
     if (x == nullptr)
         return;
+    if (d.nativeContentEdited && d.type == "InstrumentVector" && d.sourceXml) // DEV-28b: a chosen wavetable (SpriteName / UserSprite)
+        if (const auto source = juce::XmlDocument::parse(juce::String(*d.sourceXml)))
+            for (const char* tag : {"SpriteName1", "SpriteName2", "UserSprite1", "UserSprite2"})
+                if (const auto* chosen = source->getChildByName(tag))
+                {
+                    if (auto* old = child(x, tag)) x->replaceChildElement(old, new XmlElement(*chosen));
+                    else x->addChildElement(new XmlElement(*chosen));
+                }
     setManual(child(x, "On"), d.enabled ? 1.0 : 0.0);
     if (d.type == "SonoraWavetable")
     {
@@ -300,6 +325,9 @@ void patchDevice(XmlElement* x, const model::Device& d)
                 auto* range = child(target, "MidiControllerRange"); if (! range) range = target->createNewChildElement("MidiControllerRange");
                 leaf(range, "Min", p.rangeMin); leaf(range, "Max", p.rangeMax);
             }
+            else if (p.macroMappingEdited) // UI-66: the mapping was removed in Map mode
+                if (auto* key = child(target, "KeyMidi"); key && child(key, "Channel") && child(key, "Channel")->getIntAttribute("Value", -1) == 16)
+                    target->removeChildElement(key, true);
         }
     }
     for (const auto& [key, value] : d.plain)
@@ -309,9 +337,7 @@ void patchDevice(XmlElement* x, const model::Device& d)
         {
             target = x;
             for (const auto& name : juce::StringArray::fromTokens(juce::String(key), "/", ""))
-            {
-                auto* next = target->getChildByName(name); target = next ? next : target->createNewChildElement(name);
-            }
+                target = pathChild(target, name, true);
         }
         const auto current = target->getStringAttribute("Value");
         if (current.equalsIgnoreCase("true") || current.equalsIgnoreCase("false"))
@@ -341,6 +367,8 @@ void patchDevice(XmlElement* x, const model::Device& d)
             if (d.chainsEdited) replace(x, "Branches", child(authored.get(), "Branches"));
         }
     }
+    if (d.kind == model::DeviceKind::Rack) // UI-66: the + / - macro buttons
+        if (auto* visible = child(x, "NumVisibleMacroControls")) setNumber(visible, d.numVisibleMacros);
     // Racks: recurse into the chains in order.
     if (auto* branches = child(x, "Branches"))
     {
@@ -354,6 +382,7 @@ void patchDevice(XmlElement* x, const model::Device& d)
             setManual(at(br, "MixerDevice/Volume"), chain.volume);
             setManual(at(br, "MixerDevice/Panorama"), chain.pan);
             setManual(at(br, "MixerDevice/Speaker"), chain.speakerOn ? 1.0 : 0.0);
+            if (auto* soloed = child(br, "IsSoloed")) soloed->setAttribute("Value", chain.solo ? "true" : "false"); // UI-66
             // devices of the chain: first <Devices> below the branch
             std::function<XmlElement*(XmlElement*, int)> findDevices = [&](XmlElement* e, int depth) -> XmlElement* {
                 if (e == nullptr || depth > 4)

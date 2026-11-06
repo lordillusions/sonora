@@ -1,8 +1,9 @@
 // COL-4c: Sonora's own VST3s that are not installed here (a collab guest, a set from another computer) play through the
-// built-in Prism / Curve LFO from their saved state, and saving leaves that state as it was.
+// built-in Prism / Curve LFO / Hush (COL-4e) from their saved state, and saving leaves that state as it was.
 #include "TestFramework.h"
 #include "devices/DeviceFactory.h"
 #include "devices/native/CurveLfo.h"
+#include "devices/native/HushSession.h"
 #include "devices/native/WavetableSynth.h"
 #include "plugins/PrismPreset.h"
 #include "plugins/SonoraPluginState.h"
@@ -131,7 +132,7 @@ TEST_CASE("sonora stand-in: a missing Prism VST3 plays its saved sound on the bu
     CHECK(logHas(log, "could not be read"));
 }
 
-TEST_CASE("sonora stand-in: a missing Curve LFO VST3 keeps its curves on the built-in device; Hush stays a gap")
+TEST_CASE("sonora stand-in: a missing Curve LFO VST3 keeps its curves on the built-in device")
 {
     juce::ScopedJuceInitialiser_GUI init;
     L source;
@@ -159,9 +160,63 @@ TEST_CASE("sonora stand-in: a missing Curve LFO VST3 keeps its curves on the bui
     CHECK_NEAR(lfo->getParameter(L::countParam(0)), 3.0f, 1e-6);
     CHECK_NEAR(lfo->getParameter(L::pointParam(0, 1, L::X)), 0.25f, 1e-6);
     CHECK(! lfo->isBypassed());
+}
 
-    // No built-in Hush: an effect that is not installed is skipped, as before.
+TEST_CASE("sonora stand-in: a missing Hush VST3 plays on the built-in Hush from its state, which saving leaves alone")
+{
+    using H = devices::Hush;
+    // The VST3's state body is its session's bytes (HushPlugin::getStateInformation).
+    devices::HushDevice source;
+    source.session().setFromEditor(H::Depth, 9.0f);
+    source.session().setFromEditor(H::Mode, 1.0f);
+    source.session().setFromEditor(H::bandParam(1, H::BandFrequency), 2500.0f);
+    source.session().copyToOtherSlot();
+    source.session().selectSlot(1);
+    source.session().setFromEditor(H::Depth, 1.0f);
+    source.session().selectSlot(0);
+    const auto state = wrapLikeJuceVst3(source.session().encodeState(), false);
+
+    auto device = sonoraVst3("Sonora Hush", kHush, state);
+    std::vector<std::string> log;
+    devices::BuildContext ctx; // no plug-in host: the VST3 cannot be found
+    ctx.log = &log;
+    auto processor = devices::createDevice(device, ctx);
+    auto* hush = dynamic_cast<devices::HushDevice*>(processor.get());
+    REQUIRE(hush != nullptr);
+    CHECK(logHas(log, "Sonora Hush: VST3 not installed here, played by Sonora's built-in device"));
+    CHECK_NEAR(hush->getParameter(H::Depth), 9.0, 1e-6);
+    CHECK_NEAR(hush->getParameter(H::Mode), 1.0, 1e-6);
+    CHECK_NEAR(hush->getParameter(H::bandParam(1, H::BandFrequency)), 2500.0, 1e-3);
+    hush->session().selectSlot(1);
+    CHECK_NEAR(hush->getParameter(H::Depth), 1.0, 1e-6);
+    // It plays.
+    hush->prepare(48000, 256);
+    juce::AudioBuffer<float> audio(2, 256);
+    juce::MidiBuffer midi;
+    for (int block = 0; block < 40; ++block)
+    {
+        for (int s = 0; s < 256; ++s) audio.setSample(0, s, std::sin(0.3f * (float) (block * 256 + s))), audio.setSample(1, s, 0.0f);
+        hush->process(audio, midi);
+        for (int s = 0; s < 256; ++s) REQUIRE(std::isfinite(audio.getSample(0, s)));
+    }
+    // Saving keeps the VST3 reference and its state byte for byte (computers with the VST3 open it unchanged).
+    auto saved = device;
+    devices::captureDeviceState(saved, processor.get());
+    REQUIRE(saved.plugin.has_value());
+    CHECK(saved.plugin->state == state);
+    CHECK(saved.kind == model::DeviceKind::PluginVst3);
+    CHECK(saved.nativeContent == nullptr);
+    CHECK(saved.parameters.empty());
+
+    // Bypassed in the set, an empty state, a damaged state: never a failed load.
+    auto off = sonoraVst3("Sonora Hush", kHush, {});
+    off.enabled = false;
     log.clear();
-    CHECK(devices::createDevice(sonoraVst3("Sonora Hush", kHush, {}), ctx) == nullptr);
-    CHECK(! logHas(log, "built-in"));
+    auto empty = devices::createDevice(off, ctx);
+    REQUIRE(dynamic_cast<devices::HushDevice*>(empty.get()) != nullptr);
+    CHECK(empty->isBypassed());
+    log.clear();
+    auto damaged = devices::createDevice(sonoraVst3("Sonora Hush", kHush, {1, 2, 3, 4, 5}), ctx);
+    REQUIRE(dynamic_cast<devices::HushDevice*>(damaged.get()) != nullptr);
+    CHECK(logHas(log, "could not be read"));
 }

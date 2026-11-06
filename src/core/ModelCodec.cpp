@@ -450,6 +450,8 @@ template <class IO> void visit(IO& io, Device::Chain& c)
     io.v(c.velMax);
     io.v(c.selMin);
     io.v(c.selMax);
+    io.v(c.color);
+    io.v(c.solo);
 }
 
 template <class IO> void visit(IO& io, Device& d)
@@ -509,6 +511,12 @@ template <class IO> void visit(IO& io, Device& d)
     io.vec(d.chains, [&](Device::Chain& c) { visit(io, c); }, 8);
     io.vec(d.macroNames, [&](std::string& s) { io.v(s); }, 1);
     io.v(d.numVisibleMacros);
+    for (auto& color : d.macroColors) io.v(color);
+    for (auto& excluded : d.macroNoRandom) io.v(excluded);
+    io.v(d.macrosVisible);
+    io.v(d.chainListVisible);
+    io.v(d.chainDevicesVisible);
+    io.v(d.zonesVisible);
     io.leave();
 }
 
@@ -718,8 +726,8 @@ template <class F> void decodeWith(std::string_view bytes, F&& body)
 #if defined(__APPLE__) && defined(__aarch64__) && defined(_LIBCPP_VERSION)
 // A new model field changes these sizes: add it to the visitors above (and to the live/identity split), then update.
 static_assert(sizeof(Clip) == 520, "model::Clip changed: update ModelCodec");
-static_assert(sizeof(Device) == 568, "model::Device changed: update ModelCodec");
-static_assert(sizeof(Device::Chain) == 120, "model::Device::Chain changed: update ModelCodec");
+static_assert(sizeof(Device) == 648, "model::Device changed: update ModelCodec");
+static_assert(sizeof(Device::Chain) == 128, "model::Device::Chain changed: update ModelCodec");
 static_assert(sizeof(Track) == 1144, "model::Track changed: update ModelCodec");
 static_assert(sizeof(Mixer) == 200, "model::Mixer changed: update ModelCodec");
 static_assert(sizeof(Song) == 1528, "model::Song changed: update ModelCodec");

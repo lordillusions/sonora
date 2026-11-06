@@ -1,4 +1,5 @@
 #include "io/als/AlsTemplates.h"
+#include "core/WavetableFormat.h"
 #include <juce_core/juce_core.h>
 
 namespace sonora::io
@@ -19,8 +20,20 @@ XmlElement* path(XmlElement& parent, const std::string& key)
     const auto tokens = juce::StringArray::fromTokens(juce::String(key), "/", "");
     for (const auto& token : tokens)
     {
-        auto* next = result->getChildByName(token);
-        result = next ? next : result->createNewChildElement(token);
+        // "Tag#n": the n-th child with that tag, created with its siblings when missing (InstrumentVector matrix, DEV-28b).
+        const int hash = token.indexOfChar('#');
+        const auto name = hash < 0 ? token : token.substring(0, hash);
+        const int index = hash < 0 ? 0 : token.substring(hash + 1).getIntValue();
+        int seen = 0;
+        XmlElement* next = nullptr;
+        for (auto* c : result->getChildWithTagNameIterator(name))
+            if (seen++ == index) { next = c; break; }
+        while (next == nullptr)
+        {
+            auto* made = result->createNewChildElement(name);
+            if (seen++ == index) next = made;
+        }
+        result = next;
     }
     return result;
 }
@@ -159,6 +172,20 @@ std::string deviceTemplate(const model::Device& device)
                     value(*range, "Min", juce::String(param.rangeMin, 17)); value(*range, "Max", juce::String(param.rangeMax, 17));
                 }
             }
+        if (device.type == "InstrumentVector" && ! device.sourceXml)
+        {
+            // DEV-28b: the default table and the matrix list with its target ids, which the reference requires.
+            value(root, "SpriteName1", model::wavetable::kDefaultTable);
+            value(root, "SpriteName2", model::wavetable::kDefaultTable);
+            auto* list = root.createNewChildElement("ModulationConnections");
+            for (size_t i = 0; i < model::wavetable::kTargetIds.size(); ++i)
+            {
+                auto* item = list->createNewChildElement("ModulationConnectionsForInstrumentVector");
+                item->setAttribute("Id", (int) i);
+                item->setAttribute("TargetId", model::wavetable::kTargetIds[i]);
+                value(*item, "TargetName", model::wavetable::kTargetNames[i]);
+            }
+        }
         for (const auto& [key, number] : device.plain)
         {
             const auto slash = key.find_last_of('/');

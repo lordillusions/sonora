@@ -199,7 +199,7 @@ TEST_CASE("native replacement: only missing instances on editable tracks are off
     CHECK(contains(found[0].notes, "1 automation lane of Serum 2 parameters has no Sonora Prism equivalent"));
     CHECK(contains(found[0].notes, "1 automation lane now drives Sonora Prism"));
     CHECK(! contains(found[0].notes, "could not be read"));
-    CHECK(contains(found[1].notes, "curve is not readable"));
+    CHECK(contains(found[1].notes, "the set holds no LFOTool state"));
     CHECK(contains(found[1].notes, "Restored 2 LFOTool settings"));
     CHECK(contains(found[1].notes, "1 automation lane of LFOTool parameters has no Sonora Curve LFO equivalent"));
     CHECK(contains(found[1].notes, "2 automation lanes now drive Sonora Curve LFO"));
@@ -209,7 +209,7 @@ TEST_CASE("native replacement: only missing instances on editable tracks are off
     CHECK(offer.message.find("This set uses them 2 times.") != std::string::npos);
     CHECK(offer.message.find("\u2022 Serum 2 \u2192 Sonora Prism (1): 1-Lead") != std::string::npos);
     CHECK(offer.message.find("\u2022 LFOTool \u2192 Sonora Curve LFO (1): A-Pump") != std::string::npos);
-    CHECK(offer.message.find("starts from its default curve") != std::string::npos);
+    CHECK(offer.message.find("Curve LFO rebuilds each saved LFOTool state") != std::string::npos);
     CHECK(offer.message.find(std::to_string(found[0].notes.size() + found[1].notes.size()) + " compatibility notes go") != std::string::npos);
     CHECK(plugins::describeNativeReplacements({found[0]}).title == "Serum 2 is not installed");
 }

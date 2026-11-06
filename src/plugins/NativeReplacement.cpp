@@ -2,6 +2,7 @@
 
 #include "devices/DeviceFactory.h"
 #include "devices/DeviceProcessor.h"
+#include "plugins/LfoToolState.h"
 #include "plugins/SerumPatch.h"
 
 #include <juce_core/juce_core.h>
@@ -53,27 +54,12 @@ constexpr ParameterLink prismLinks[]{
     {"Macro 1", "Macro.0"}, {"Macro 2", "Macro.1"}, {"Macro 3", "Macro.2"}, {"Macro 4", "Macro.3"},
     {"Macro 5", "Macro.4"}, {"Macro 6", "Macro.5"}, {"Macro 7", "Macro.6"}, {"Macro 8", "Macro.7"},
 };
+// LFOTool's VST2 parameter names with the same 0..1 meaning on both sides (phase 0..360 degrees, depth / mix / var /
+// resonance 0..100 %), plus the names an earlier table guessed.
 constexpr ParameterLink curveLfoLinks[]{
-    {"Phase", "Phase"}, {"Cutoff", "Filter.Cutoff"}, {"Reso", "Filter.Resonance"}, {"Vel->PWM", "Midi.VelPwm"},
+    {"Phase", "Phase"}, {"LFO Depth", "Depth"}, {"VF Mix", "Filter.Mix"}, {"VF Var", "Filter.Var"},
+    {"F.Reso", "Filter.Resonance"}, {"Cutoff", "Filter.Cutoff"}, {"Reso", "Filter.Resonance"}, {"Vel->PWM", "Midi.VelPwm"},
 };
-
-// Base64 <data> of one key of an XML plist dictionary (the AU ClassInfo Live stores).
-std::vector<uint8_t> plistData(const std::vector<uint8_t>& plist, const juce::String& key)
-{
-    const auto xml = juce::XmlDocument::parse(juce::String::fromUTF8((const char*) plist.data(), (int) plist.size()));
-    const auto* dict = xml != nullptr ? xml->getChildByName("dict") : nullptr;
-    for (auto* item = dict != nullptr ? dict->getFirstChildElement() : nullptr; item != nullptr; item = item->getNextElement())
-    {
-        if (! item->hasTagName("key") || item->getAllSubText() != key) continue;
-        const auto* value = item->getNextElement();
-        if (value == nullptr || ! value->hasTagName("data")) return {};
-        juce::MemoryOutputStream decoded;
-        if (! juce::Base64::convertFromBase64(decoded, value->getAllSubText().removeCharacters(" \t\r\n"))) return {};
-        const auto* first = static_cast<const uint8_t*>(decoded.getData());
-        return {first, first + decoded.getDataSize()};
-    }
-    return {};
-}
 
 int countLanes(const model::Track& track, const std::set<int>& targets)
 {
@@ -116,10 +102,22 @@ NativeReplacement convert(const model::Song& song, const model::Track& track, co
             notes.push_back("The saved Serum 2 patch could not be read (" + imported.error + "): a default Prism patch is used");
         }
     }
-    else
+    bool fromChunk = false;
+    if (alternative == NativeAlternative::CurveLfo)
     {
+        // PLG-16b: LFOTool's own chunk carries the graphs and every setting (plugins/LfoToolState.h).
         result.device = devices::nativeDeviceModel("SonoraCurveLfo");
-        notes.push_back("LFOTool's saved curve is not readable: the Curve LFO starts from its default curve");
+        const auto decoded = decodeLfoToolChunk(lfoToolChunk(*plugin.plugin, plugin.kind));
+        if (decoded.ok)
+        {
+            applyLfoToolState(decoded.state, result.device, notes);
+            fromChunk = true;
+        }
+        else if (decoded.empty)
+            notes.push_back("LFOTool saved an empty state in this set (all zeros: the plug-in gave the host no settings when "
+                            "the set was saved), so there are no graphs or settings to carry: the Curve LFO starts from its defaults");
+        else
+            notes.push_back("LFOTool's saved state could not be read (" + decoded.error + "): the Curve LFO starts from its defaults");
     }
     result.device.id = -1;
     result.device.enabled = plugin.enabled;
@@ -147,16 +145,16 @@ NativeReplacement convert(const model::Song& song, const model::Track& track, co
             destination->automationTargetId = source->automationTargetId;
             carried.insert(source->automationTargetId);
         }
-        // Serum 2's saved state is authoritative for Prism; LFOTool's named values are all Curve LFO gets.
-        if (alternative == NativeAlternative::CurveLfo && std::abs(source->value - liveUnreadValue) > 1e-6)
+        // The saved state is authoritative; Live's named values only stand in when LFOTool's chunk had nothing.
+        if (alternative == NativeAlternative::CurveLfo && ! fromChunk && std::abs(source->value - liveUnreadValue) > 1e-6)
         {
             destination->value = info->isToggle ? (source->value >= 0.5 ? 1.0 : 0.0) : std::clamp(source->value, 0.0, 1.0);
             ++restored;
         }
     }
-    if (alternative == NativeAlternative::CurveLfo)
-        notes.push_back(restored > 0 ? "Restored " + std::to_string(restored) + " LFOTool settings by name (Phase, Cutoff, Reso, Vel->PWM; "
-                                           "same knob positions, Sonora's own response)"
+    if (alternative == NativeAlternative::CurveLfo && ! fromChunk)
+        notes.push_back(restored > 0 ? "Restored " + std::to_string(restored) + " LFOTool settings by name (same knob positions, "
+                                           "Sonora's own response)"
                                      : "No LFOTool settings were stored in the set: rate, shape and filter use Curve LFO defaults");
     std::set<int> dropped;
     for (const auto& p : plugin.pluginParams)
@@ -212,6 +210,23 @@ model::Device* nestedDevice(model::Device& top, const std::vector<int>& path)
 }
 } // namespace
 
+std::vector<uint8_t> plistData(const std::vector<uint8_t>& plist, const std::string& key)
+{
+    const auto xml = juce::XmlDocument::parse(juce::String::fromUTF8((const char*) plist.data(), (int) plist.size()));
+    const auto* dict = xml != nullptr ? xml->getChildByName("dict") : nullptr;
+    for (auto* item = dict != nullptr ? dict->getFirstChildElement() : nullptr; item != nullptr; item = item->getNextElement())
+    {
+        if (! item->hasTagName("key") || item->getAllSubText() != juce::String::fromUTF8(key.c_str())) continue;
+        const auto* value = item->getNextElement();
+        if (value == nullptr || ! value->hasTagName("data")) return {};
+        juce::MemoryOutputStream decoded;
+        if (! juce::Base64::convertFromBase64(decoded, value->getAllSubText().removeCharacters(" \t\r\n"))) return {};
+        const auto* first = static_cast<const uint8_t*>(decoded.getData());
+        return {first, first + decoded.getDataSize()};
+    }
+    return {};
+}
+
 NativeAlternative nativeAlternativeFor(const model::Device& device)
 {
     if (! device.plugin) return NativeAlternative::None;
@@ -262,6 +277,56 @@ std::vector<NativeReplacement> findNativeReplacements(const model::Song& song, c
         collect(song, *track, index, track->devices, path, installed, out);
     }
     return out;
+}
+
+std::optional<NativeReplacement> nativeReplacementAt(const model::Song& song, int trackIndex, const std::vector<int>& path)
+{
+    const auto* track = model::trackAt(song, trackIndex);
+    if (track == nullptr || track->frozen || track->deactivated || path.empty() || path.size() % 2 == 0) return std::nullopt;
+    const std::vector<model::Device>* devices = &track->devices;
+    const model::Device* device = nullptr;
+    for (size_t i = 0; i < path.size(); i += 2)
+    {
+        if (path[i] < 0 || (size_t) path[i] >= devices->size()) return std::nullopt;
+        device = &(*devices)[(size_t) path[i]];
+        if (i + 1 < path.size())
+        {
+            if (path[i + 1] < 0 || (size_t) path[i + 1] >= device->chains.size()) return std::nullopt;
+            devices = &device->chains[(size_t) path[i + 1]].devices;
+        }
+    }
+    const auto alternative = nativeAlternativeFor(*device);
+    if (alternative == NativeAlternative::None) return std::nullopt;
+    auto replacement = convert(song, *track, *device, alternative);
+    replacement.track = trackIndex;
+    replacement.path = path;
+    replacement.trackName = track->name;
+    return replacement;
+}
+
+std::vector<NativeReplacement> allNativeReplacements(const model::Song& song, NativeAlternative alternative)
+{
+    auto found = findNativeReplacements(song, [alternative](const model::Device& d) {
+        return alternative != NativeAlternative::None && nativeAlternativeFor(d) != alternative; // "installed" = skipped
+    });
+    return found;
+}
+
+int countNativeCandidates(const model::Song& song, NativeAlternative alternative)
+{
+    int count = 0;
+    const std::function<void(const std::vector<model::Device>&)> walk = [&](const std::vector<model::Device>& devices) {
+        for (const auto& d : devices)
+        {
+            const auto kind = nativeAlternativeFor(d);
+            count += kind != NativeAlternative::None && (alternative == NativeAlternative::None || kind == alternative) ? 1 : 0;
+            for (const auto& chain : d.chains) walk(chain.devices);
+        }
+    };
+    const int tracks = (int) (song.tracks.size() + song.returns.size()) + 1;
+    for (int index = 0; index < tracks; ++index)
+        if (const auto* track = model::trackAt(song, index); track != nullptr && ! track->frozen && ! track->deactivated) walk(track->devices);
+    return count;
 }
 
 model::EditCommand replaceWithNative(const model::Song& song, const std::vector<NativeReplacement>& replacements)
@@ -340,8 +405,9 @@ NativeReplacementOffer describeNativeReplacements(const std::vector<NativeReplac
     }
     m += "\n";
     for (const auto& g : groups)
-        m += g.alternative == NativeAlternative::Prism ? "\nPrism rebuilds each saved patch with its own engine: similar, not identical."
-                                                       : "\nLFOTool's curves cannot be read: each Curve LFO starts from its default curve.";
+        m += g.alternative == NativeAlternative::Prism
+                 ? "\nPrism rebuilds each saved patch with its own engine: similar, not identical."
+                 : "\nCurve LFO rebuilds each saved LFOTool state (graphs, rate, routing, filter) with its own engine: similar, not identical.";
     if (notes > 0) m += " " + std::to_string(notes) + " compatibility note" + (notes == 1 ? " goes" : "s go") + " to the load notes.";
     m += " Keep leaves placeholders; Undo brings the plug-ins back after a replace.";
     return offer;

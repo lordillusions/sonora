@@ -1,6 +1,7 @@
 #include "ui/views/DetailView.h"
 
 #include "ui/WheelScale.h"
+#include "ui/DeviceMenu.h"
 
 #include "ui/views/PianoRoll.h"
 #include "ui/views/MpeEditor.h"
@@ -11,6 +12,7 @@
 #include "ui/views/NativeEditors.h"
 #include "ui/views/DeviceFace.h"
 #include "ui/views/ReferenceFace.h"
+#include "ui/views/RackFace.h"
 #include "ui/views/ResynthEditor.h"
 
 #include "core/DeviceCatalog.h"
@@ -24,6 +26,8 @@
 #include "devices/native/WavetableSynth.h"
 #include "devices/native/Delay.h"
 #include "ui/views/CurveLfoEditor.h"
+#include "ui/views/HushFace.h"
+#include "devices/native/HushSession.h"
 #include "ui/views/WavetableEditor.h"
 #include "engine/EngineGraph.h"
 #include "plugins/PluginDevice.h"
@@ -126,34 +130,70 @@ Knob::Source paramSource(DeviceProcessor* dev, int index)
 }
 
 // ---------------------------------------------------------------- device box
-class RackSelector final : public Widget
+// UI-66: the rack's Rand (pill) and Map (square) title buttons, as the reference draws them.
+class RackTitleButton final : public TextButton
 {
 public:
-    explicit RackSelector(DeviceProcessor* processor) : processor_(processor) {}
+    RackTitleButton(std::string label, bool pill) : TextButton(std::move(label), Style::Plain), pill_(pill) {}
     void paint(SkCanvas& c, const Theme& t) override
     {
-        ctl::valueBox(c, t, localBounds(), "Chain Selector  " + fmt("%.0f", processor_->getParameter(devices::RackProcessor::kChainSelector)));
+        const auto r = localBounds();
+        const bool on = isOn && isOn();
+        const float radius = pill_ ? r.h * 0.5f : 0.0f;
+        paint::fillRounded(c, r, radius, t.color("ControlContrastFrame"));
+        paint::fillRounded(c, r.reduced(1.2f, 1.2f), std::max(0.0f, radius - 1.2f),
+                           on ? t.color("MacroAssignment") : t.color("ControlBackground"));
+        paint::text(c, label(), r, t.color("ControlForeground"), r.h * 0.78f, Align::Centre);
+    }
+private:
+    bool pill_;
+};
+
+// UI-66: over a rack chain's device while its rack is in Map mode: mappable controls are tinted, the ones following a
+// macro labelled, and a click maps the control under the pointer to the chosen macro (right click removes the mapping).
+class MacroMapOverlay final : public Widget
+{
+public:
+    struct Target { Widget* widget; int parameter; };
+    std::function<const std::vector<Target>&()> targets;
+    std::function<int(int)> mappedMacro; // parameter -> macro index or -1
+    std::function<void(int parameter, bool remove)> map;
+    void paint(SkCanvas& c, const Theme& t) override
+    {
+        const auto assign = t.color("MacroAssignment");
+        const auto origin = boundsInRoot();
+        for (const auto& target : targets())
+        {
+            if (! Widget::isAlive(target.widget) || ! shown(target.widget)) continue;
+            const auto b = target.widget->boundsInRoot();
+            const Rect r{b.x - origin.x, b.y - origin.y, b.w, b.h};
+            const int macro = mappedMacro(target.parameter);
+            paint::fill(c, r, paint::withAlpha(assign, macro >= 0 ? 150 : 70));
+            if (macro >= 0)
+            {
+                paint::stroke(c, r, macro == ctx().rackMacroToMap ? t.color("ControlForeground") : assign, 1.5f);
+                paint::text(c, "M" + std::to_string(macro + 1), r.withHeight(std::min(r.h, 12.0f)), t.color("ControlForeground"),
+                            t.metrics.smallFontSize, Align::Right);
+            }
+        }
     }
     void mouseDown(const MouseEvent& e) override
     {
-        pressed_ = ! e.right; startX_ = e.x; start_ = processor_->getParameter(devices::RackProcessor::kChainSelector);
-    }
-    void mouseDrag(const MouseEvent& e) override
-    {
-        if (pressed_ && ! e.right) { processor_->setParameter(devices::RackProcessor::kChainSelector, std::round(start_ + (e.x - startX_) * (e.shift ? 0.1f : 1.0f))); repaint(); }
-    }
-    void mouseUp(const MouseEvent&) override { pressed_ = false; }
-    bool mouseWheel(const MouseEvent& e) override
-    {
-        if (e.right || std::abs(e.wheelDeltaX) > std::abs(e.wheelDeltaY)) return false;
-        processor_->setParameter(devices::RackProcessor::kChainSelector, processor_->getParameter(devices::RackProcessor::kChainSelector) + (e.wheelDeltaY > 0 ? 1.0f : -1.0f));
-        repaint(); return true;
+        const auto origin = boundsInRoot();
+        for (const auto& target : targets())
+        {
+            if (! Widget::isAlive(target.widget) || ! shown(target.widget)) continue;
+            if (target.widget->boundsInRoot().contains(e.x + origin.x, e.y + origin.y)) { map(target.parameter, e.right); return; }
+        }
     }
 private:
-    DeviceProcessor* processor_;
-    float startX_ = 0, start_ = 0;
-    bool pressed_ = false;
+    static bool shown(const Widget* w)
+    {
+        for (; w != nullptr; w = w->parent()) if (! w->visible) return false;
+        return true;
+    }
 };
+
 class DeviceBox : public Widget
 {
 public:
@@ -183,6 +223,19 @@ public:
         // COL-4c: a built-in stand-in for a missing Sonora VST3 keeps the plug-in's knob panel (same parameter order as
         // the VST3); the native editors would edit the plug-in's model as if it were the built-in device.
         if (model_.plugin && ! dynamic_cast<plugins::PluginDevice*>(proc_)) return;
+        if (auto* rack = dynamic_cast<devices::RackProcessor*>(proc_)) // UI-66: macros, chain list, zone editors
+        {
+            rackFace_ = add<RackFace>(model, rack, trackIndex, deviceIndex, chain, child, [this](Widget* widget, int parameter) { tag(widget, parameter); });
+            referenceFace_ = rackFace_;
+            randButton_ = add<RackTitleButton>("Rand", true);
+            randButton_->tooltip = "Randomize the macros";
+            randButton_->onClick = [this] { rackFace_->randomizeMacros(); };
+            mapButton_ = add<RackTitleButton>("Map", false);
+            mapButton_->tooltip = "Map macros to parameters in the chains";
+            mapButton_->isOn = [this] { return rackFace_->mapping(); };
+            mapButton_->onClick = [this] { rackFace_->toggleMapping(); };
+            return;
+        }
         if (auto* synth = dynamic_cast<devices::Resynth*>(proc_))
         {
             resynth_ = add<ResynthEditor>(synth, trackIndex, deviceIndex, chain, child,
@@ -194,6 +247,21 @@ public:
         if (auto* lfo = dynamic_cast<devices::CurveLfo*>(proc_))
         {
             curveLfo_ = add<CurveLfoEditor>(lfo, [this](Widget* widget, int parameter) { tag(widget, parameter); });
+            return;
+        }
+        if (auto* hush = dynamic_cast<devices::HushDevice*>(proc_))
+        {
+            // PLG-14g: the VST3's face, scaled to the chain's height; the title icon (and Size > Open in a window) floats it.
+            hush_ = add<HushFace>(hush->session());
+            hush_->menuHost = []() -> juce::Component* { return juce::TopLevelWindow::getActiveTopLevelWindow(); };
+            hush_->mappingTarget = [this](int parameter) -> std::optional<midi::ControlTarget> {
+                if (chain_ >= 0) return std::nullopt;
+                return midi::ControlTarget{midi::ControlTarget::Kind::DeviceParameter, trackIndex_, deviceIndex_, 0,
+                                           proc_->parameters()[(size_t) parameter].id};
+            };
+            hush_->onOpenWindow = [this] { openHushWindow(); };
+            hushWindow_ = add<IconButton>(IconButton::Icon::FloatWindow);
+            hushWindow_->onClick = [this] { openHushWindow(); };
             return;
         }
         if (DeviceFace::supports(proc_))
@@ -210,8 +278,6 @@ public:
                 }
             return;
         }
-        if (chain < 0 && dynamic_cast<devices::RackProcessor*>(proc_))
-            nativePanel_ = add<NativeDevicePanel>(model, trackIndex, deviceIndex, chain, child);
         if (auto* lfo = dynamic_cast<devices::LfoShaper*>(proc_)) lfoCurve_ = add<LfoCurveEditor>(lfo);
         if (auto* synth = dynamic_cast<devices::WavetableSynth*>(proc_))
         {
@@ -247,16 +313,11 @@ public:
         }
         else if (! proc_->parameters().empty())
         {
-            // Any other device (racks: their macros): generic controls for its display parameters.
+            // Any other device: generic controls for its display parameters.
             for (int p : proc_->displayParameters())
             {
                 const auto& info = proc_->parameters()[(size_t) p];
-                if (nativePanel_ && p == devices::RackProcessor::kChainSelector)
-                {
-                    rackSelector_ = add<RackSelector>(proc_);
-                    tag(rackSelector_, p);
-                }
-                else if (info.isToggle)
+                if (info.isToggle)
                 {
                     auto* b = add<TextButton>(info.name);
                     tag(b, p);
@@ -272,11 +333,11 @@ public:
                 }
             }
         }
-        if (knobs_.size() > (nativePanel_ ? 8u : 12u))
+        if (knobs_.size() > 12u)
         {
             pageButton_ = add<TextButton>("Page 1");
             pageButton_->onClick = [this] {
-                const size_t count = nativePanel_ ? 8u : 12u;
+                const size_t count = 12u;
                 const size_t macros = knobs_.size();
                 knobPage_ = (knobPage_ + 1) % (int) ((macros + count - 1) / count); layout(); repaint();
             };
@@ -451,6 +512,7 @@ public:
 
     void tick() override
     {
+        updateMapOverlay();
         if (! groups_.empty() && groupSignature() != shapeSignature_)
         {
             layout();
@@ -466,30 +528,69 @@ public:
     {
         if (chain_ >= 0)
         {
+            mapTargets_.push_back({w, index});
             if (auto* knob = dynamic_cast<Knob*>(w))
-            {
-                const auto info = proc_->parameters()[(size_t) index];
-                knob->onRightClick = [this, info] {
-                    const int macro = ctx().rackMacroToMap, chain = chain_, child = child_;
-                    if (ctx().editDevice) ctx().editDevice(trackIndex_, deviceIndex_, [macro, chain, child, info](auto& rack) {
-                        if ((size_t) chain >= rack.chains.size() || (size_t) child >= rack.chains[(size_t) chain].devices.size()) return;
-                        auto& device = rack.chains[(size_t) chain].devices[(size_t) child];
-                        if (std::none_of(device.parameters.begin(), device.parameters.end(), [&](const auto& p) { return p.path == info.id; }))
-                        { model::Parameter p; p.path = info.id; p.value = info.defaultValue; p.booleanValue = info.isToggle; device.parameters.push_back(std::move(p)); }
-                        for (auto& p : device.parameters) if (p.path == info.id)
-                        {
-                            p.macroIndex = macro; p.rangeMin = info.minValue; p.rangeMax = info.maxValue;
-                            p.midi.channel = 16; p.midi.isNote = false; p.midi.number = macro;
-                            p.macroMappingEdited = true;
-                        }
-                        rack.chainsEdited = true;
-                    }, "Map Rack Macro");
-                };
-            }
+                knob->onRightClick = [this, index] { mapToMacro(index, false); };
             return;
         }
         w->midiTarget = midi::ControlTarget{midi::ControlTarget::Kind::DeviceParameter, trackIndex_, deviceIndex_, 0,
                                             proc_->parameters()[(size_t) index].id};
+    }
+
+    // Rack chain children: parameter `index` follows the rack's chosen macro over its full range (or, `remove`, no
+    // longer follows any macro). One undoable rack edit.
+    void mapToMacro(int index, bool remove)
+    {
+        if (chain_ < 0 || proc_ == nullptr || index < 0 || (size_t) index >= proc_->parameters().size()) return;
+        const auto info = proc_->parameters()[(size_t) index];
+        const int macro = ctx().rackMacroToMap, chain = chain_, child = child_;
+        if (ctx().editDevice) ctx().editDevice(trackIndex_, deviceIndex_, [macro, chain, child, info, remove](auto& rack) {
+            if ((size_t) chain >= rack.chains.size() || (size_t) child >= rack.chains[(size_t) chain].devices.size()) return;
+            auto& device = rack.chains[(size_t) chain].devices[(size_t) child];
+            if (std::none_of(device.parameters.begin(), device.parameters.end(), [&](const auto& p) { return p.path == info.id; }))
+            { model::Parameter p; p.path = info.id; p.value = info.defaultValue; p.booleanValue = info.isToggle; device.parameters.push_back(std::move(p)); }
+            for (auto& p : device.parameters) if (p.path == info.id)
+            {
+                if (remove) { p.macroIndex = -1; p.midi.channel = -1; }
+                else
+                {
+                    p.macroIndex = macro; p.rangeMin = info.minValue; p.rangeMax = info.maxValue;
+                    p.midi.channel = 16; p.midi.isNote = false; p.midi.number = macro;
+                }
+                p.macroMappingEdited = true;
+            }
+            rack.chainsEdited = true;
+        }, remove ? "Remove Macro Mapping" : "Map Rack Macro");
+    }
+    int mappedMacro(int index) const
+    {
+        if (proc_ == nullptr || index < 0 || (size_t) index >= proc_->parameters().size()) return -1;
+        const auto& id = proc_->parameters()[(size_t) index].id;
+        for (const auto& p : model_.parameters) if (p.path == id) return p.macroIndex;
+        return -1;
+    }
+    // The rack this chain device belongs to (its Map mode shows the overlay).
+    int parentRackId() const
+    {
+        const auto* track = ctx().trackAt(trackIndex_);
+        return track && (size_t) deviceIndex_ < track->devices.size() ? track->devices[(size_t) deviceIndex_].id : -1;
+    }
+    // Rack chain children get the Map-mode overlay as their topmost child (call after construction).
+    void addMapOverlay()
+    {
+        if (chain_ < 0 || proc_ == nullptr) return;
+        mapOverlay_ = add<MacroMapOverlay>();
+        mapOverlay_->visible = false;
+        mapOverlay_->targets = [this]() -> const std::vector<MacroMapOverlay::Target>& { return mapTargets_; };
+        mapOverlay_->mappedMacro = [this](int index) { return mappedMacro(index); };
+        mapOverlay_->map = [this](int index, bool remove) { mapToMacro(index, remove); };
+    }
+    void updateMapOverlay()
+    {
+        if (! mapOverlay_) return;
+        const bool on = ctx().rackMapId >= 0 && ctx().rackMapId == parentRackId();
+        if (on != mapOverlay_->visible) { mapOverlay_->visible = on; repaint(); }
+        mapOverlay_->setBounds({0, kTitle, width(), std::max(0.0f, height() - kTitle)});
     }
 
     bool isMidiEffect() const { return model::deviceRole(model_) == model::DeviceRole::MidiEffect; }
@@ -532,6 +633,11 @@ public:
             x.openWavetableWindow(*key);
     }
     int deviceIndex() const { return chain_ < 0 ? deviceIndex_ : -1; }
+    void openHushWindow()
+    {
+        auto& x = ctx();
+        if (const auto key = x.wavetableKey(trackIndex_, deviceIndex_, chain_, child_); key && x.openHushWindow) x.openHushWindow(*key);
+    }
 
     float preferredWidth() const
     {
@@ -540,9 +646,9 @@ public:
         if (deviceFace_) return deviceFace_->preferredWidth() + 8;
         if (resynth_) return ResynthEditor::preferredWidth + 12;
         if (effectPanel_ && ! expandedControls_) return effectPanel_->preferredWidth() + 8;
-        if (nativePanel_) return model_.type == "DrumGroupDevice" ? 798.0f : 598.0f;
         if (lfoCurve_) return 730;
         if (curveLfo_) return CurveLfoEditor::kPreferredWidth + 12;
+        if (hush_) return (std::max(40.0f, (height() > kTitle ? height() - kTitle : ReferenceFace::kDefaultBody) - 12)) * HushFace::kWidth / HushFace::kHeight + 12;
         if (wavetableFloating_) return 150;
         if (wavetable_) return WavetableEditor::kPreferredWidth + 12;
         if (proc_ == nullptr)
@@ -565,9 +671,17 @@ public:
         auto title = r.removeFromTop(kTitle);
         if (onButton_)
             onButton_->setBounds(Rect{title.x + 3, title.y + 2, 13, 13});
+        updateMapOverlay();
         if (referenceFace_)
         {
             referenceFace_->setBounds({0, kTitle, width(), height() - kTitle}); // the face draws the whole body
+            if (rackFace_) // Rand at 413..472, Map at 482..532 of the capture's 34-px title (y 17..41 of 12..45)
+            {
+                const auto span = rackFace_->titleButtonsCapture();
+                const float u = span.w / 119.0f, y = kTitle * 5.0f / 34.0f, h = kTitle * 24.0f / 34.0f;
+                randButton_->setBounds({span.x, y, 59 * u, h});
+                mapButton_->setBounds({span.x + 69 * u, y, 50 * u, h});
+            }
             return;
         }
         r = (pluginPanel_ || effectPanel_ || deviceFace_) ? r.reduced(4, 2) : r.reduced(6, 6);
@@ -577,6 +691,12 @@ public:
             return;
         }
         if (curveLfo_) { curveLfo_->setBounds(r); return; }
+        if (hush_)
+        {
+            hushWindow_->setBounds({width() - kTitleIcons - 21, 1, 17, 16});
+            hush_->setBounds({r.x, r.y, r.h * HushFace::kWidth / HushFace::kHeight, r.h}); // the face keeps its aspect
+            return;
+        }
         if (deviceFace_)
         {
             for (size_t i = 0; i < sampleTabs_.size(); ++i)
@@ -610,9 +730,9 @@ public:
         }
         if (pageButton_)
         {
-            const size_t count = nativePanel_ ? 8u : 12u;
+            const size_t count = 12u;
             const size_t macros = knobs_.size();
-            pageButton_->setLabel(std::string(nativePanel_ ? "Macros " : "Page ") + std::to_string(knobPage_ + 1) + "/" + std::to_string((macros + count - 1) / count));
+            pageButton_->setLabel("Page " + std::to_string(knobPage_ + 1) + "/" + std::to_string((macros + count - 1) / count));
             pageButton_->setBounds({width() - kTitleIcons - 78, 1, 74, 16});
         }
 
@@ -623,19 +743,6 @@ public:
         }
         if (editorButton_)
             editorButton_->setBounds(r.removeFromTop(20).withWidth(28));
-        if (nativePanel_)
-        {
-            nativePanel_->setBounds(r.removeFromRight(model_.type == "DrumGroupDevice" ? 536.0f : 336.0f));
-            const float kh = std::min(68.0f, (r.h - 46) * 0.5f);
-            const size_t macros = knobs_.size();
-            for (size_t i = 0; i < macros; ++i)
-            {
-                auto* knob = knobs_[i]; knob->visible = i / 8 == (size_t) knobPage_;
-                if (knob->visible) knob->setBounds({r.x + (float) (i % 4) * 58, r.y + 20 + (float) ((i % 8) / 4) * kh, 56, kh});
-            }
-            if (rackSelector_) rackSelector_->setBounds({r.x, r.bottom() - 18, 228, 18});
-            return;
-        }
         if (lfoCurve_) { lfoCurve_->setBounds(r.removeFromRight(std::max(80.0f, r.w - 302))); r.removeFromRight(4); }
         const float knobHeight = std::min(62.0f, std::max(32.0f, (r.h - (toggles_.empty() ? 0.0f : 24.0f)) / 2));
         auto knobsArea = r.removeFromTop(std::min(r.h, knobHeight));
@@ -691,7 +798,12 @@ public:
 
     void mouseDown(const MouseEvent& e) override
     {
-        if (chain_ >= 0) return;
+        if (chain_ >= 0)
+        {
+            // A rack's child: its menu has what applies inside a rack (PLG-16f: Replace with a Sonora device).
+            if (e.right && e.y < kTitle) showDeviceContextMenu(ctx(), trackIndex_, {deviceIndex_, chain_, child_});
+            return;
+        }
         if (! e.right && e.y < kTitle && showsTitleIcons())
             for (int i = 0; i < 3; ++i)
                 if (std::hypot(e.x - (width() - kTitleIconRight[i]), e.y - kTitle * 0.5f) <= kTitleIconSize * 0.5f + 1)
@@ -710,21 +822,7 @@ public:
             }
             return;
         }
-        auto* context = &ctx();
-        juce::PopupMenu menu;
-        const auto* song = context->song;
-        const int track = trackIndex_, id = model_.id;
-        for (const auto* label : {"Cut", "Copy", "Paste", "Duplicate"}) menu.addItem(juce::PopupMenu::Item(label).setEnabled(false));
-        menu.addItem(1, "Delete", ! context->recording && ! context->recordingRequested);
-        for (const auto* label : {"Rename", "Edit Info Text"}) menu.addItem(juce::PopupMenu::Item(label).setEnabled(false));
-        menu.addSeparator();
-        menu.addItem(juce::PopupMenu::Item("Group").setEnabled(false));
-        menu.addItem(juce::PopupMenu::Item("Save as Default Preset").setEnabled(false));
-        menu.showMenuAsync(juce::PopupMenu::Options(), [context, song, track, id](int result) {
-            if (result != 1 || context->song != song || context->recording || context->recordingRequested) return;
-            context->selectedTrack = track; context->selectedDeviceId = id;
-            if (context->deleteSelectedDevice() && context->modelChanged) context->modelChanged();
-        });
+        showDeviceContextMenu(ctx(), trackIndex_, {deviceIndex_}); // ui/DeviceMenu: Delete, ..., Replace with Sonora
     }
 
     void mouseDrag(const MouseEvent& e) override
@@ -753,7 +851,9 @@ public:
         const SkColor band = picked ? paint::mix(t.color("SurfaceHighlight"), t.color("ChosenAlternative"), 0.2f) : t.color("SurfaceHighlight");
         paint::fillRounded(c, title, 3, band); // rounded top corners, square where it meets the body
         paint::fill(c, {title.x, title.y + 3, title.w, title.h - 3}, band);
-        const Rect nameRect = pluginPanel_ ? Rect{52, 0, width() - 56 - kTitleIcons, kTitle} : Rect{20, 0, width() - 24 - kTitleIcons, kTitle};
+        const Rect nameRect = pluginPanel_ ? Rect{52, 0, width() - 56 - kTitleIcons, kTitle}
+                              : rackFace_  ? Rect{20, 0, std::max(10.0f, randButton_->bounds().x - 24), kTitle}
+                                           : Rect{20, 0, width() - 24 - kTitleIcons, kTitle};
         if (pluginPanel_)
         {
             ctl::triangle(c, 24, 9, 7, 6, ctl::Dir::Down, t.color("ControlForeground"));
@@ -793,21 +893,6 @@ public:
             paint::text(c, deactivated ? "Activate Track to load it" : model_.type, r.reduced(8, 0).translated(0, 22).withHeight(40), t.color("TextDisabled"),
                         t.metrics.smallFontSize);
         }
-        else if (auto* rack = dynamic_cast<devices::RackProcessor*>(proc_); rack && ! nativePanel_)
-        {
-            const int knobRows = knobs_.empty() ? 0 : (int) std::ceil((double) knobs_.size() / (double) knobColumns());
-            float y = r.y + 12 + (float) knobRows * 62.0f + (toggles_.empty() ? 0.0f : 18.0f);
-            int i = 0;
-            for (const auto& chain : model_.chains)
-            {
-                (void) rack;
-                paint::text(c, chain.name.empty() ? "Chain " + std::to_string(i + 1) : chain.name,
-                            {r.x + 8, y, r.w - 16, 16}, t.color("ControlForeground"), t.metrics.fontSize);
-                y += 16;
-                if (++i > 10)
-                    break;
-            }
-        }
         else if (wavetableFloating_)
         {
             paint::text(c, "Editor in its own window", r.reduced(6, 6).withHeight(16), t.color("TextDisabled"), t.metrics.smallFontSize);
@@ -829,14 +914,18 @@ private:
     EffectPanel* effectPanel_ = nullptr;
     PluginPanel* pluginPanel_ = nullptr;
     bool expandedControls_ = false;
-    NativeDevicePanel* nativePanel_ = nullptr;
     DeviceFace* deviceFace_ = nullptr;
     ReferenceFace* referenceFace_ = nullptr;
+    RackFace* rackFace_ = nullptr;
+    TextButton *randButton_ = nullptr, *mapButton_ = nullptr;
+    MacroMapOverlay* mapOverlay_ = nullptr;
+    std::vector<MacroMapOverlay::Target> mapTargets_; // rack chain children: controls Map mode can map
     ResynthEditor* resynth_ = nullptr;
     std::vector<TextButton*> sampleTabs_;
-    Widget* rackSelector_ = nullptr;
     LfoCurveEditor* lfoCurve_ = nullptr;
     CurveLfoEditor* curveLfo_ = nullptr;
+    HushFace* hush_ = nullptr;
+    IconButton* hushWindow_ = nullptr;
     WavetableEditor* wavetable_ = nullptr;
     bool wavetableFloating_ = false;
     IconButton *wavetableFloat_ = nullptr, *wavetableOpen_ = nullptr;
@@ -963,8 +1052,10 @@ void DetailView::rebuild()
                 {
                     const auto& processors = rack->chains()[ci].processorForModelDevice;
                     auto* child = di < processors.size() ? processors[di] : nullptr;
-                    boxes_.push_back(add<DeviceBox>(model.chains[ci].devices[di], child, x.selectedTrack, (int) i, (int) ci, (int) di,
-                                                    floatsWavetable(x, (int) i, (int) ci, (int) di)));
+                    auto* box = add<DeviceBox>(model.chains[ci].devices[di], child, x.selectedTrack, (int) i, (int) ci, (int) di,
+                                               floatsWavetable(x, (int) i, (int) ci, (int) di));
+                    box->addMapOverlay(); // UI-66: the rack's Map mode
+                    boxes_.push_back(box);
                 }
         }
     }

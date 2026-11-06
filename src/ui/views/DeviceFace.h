@@ -14,6 +14,8 @@ class DeviceFace final : public Widget
 public:
     enum class Kind { Fm, Simpler, Sampler, Vector, Impulse, Echo, Redux, Tuner, Gate, AutoPan, Meter, Utility };
     static bool supports(devices::DeviceProcessor*);
+    // A parameter's value text as this face shows it (rack macros show their mapped parameter this way, UI-66).
+    static std::string valueText(devices::DeviceProcessor*, int parameter);
     DeviceFace(const model::Device&, devices::DeviceProcessor*, int track, int device, int chain, int child,
                std::function<void(Widget*, int)> tag);
     float preferredWidth() const;

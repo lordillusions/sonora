@@ -55,6 +55,14 @@ std::vector<ParameterInfo> hushParameters()
         p.push_back(makeParam(prefix + "slope", prefix + "slope", 0, 10, d.slope));
         p.push_back(makeParam(prefix + "focus", prefix + "focus", 0, 1, d.focus));
     }
+    // Names are the reference's ("Band 1 frequency": preset files, saved states and the VST3's host ids use them). Ids
+    // are the built-in device's .als parameter paths (PLG-14g): XML-safe, and never a device element the .als already
+    // has (tags compare without case there, and "SideChain" is the sidechain routing).
+    for (auto& info : p)
+    {
+        std::replace(info.id.begin(), info.id.end(), ' ', '_');
+        if (info.id == "Sidechain") info.id = "Sidechain_on";
+    }
     return p;
 }
 

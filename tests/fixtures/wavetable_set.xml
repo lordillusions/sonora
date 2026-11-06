@@ -1,0 +1,273 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written minimal Live Set used by tests/test_als.cpp.
+     It only contains the elements Sonora reads; real files have many more. -->
+<Ableton MajorVersion="5" MinorVersion="12.0_12120" Creator="Ableton Live 12.1.5">
+	<LiveSet>
+		<Tracks>
+			<MidiTrack Id="12">
+				<Name><EffectiveName Value="1-Synth" /><UserName Value="" /></Name>
+				<Color Value="19" />
+				<TrackGroupId Value="-1" />
+				<DeviceChain>
+					<Mixer>
+						<Sends>
+							<TrackSendHolder Id="0"><Send><Manual Value="0.5" /><AutomationTarget Id="103" /></Send></TrackSendHolder>
+						</Sends>
+						<Pan><Manual Value="-0.25" /><AutomationTarget Id="101" /></Pan>
+						<Volume><KeyMidi><PersistentKeyString Value="" /><IsNote Value="false" /><Channel Value="15" /><NoteOrController Value="7" /><LowerRangeNote Value="-1" /><UpperRangeNote Value="-1" /><ControllerMapMode Value="0" /></KeyMidi><Manual Value="0.5011872" /><AutomationTarget Id="100" /></Volume>
+						<Speaker><KeyMidi><PersistentKeyString Value="" /><IsNote Value="true" /><Channel Value="1" /><NoteOrController Value="36" /><LowerRangeNote Value="-1" /><UpperRangeNote Value="-1" /><ControllerMapMode Value="0" /></KeyMidi><Manual Value="true" /><AutomationTarget Id="102" /></Speaker>
+					</Mixer>
+					<MainSequencer>
+						<ClipSlotList>
+							<ClipSlot Id="0"><ClipSlot><Value /></ClipSlot></ClipSlot>
+							<ClipSlot Id="1"><ClipSlot><Value>
+								<MidiClip Id="1" Time="0">
+									<CurrentStart Value="0" /><CurrentEnd Value="4" />
+									<Loop><LoopStart Value="0" /><LoopEnd Value="4" /><StartRelative Value="0" /><LoopOn Value="true" /></Loop>
+									<Name Value="Session Clip" /><Color Value="5" />
+									<Notes><KeyTracks>
+										<KeyTrack Id="0"><Notes>
+											<MidiNoteEvent Time="0" Duration="1" Velocity="100" OffVelocity="64" Probability="1" IsEnabled="true" />
+										</Notes><MidiKey Value="60" /></KeyTrack>
+									</KeyTracks></Notes>
+								</MidiClip>
+							</Value></ClipSlot></ClipSlot>
+						</ClipSlotList>
+						<ClipTimeable><ArrangerAutomation><Events>
+							<MidiClip Id="5" Time="4">
+								<CurrentStart Value="4" /><CurrentEnd Value="12" />
+								<Loop><LoopStart Value="0" /><LoopEnd Value="8" /><StartRelative Value="0" /><LoopOn Value="true" /></Loop>
+								<Name Value="" /><Color Value="19" />
+								<TimeSignature><TimeSignatures><RemoteableTimeSignature Id="0"><Numerator Value="4" /><Denominator Value="4" /><Time Value="0" /></RemoteableTimeSignature></TimeSignatures></TimeSignature>
+								<Notes><KeyTracks>
+									<KeyTrack Id="0"><Notes>
+										<MidiNoteEvent Time="2.75" Duration="0.5" Velocity="90" OffVelocity="64" Probability="1" IsEnabled="true" />
+										<MidiNoteEvent Time="0.75" Duration="0.5" Velocity="100" OffVelocity="64" Probability="1" IsEnabled="true" />
+									</Notes><MidiKey Value="65" /></KeyTrack>
+								</KeyTracks></Notes>
+							</MidiClip>
+						</Events></ArrangerAutomation></ClipTimeable>
+					</MainSequencer>
+					<DeviceChain>
+						<Devices>
+							<InstrumentVector Id="8">
+							<LomId Value="0" />
+							<On><Manual Value="true" /><AutomationTarget Id="300" /></On>
+							<UserName Value="Fixture Pad" />
+							<ViewData Value="{}" />
+							<SpriteName1 Value="Basic Shapes" />
+							<SpriteName2 Value="Basic Shapes" />
+							<UserSprite1><Value /></UserSprite1>
+							<UserSprite2><Value><SampleRef><FileRef><RelativePathType Value="3" /><RelativePath Value="Samples/Imported/missing_table.wav" /><Path Value="/nonexistent/missing_table.wav" /></FileRef></SampleRef></Value></UserSprite2>
+							<UseRawUserWavetable1 Value="false" />
+							<UseRawUserWavetable2 Value="true" />
+							<Voice_Oscillator1_On><LomId Value="0" /><Manual Value="true" /><AutomationTarget Id="301" /></Voice_Oscillator1_On>
+							<Voice_Oscillator1_Pitch_Transpose><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="302" /></Voice_Oscillator1_Pitch_Transpose>
+							<Voice_Oscillator1_Pitch_Detune><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="303" /></Voice_Oscillator1_Pitch_Detune>
+							<Voice_Oscillator1_Wavetables_WavePosition><LomId Value="0" /><Manual Value="0.25" /><AutomationTarget Id="304" /></Voice_Oscillator1_Wavetables_WavePosition>
+							<Voice_Oscillator1_Effects_Effect1><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="305" /></Voice_Oscillator1_Effects_Effect1>
+							<Voice_Oscillator1_Effects_Effect2><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="306" /></Voice_Oscillator1_Effects_Effect2>
+							<Voice_Oscillator1_Pan><LomId Value="0" /><Manual Value="-0.5" /><AutomationTarget Id="307" /></Voice_Oscillator1_Pan>
+							<Voice_Oscillator1_Gain><LomId Value="0" /><Manual Value="1" /><AutomationTarget Id="308" /></Voice_Oscillator1_Gain>
+							<Voice_Oscillator2_On><LomId Value="0" /><Manual Value="true" /><AutomationTarget Id="309" /></Voice_Oscillator2_On>
+							<Voice_Oscillator2_Pitch_Transpose><LomId Value="0" /><Manual Value="-12" /><AutomationTarget Id="310" /></Voice_Oscillator2_Pitch_Transpose>
+							<Voice_Oscillator2_Pitch_Detune><LomId Value="0" /><Manual Value="0.05" /><AutomationTarget Id="311" /></Voice_Oscillator2_Pitch_Detune>
+							<Voice_Oscillator2_Wavetables_WavePosition><LomId Value="0" /><Manual Value="0.5" /><AutomationTarget Id="312" /></Voice_Oscillator2_Wavetables_WavePosition>
+							<Voice_Oscillator2_Effects_Effect1><LomId Value="0" /><Manual Value="0.25" /><AutomationTarget Id="313" /></Voice_Oscillator2_Effects_Effect1>
+							<Voice_Oscillator2_Effects_Effect2><LomId Value="0" /><Manual Value="0.5" /><AutomationTarget Id="314" /></Voice_Oscillator2_Effects_Effect2>
+							<Voice_Oscillator2_Pan><LomId Value="0" /><Manual Value="0.5" /><AutomationTarget Id="315" /></Voice_Oscillator2_Pan>
+							<Voice_Oscillator2_Gain><LomId Value="0" /><Manual Value="0.5" /><AutomationTarget Id="316" /></Voice_Oscillator2_Gain>
+							<Voice_SubOscillator_On><LomId Value="0" /><Manual Value="true" /><AutomationTarget Id="317" /></Voice_SubOscillator_On>
+							<Voice_SubOscillator_Tone><LomId Value="0" /><Manual Value="0.1" /><AutomationTarget Id="318" /></Voice_SubOscillator_Tone>
+							<Voice_SubOscillator_Gain><LomId Value="0" /><Manual Value="0.5" /><AutomationTarget Id="319" /></Voice_SubOscillator_Gain>
+							<Voice_SubOscillator_Transpose><LomId Value="0" /><Manual Value="1" /><AutomationTarget Id="320" /></Voice_SubOscillator_Transpose>
+							<Voice_Filter1_On><LomId Value="0" /><Manual Value="true" /><AutomationTarget Id="321" /></Voice_Filter1_On>
+							<Voice_Filter1_Type><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="322" /></Voice_Filter1_Type>
+							<Voice_Filter1_CircuitLpHp><LomId Value="0" /><Manual Value="2" /><AutomationTarget Id="323" /></Voice_Filter1_CircuitLpHp>
+							<Voice_Filter1_CircuitBpNoMo><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="324" /></Voice_Filter1_CircuitBpNoMo>
+							<Voice_Filter1_Slope><LomId Value="0" /><Manual Value="1" /><AutomationTarget Id="325" /></Voice_Filter1_Slope>
+							<Voice_Filter1_Frequency><LomId Value="0" /><Manual Value="1200" /><AutomationTarget Id="326" /></Voice_Filter1_Frequency>
+							<Voice_Filter1_Resonance><LomId Value="0" /><Manual Value="0.4" /><AutomationTarget Id="327" /></Voice_Filter1_Resonance>
+							<Voice_Filter1_Drive><LomId Value="0" /><Manual Value="3" /><AutomationTarget Id="328" /></Voice_Filter1_Drive>
+							<Voice_Filter1_Morph><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="329" /></Voice_Filter1_Morph>
+							<Voice_Filter2_On><LomId Value="0" /><Manual Value="false" /><AutomationTarget Id="330" /></Voice_Filter2_On>
+							<Voice_Filter2_Type><LomId Value="0" /><Manual Value="1" /><AutomationTarget Id="331" /></Voice_Filter2_Type>
+							<Voice_Filter2_CircuitLpHp><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="332" /></Voice_Filter2_CircuitLpHp>
+							<Voice_Filter2_CircuitBpNoMo><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="333" /></Voice_Filter2_CircuitBpNoMo>
+							<Voice_Filter2_Slope><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="334" /></Voice_Filter2_Slope>
+							<Voice_Filter2_Frequency><LomId Value="0" /><Manual Value="100" /><AutomationTarget Id="335" /></Voice_Filter2_Frequency>
+							<Voice_Filter2_Resonance><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="336" /></Voice_Filter2_Resonance>
+							<Voice_Filter2_Drive><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="337" /></Voice_Filter2_Drive>
+							<Voice_Filter2_Morph><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="338" /></Voice_Filter2_Morph>
+							<Voice_Modulators_AmpEnvelope_Times_Attack><LomId Value="0" /><Manual Value="0.01" /><AutomationTarget Id="339" /></Voice_Modulators_AmpEnvelope_Times_Attack>
+							<Voice_Modulators_AmpEnvelope_Times_Decay><LomId Value="0" /><Manual Value="0.3" /><AutomationTarget Id="340" /></Voice_Modulators_AmpEnvelope_Times_Decay>
+							<Voice_Modulators_AmpEnvelope_Times_Release><LomId Value="0" /><Manual Value="0.2" /><AutomationTarget Id="341" /></Voice_Modulators_AmpEnvelope_Times_Release>
+							<Voice_Modulators_AmpEnvelope_Slopes_Attack><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="342" /></Voice_Modulators_AmpEnvelope_Slopes_Attack>
+							<Voice_Modulators_AmpEnvelope_Slopes_Decay><LomId Value="0" /><Manual Value="0.5" /><AutomationTarget Id="343" /></Voice_Modulators_AmpEnvelope_Slopes_Decay>
+							<Voice_Modulators_AmpEnvelope_Slopes_Release><LomId Value="0" /><Manual Value="0.5" /><AutomationTarget Id="344" /></Voice_Modulators_AmpEnvelope_Slopes_Release>
+							<Voice_Modulators_AmpEnvelope_Sustain><LomId Value="0" /><Manual Value="0.7" /><AutomationTarget Id="345" /></Voice_Modulators_AmpEnvelope_Sustain>
+							<Voice_Modulators_AmpEnvelope_LoopMode><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="346" /></Voice_Modulators_AmpEnvelope_LoopMode>
+							<Voice_Modulators_Lfo1_Retrigger><LomId Value="0" /><Manual Value="true" /><AutomationTarget Id="347" /></Voice_Modulators_Lfo1_Retrigger>
+							<Voice_Modulators_Lfo1_Shape_Type><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="348" /></Voice_Modulators_Lfo1_Shape_Type>
+							<Voice_Modulators_Lfo1_Shape_Amount><LomId Value="0" /><Manual Value="1" /><AutomationTarget Id="349" /></Voice_Modulators_Lfo1_Shape_Amount>
+							<Voice_Modulators_Lfo1_Time_Sync><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="350" /></Voice_Modulators_Lfo1_Time_Sync>
+							<Voice_Modulators_Lfo1_Time_Rate><LomId Value="0" /><Manual Value="2" /><AutomationTarget Id="351" /></Voice_Modulators_Lfo1_Time_Rate>
+							<Voice_Unison_Amount><LomId Value="0" /><Manual Value="0.3" /><AutomationTarget Id="352" /></Voice_Unison_Amount>
+							<Voice_Global_Transpose><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="353" /></Voice_Global_Transpose>
+							<Voice_Global_Glide><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="354" /></Voice_Global_Glide>
+							<Volume><LomId Value="0" /><Manual Value="0.5" /><AutomationTarget Id="355" /></Volume>
+							<Voice_Oscillator2_Effects_EffectMode Value="1" />
+							<Voice_Unison_Mode Value="1" />
+							<Voice_Unison_VoiceCount Value="3" />
+							<Voice_Global_FilterRouting Value="0" />
+							<MonoPoly Value="1" />
+							<PolyVoices Value="2" />
+							<HiQ Value="false" />
+							<ModulationConnections>
+							<ModulationConnectionsForInstrumentVector Id="0" TargetId="Voice_Oscillator1_Pitch_PitchModulation"><TargetName Value="T0" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="1" TargetId="Voice_Oscillator1_Wavetables_WavePosition"><TargetName Value="T1" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0.25" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="2" TargetId="Voice_Oscillator1_Effects_Effect1"><TargetName Value="T2" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="3" TargetId="Voice_Oscillator1_Effects_Effect2"><TargetName Value="T3" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="4" TargetId="Voice_Oscillator1_Pan"><TargetName Value="T4" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="5" TargetId="Voice_Oscillator1_Gain"><TargetName Value="T5" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="6" TargetId="Voice_Oscillator2_Pitch_PitchModulation"><TargetName Value="T6" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="7" TargetId="Voice_Oscillator2_Wavetables_WavePosition"><TargetName Value="T7" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="8" TargetId="Voice_Oscillator2_Effects_Effect1"><TargetName Value="T8" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="9" TargetId="Voice_Oscillator2_Effects_Effect2"><TargetName Value="T9" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="10" TargetId="Voice_Oscillator2_Pan"><TargetName Value="T10" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="11" TargetId="Voice_Oscillator2_Gain"><TargetName Value="T11" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="12" TargetId="Voice_SubOscillator_Tone"><TargetName Value="T12" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="13" TargetId="Voice_SubOscillator_Gain"><TargetName Value="T13" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="14" TargetId="Voice_Filter1_Frequency"><TargetName Value="T14" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0.2" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="15" TargetId="Voice_Filter1_Resonance"><TargetName Value="T15" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="16" TargetId="Voice_Filter1_Drive"><TargetName Value="T16" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="17" TargetId="Voice_Filter1_Morph"><TargetName Value="T17" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="18" TargetId="Voice_Filter2_Frequency"><TargetName Value="T18" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="19" TargetId="Voice_Filter2_Resonance"><TargetName Value="T19" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="20" TargetId="Voice_Filter2_Drive"><TargetName Value="T20" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="21" TargetId="Voice_Filter2_Morph"><TargetName Value="T21" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="22" TargetId="Voice_Modulators_AmpEnvelope_Times_Attack"><TargetName Value="T22" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="23" TargetId="Voice_Modulators_AmpEnvelope_Times_Decay"><TargetName Value="T23" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="24" TargetId="Voice_Modulators_AmpEnvelope_Times_Release"><TargetName Value="T24" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="25" TargetId="Voice_Modulators_AmpEnvelope_Sustain"><TargetName Value="T25" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="26" TargetId="Voice_Modulators_Envelope2_Times_Attack"><TargetName Value="T26" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="27" TargetId="Voice_Modulators_Envelope2_Times_Decay"><TargetName Value="T27" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="28" TargetId="Voice_Modulators_Envelope2_Times_Release"><TargetName Value="T28" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="29" TargetId="Voice_Modulators_Envelope2_Values_Initial"><TargetName Value="T29" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="30" TargetId="Voice_Modulators_Envelope2_Values_Peak"><TargetName Value="T30" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="31" TargetId="Voice_Modulators_Envelope2_Values_Sustain"><TargetName Value="T31" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="32" TargetId="Voice_Modulators_Envelope2_Values_Final"><TargetName Value="T32" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="33" TargetId="Voice_Modulators_Envelope3_Times_Attack"><TargetName Value="T33" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="34" TargetId="Voice_Modulators_Envelope3_Times_Decay"><TargetName Value="T34" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="35" TargetId="Voice_Modulators_Envelope3_Times_Release"><TargetName Value="T35" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="36" TargetId="Voice_Modulators_Envelope3_Values_Initial"><TargetName Value="T36" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="37" TargetId="Voice_Modulators_Envelope3_Values_Peak"><TargetName Value="T37" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="38" TargetId="Voice_Modulators_Envelope3_Values_Sustain"><TargetName Value="T38" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="39" TargetId="Voice_Modulators_Envelope3_Values_Final"><TargetName Value="T39" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="40" TargetId="Voice_Modulators_Lfo1_Shape_Amount"><TargetName Value="T40" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="41" TargetId="Voice_Modulators_Lfo1_Shape_Shaping"><TargetName Value="T41" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="42" TargetId="Voice_Modulators_Lfo1_Time_UnifiedRateModulation"><TargetName Value="T42" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="43" TargetId="Voice_Modulators_Lfo2_Shape_Amount"><TargetName Value="T43" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="44" TargetId="Voice_Modulators_Lfo2_Shape_Shaping"><TargetName Value="T44" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="45" TargetId="Voice_Modulators_Lfo2_Time_UnifiedRateModulation"><TargetName Value="T45" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="46" TargetId="Voice_Modulators_TimeScale"><TargetName Value="T46" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="47" TargetId="Voice_Modulators_Amount"><TargetName Value="T47" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="48" TargetId="Voice_Unison_Amount"><TargetName Value="T48" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="49" TargetId="Voice_Global_AmpModulation"><TargetName Value="T49" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0.5" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="50" TargetId="Voice_Global_PitchModulation"><TargetName Value="T50" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0.0416666679" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							<ModulationConnectionsForInstrumentVector Id="51" TargetId="Voice_Global_Glide"><TargetName Value="T51" /><ModulationAmounts.0 Value="0" /><ModulationAmounts.1 Value="0" /><ModulationAmounts.2 Value="0" /><ModulationAmounts.3 Value="0" /><ModulationAmounts.4 Value="0" /><ModulationAmounts.5 Value="0" /><ModulationAmounts.6 Value="0" /><ModulationAmounts.7 Value="0" /><ModulationAmounts.8 Value="0" /><ModulationAmounts.9 Value="0" /><ModulationAmounts.10 Value="0" /><ModulationAmounts.11 Value="0" /><ModulationAmounts.12 Value="0" /></ModulationConnectionsForInstrumentVector>
+							</ModulationConnections>
+							</InstrumentVector>
+						</Devices>
+					</DeviceChain>
+				</DeviceChain>
+				<AutomationEnvelopes><Envelopes>
+					<AutomationEnvelope Id="0">
+						<EnvelopeTarget><PointeeId Value="100" /></EnvelopeTarget>
+						<Automation><Events>
+							<FloatEvent Id="0" Time="-63072000" Value="1" />
+							<FloatEvent Id="1" Time="4" Value="1" />
+							<FloatEvent Id="2" Time="8" Value="0.5" />
+						</Events></Automation>
+					</AutomationEnvelope>
+					<AutomationEnvelope Id="1">
+						<EnvelopeTarget><PointeeId Value="102" /></EnvelopeTarget>
+						<Automation><Events>
+							<BoolEvent Id="0" Time="-63072000" Value="true" />
+							<BoolEvent Id="1" Time="16" Value="false" />
+						</Events></Automation>
+					</AutomationEnvelope>
+					<AutomationEnvelope Id="2">
+						<EnvelopeTarget><PointeeId Value="104" /></EnvelopeTarget>
+						<Automation><Events>
+							<FloatEvent Id="0" Time="-63072000" Value="0" />
+							<FloatEvent Id="1" Time="0" Value="-6" />
+						</Events></Automation>
+					</AutomationEnvelope>
+					<AutomationEnvelope Id="3">
+						<EnvelopeTarget><PointeeId Value="105" /></EnvelopeTarget>
+						<Automation><Events>
+							<BoolEvent Id="0" Time="-63072000" Value="true" />
+							<BoolEvent Id="1" Time="2" Value="false" />
+						</Events></Automation>
+					</AutomationEnvelope>
+					<AutomationEnvelope Id="4">
+						<EnvelopeTarget><PointeeId Value="999" /></EnvelopeTarget>
+						<Automation><Events><FloatEvent Id="0" Time="-63072000" Value="3" /><FloatEvent Id="1" Time="8" Value="4" /></Events></Automation>
+					</AutomationEnvelope>
+				</Envelopes></AutomationEnvelopes>
+			</MidiTrack>
+			<ReturnTrack Id="2">
+				<Name><EffectiveName Value="A-Reverb" /><UserName Value="" /></Name>
+				<Color Value="1" />
+				<DeviceChain>
+					<Mixer><Volume><Manual Value="1" /></Volume><Pan><Manual Value="0" /></Pan></Mixer>
+					<DeviceChain><Devices>
+						<Chorus2 Id="9"><On><Manual Value="true" /></On></Chorus2>
+						<AudioEffectGroupDevice Id="10">
+							<On><Manual Value="true" /></On>
+							<UserName Value="FX Rack" />
+							<Branches>
+								<AudioEffectBranch Id="0">
+									<Name><EffectiveName Value="Low" /><UserName Value="" /></Name>
+									<DeviceChain><DeviceChain><Devices>
+										<Eq8 Id="11">
+											<On><Manual Value="true" /></On>
+											<GlobalGain>
+												<KeyMidi><PersistentKeyString Value="" /><IsNote Value="false" /><Channel Value="16" /><NoteOrController Value="0" /><LowerRangeNote Value="-1" /><UpperRangeNote Value="-1" /><ControllerMapMode Value="0" /></KeyMidi>
+												<Manual Value="0" />
+												<MidiControllerRange><Min Value="-12" /><Max Value="12" /></MidiControllerRange>
+											</GlobalGain>
+										</Eq8>
+									</Devices></DeviceChain></DeviceChain>
+									<MixerDevice><Volume><Manual Value="1" /></Volume><Panorama><Manual Value="0" /></Panorama><Speaker><Manual Value="true" /></Speaker></MixerDevice>
+									<ZoneSettings><KeyRange><Min Value="24" /><Max Value="72" /></KeyRange><VelocityRange><Min Value="10" /><Max Value="100" /></VelocityRange></ZoneSettings>
+									<BranchSelectorRange><Min Value="0" /><Max Value="63" /></BranchSelectorRange>
+								</AudioEffectBranch>
+							</Branches>
+							<MacroDisplayNames.0 Value="Boost" />
+							<NumVisibleMacroControls Value="4" />
+							<MacroControls.0><Manual Value="64" /></MacroControls.0>
+						</AudioEffectGroupDevice>
+					</Devices></DeviceChain>
+				</DeviceChain>
+			</ReturnTrack>
+		</Tracks>
+		<MainTrack>
+			<DeviceChain>
+				<Mixer>
+					<Volume><Manual Value="1" /></Volume>
+					<Tempo><Manual Value="128" /></Tempo>
+					<TimeSignature><Manual Value="201" /></TimeSignature>
+				</Mixer>
+			</DeviceChain>
+		</MainTrack>
+		<Scenes>
+			<Scene Id="0"><Name Value="" /></Scene>
+			<Scene Id="1"><Name Value="Drop" /><IsTempoEnabled Value="true" /><Tempo Value="140" /></Scene>
+		</Scenes>
+		<Transport>
+			<LoopOn Value="true" /><LoopStart Value="4" /><LoopLength Value="8" /><CurrentTime Value="5.5" />
+		</Transport>
+	</LiveSet>
+</Ableton>

@@ -296,7 +296,7 @@ TEST_CASE("arrangement: clicking the ruler plays from that position (snapped), l
     auto xAt = [&](double beat) { return origin.x + (float) ((beat - ctx.scrollBeats) * ctx.pixelsPerBeat); };
 
     // the scrub area is the strip below the ruler's numbers (the numbers row zooms, UI-62)
-    const float scrubY = origin.y + 33.0f;
+    const float scrubY = origin.y + ui::ArrangementView::kLocatorRowTop + 6.0f;
     root.dispatchMouseDown(mouseAt(xAt(8.1), scrubY)); // snaps to the 1/16 grid: 8.0
     root.dispatchMouseUp(mouseAt(xAt(8.1), scrubY));
     auto block = transport.beginBlock();
@@ -865,7 +865,7 @@ TEST_CASE("arrangement: double-clicking the ruler plays from that position as we
     auto* arrangement = findWidget<ui::ArrangementView>(root);
     REQUIRE(arrangement != nullptr);
     const auto origin = arrangement->boundsInRoot();
-    const float y = origin.y + 33.0f; // the scrub area, below the numbers (UI-62)
+    const float y = origin.y + ui::ArrangementView::kLocatorRowTop + 6.0f; // the scrub area, below the numbers (UI-62)
     const float x = origin.x + (float) (12.0 * ctx.pixelsPerBeat);
     root.dispatchMouseDown(mouseAt(x, y, 1));
     root.dispatchMouseUp(mouseAt(x, y, 1));

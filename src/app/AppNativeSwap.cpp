@@ -2,6 +2,7 @@
 #include "app/AppController.h"
 #include "app/PromptWindow.h"
 #include "plugins/NativeReplacement.h"
+#include "ui/DeviceMenu.h"
 #include "util/Log.h"
 
 namespace sonora::app
@@ -96,16 +97,9 @@ void AppController::replaceWithNativeDevices(const std::vector<plugins::NativeRe
         logf("native swap: not applied: %s", ui_.statusText.c_str());
         return;
     }
-    size_t notes = 0;
-    for (const auto& r : replacements)
-        for (const auto& note : r.notes)
-        {
-            ui_.buildLog.push_back(r.pluginName + " \u2192 " + plugins::nativeAlternativeName(r.alternative) + " (" + r.trackName + "): " + note);
-            logf("native swap: note: %s", ui_.buildLog.back().c_str());
-            ++notes;
-        }
-    ui_.statusText = "Replaced " + std::to_string(replacements.size()) + " plug-in" + (replacements.size() == 1 ? "" : "s")
-                     + " with Sonora devices" + (notes > 0 ? " \u2014 " + std::to_string(notes) + " compatibility notes" : std::string());
+    const auto before = ui_.buildLog.size();
+    ui::reportNativeReplacements(ui_, replacements); // the same notes and status line as the device menu's swap
+    for (size_t i = before; i < ui_.buildLog.size(); ++i) logf("native swap: note: %s", ui_.buildLog[i].c_str());
     logDevices(*song_, replacements, "replaced");
     if (swapAutotest() == "replace-undo")
     {

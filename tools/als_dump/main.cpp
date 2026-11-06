@@ -39,8 +39,14 @@ void printDevices(const std::vector<model::Device>& devices, int indent, bool pa
             std::printf("%*s  state=%zu bytes, controllerState=%zu bytes\n", indent, "", d.plugin->state.size(),
                         d.plugin->controllerState.size());
         if (params)
+        {
             for (const auto& p : d.parameters)
                 std::printf("%*s  %s = %g\n", indent, "", p.path.c_str(), p.value);
+            // Plain (non-automatable) leaves; matrix cells (InstrumentVector, "...#n/ModulationAmounts.m") only when set.
+            for (const auto& [key, value] : d.plain)
+                if (key.find('#') == std::string::npos || value != 0.0)
+                    std::printf("%*s  [plain] %s = %g\n", indent, "", key.c_str(), value);
+        }
         for (const auto& chain : d.chains)
         {
             std::printf("%*s  chain \"%s\"\n", indent, "", chain.name.c_str());

@@ -2,7 +2,7 @@
 // COL-4c: Sonora's own VST3s (PLG-11 Prism, PLG-12 Curve LFO, PLG-14 Hush) inside a set. Their class ids follow JUCE's
 // scheme {0xABCDEF01, 0x9182FAEB, 'Snra', plug-in code}; their saved state is the plug-in's own bytes followed by JUCE's
 // private-data trailer. A computer without the VST3 (a collab guest, a set made elsewhere) plays Prism and Curve LFO with
-// the built-in devices from that state (DeviceFactory). Hush has no built-in device yet.
+// the built-in devices from that state (DeviceFactory); Hush since COL-4e (its state body is HushSession's bytes).
 #include "core/Model.h"
 
 #include <cstddef>

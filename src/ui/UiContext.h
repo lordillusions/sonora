@@ -450,6 +450,11 @@ struct UiContext
     int selectedRackId = -1, selectedRackChain = 0;
     int rackMacroToMap = 0;
     std::map<int, int> drumPadBanks;
+    // UI-66: a rack's view switches (left strip, zone tabs), keyed by device id like drumPadBanks and seeded from the
+    // set's own switches when the rack is first shown. zones: 0 hidden, 1 Key, 2 Velocity, 3 Chain selector.
+    struct RackView { bool macros = true, chains = false; int zones = 0; };
+    std::map<int, RackView> rackViews;
+    int rackMapId = -1; // UI-66: the rack whose macro Map mode is on, -1 none
     // Sonora Prism editor placement (UI-27): a floating window or docked in the device chain, chosen per instance.
     // Keyed by track id + device ids because imported device ids repeat across tracks. View state only: never saved.
     struct WavetableKey
@@ -463,6 +468,7 @@ struct UiContext
     uint64_t wavetablePlacementRevision = 0;        // the device chain rebuilds when a choice changes
     std::function<void(const WavetableKey&)> openWavetableWindow;  // shows or raises the floating editor
     std::function<void(const WavetableKey&)> closeWavetableWindow; // asynchronous: may be called from inside that window
+    std::function<void(const WavetableKey&)> openHushWindow; // PLG-14g: the built-in Sonora Hush face in its own window
     bool isWavetableFloating(const WavetableKey& key) const
     {
         const auto found = wavetableFloating.find(key);
@@ -601,6 +607,8 @@ struct UiContext
     std::function<int(int)> sessionRecordingPhase; // track -1 queries the aggregate phase
     bool documentDirty = false; // edits since the last save
     std::function<void(model::EditCommand)> applyEdit; // performs, records for undo, refreshes engine + UI
+    // Copies the running devices' states (hosted plug-ins included) into the song, before a command reads them (PLG-16f).
+    std::function<void()> capturePluginStates;
     // Waveform overview of an audio clip's sample; nullptr while it is being computed (UI-4).
     std::function<std::shared_ptr<const engine::Peaks>(const model::Clip&)> peaks;
     std::function<void(const model::ClipLocation&)> reverseClip; // writes a reversed copy of the clip's sample and swaps it in

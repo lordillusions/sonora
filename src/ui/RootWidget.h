@@ -45,6 +45,7 @@ public:
     Widget* keyboardFocus() const { return isAlive(keyboardFocus_) ? keyboardFocus_ : nullptr; }
     // Pointer shape for the widget under the mouse (or the one holding the mouse during a drag).
     Cursor cursor() const { return cursor_; }
+    void refreshCursor(MouseEvent e); // re-reads cursorAt() under e (root coordinates) without a mouse move
     bool dispatchKey(const KeyEvent& k);
     // REQ-3a: physical key presses from the window. User-rebound menu shortcuts run first (never while typing, in Settings,
     // export or a MIDI/key map mode, or for plain keys the Computer MIDI Keyboard plays); then dispatchKey. Synthetic keys

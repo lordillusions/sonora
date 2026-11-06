@@ -618,12 +618,18 @@ SerumPatchResult importSerumPatch(std::span<const uint8_t> bytes, const std::str
     { result.error = "Choose a Serum 2 instrument processor or instrument preset"; return result; }
     if (bytes.size() + controller.size() > model::NativeContent::maxBytes)
     { result.error = "Preset exceeds the native content size limit"; return result; }
+    // PLG-16e: the patch name. Presets keep it in the root; a hosted state keeps it in the controller container's
+    // metadata ({"presetName": ...} next to the hash), sometimes in the processor's.
+    std::string presetName = text(root.find("presetName"));
+    if (presetName.empty()) presetName = text(state.metadata().find("presetName"));
     if (! controller.empty())
     {
         const auto control = decodeSerumState(controller);
         if (! control || text(control.state->root().find("product")) != "Serum2"
             || text(control.state->root().find("component")) != "controller")
         { result.error = "Invalid Serum 2 controller state"; return result; }
+        if (presetName.empty()) presetName = text(control.state->metadata().find("presetName"));
+        if (presetName.empty()) presetName = text(control.state->root().find("presetName"));
     }
     auto content = std::make_shared<model::NativeContent>();
     content->format = format; content->sourceDirectory = sourceDirectory;
@@ -632,7 +638,7 @@ SerumPatchResult importSerumPatch(std::span<const uint8_t> bytes, const std::str
     result.device = devices::nativeDeviceModel("SonoraWavetable");
     const auto probe = devices::createNative(result.device);
     result.device.nativeContent = std::move(content); result.device.nativeContentEdited = true;
-    result.device.displayName = text(root.find("presetName"), "Sonora Prism");
+    result.device.displayName = presetName.empty() ? "Sonora Prism" : presetName;
     const auto& infos = probe->parameters();
     const auto assign = [&](int index, double value)
     {

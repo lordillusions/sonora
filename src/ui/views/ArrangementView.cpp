@@ -40,7 +40,11 @@ namespace
 // Live's Arrangement track header: a coloured title column, an I/O column, a mixer column
 // (activator / solo / arm, volume, pan, peak readouts) and a pair of level meters.
 constexpr float kTitleDefault = 103, kHeaderSep = 2, kIoW = 79, kMixW = 106, kMeterW = 14;
-constexpr float kShortLane = 40; // lanes shorter than this (returns, main, collapsed) use a single row
+// Header rows (measured from the reference at 100 %): 13 px controls every 17.5 px from 3.5 px down. A lane shows as many
+// rows as fit, like the reference's track heights: 1 row (folded, returns), 2 (activator/solo + volume/pan, output type +
+// channel), and from 3 on the sends (three per row) and the full I/O chooser set.
+constexpr float kRowTop = 3.5f, kRowPitch = InputControls::compactPitch, kRowH = 13;
+int headerRows(float h) { return h < kRowTop + kRowH + kRowPitch ? 1 : 1 + (int) std::floor((h - kRowTop - kRowH) / kRowPitch); }
 
 class WaveformZoomButton : public TextButton
 {
@@ -125,42 +129,47 @@ public:
     float titleW() const { return std::max(40.0f, width() - (totalWidth(ctx().ioVisible, 0.0f))); }
     bool midiOnly() const { const auto* track = ctx().trackAt(index_); return track && model::isMidiOnly(*track); }
 
+    // Local y of header row k (a single row is centred in the lane).
+    float rowY(int k) const { return rows_ == 1 ? std::max(1.0f, (height() - kRowH) * 0.5f) : kRowTop + (float) k * kRowPitch; }
+    int rows() const { return rows_; }
+    const std::vector<Rect>& sendRects() const { return sendRects_; }
+    Rect volumeRect() const { return volRect_; }
+
     void layout() override
     {
         const bool io = ctx().ioVisible;
-        const bool shortLane = height() < kShortLane;
+        rows_ = headerRows(height());
         ioX_ = titleW() + kHeaderSep;
         mixX_ = ioX_ + (io ? kIoW + kHeaderSep : 0.0f);
         meterX_ = mixX_ + kMixW;
-        const float rowH = 13;
-        const float y1 = shortLane ? std::max(1.0f, (height() - rowH) * 0.5f) : 4.0f;
+        const float y1 = rowY(0);
         if (input_)
         {
-            input_->visible = io && ! shortLane;
-            input_->setBounds({ioX_ + 3, 4, kIoW - 6, InputControls::preferredHeight});
+            input_->visible = io;
+            input_->setRowCount(rows_);
+            input_->setBounds({ioX_ + 3, y1, kIoW - 6, rows_ == 1 ? kRowH : (float) rows_ * kRowPitch});
         }
         if (activator_)
-            activator_->setBounds({mixX_ + 5, y1, 48, rowH});
+            activator_->setBounds({mixX_ + 5, y1, 48, kRowH});
         if (solo_)
-            solo_->setBounds({mixX_ + 57, y1, 22, rowH});
+            solo_->setBounds({mixX_ + 57, y1, 22, kRowH});
         if (arm_)
-        {
-            arm_->visible = ! shortLane;
-            arm_->setBounds({mixX_ + 83, y1, 22, rowH});
-        }
-        volRect_ = {mixX_ + 5, shortLane ? y1 : 22.5f, 48, rowH};
-        panRect_ = {mixX_ + 57, shortLane ? y1 : 22.5f, 48, rowH};
-        if (isMain_ && shortLane)
-        {
-            volRect_.y = panRect_.y = y1;
-        }
-        peakL_ = {mixX_ + 5, 41, 32, rowH};
-        peakR_ = {mixX_ + 41, 41, 32, rowH};
-        if (shortLane && ! isMain_)
-        {
-            volRect_ = panRect_ = peakL_ = peakR_ = {};
-        }
-        if (midiOnly()) volRect_ = panRect_ = peakL_ = peakR_ = {};
+            arm_->setBounds({mixX_ + 83, y1, 22, kRowH});
+        // The main track has no activator row: volume and pan take its first row.
+        const float mixY = isMain_ ? y1 : rowY(1);
+        volRect_ = {mixX_ + 5, mixY, 48, kRowH};
+        panRect_ = {mixX_ + 57, mixY, 48, kRowH};
+        if ((rows_ < 2 && ! isMain_) || midiOnly()) volRect_ = panRect_ = {};
+        // Sends, three per row from the third row on (the reference's "-inf" boxes), as many as the height allows.
+        sendRects_.clear();
+        const int returns = ctx().numReturns();
+        if (! isMain_ && ! isReturn_ && ! midiOnly() && ctx().sendsVisible)
+            for (int s = 0; s < std::min(returns, engine::TrackControls::kMaxSends); ++s)
+            {
+                const int row = 2 + s / 3;
+                if (row >= rows_) break;
+                sendRects_.push_back({mixX_ + 5 + (float) (s % 3) * 34.0f, rowY(row), 30, kRowH});
+            }
     }
 
     void tick() override
@@ -176,8 +185,6 @@ public:
         const bool changed = std::abs(nl - shownL_) > 0.0f || std::abs(nr - shownR_) > 0.0f;
         shownL_ = nl;
         shownR_ = nr;
-        holdL_ = std::max(holdL_, l);
-        holdR_ = std::max(holdR_, r);
         if (changed)
             repaint();
     }
@@ -187,7 +194,7 @@ public:
         const auto* track = ctx().trackAt(index_);
         const bool selected = ctx().isTrackSelected(index_);
         const bool io = ctx().ioVisible;
-        const bool shortLane = height() < kShortLane;
+        const bool shortLane = rows_ == 1;
         const SkColor tc = selected && ctx().sessionTrackSelection ? t.color("SelectionBackground")
                           : track && track->deactivated ? paint::mix(Theme::paletteColor(track->colorIndex), SkColorSetRGB(0x9a, 0x9a, 0x9a), 0.8f)
                           : track && track->kind != model::TrackKind::Main ? Theme::paletteColor(track->colorIndex)
@@ -259,14 +266,16 @@ public:
             paint::text(c, name, Rect{indent + 21, shortLane ? 0.0f : 2.0f, kTitleW - indent - 24, shortLane ? h : 15.0f}, ink, t.metrics.fontSize, Align::Left, true);
         }
 
-        // I/O column for returns, groups and main
+        // I/O column for returns, groups and main: the output type, then its channel when a second row fits.
         if (io && (isReturn_ || isGroup_ || isMain_))
         {
-            const float y = shortLane ? std::max(1.0f, (h - 13) * 0.5f) : 4.0f;
             if (isMain_)
-                ctl::dropdown(c, t, {ioX_ + 3, y, kIoW - 6, 13}, "1/2");
+                ctl::dropdown(c, t, {ioX_ + 3, rowY(0), kIoW - 6, kRowH}, "1/2");
             else
-                ctl::emptyBox(c, t, {ioX_ + 3, y, kIoW - 6, 13});
+            {
+                ctl::dropdown(c, t, {ioX_ + 3, rowY(0), kIoW - 6, kRowH}, track ? trackOutputName(*track) : std::string("Main"));
+                if (rows_ >= 2) ctl::emptyBox(c, t, {ioX_ + 3, rowY(1), kIoW - 6, kRowH});
+            }
         }
 
         // Volume / pan / peak readouts
@@ -281,13 +290,10 @@ public:
             paint::fill(c, {volRect_.x + 1, volRect_.y + 1, (volRect_.w - 2) * Fader::gainToPosition(gain), volRect_.h - 2}, fill);
             paint::text(c, formatDb(gain), volRect_, t.color("ControlForeground"), t.metrics.smallFontSize, Align::Centre);
             ctl::valueBox(c, t, panRect_, formatPanText(pan));
-            if (! peakL_.isEmpty())
-            {
-                auto peakText = [](float p) { return p <= 0.000317f ? std::string("-\xE2\x88\x9E") : formatDb(p); };
-                ctl::valueBox(c, t, peakL_, peakText(holdL_));
-                ctl::valueBox(c, t, peakR_, peakText(holdR_));
-            }
         }
+        if (const auto* ctrl = controls())
+            for (size_t s = 0; s < sendRects_.size(); ++s)
+                ctl::valueBox(c, t, sendRects_[s], formatDb(ctrl->sends[s].load()));
 
         // MIDI-only tracks carry activity dots instead of audio meters/readouts.
         if (midiOnly()) ctl::midiMeter(c, t, {meterX_ + 1, 5, kMeterW - 2, h - 10}, midiTicks_ > 0);
@@ -390,8 +396,16 @@ public:
                 startX_ = e.x;
                 if (e.clicks >= 2) { ctrl->pan.store(0.0f); field_ = Field::None; }
             }
-            else if (peakL_.contains(e.x, e.y) || peakR_.contains(e.x, e.y))
-                holdL_ = holdR_ = 0.0f;
+            else
+                for (size_t s = 0; s < sendRects_.size(); ++s)
+                    if (sendRects_[s].contains(e.x, e.y))
+                    {
+                        field_ = Field::Send;
+                        send_ = (int) s;
+                        startValue_ = Fader::gainToPosition(ctrl->sends[s].load());
+                        startX_ = e.x;
+                        if (e.clicks >= 2) { ctrl->sends[s].store(0.0f); field_ = Field::None; }
+                    }
         }
         repaint();
     }
@@ -413,13 +427,15 @@ public:
         const float dx = (e.x - startX_) / (e.shift ? 500.0f : 100.0f);
         if (field_ == Field::Volume)
             ctrl->volume.store(Fader::positionToGain(startValue_ + dx));
+        else if (field_ == Field::Send && (size_t) send_ < ctrl->sends.size())
+            ctrl->sends[(size_t) send_].store(std::min(1.0f, Fader::positionToGain(std::max(0.0f, startValue_ + dx)))); // sends top out at 0 dB
         else
             ctrl->pan.store(std::clamp(startValue_ + dx * 2.0f, -1.0f, 1.0f));
         repaint();
     }
 
 private:
-    enum class Field { None, Volume, Pan };
+    enum class Field { None, Volume, Pan, Send };
 
     bool collapsed() const
     {
@@ -464,8 +480,10 @@ private:
     int index_;
     bool isMain_, isReturn_, isGroup_;
     float ioX_ = 0, mixX_ = 0, meterX_ = 0;
-    Rect volRect_, panRect_, peakL_, peakR_;
-    float shownL_ = 0, shownR_ = 0, holdL_ = 0, holdR_ = 0;
+    Rect volRect_, panRect_;
+    std::vector<Rect> sendRects_;
+    int rows_ = 1, send_ = -1;
+    float shownL_ = 0, shownR_ = 0;
     Field field_ = Field::None;
     float startValue_ = 0, startX_ = 0;
     bool resizingLane_ = false;
@@ -649,12 +667,15 @@ void ArrangementView::paintOverview(SkCanvas& c, const Theme& t, const Rect& r)
     {
         const double total = overviewBeats();
         const float pxPerBeat = (float) (r.w / total);
-        const float rowH = std::max(1.0f, (r.h - 2) / (float) x.numTracks());
+        // Many tracks share the strip: rows get thinner than a pixel rather than spilling into the bar numbers below.
+        const float rowH = (r.h - 2) / (float) x.numTracks();
+        c.save(); c.clipRect(r.sk());
         for (int i = 0; i < x.numTracks(); ++i)
             for (const auto& clip : x.song->tracks[(size_t) i].arrangementClips)
                 paint::fill(c, {r.x + (float) clip.currentStart * pxPerBeat, r.y + 1 + (float) i * rowH,
                                 std::max(1.0f, (float) (clip.currentEnd - clip.currentStart) * pxPerBeat), std::max(1.0f, rowH - 0.5f)},
                             Theme::paletteColor(clip.colorIndex));
+        c.restore();
         const Rect view{r.x + (float) x.scrollBeats * pxPerBeat, r.y, (float) (timelineArea().w / x.pixelsPerBeat) * pxPerBeat, r.h};
         paint::fill(c, view, paint::withAlpha(SK_ColorWHITE, 70));
         paint::stroke(c, view.withWidth(std::max(2.0f, view.w)), t.color("ControlContrastFrame"));
@@ -711,8 +732,8 @@ void ArrangementView::showWaveformZoomMenu()
 
 bool ArrangementView::inBeatRuler(float x, float y) const
 {
-    // Between the overview and the scrub strip (locators and the loop brace start at 31, see paintLocators / loopZoneAt).
-    return x >= 0 && x < timelineArea().w && y >= overviewRect().bottom() + 1 && y < 31;
+    // Between the overview and the scrub area (the loop brace row starts at kBraceRowTop, the locator row under it).
+    return x >= 0 && x < timelineArea().w && y >= overviewRect().bottom() + 1 && y < kBraceRowTop;
 }
 
 double ArrangementView::arrangementEndBeat() const
@@ -1144,7 +1165,7 @@ void ArrangementView::paint(SkCanvas& c, const Theme& t)
         const double ll = x.transport ? x.transport->loopLength() : x.song->loopLength;
         const bool on = x.transport ? x.transport->loopEnabled() : x.song->loopOn;
         c.save(); c.clipRect(ruler.sk());
-        ctl::loopBrace(c, t, {beatToX(ls), ruler.bottom() - 13, (float) (ll * x.pixelsPerBeat), 10}, on);
+        ctl::loopBrace(c, t, {beatToX(ls), kBraceRowTop + 2, (float) (ll * x.pixelsPerBeat), 10}, on);
         c.restore();
     }
     c.save();
@@ -1240,8 +1261,8 @@ Rect ArrangementView::locatorButtonBounds(LocatorButton which) const
     switch (which)
     {
         case LocatorButton::Set: return {x0, 18, 25, 13};
-        case LocatorButton::Previous: return {x0, 33, 12, 12};
-        case LocatorButton::Next: return {x0 + 13, 33, 12, 12};
+        case LocatorButton::Previous: return {x0, kLocatorRowTop + 0.5f, 12, 12};
+        case LocatorButton::Next: return {x0 + 13, kLocatorRowTop + 0.5f, 12, 12};
     }
     return {};
 }
@@ -1253,18 +1274,19 @@ Rect ArrangementView::locatorBounds(const model::Locator& locator) const
     const auto& label = editing ? renameText_ : locator.name;
     const float labelWidth = label.empty() && ! editing ? 0.0f : std::min(160.0f, gfx::measureText(label, m.smallFontSize) + (editing ? 12.0f : 6.0f));
     const float lx = beatToX(locator.time);
-    return {lx - 1, 33, 9 + labelWidth, 13};
+    return {lx - 1, kLocatorRowTop, 9 + labelWidth, 13};
 }
 
 int ArrangementView::locatorAt(float x, float y) const
 {
     const auto* song = ctx().song;
-    if (! song || x >= timelineArea().w || y < 31 || y >= ctx().theme.metrics.arrangementRulerHeight) return -1;
+    if (! song || x >= timelineArea().w || y < kLocatorRowTop - 1 || y >= ctx().theme.metrics.arrangementRulerHeight) return -1;
     // Later locators draw on top, so they win the hit test.
     for (auto it = song->locators.rbegin(); it != song->locators.rend(); ++it)
     {
         const auto bounds = locatorBounds(*it);
-        if (Rect{bounds.x - 2, 31, bounds.w + 2, ctx().theme.metrics.arrangementRulerHeight - 31}.contains(x, y)) return it->id;
+        if (Rect{bounds.x - 2, kLocatorRowTop - 1, bounds.w + 2, ctx().theme.metrics.arrangementRulerHeight - kLocatorRowTop + 1}.contains(x, y))
+            return it->id;
     }
     return -1;
 }
@@ -1696,8 +1718,7 @@ bool ArrangementView::fadeHandleAt(const model::Clip& clip, const model::ClipLoc
 
 ArrangementView::LoopDrag ArrangementView::loopZoneAt(float x, float y) const
 {
-    const auto& m = ctx().theme.metrics;
-    if (ctx().transport == nullptr || y >= m.arrangementRulerHeight || y <= m.arrangementRulerHeight - 14 || x >= timelineArea().w)
+    if (ctx().transport == nullptr || y < kBraceRowTop || y >= kLocatorRowTop || x >= timelineArea().w)
         return LoopDrag::None;
     const double ls = ctx().transport->loopStart(), ll = ctx().transport->loopLength();
     const float bx0 = beatToX(ls), bx1 = beatToX(ls + ll);
@@ -1714,9 +1735,10 @@ ui::DragMode ArrangementView::clipEdgeAt(const Lane* lane, float x, float y, flo
 Cursor ArrangementView::cursorAt(float x, float y) const
 {
     if (locatorDrag_.id >= 0 || locatorAt(x, y) >= 0) return Cursor::Default; // UI-3b: locators are picked, not scrubbed
-    // The loop brace: its ends resize (the resize cursor shows it), its body moves it.
+    // The loop brace (its own row above the locators): the resize cursor over all of it (owner request, 2026-11-06);
+    // its ends still resize it and its body still moves it.
     if (const auto zone = loopDrag_ != LoopDrag::None ? loopDrag_ : loopZoneAt(x, y); zone != LoopDrag::None)
-        return zone == LoopDrag::Move ? Cursor::Move : Cursor::ResizeHorizontal;
+        return Cursor::ResizeHorizontal;
     // UI-62: the bar-number row is the beat-time ruler: a magnifying glass (drag zooms and scrolls).
     if ((rulerZoom_.active && ! draggingOverview_) || (! draggingRuler_ && inBeatRuler(x, y))) return Cursor::Zoom;
     // UI-52: the rest of the ruler is the scrub area (click plays from there): Live's speaker cursor.
@@ -1729,6 +1751,9 @@ Cursor ArrangementView::cursorAt(float x, float y) const
         return mode == ui::DragMode::FadeInCurve || mode == ui::DragMode::FadeOutCurve ? Cursor::ResizeVertical : Cursor::ResizeHorizontal;
     if (const auto* clip = clipAt(x, y, location, x0, x1); clip && clipEdgeAt(laneAt(y), x, y, x0, x1) != ui::DragMode::Move)
         return Cursor::ResizeHorizontal;
+    // A clip's title bar moves the clip: the hand, like the reference (the body below it selects time: the arrow).
+    if (const auto* lane = laneAt(y); lane && y < lane->y + 13 && clipAt(x, y, location, x0, x1) != nullptr)
+        return Cursor::Move;
     if (laneEdgeAt(x, y) >= 0) return Cursor::ResizeVertical;
     if (inTimeSelection(x, y)) return Cursor::Move;
     return Cursor::Default;
@@ -2380,6 +2405,7 @@ void ArrangementView::mouseDrag(const MouseEvent& e)
 
 void ArrangementView::mouseUp(const MouseEvent& e)
 {
+    draggingRuler_ = false; // a scrub ends with the click: the speaker cursor must not stay over the lanes
     draggingWaveformZoom_ = false;
     selectingTime_ = false;
     draggingOverview_ = false;

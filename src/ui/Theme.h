@@ -51,7 +51,7 @@ public:
         float sessionMixerHeight = 210;
         float sessionVolumeHeight = 120; // fader section of the Session mixer (resizable)
         float sceneColumnWidth = 104;
-        float arrangementRulerHeight = 48;
+        float arrangementRulerHeight = 58; // overview, bar numbers, loop brace row, locator row
         float arrangementLaneHeight = 87;
         float arrangementHeaderWidth = 306;
         float arrangementFooterHeight = 18;

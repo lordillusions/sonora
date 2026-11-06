@@ -4,12 +4,14 @@
 // class (VST3 uid, VST2 id, AU type/subtype/manufacturer) with the name as a guard, never the name alone.
 //
 // Serum 2 converts its saved state with importSerumPatch (DEV-18d) and passes the importer's warnings on. LFOTool's
-// chunk is not readable, so a default Curve LFO gets only what Live stored as named parameters with a clear meaning.
+// chunk goes through plugins/LfoToolState (PLG-16b: graphs, rate, routing, filter, MIDI options); when the set holds
+// no chunk (or an all-zero one), a default Curve LFO gets what Live stored as named parameters with a clear meaning.
 // Plug-in automation carries over where the Sonora parameter has the same normalized 0..1 range (the lane plays as is);
 // other lanes stay in the set, unused, and the notes say so.
 #include "core/Edit.h"
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -36,9 +38,21 @@ struct NativeReplacement
 std::vector<NativeReplacement> findNativeReplacements(const model::Song& song,
                                                       const std::function<bool(const model::Device&)>& installed);
 
+// PLG-16f: the same conversion for instances the user swaps by hand (the device menu), installed or not.
+// The instance at `path` on track `track` (model::trackAt index), or nullopt when it is not Serum 2 / LFOTool or its
+// track cannot be edited (frozen, deactivated).
+std::optional<NativeReplacement> nativeReplacementAt(const model::Song& song, int track, const std::vector<int>& path);
+// Every Serum 2 / LFOTool instance on editable tracks (`alternative` None = both kinds).
+std::vector<NativeReplacement> allNativeReplacements(const model::Song& song, NativeAlternative alternative = NativeAlternative::None);
+// How many instances of that kind the set has on editable tracks (cheap: no conversion).
+int countNativeCandidates(const model::Song& song, NativeAlternative alternative);
+
 // One undoable edit that puts each converted device where its plug-in was. The rest of every track (clips, other
 // devices, automation lanes) is untouched; undo brings the plug-in devices back as they were.
 model::EditCommand replaceWithNative(const model::Song& song, const std::vector<NativeReplacement>& replacements);
+
+// Base64 <data> of one key of an XML plist dictionary (the AU ClassInfo Live stores); empty when absent.
+std::vector<uint8_t> plistData(const std::vector<uint8_t>& plist, const std::string& key);
 
 // Prompt text: the instances found and how many compatibility notes each conversion has.
 struct NativeReplacementOffer

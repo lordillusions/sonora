@@ -104,6 +104,7 @@ Theme::Theme()
         {"PianoKeySeparator", 0xa4a8b1},
         {"Modulation", 0x008cad},
         {"RangeEditField", 0x00cadb},
+        {"MacroAssignment", 0x5cc83a}, // UI-66: rack Map mode (an approximation; a loaded .ask theme overrides it)
     };
     for (const auto& [k, v] : defaults)
         colors_[k] = rgb(v);

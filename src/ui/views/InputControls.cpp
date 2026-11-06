@@ -15,8 +15,9 @@ namespace sonora::ui
 namespace
 {
 constexpr float kBox = 13.0f;
+} // namespace
 
-std::string outputName(const model::Track& track)
+std::string trackOutputName(const model::Track& track)
 {
     if (model::isMidiOnly(track)) return "No Output";
     const auto& r = track.outputRouting;
@@ -31,7 +32,6 @@ std::string outputName(const model::Track& track)
     const auto slash = r.find_last_of('/');
     return slash == std::string::npos ? r : r.substr(slash + 1);
 }
-} // namespace
 
 InputControls::Rows InputControls::rows() const
 {
@@ -50,11 +50,24 @@ InputControls::Rows InputControls::rows() const
     }
     else
     {
-        r.source = {1, 0, w - 2, kBox};
-        r.channel = {1, 16, w - 2, kBox};
-        r.monitorY = 32;
-        r.output = {1, 48, w - 2, kBox};
-        r.spare = {1, 64, w - 2, kBox};
+        auto row = [w](int k) { return Rect{1, (float) k * compactPitch, w - 2, kBox}; };
+        if (rowCount_ == 1) { r.spare = row(0); return r; }
+        if (rowCount_ >= 5)
+        {
+            r.source = row(0);
+            r.channel = row(1);
+            r.monitorY = 2 * compactPitch;
+            r.output = row(3);
+            r.spare = row(4);
+            return r;
+        }
+        // The input type folds into a grip at the left of the channel chooser.
+        r.sourceGrip = {1, 0, 8, kBox};
+        r.channel = {10, 0, w - 11, kBox};
+        if (rowCount_ == 2) { r.output = row(1); return r; }
+        r.monitorY = compactPitch;
+        r.output = row(2);
+        if (rowCount_ == 4) r.spare = row(3);
     }
     return r;
 }
@@ -99,17 +112,21 @@ void InputControls::paint(SkCanvas& canvas, const Theme& theme)
         ctl::caption(canvas, theme, r.monitorCaption, "Monitor");
         ctl::caption(canvas, theme, r.outputCaption, model::isMidiOnly(*track) ? "MIDI To" : "Audio To");
     }
-    ctl::dropdown(canvas, theme, r.source, source);
-    ctl::dropdown(canvas, theme, r.channel, channel, hasChannel);
+    if (! r.source.isEmpty()) ctl::dropdown(canvas, theme, r.source, source);
+    if (! r.sourceGrip.isEmpty())
+        for (int dot = 0; dot < 3; ++dot) // the folded input-type chooser: a vertical grip of three dots
+            paint::fill(canvas, {r.sourceGrip.x + 3, r.sourceGrip.y + 2.5f + (float) dot * 3.0f, 2, 2}, theme.color("ControlForeground"));
+    if (! r.channel.isEmpty()) ctl::dropdown(canvas, theme, r.channel, channel, hasChannel);
     static const char* names[] = {"In", "Auto", "Off"};
-    for (int mode = 0; mode < 3; ++mode)
-    {
-        const bool selected = track->monitoring == mode;
-        ctl::toggle(canvas, theme, monitorButton(mode), names[mode], selected, theme.color("ChosenDefault"),
-                    monitorable || mode == 2);
-    }
-    ctl::dropdown(canvas, theme, r.output, outputName(*track));
-    ctl::emptyBox(canvas, theme, r.spare);
+    if (r.monitorY >= 0)
+        for (int mode = 0; mode < 3; ++mode)
+        {
+            const bool selected = track->monitoring == mode;
+            ctl::toggle(canvas, theme, monitorButton(mode), names[mode], selected, theme.color("ChosenDefault"),
+                        monitorable || mode == 2);
+        }
+    if (! r.output.isEmpty()) ctl::dropdown(canvas, theme, r.output, trackOutputName(*track));
+    if (! r.spare.isEmpty()) ctl::emptyBox(canvas, theme, r.spare);
 }
 
 void InputControls::applySelection(model::InputSelection selection, const std::string& displayName)
@@ -131,7 +148,7 @@ void InputControls::mouseDown(const MouseEvent& event)
     if (! track || ! ctx().applyEdit) return;
     ctx().selectedTrack = track_;
     const auto r = rows();
-    for (int mode = 0; mode < 3; ++mode)
+    for (int mode = 0; mode < 3 && r.monitorY >= 0; ++mode)
         if (monitorButton(mode).contains(event.x, event.y))
         {
             if (model::parseInput(*track).kind == model::InputKind::Resampling) return;
@@ -142,7 +159,8 @@ void InputControls::mouseDown(const MouseEvent& event)
         }
     const auto selection = model::parseInput(*track);
     const bool midi = track->kind == model::TrackKind::Midi;
-    const bool onSource = r.source.contains(event.x, event.y), onChannel = r.channel.contains(event.x, event.y);
+    const bool onSource = r.source.contains(event.x, event.y) || r.sourceGrip.contains(event.x, event.y);
+    const bool onChannel = r.channel.contains(event.x, event.y);
     if (! onSource && ! onChannel)
         return;
 

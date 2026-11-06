@@ -610,6 +610,10 @@ void lfoWave(SkCanvas& c, const Theme& t, P* p, Rect r)
 }
 
 constexpr float kUtilityText = 9.9f, kUtilityHeader = 10.7f; // face units, measured ("Bass Mono" 49.6 wide, "Input" 31)
+std::string DeviceFace::valueText(P* p, int parameter)
+{
+    return p && parameter >= 0 && (size_t) parameter < p->parameters().size() ? formatted(p, parameter) : std::string();
+}
 bool DeviceFace::supports(P* p)
 {
     return dynamic_cast<F*>(p) || dynamic_cast<S*>(p)

@@ -31,6 +31,8 @@
 #include "core/Edit.h"
 #include "io/als/AlsReader.h"
 #include "io/als/AlsWriter.h"
+#include "devices/DeviceFactory.h"
+#include "plugins/LfoToolState.h"
 #include "plugins/PluginDevice.h"
 #include "plugins/PluginHost.h"
 #include "plugins/Vst3PresetBuilder.h"
@@ -621,6 +623,50 @@ bool showReferenceEditor(juce::AudioPluginInstance& instance, juce::String& erro
     }
     instance.releaseResources();
     return true;
+}
+
+// PLG-16b: an LFOTool chunk (raw, or an .fxp) through the swap's own conversion to Sonora Curve LFO. Prints the notes,
+// the converted settings and the gain over DC 0.5 at 120 BPM from beat 0 (sample 0 of every 250-sample block for one
+// second), to compare with the plug-in itself through fx_render --tempo 120 --block 250.
+int convertLfoToolFile(const juce::File& file)
+{
+    juce::MemoryBlock data;
+    if (! file.loadFileAsData(data)) { std::fprintf(stderr, "cannot read %s\n", file.getFullPathName().toRawUTF8()); return 1; }
+    std::vector<uint8_t> chunk(static_cast<const uint8_t*>(data.getData()), static_cast<const uint8_t*>(data.getData()) + data.getSize());
+    if (chunk.size() > 60 && std::memcmp(chunk.data(), "CcnK", 4) == 0) chunk.erase(chunk.begin(), chunk.begin() + 60);
+    const auto decoded = plugins::decodeLfoToolChunk(chunk);
+    if (! decoded.ok) { std::printf("not converted: %s\n", decoded.error.c_str()); return 1; }
+    auto device = devices::nativeDeviceModel("SonoraCurveLfo");
+    const auto defaults = device;
+    std::vector<std::string> notes;
+    plugins::applyLfoToolState(decoded.state, device, notes);
+    std::printf("version %.2f\n", (double) decoded.state.version);
+    std::string changed;
+    for (size_t i = 0; i < device.parameters.size(); ++i)
+        if (std::abs(device.parameters[i].value - defaults.parameters[i].value) > 1e-6 && device.parameters[i].path.rfind('G', 0) != 0)
+            changed += " " + device.parameters[i].path + "=" + juce::String(device.parameters[i].value, 4).toStdString();
+    std::printf("settings:%s\n", changed.c_str());
+    for (const auto& note : notes) std::printf("note: %s\n", note.c_str());
+    auto processor = devices::createNative(device);
+    if (processor == nullptr) return 1;
+    processor->prepare(48000.0, 250);
+    devices::HostInfo host;
+    host.playing = true;
+    host.sampleRate = 48000.0;
+    juce::AudioBuffer<float> block(2, 250);
+    std::printf("envelope:");
+    for (int done = 0; done < 48000; done += 250)
+    {
+        host.beats = done / 48000.0 * 2.0;
+        processor->setHostInfo(host);
+        for (int channel = 0; channel < 2; ++channel)
+            for (int i = 0; i < 250; ++i) block.setSample(channel, i, 0.5f);
+        juce::MidiBuffer midi;
+        processor->process(block, midi);
+        std::printf(" %.3f", (double) block.getSample(0, 0) / 0.5);
+    }
+    std::printf("\n");
+    return 0;
 }
 
 // Read the vendor container with Sonora's native decoder, without instantiating a plugin.
@@ -1425,10 +1471,12 @@ static int runProbeCommand(int argc, char** argv)
 
     if (argc < 2)
     {
-        std::fprintf(stderr, "usage: plugin_probe [--data-folder <name>] --scan | --scan-file <plugin> | --list | --decode-serum-state <state.bin> | --inspect-file <plugin> [--output <json>] [--state-dir <dir>] [--render-out <dir>] [--class-id <CID>] [--component-state <bin>] [--controller-state <bin>] [--set <hostId>=<normalised>] ... [--note <0..127>] [--velocity <1..127>] [--stimulus sine|impulse|step|noise] [--amplitude <0..1>] [--frequency <Hz>] [--right-scale <-1..1>] [--midi-event <sample>:<channel-message-hex>] ... [--render-block-size <128|256|512|1024|2048>] [--render-samples <48000..480000>] [--preroll-samples <0..65536, block aligned>] [--settle-ms <0..30000>] [--playhead-jump <sample>:<delta-samples>] ... [--text-sweep <hostId>=<2..4097 points>] ... [--native-interfaces] [--raw-state] [--editor-query] [--editor] | <set.als> [--render]\n");
+        std::fprintf(stderr, "usage: plugin_probe [--data-folder <name>] --scan | --scan-file <plugin> | --list | --decode-serum-state <state.bin> | --convert-lfotool <chunk.bin|preset.fxp> | --inspect-file <plugin> [--output <json>] [--state-dir <dir>] [--render-out <dir>] [--class-id <CID>] [--component-state <bin>] [--controller-state <bin>] [--set <hostId>=<normalised>] ... [--note <0..127>] [--velocity <1..127>] [--stimulus sine|impulse|step|noise] [--amplitude <0..1>] [--frequency <Hz>] [--right-scale <-1..1>] [--midi-event <sample>:<channel-message-hex>] ... [--render-block-size <128|256|512|1024|2048>] [--render-samples <48000..480000>] [--preroll-samples <0..65536, block aligned>] [--settle-ms <0..30000>] [--playhead-jump <sample>:<delta-samples>] ... [--text-sweep <hostId>=<2..4097 points>] ... [--native-interfaces] [--raw-state] [--editor-query] [--editor] | <set.als> [--render]\n");
         return 2;
     }
     const juce::String a = argv[1];
+    if (a == "--convert-lfotool")
+        return argc == 3 ? convertLfoToolFile(juce::File(juce::String::fromUTF8(argv[2]))) : 2;
     if (a == "--decode-serum-state")
         return argc == 3 ? decodeSerumStateFile(juce::File(juce::String(argv[2]))) : 2;
     if (a == "--inspect-file" || a == "--inspect-file-worker")

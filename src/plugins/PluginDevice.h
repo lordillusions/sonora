@@ -20,6 +20,11 @@ namespace sonora::plugins
 // Message thread.
 bool capturePluginInfo(juce::AudioPluginInstance& instance, model::DeviceKind kind, model::PluginInfo& info);
 
+// PLG-16b: some chunk plug-ins (LFOTool, VST2 and AU, measured on this Mac) hand the host an all-zero chunk even right
+// after loading a real one. That is no report, not a state: true when `captured` is such a chunk and `stored` (the
+// state the set had) is a real one, so capture keeps `stored`. VST2: the chunk itself; AU: the "vstdata" FXP's chunk.
+bool pluginChunkUnreported(model::DeviceKind kind, const std::vector<uint8_t>& captured, const std::vector<uint8_t>& stored);
+
 class PluginDevice final : public devices::DeviceProcessor, private juce::AudioProcessorListener
 {
 public:

@@ -179,6 +179,7 @@ void SkiaCanvasComponent::mouseDrag(const juce::MouseEvent& e)
 void SkiaCanvasComponent::mouseUp(const juce::MouseEvent& e)
 {
     root_.dispatchMouseUp(convert(e, zoom()));
+    updateCursor(); // the release may end a scrub or drag that held its own cursor
 }
 
 void SkiaCanvasComponent::mouseMove(const juce::MouseEvent& e)

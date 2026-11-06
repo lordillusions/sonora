@@ -10,6 +10,7 @@
 #include "devices/RackProcessor.h"
 #include "devices/native/AutoFilter.h"
 #include "devices/native/Bands.h"
+#include "devices/native/ChannelEq.h"
 #include "devices/native/Delay.h"
 #include "devices/native/Compressor.h"
 #include "devices/native/EqEight.h"
@@ -22,6 +23,8 @@
 #include "devices/native/Simpler.h"
 #include "devices/native/FmSynth.h"
 #include "devices/native/VectorSynth.h"
+#include "devices/native/WavetableInstrument.h"
+#include "devices/native/WavetableSprites.h"
 #include "devices/native/Resynth.h"
 #include "devices/native/Impulse.h"
 #include "devices/native/Echo.h"
@@ -29,6 +32,7 @@
 #include "devices/native/WavetableContent.h"
 #include "devices/native/LfoShaper.h"
 #include "devices/native/CurveLfo.h"
+#include "devices/native/HushSession.h"
 #include "devices/native/MidiVelocity.h"
 #include "devices/native/MidiNoteEffects.h"
 #include "devices/native/Arpeggiator.h"
@@ -50,6 +54,15 @@ void note(BuildContext& ctx, std::string text)
 {
     if (ctx.log != nullptr)
         ctx.log->push_back(std::move(text));
+}
+
+// PLG-14g: the built-in Hush keeps its session (preset, A/B slot, view) as .als content; the bytes are the VST3's state.
+std::shared_ptr<const model::NativeContent> hushContent(const HushSession& session)
+{
+    auto content = std::make_shared<model::NativeContent>();
+    content->format = HushDevice::kContentFormat;
+    content->data = session.encodeState();
+    return content;
 }
 
 bool isInstrumentDevice(const model::Device& d)
@@ -86,6 +99,7 @@ std::unique_ptr<DeviceProcessor> createRack(const model::Device& d, BuildContext
         c.volume = (float) mc.volume;
         c.pan = (float) mc.pan;
         c.active = mc.speakerOn;
+        c.solo = mc.solo;
         c.receivingNote = mc.receivingNote;
         c.sendingNote = mc.sendingNote;
         c.chokeGroup = mc.chokeGroup;
@@ -169,7 +183,7 @@ std::unique_ptr<DeviceProcessor> createSonoraStandIn(const model::Device& d, Bui
 {
     using plugins::SonoraPlugin;
     const auto which = plugins::sonoraPluginFor(*d.plugin, d.kind);
-    if (which != SonoraPlugin::Prism && which != SonoraPlugin::CurveLfo) return nullptr;
+    if (which != SonoraPlugin::Prism && which != SonoraPlugin::CurveLfo && which != SonoraPlugin::Hush) return nullptr;
     const auto body = plugins::juceVst3StateBody(d.plugin->state);
     std::string error;
     std::unique_ptr<DeviceProcessor> dev;
@@ -183,12 +197,19 @@ std::unique_ptr<DeviceProcessor> createSonoraStandIn(const model::Device& d, Bui
         dev = createNative(native, &warnings);
         for (auto& warning : warnings) note(ctx, d.plugin->name + ": " + warning);
     }
-    else
+    else if (which == SonoraPlugin::CurveLfo)
     {
         auto lfo = std::make_unique<CurveLfo>();
         if (! body.empty() && ! plugins::decodeCurveLfoState(body.data(), body.size(), *lfo, error))
             note(ctx, d.plugin->name + ": the saved curves could not be read (" + error + "), using the defaults");
         dev = std::move(lfo);
+    }
+    else // COL-4e: the VST3's state body is the built-in device's session state
+    {
+        auto hush = std::make_unique<HushDevice>();
+        if (! body.empty() && ! hush->session().decodeState(body.data(), body.size(), error))
+            note(ctx, d.plugin->name + ": the saved settings could not be read (" + error + "), using the defaults");
+        dev = std::move(hush);
     }
     if (! dev) return nullptr;
     dev->setBypassed(! d.enabled);
@@ -282,6 +303,8 @@ std::unique_ptr<DeviceProcessor> createNative(const model::Device& d, std::vecto
         dev = std::make_unique<AutoFilter2>();
     else if (d.type == "FilterEQ3")
         dev = std::make_unique<EqThree>();
+    else if (d.type == "ChannelEq") // DEV-30
+        dev = std::make_unique<ChannelEq>();
     else if (d.type == "MultibandDynamics")
         dev = std::make_unique<MultibandDynamics>();
     else if (d.type == "Limiter")
@@ -290,6 +313,13 @@ std::unique_ptr<DeviceProcessor> createNative(const model::Device& d, std::vecto
         dev = std::make_unique<FmSynth>();
     else if (d.type == "SonoraVector")
         dev = std::make_unique<VectorSynth>();
+    else if (d.type == "InstrumentVector") // DEV-28b: the reference's Wavetable
+    {
+        auto synth = std::make_unique<WavetableInstrument>();
+        std::vector<std::string> localWarnings;
+        prepareWavetableInstrument(*synth, d, warnings != nullptr ? *warnings : localWarnings);
+        dev = std::move(synth);
+    }
     else if (d.type == "SonoraResynth")
     {
         std::string error;
@@ -313,6 +343,19 @@ std::unique_ptr<DeviceProcessor> createNative(const model::Device& d, std::vecto
         dev = std::make_unique<LfoShaper>();
     else if (d.type == "SonoraCurveLfo")
         dev = std::make_unique<CurveLfo>();
+    else if (d.type == "SonoraHush")
+    {
+        // Session first (preset, A/B, view); the parameters below then take the model's values, which automation and
+        // the engine sync keep current.
+        auto hush = std::make_unique<HushDevice>();
+        if (d.nativeContent && d.nativeContent->format == HushDevice::kContentFormat)
+        {
+            std::string error;
+            if (! hush->session().decodeState(d.nativeContent->data.data(), d.nativeContent->data.size(), error) && warnings)
+                warnings->push_back("Sonora Hush: its saved settings could not be read (" + error + "); parameters kept");
+        }
+        dev = std::move(hush);
+    }
     else if (d.type == "SonoraVelocity")
         dev = std::make_unique<MidiVelocity>();
 
@@ -383,13 +426,22 @@ model::Device nativeDeviceModel(const std::string& type)
     if (d.kind == model::DeviceKind::Rack) d.numVisibleMacros = 16;
     BuildContext context;
     if (auto p = createDevice(d, context))
-        for (const auto& info : p->parameters())
+    {
+        // A new Hush starts from the preset chosen as its default (shared Hush settings), like the VST3.
+        std::unique_ptr<HushDevice> fresh;
+        if (type == "SonoraHush") fresh = std::make_unique<HushDevice>();
+        const auto& infos = p->parameters();
+        for (size_t i = 0; i < infos.size(); ++i)
         {
-            if (info.plainValue) { d.plain[info.id] = info.defaultValue; continue; }
+            const auto& info = infos[i];
+            const float value = fresh ? fresh->getParameter((int) i) : info.defaultValue;
+            if (info.plainValue) { d.plain[info.id] = value; continue; }
             model::Parameter parameter;
-            parameter.path = info.id; parameter.value = info.defaultValue; parameter.booleanValue = info.isToggle;
+            parameter.path = info.id; parameter.value = value; parameter.booleanValue = info.isToggle;
             d.parameters.push_back(std::move(parameter));
         }
+        if (fresh) d.nativeContent = hushContent(fresh->session());
+    }
     return d;
 }
 
@@ -424,9 +476,25 @@ void captureDeviceState(model::Device& d, DeviceProcessor* processor)
             d.parameters.push_back(std::move(p));
         }
     }
+    if (const auto* hush = dynamic_cast<HushDevice*>(processor))
+    {
+        // Preset name, A/B slot and view as content; replaced only when they changed, so saving twice writes the same.
+        auto content = hushContent(hush->session());
+        if (! d.nativeContent || d.nativeContent->format != content->format || d.nativeContent->data != content->data)
+            d.nativeContent = std::move(content);
+    }
     if (const auto* rack = dynamic_cast<RackProcessor*>(processor))
         for (size_t ci = 0; ci < d.chains.size() && ci < rack->chains().size(); ++ci)
         {
+            if (const auto* mix = rack->chainMix((int) ci)) // UI-66: the chain list edits the mixer live
+            {
+                // Untouched values keep their double precision from the file (the processor holds floats).
+                auto keep = [](double& stored, float live) { if (std::abs(stored - (double) live) > 1e-6) stored = live; };
+                keep(d.chains[ci].volume, mix->volume.load());
+                keep(d.chains[ci].pan, mix->pan.load());
+                d.chains[ci].speakerOn = mix->active.load();
+                d.chains[ci].solo = mix->solo.load();
+            }
             auto& children = d.chains[ci].devices;
             const auto& processors = rack->chains()[ci].processorForModelDevice;
             for (size_t pi = 0; pi < children.size() && pi < processors.size(); ++pi) captureDeviceState(children[pi], processors[pi]);

@@ -679,7 +679,7 @@ TEST_CASE("browser: real drag events route stable filtered items and Escape canc
     start.x = listRow(0).first; start.y = listRow(0).second;
     root.dispatchMouseDown(start);
     auto end = start;
-    end.x = 600; end.y = 90;
+    end.x = 600; end.y = ctx.theme.metrics.controlBarHeight + ctx.theme.metrics.arrangementRulerHeight + 12; // track 1's lane
     root.dispatchMouseDrag(end);
     REQUIRE(ctx.browserDrag.has_value());
     REQUIRE(gfx::renderToPng(root, 1200, 700, 1, image.getFullPathName().toStdString()));
@@ -703,7 +703,7 @@ TEST_CASE("browser: real drag events route stable filtered items and Escape canc
     root.dispatchMouseDown(category); root.dispatchMouseUp(category);
     auto group = start; group.x = listRow(2).first; group.y = listRow(2).second; // EQ & Filters
     root.dispatchMouseDown(group); root.dispatchMouseUp(group);
-    start.x = listRow(4).first; start.y = listRow(4).second; // EQ Eight, after Auto Filter
+    start.x = listRow(5).first; start.y = listRow(5).second; // EQ Eight, after Auto Filter and Channel EQ (DEV-30)
     root.dispatchMouseDown(start); root.dispatchMouseDrag(end); root.dispatchMouseUp(end);
     CHECK(payload.kind == ui::BrowserDrag::Kind::NativeDevice);
     CHECK(payload.value == "Eq8");

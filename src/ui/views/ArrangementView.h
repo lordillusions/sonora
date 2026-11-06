@@ -52,6 +52,9 @@ public:
     bool wantsTextInput() const override { return renaming_ || editingWaveformZoom_; }
     void focusLost() override { editingWaveformZoom_ = false; repaint(); }
     Cursor cursorAt(float x, float y) const override;
+    // Rows of the ruler below the overview (local y): the bar numbers (beat-time ruler, zoom), the loop brace row and,
+    // right under it, the locator row, so locator names never sit under the brace. The last two are the scrub area.
+    static constexpr float kNumbersTop = 16, kBraceRowTop = 31, kLocatorRowTop = 44;
     bool browserDrop(const BrowserDrag&, const MouseEvent&) override;
 
     // Lane order: tracks (skipping folded groups' children), returns, main.

@@ -39,6 +39,7 @@
 
 #include "core/AppDataFolder.h"
 #include "ui/views/PianoRoll.h"
+#include "ui/DeviceMenu.h"
 #include "devices/DeviceFactory.h"
 #include "engine/EngineGraph.h"
 #include "engine/MasterMonitor.h"
@@ -128,7 +129,8 @@ int main(int argc, char** argv)
     int benchWarmup = 20;
     bool wavetableWindow = false, wavetableBrowser = false;
     std::string wavetablePreset, wavetableSearch;
-    bool trackMenu = false, arrangementMenu = false, nativeSwapPrompt = false;
+    bool trackMenu = false, arrangementMenu = false, nativeSwapPrompt = false, nativeSwap = false;
+    std::string deviceMenu; // --device-menu TRACK:PATH
     double deviceDemoBeats = 0;
     std::string collabMode;
     float fileDragX = -1, fileDragY = -1;
@@ -161,6 +163,7 @@ int main(int argc, char** argv)
     int width = 1440, height = 900;
     float scale = 2.0f, deviceScroll = -1;
     int devicePage = -1, deviceSection = -1;
+    std::string rackView; // UI-66: --rack-view letters for the selected track's racks
     ui::UiContext ctx;
     midi::MidiManager mappingInput; // no hardware ports opened by the snapshot tool
     ctx.midi = &mappingInput;
@@ -186,7 +189,9 @@ int main(int argc, char** argv)
         const std::string a = argv[i];
         auto next = [&] { return i + 1 < argc ? std::string(argv[++i]) : std::string(); };
         if (a == "--track-menu") trackMenu = true;
+        else if (a == "--device-menu") deviceMenu = next();
         else if (a == "--native-swap-prompt") nativeSwapPrompt = true;
+        else if (a == "--native-swap") nativeSwap = true; // PLG-16: Replace All as if every Serum 2 / LFOTool were missing
         else if (a == "--arrangement-menu") arrangementMenu = true;
         else if (a == "--fold-scale") { ctx.scaleFold = ctx.scaleHighlight = true; }
         else if (a == "--session")
@@ -283,6 +288,8 @@ int main(int argc, char** argv)
             ctx.mixerVisible = false;
         else if (a == "--no-sends")
             ctx.sendsVisible = false;
+        else if (a == "--rack-view") // UI-66: m macros, c chain list, k/v/s Key/Vel/Chain zones, d chain devices, p Map mode
+            rackView = next();
         else if (a == "--device-scroll")
             deviceScroll = std::stof(next());
         else if (a == "--device-page") // PAGE[:SECTION]: page (and section tab) of compact device faces, e.g. Simpler Controls = 1
@@ -430,6 +437,56 @@ int main(int argc, char** argv)
         std::printf("wrote native swap prompt %s (%zu instances)\n", out.c_str(), found.size());
         return 0;
     }
+    if (nativeSwap)
+    {
+        // The app's Replace All: the same conversion and edit, then the snapshot shows the swapped set. Prints what
+        // each Sonora device received: every parameter that differs from the device's defaults, and the notes.
+        const auto found = plugins::findNativeReplacements(*loaded.song, [](const model::Device&) { return false; });
+        for (const auto& r : found)
+        {
+            const auto defaults = devices::nativeDeviceModel(r.device.type);
+            std::printf("%s: %s -> %s \"%s\"%s\n", r.trackName.c_str(), r.pluginName.c_str(), plugins::nativeAlternativeName(r.alternative),
+                        r.device.displayName.c_str(), r.device.nativeContent ? " (source state kept)" : "");
+            int changed = 0;
+            std::string line;
+            for (size_t i = 0; i < r.device.parameters.size() && i < defaults.parameters.size(); ++i)
+                if (std::abs(r.device.parameters[i].value - defaults.parameters[i].value) > 1e-6)
+                {
+                    ++changed;
+                    char item[160];
+                    std::snprintf(item, sizeof item, " %s=%.4g", r.device.parameters[i].path.c_str(), r.device.parameters[i].value);
+                    line += item;
+                }
+            std::printf("    %d of %zu parameters differ from the defaults:%s\n", changed, r.device.parameters.size(), line.c_str());
+            if (r.alternative == plugins::NativeAlternative::CurveLfo)
+                if (auto device = devices::createNative(r.device))
+                {
+                    // Gain over DC 0.5 while the song plays from beat 0 at 120 BPM, every 250 samples for one second
+                    // (compare with the plug-in through fx_render --tempo 120).
+                    device->prepare(48000.0, 250);
+                    devices::HostInfo host;
+                    host.playing = true;
+                    host.sampleRate = 48000.0;
+                    juce::AudioBuffer<float> block(2, 250);
+                    std::string envelope;
+                    for (int done = 0; done < 48000; done += 250)
+                    {
+                        host.beats = done / 48000.0 * 2.0;
+                        device->setHostInfo(host);
+                        for (int channel = 0; channel < 2; ++channel)
+                            for (int i = 0; i < 250; ++i) block.setSample(channel, i, 0.5f);
+                        juce::MidiBuffer midi;
+                        device->process(block, midi);
+                        char value[16];
+                        std::snprintf(value, sizeof value, " %.3f", (double) block.getSample(0, 0) / 0.5);
+                        envelope += value;
+                    }
+                    std::printf("    envelope:%s\n", envelope.c_str());
+                }
+            for (const auto& note : r.notes) std::printf("    note: %s\n", note.c_str());
+        }
+        if (auto command = plugins::replaceWithNative(*loaded.song, found); command.apply) command.apply(*loaded.song);
+    }
     for (int track : selectedTracks)
         if (track >= 0 && (size_t) track < loaded.song->tracks.size())
         {
@@ -486,6 +543,24 @@ int main(int argc, char** argv)
     ctx.buildLog = graph.log;
     if (setView) ui::applySetView(ctx);
     if (allAutomation) ui::AutomationEditor::toggleAllAutomation(ctx);
+    if (! deviceMenu.empty())
+    {
+        // PLG-16f: the device title menu of track N's device at PATH ("N:0" top level, "N:0.1.2" a rack's child).
+        const auto colon = deviceMenu.find(':');
+        const int track = std::atoi(deviceMenu.substr(0, colon).c_str());
+        std::vector<int> path;
+        for (const auto& part : juce::StringArray::fromTokens(juce::String(deviceMenu.substr(colon + 1)), ".", ""))
+            path.push_back(part.getIntValue());
+        ctx.applyEdit = [](model::EditCommand) {};
+        auto image = ui::renderDeviceMenuPreview(ctx, track, path, scale);
+        juce::FileOutputStream stream{juce::File(juce::String(out))};
+        stream.setPosition(0); stream.truncate();
+        if (! stream.openedOk() || ! juce::PNGImageFormat().writeImageToStream(image, stream)) return 1;
+        for (const auto& action : ui::deviceContextActions(ctx, track, path))
+            std::printf("  %s%s\n", action.label.empty() ? "----" : action.label.c_str(), action.enabled || action.label.empty() ? "" : " (disabled)");
+        std::printf("wrote device menu preview %s\n", out.c_str());
+        return 0;
+    }
     if (trackMenu)
     {
         ctx.applyEdit = [](model::EditCommand) {};
@@ -902,6 +977,23 @@ int main(int argc, char** argv)
             }
     if (! fileDragPaths.empty() && ! root.dispatchFileDragMove(fileDragX, fileDragY, fileDragPaths))
         std::fprintf(stderr, "warning: --file-drag paths hold no audio file\n");
+    if (! rackView.empty() && ctx.song)
+        if (const auto* track = ctx.trackAt(ctx.selectedTrack))
+        {
+            const auto has = [&](char letter) { return rackView.find(letter) != std::string::npos; };
+            for (const auto& device : track->devices)
+                if (device.kind == model::DeviceKind::Rack)
+                {
+                    auto& view = ctx.rackViews[device.id];
+                    view.macros = has('m');
+                    view.chains = has('c');
+                    view.zones = has('k') ? 1 : has('v') ? 2 : has('s') ? 3 : 0;
+                    ctx.selectedRackId = has('d') ? device.id : -1000;
+                    if (has('p')) ctx.rackMapId = device.id;
+                    break;
+                }
+            root.layout();
+        }
     if (deviceScroll >= 0)
         for (auto& child : root.children())
             if (auto* detail = dynamic_cast<ui::DetailView*>(child.get())) detail->navigateOverview(deviceScroll);

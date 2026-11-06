@@ -4,7 +4,10 @@
 //   fx_render <plugin> --params                       list parameters: index, name, default, steps, text at 0/.25/.5/.75/1
 //   fx_render <plugin> --editor-size                  the editor's default size in points
 //   fx_render <plugin> --in in.wav --out out.wav [--sc key.wav] [--set "Name=0.5"] [--text "Name=12 dB"]
-//             [--rate 48000] [--block 512] [--state-in s.bin] [--state-out s.bin]
+//             [--rate 48000] [--block 512] [--state-in s.bin] [--state-out s.bin] [--tempo 120]
+//
+// --tempo gives the plug-in a playing transport from beat 0 at that tempo (tempo-synced LFOs, gates); without it
+// the plug-in sees no host transport.
 //
 // --set takes a normalised value, --text the plug-in's own text for a value. Names match exactly, else case-insensitively.
 // Output is 32-bit float at the input's channel count (stereo when the input is mono). The plug-in's latency is printed
@@ -14,6 +17,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
 
+#include <cmath>
 #include <cstdio>
 #include <memory>
 
@@ -27,6 +31,31 @@ juce::AudioProcessorParameter* findParameter(juce::AudioPluginInstance& p, const
         if (prm->getName(256).equalsIgnoreCase(name)) return prm;
     return nullptr;
 }
+
+// A transport that plays from beat 0 at a fixed tempo, advanced block by block.
+class PlayingTransport final : public juce::AudioPlayHead
+{
+public:
+    PlayingTransport(double tempo, double rate) : tempo_(tempo), rate_(rate) {}
+    void advance(int samples) { sample_ += samples; }
+    juce::Optional<PositionInfo> getPosition() const override
+    {
+        PositionInfo info;
+        info.setIsPlaying(true);
+        info.setBpm(tempo_);
+        info.setTimeSignature(juce::AudioPlayHead::TimeSignature{4, 4});
+        info.setTimeInSamples(sample_);
+        info.setTimeInSeconds((double) sample_ / rate_);
+        const double beats = (double) sample_ / rate_ * tempo_ / 60.0;
+        info.setPpqPosition(beats);
+        info.setPpqPositionOfLastBarStart(std::floor(beats / 4.0) * 4.0);
+        return info;
+    }
+
+private:
+    double tempo_, rate_;
+    int64_t sample_ = 0;
+};
 
 std::unique_ptr<juce::AudioBuffer<float>> readWav(const juce::File& file, double& rate)
 {
@@ -51,7 +80,7 @@ int run(int argc, char** argv)
     juce::String inPath, outPath, scPath, stateIn, stateOut;
     juce::StringArray sets, texts;
     bool listParams = false, editorSize = false;
-    double rate = 48000.0;
+    double rate = 48000.0, tempo = 0.0;
     int block = 512;
     for (int i = 2; i < argc; ++i)
     {
@@ -68,6 +97,7 @@ int run(int argc, char** argv)
         else if (a == "--block") block = juce::jmax(16, next().getIntValue());
         else if (a == "--state-in") stateIn = next();
         else if (a == "--state-out") stateOut = next();
+        else if (a == "--tempo") tempo = next().getDoubleValue();
         else
         {
             std::fprintf(stderr, "unknown option %s\n", a.toRawUTF8());
@@ -170,6 +200,12 @@ int run(int argc, char** argv)
         return 2;
     }
 
+    std::unique_ptr<PlayingTransport> transport;
+    if (tempo > 0)
+    {
+        transport = std::make_unique<PlayingTransport>(tempo, rate);
+        plugin->setPlayHead(transport.get());
+    }
     plugin->prepareToPlay(rate, block);
     std::fprintf(stderr, "latency %d\n", plugin->getLatencySamples());
     const int channels = juce::jmax(2, plugin->getTotalNumInputChannels(), plugin->getTotalNumOutputChannels());
@@ -189,10 +225,12 @@ int run(int argc, char** argv)
                                   juce::jmin(n, key->getNumSamples() - start));
         midi.clear();
         plugin->processBlock(work, midi);
+        if (transport != nullptr) transport->advance(n);
         for (int ch = 0; ch < 2; ++ch) out.copyFrom(ch, start, work, ch, 0, n);
     }
     std::fprintf(stderr, "latency_end %d\n", plugin->getLatencySamples()); // plug-ins may change it once they run
     plugin->releaseResources();
+    plugin->setPlayHead(nullptr);
 
     if (stateOut.isNotEmpty())
     {

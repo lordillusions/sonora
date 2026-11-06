@@ -466,3 +466,11 @@ from the reference app drops them, so hidden/deactivated tracks come back as ord
   Returns only receive holders when their existing holders already match the return count (Sonora's own new sets author none).
   **13 returns crash the reference app while loading** (12 open), so Sonora caps returns at 12.
 
+
+## Wavetable (`InstrumentVector`, DEV-28b)
+
+Root plain leaves (effect modes, unison mode / voices, filter routing, MonoPoly, PolyVoices, HiQ) are read into
+`Device::plain`. The 52 `ModulationConnectionsForInstrumentVector` items (fixed `TargetId` order) become plain keys
+`ModulationConnections/ModulationConnectionsForInstrumentVector#<n>/ModulationAmounts.<m>`; the writer and the device
+templates address repeated elements with `#n`. Table choices (`SpriteName1/2`, `UserSprite1/2`) stay in the retained XML
+and are copied back when the device is marked `nativeContentEdited`. Enum values and laws: docs/WAVETABLE.md.
