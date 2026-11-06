@@ -1048,6 +1048,94 @@ TEST_CASE("device chain order and instrument replacement: save reload undo redo 
     CHECK(read->tracks[0].devices[0].id == replacementId); CHECK(read->tracks[0].devices[1].id == reverbId);
 }
 
+#include "io/als/LiveCompat.h"
+
+TEST_CASE("device to another track (UI-7c): Opt copy gets fresh ids and no mappings, move carries automation; save reload undo")
+{
+    auto loaded = io::loadAls(juce::File(SONORA_TEST_FIXTURES).getChildFile("minimal_set.xml"));
+    REQUIRE(loaded); auto& song = *loaded.song;
+    model::EditHistory history;
+    int pointeeEnd = 0;
+    auto second = io::createMidiTrack(song, "2-MIDI", 4, pointeeEnd);
+    history.perform(song, model::insertTracks({second}, pointeeEnd, "Insert MIDI Track", 1));
+    REQUIRE(song.tracks.size() == 2);
+    const auto eq = song.tracks[0].devices[1];
+    REQUIRE(eq.type == "Eq8"); REQUIRE(eq.enabledTargetId == 105);
+    const auto gain = std::find_if(eq.parameters.begin(), eq.parameters.end(), [](const auto& p) { return p.path == "GlobalGain"; });
+    REQUIRE(gain != eq.parameters.end()); REQUIRE(gain->automationTargetId == 104); REQUIRE(gain->midi.mapped());
+
+    // Opt-drop: an exact copy of the EQ on track 2.
+    auto copy = io::prepareDeviceCopy(song, 0, eq.id);
+    REQUIRE(copy.error.empty());
+    CHECK(copy.device.type == "Eq8"); CHECK(copy.device.id == song.nextDeviceId);
+    CHECK(copy.device.enabledTargetId >= song.nextPointeeId); CHECK(copy.pointeeEnd > copy.device.enabledTargetId);
+    REQUIRE(copy.device.parameters.size() == eq.parameters.size());
+    for (size_t i = 0; i < eq.parameters.size(); ++i)
+    {
+        CHECK(copy.device.parameters[i].path == eq.parameters[i].path);
+        CHECK_NEAR(copy.device.parameters[i].value, eq.parameters[i].value, 1e-9);
+        CHECK(! copy.device.parameters[i].midi.mapped()); // one MIDI control must not drive both
+        if (eq.parameters[i].automationTargetId >= 0) CHECK(copy.device.parameters[i].automationTargetId != eq.parameters[i].automationTargetId);
+    }
+    const int copyId = copy.device.id, copyOn = copy.device.enabledTargetId;
+    song.nextDeviceId = copyId + 1; song.nextPointeeId = copy.pointeeEnd; song.pointeeIdsAllocated = true;
+    history.perform(song, model::insertTrackDevice(song, 1, std::move(copy.device)));
+
+    // Plain drop: the instrument and the original EQ move to track 2; the EQ's envelopes (104 gain, 105 on) go along.
+    CHECK(! model::moveDeviceToTrack(song, 0, 7, 2, song.nextDeviceId).apply); // index 2 is the return: no instruments
+    CHECK(! model::moveDeviceToTrack(song, 0, 7, 0, song.nextDeviceId).apply); // same track
+    const int instrumentId = song.nextDeviceId++;
+    history.perform(song, model::moveDeviceToTrack(song, 0, 7, 1, instrumentId));
+    const int eqId = song.nextDeviceId++;
+    auto move = model::moveDeviceToTrack(song, 0, eq.id, 1, eqId);
+    REQUIRE(move.apply); CHECK(move.label == "Move " + eq.displayName);
+    history.perform(song, std::move(move));
+    auto targets = [](const model::Track& t) { std::set<int> ids; for (const auto& e : t.automation) ids.insert(e.targetId); return ids; };
+    CHECK(song.tracks[0].devices.empty());
+    REQUIRE(song.tracks[1].devices.size() == 3);
+    CHECK(song.tracks[1].devices[0].id == instrumentId); // the instrument goes first, effects after it
+    CHECK(song.tracks[1].devices[1].id == copyId); CHECK(song.tracks[1].devices[2].id == eqId);
+    CHECK(targets(song.tracks[1]).count(104)); CHECK(targets(song.tracks[1]).count(105));
+    CHECK(! targets(song.tracks[0]).count(104)); CHECK(targets(song.tracks[0]).count(100)); // mixer lanes stay
+
+    juce::TemporaryFile file(".als");
+    auto reload = [&]() {
+        auto saved = io::saveAls(song, file.getFile()); REQUIRE(saved.ok);
+        auto read = io::loadAls(file.getFile()); REQUIRE(read); return std::move(read.song);
+    };
+    auto read = reload();
+    REQUIRE(read->tracks.size() == 2); REQUIRE(read->tracks[1].devices.size() == 3);
+    CHECK(read->tracks[0].devices.empty());
+    REQUIRE(read->tracks[1].devices[0].plugin); CHECK(read->tracks[1].devices[0].plugin->state == song.tracks[1].devices[0].plugin->state);
+    CHECK(read->tracks[1].devices[1].enabledTargetId == copyOn);
+    CHECK(read->tracks[1].devices[2].enabledTargetId == 105);
+    CHECK(targets(read->tracks[1]).count(104)); CHECK(! targets(read->tracks[0]).count(105));
+    {
+        std::string error;
+        auto dom = io::readAlsDom(file.getFile(), error); REQUIRE(dom);
+        std::multiset<int> ids;
+        std::function<void(const juce::XmlElement&)> collect = [&](const auto& e) {
+            if (io::isPointeeElement(e)) ids.insert(e.getIntAttribute("Id", -1));
+            for (const auto* c : e.getChildIterator()) collect(*c);
+        };
+        collect(*dom);
+        bool unique = true;
+        for (const int id : ids) unique &= id < 0 || ids.count(id) == 1;
+        CHECK(unique);
+    }
+
+    // Undo both moves and the copy: the original chain and lanes are back on track 1, also after saving.
+    REQUIRE(history.undo(song)); REQUIRE(history.undo(song)); REQUIRE(history.undo(song));
+    REQUIRE(song.tracks[0].devices.size() == 2);
+    CHECK(song.tracks[0].devices[0].id == 7); CHECK(song.tracks[0].devices[1].id == eq.id);
+    CHECK(song.tracks[1].devices.empty()); CHECK(targets(song.tracks[0]).count(104));
+    read = reload();
+    REQUIRE(read->tracks[0].devices.size() == 2); CHECK(read->tracks[0].devices[1].enabledTargetId == 105);
+    CHECK(targets(read->tracks[0]).count(105)); CHECK(read->tracks[1].devices.empty());
+    REQUIRE(history.redo(song)); REQUIRE(history.redo(song));
+    CHECK(song.tracks[0].devices.size() == 1); CHECK(song.tracks[1].devices[0].id == instrumentId);
+}
+
 #include "core/Scales.h"
 
 TEST_CASE("scale: set and clip scales read, save and reload; edits undo; new clips take the set scale (UI-30b)")

@@ -121,6 +121,7 @@ void RootWidget::dispatchMouseDrag(MouseEvent e)
     {
         ctx_.browserDragX = e.x;
         ctx_.browserDragY = e.y;
+        ctx_.browserDrag->copy = e.alt; // UI-7c: the label says whether a device drop will copy or move
         markDirty();
     }
 }
@@ -142,7 +143,10 @@ void RootWidget::dispatchMouseUp(MouseEvent e)
     {
         const auto payload = *ctx_.browserDrag;
         ctx_.browserDrag.reset();
+        auto* owner = isAlive(captured_) && captured_ != this ? captured_ : nullptr;
         captured_ = nullptr;
+        // A device dragged out of the device view (UI-7c): its title box ends its own gesture first, then the drop.
+        if (payload.kind == BrowserDrag::Kind::TrackDevice && owner) owner->mouseUp(localise(e, capturedOrigin_));
         dropBrowserPayload(payload, e);
         return;
     }
@@ -171,6 +175,7 @@ void RootWidget::refreshCursor(MouseEvent e)
 void RootWidget::dropBrowserPayload(BrowserDrag payload, const MouseEvent& e)
 {
     payload.oneTrackPerFile = e.cmd && payload.files.size() > 1;
+    payload.copy = e.alt;
     float lx = 0, ly = 0;
     for (auto* w = findAt(e.x, e.y, lx, ly); w && w != this; w = w->parent())
         if (w->browserDrop(payload, localise(e, w->boundsInRoot()))) break;
@@ -491,7 +496,9 @@ void RootWidget::paintOverChildren(SkCanvas& canvas, const Theme& theme)
     const Rect box{ctx_.browserDragX + 10, ctx_.browserDragY + 12, 150, 22};
     paint::fill(canvas, box, theme.color("SelectionBackground"));
     paint::stroke(canvas, box, theme.color("SelectionFrame"));
-    paint::text(canvas, ctx_.browserDrag->label, box.reduced(5, 0), theme.color("SelectionForeground"), theme.metrics.fontSize);
+    const auto& drag = *ctx_.browserDrag;
+    const auto label = drag.kind != BrowserDrag::Kind::TrackDevice ? drag.label : (drag.copy ? "Copy " : "Move ") + drag.label;
+    paint::text(canvas, label, box.reduced(5, 0), theme.color("SelectionForeground"), theme.metrics.fontSize);
 }
 
 void RootWidget::tick()

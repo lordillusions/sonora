@@ -80,4 +80,16 @@ struct TrackDuplication
 // Caller captures live device/mixer state first, then inserts the result through model::insertTracks as one history entry.
 TrackDuplication prepareTrackDuplication(const model::Song&, const std::vector<int>& selection);
 
+struct DeviceCopy
+{
+    model::Device device;
+    int pointeeEnd = 0; // raise song.nextPointeeId to this when the copy is inserted
+    std::string error;
+};
+// UI-7c (Opt-drag of a device to a track): the top-level device `deviceId` of `track` exactly as it would be saved now,
+// cloned with fresh automation/modulation target ids and the device id song.nextDeviceId (the caller advances both
+// allocators). MIDI/key mappings are not copied, so one control does not drive both devices. The caller captures live
+// device state into the model first, like track duplication.
+DeviceCopy prepareDeviceCopy(const model::Song&, int track, int deviceId);
+
 } // namespace sonora::io

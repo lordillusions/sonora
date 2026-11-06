@@ -68,6 +68,8 @@ private:
     int dragDeviceId_ = -1, dragDestination_ = -1;
     float dragStartX_ = 0, dragStartY_ = 0, dragX_ = 0, dragY_ = 0, insertionX_ = 0;
     bool deviceDragging_ = false, deviceDropAllowed_ = false;
+    bool dragReorders_ = false; // audio effects only: the in-chain insertion marker
+    bool outsideDrag_ = false;  // UI-7c: outside this view, ctx().browserDrag carries the device to a track
     std::string dragLabel_;
 };
 

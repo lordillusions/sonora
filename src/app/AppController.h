@@ -307,6 +307,8 @@ private:
     std::unique_ptr<model::Song> deferredSong_;
     void queueDeferredSong();
     void dropBrowserItem(const ui::BrowserDrag&, int track, double beat, int scene);
+    void dropTrackDevice(const ui::BrowserDrag&, int track); // UI-7c: a device dragged to a track (Opt copies)
+    void runDeviceDragAutotest(); // SONORA_DEVICE_DRAG_AUTOTEST (UI-7c verification without driving the UI)
     void syncModelFromEngine();
     void openBrowserFolder(const std::string& path);
     void readBrowserFolder(const std::string& path, bool root);

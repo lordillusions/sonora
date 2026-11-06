@@ -1809,6 +1809,70 @@ TrackDuplication prepareTrackDuplication(const model::Song& song, const std::vec
     return result;
 }
 
+DeviceCopy prepareDeviceCopy(const model::Song& song, int trackIndex, int deviceId)
+{
+    DeviceCopy result;
+    const auto* track = model::trackAt(song, trackIndex);
+    const auto found = track ? std::find_if(track->devices.begin(), track->devices.end(), [deviceId](const auto& d) { return d.id == deviceId; })
+                             : std::vector<model::Device>::const_iterator{};
+    if (! track || found == track->devices.end()) { result.error = "The device is no longer on that track"; return result; }
+    auto root = readAlsDom(juce::File(song.sourcePath), result.error);
+    if (! root) return result;
+    if (auto patched = patchAlsDom(song, *root); ! patched.ok) { result.error = patched.error; return result; }
+    XmlElement* trackX = nullptr;
+    if (track == &song.main)
+    {
+        trackX = at(root.get(), "LiveSet/MainTrack");
+        if (! trackX) trackX = at(root.get(), "LiveSet/MasterTrack");
+    }
+    else if (auto* list = at(root.get(), "LiveSet/Tracks"))
+        trackX = list->getChildByAttribute("Id", juce::String(track->id));
+    const XmlElement* sourceX = nullptr;
+    if (auto* devices = trackX ? at(trackX, "DeviceChain/DeviceChain/Devices") : nullptr)
+        for (auto* dx : devices->getChildIterator())
+            if (dx->getIntAttribute("Id", -1) == deviceId && dx->getTagName().toStdString() == found->type) sourceX = dx;
+    if (! sourceX) { result.error = "Missing source device for the copy"; return result; }
+
+    int nextTarget = std::max(1, song.nextPointeeId);
+    std::function<void(const XmlElement&)> reserve = [&](const auto& e) {
+        if (isPointeeElement(e)) nextTarget = std::max(nextTarget, e.getIntAttribute("Id", -1) + 1);
+        for (const auto* childElement : e.getChildIterator()) reserve(*childElement);
+    };
+    reserve(*root);
+    XmlElement copy(*sourceX);
+    std::map<int, int> targets;
+    std::function<void(const XmlElement&)> allocate = [&](const auto& e) {
+        if (isPointeeElement(e) && e.getIntAttribute("Id", -1) >= 0) targets.try_emplace(e.getIntAttribute("Id"), nextTarget++);
+        for (const auto* childElement : e.getChildIterator()) allocate(*childElement);
+    };
+    allocate(copy);
+    std::function<void(XmlElement&)> rebind = [&](auto& e) {
+        if (isPointeeElement(e))
+            if (const auto t = targets.find(e.getIntAttribute("Id", -1)); t != targets.end()) e.setAttribute("Id", t->second);
+        if (e.hasTagName("PointeeId"))
+            if (const auto t = targets.find(e.getIntAttribute("Value", -1)); t != targets.end()) e.setAttribute("Value", t->second);
+        e.deleteAllChildElementsWithTagName("KeyMidi");
+        for (auto* childElement : e.getChildIterator()) rebind(*childElement);
+    };
+    rebind(copy);
+    copy.setAttribute("Id", song.nextDeviceId);
+    std::vector<std::string> warnings;
+    result.device = readDeviceXml(copy, warnings);
+    // The loader bases unparsed sample refs on the set's folder; the copy keeps the original's.
+    std::function<void(model::Device&, const model::Device&)> base = [&](model::Device& d, const model::Device& original) {
+        d.sourceDirectory = original.sourceDirectory;
+        if (d.maxPatchPath.empty()) d.maxPatchPath = original.maxPatchPath;
+        for (size_t i = 0; i < d.sampleParts.size() && i < original.sampleParts.size(); ++i)
+            d.sampleParts[i].sample.sourceDirectory = original.sampleParts[i].sample.sourceDirectory;
+        for (size_t c = 0; c < d.chains.size() && c < original.chains.size(); ++c)
+            for (size_t i = 0; i < d.chains[c].devices.size() && i < original.chains[c].devices.size(); ++i)
+                base(d.chains[c].devices[i], original.chains[c].devices[i]);
+    };
+    base(result.device, *found);
+    result.pointeeEnd = nextTarget;
+    return result;
+}
+
 void refreshClipIdentities(model::Song& song)
 {
     std::string error;

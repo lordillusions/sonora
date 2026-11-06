@@ -839,6 +839,7 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
         logf("  note: %s", line.c_str());
     ensureAudioInputs();
     offerNativeReplacements();
+    runDeviceDragAutotest();
 }
 
 // Hooks the preferences dialog up to the services it edits. Everything it changes is persisted.
@@ -2643,6 +2644,7 @@ void AppController::importWavetablePreset(int trackIndex, int index, const std::
 
 void AppController::dropDeviceItem(const ui::BrowserDrag& item, int trackIndex, int index, int chainIndex, int zoneIndex, int childIndex)
 {
+    if (item.kind == ui::BrowserDrag::Kind::TrackDevice) { ui_.statusText = "Drop the device on a track"; return; } // UI-7c: not into racks yet
     if (const auto tag = model::insertedDeviceTag(item.value, song_ ? song_->schemaVersion : std::string());
         item.kind == ui::BrowserDrag::Kind::NativeDevice && tag != item.value)
     {
@@ -2763,8 +2765,110 @@ void AppController::dropDeviceItem(const ui::BrowserDrag& item, int trackIndex, 
     });
 }
 
+void AppController::dropTrackDevice(const ui::BrowserDrag& item, int trackIndex)
+{
+    if (! song_ || editingDevices_ || syncingModel_ || exporting_) return;
+    if (ui_.recording || ui_.recordingRequested) { ui_.statusText = "Finish recording before moving devices"; return; }
+    const auto* source = model::trackAt(*song_, item.sourceTrack);
+    const auto* target = model::trackAt(*song_, trackIndex);
+    if (! source) return;
+    if (! target) { ui_.statusText = "Drop the device on a track"; return; }
+    const auto found = std::find_if(source->devices.begin(), source->devices.end(), [&](const auto& d) { return d.id == item.deviceId; });
+    if (found == source->devices.end()) return;
+    const auto name = found->displayName, targetName = target->name;
+    const auto role = model::deviceRole(*found);
+    if (source->frozen || target->frozen) { ui_.statusText = "Unfreeze this track before editing its clips or devices"; return; }
+    if (! model::canHoldDevice(*song_, trackIndex, *found))
+    { ui_.statusText = role == model::DeviceRole::Instrument ? "Drop instruments on a MIDI track" : "Drop MIDI effects on a MIDI track"; return; }
+    if (trackIndex == item.sourceTrack && ! item.copy) return; // back on its own track: nothing moves
+    if (trackIndex == item.sourceTrack && role == model::DeviceRole::Instrument)
+    { ui_.statusText = "A track holds one instrument: drop the copy on another MIDI track"; return; }
+    const bool replacing = role == model::DeviceRole::Instrument && model::instrumentIndex(*target) >= 0;
+    const int dropGeneration = documentGeneration_;
+    const auto sourceKey = std::to_string(source->id) + ":" + std::to_string(item.deviceId);
+    const auto targetId = target->id;
+    syncModelFromEngine(); // the device goes with the parameters and plug-in state it has right now
+    if (dropGeneration != documentGeneration_ || ! song_) return;
+    model::EditCommand command;
+    int newId = -1;
+    if (item.copy)
+    {
+        auto copy = io::prepareDeviceCopy(*song_, item.sourceTrack, item.deviceId);
+        if (! copy.error.empty()) { ui_.statusText = "Could not copy " + name + ": " + copy.error; return; }
+        newId = copy.device.id;
+        song_->nextDeviceId = std::max(song_->nextDeviceId, newId + 1);
+        song_->nextPointeeId = std::max(song_->nextPointeeId, copy.pointeeEnd);
+        song_->pointeeIdsAllocated = true;
+        command = model::insertTrackDevice(*song_, trackIndex, std::move(copy.device));
+        command.label = "Copy " + name;
+    }
+    else
+    {
+        newId = song_->nextDeviceId++;
+        command = model::moveDeviceToTrack(*song_, item.sourceTrack, item.deviceId, trackIndex, newId);
+    }
+    if (! command.apply || ! applyEdit(std::move(command)).ok) return;
+    // The plug-in X/Y pad keeps its axes on the moved or copied device.
+    if (const auto pad = ui_.pluginPadAssignments.find(sourceKey); pad != ui_.pluginPadAssignments.end())
+    {
+        const auto axes = pad->second;
+        if (! item.copy) ui_.pluginPadAssignments.erase(pad);
+        ui_.pluginPadAssignments[std::to_string(targetId) + ":" + std::to_string(newId)] = axes;
+    }
+    ui_.selectedTrack = trackIndex;
+    ui_.selectedDeviceId = newId;
+    ui_.detailTab = ui::DetailTab::Devices;
+    ui_.detailVisible = true;
+    ui_.statusText = (item.copy ? "Copied " : "Moved ") + name + " to " + targetName + (replacing ? ", replacing its instrument" : "");
+}
+
+// SONORA_DEVICE_DRAG_AUTOTEST="from:device:to:copy|move[,...]" (track indices, top-level device index on `from`) runs
+// each drop 4 s after the set loads, logs both chains ("[sonora] device drag:"), then saves the set in place. Use a copy.
+void AppController::runDeviceDragAutotest()
+{
+    const auto spec = juce::SystemStats::getEnvironmentVariable("SONORA_DEVICE_DRAG_AUTOTEST", {});
+    if (spec.isEmpty()) return;
+    const std::weak_ptr<bool> alive = alive_;
+    juce::Timer::callAfterDelay(4000, [this, alive, spec] {
+        if (alive.expired() || ! song_) return;
+        auto chain = [this](int index) {
+            std::string line;
+            if (const auto* track = model::trackAt(*song_, index))
+            {
+                line = "\"" + track->name + "\":";
+                for (const auto& d : track->devices)
+                    line += " " + d.type + (d.plugin ? ":" + d.plugin->name : std::string()) + "#" + std::to_string(d.id)
+                          + (d.plugin ? "(" + std::to_string(d.plugin->state.size()) + "B)" : std::string());
+                line += " automation " + std::to_string(track->automation.size());
+            }
+            return line;
+        };
+        for (const auto& step : juce::StringArray::fromTokens(spec, ",", ""))
+        {
+            const auto fields = juce::StringArray::fromTokens(step, ":", "");
+            if (fields.size() != 4) { logf("device drag: bad step %s", step.toRawUTF8()); continue; }
+            const int from = fields[0].getIntValue(), index = fields[1].getIntValue(), to = fields[2].getIntValue();
+            const auto* track = model::trackAt(*song_, from);
+            if (! track || index < 0 || (size_t) index >= track->devices.size()) { logf("device drag: no device %s", step.toRawUTF8()); continue; }
+            ui::BrowserDrag drag;
+            drag.kind = ui::BrowserDrag::Kind::TrackDevice;
+            drag.sourceTrack = from;
+            drag.deviceId = track->devices[(size_t) index].id;
+            drag.label = track->devices[(size_t) index].displayName;
+            drag.copy = fields[3] == "copy";
+            logf("device drag: before %s | %s", chain(from).c_str(), chain(to).c_str());
+            dropTrackDevice(drag, to);
+            logf("device drag: %s -> \"%s\"", step.toRawUTF8(), ui_.statusText.c_str());
+            logf("device drag: after %s | %s", chain(from).c_str(), chain(to).c_str());
+        }
+        saveFile();
+        logf("device drag: saved, status \"%s\"", ui_.statusText.c_str());
+    });
+}
+
 void AppController::dropBrowserItem(const ui::BrowserDrag& item, int trackIndex, double beat, int scene)
 {
+    if (item.kind == ui::BrowserDrag::Kind::TrackDevice) { dropTrackDevice(item, trackIndex); return; }
     if (const auto tag = model::insertedDeviceTag(item.value, song_ ? song_->schemaVersion : std::string());
         item.kind == ui::BrowserDrag::Kind::NativeDevice && tag != item.value)
     {

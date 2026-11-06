@@ -1162,7 +1162,8 @@ Rect DetailView::scrollbarThumb() const
 void DetailView::tick()
 {
     auto& x = ctx();
-    if (deviceDragging_ && dragY_ >= 0 && dragY_ < height())
+    if (outsideDrag_ && ! (x.browserDrag && x.browserDrag->kind == BrowserDrag::Kind::TrackDevice)) cancelDeviceDrag();
+    if (deviceDragging_ && ! outsideDrag_ && dragY_ >= 0 && dragY_ < height())
     {
         const float amount = dragX_ < 28 ? -18.0f : dragX_ > width() - 28 ? 18.0f : 0.0f;
         const float next = std::clamp(scrollX_ + amount, 0.0f, std::max(0.0f, contentWidth() - width() + 12));
@@ -1327,7 +1328,7 @@ void DetailView::paint(SkCanvas& c, const Theme& t)
 
 void DetailView::paintOverChildren(SkCanvas& c, const Theme& t)
 {
-    if (deviceDragging_)
+    if (deviceDragging_ && ! outsideDrag_)
     {
         const auto accent = t.color(deviceDropAllowed_ ? "ChosenAlternative" : "ChosenRecord");
         paint::line(c, insertionX_, 4, insertionX_, height() - 6, accent, 2.5f);
@@ -1419,8 +1420,9 @@ void DetailView::navigateOverview(float fraction)
 
 void DetailView::cancelDeviceDrag()
 {
+    if (outsideDrag_ && ctx().browserDrag && ctx().browserDrag->kind == BrowserDrag::Kind::TrackDevice) ctx().browserDrag.reset();
     dragDeviceId_ = dragDestination_ = -1;
-    deviceDragging_ = deviceDropAllowed_ = false;
+    deviceDragging_ = deviceDropAllowed_ = dragReorders_ = outsideDrag_ = false;
     dragLabel_.clear();
 }
 
@@ -1429,10 +1431,12 @@ void DetailView::beginDeviceDrag(int deviceId, float x, float y)
     cancelDeviceDrag();
     const auto* track = ctx().trackAt(ctx().selectedTrack);
     if (! track || ctx().recording || ctx().detailTab != DetailTab::Devices) return;
+    // Every top-level device can be dragged to another track (UI-7c); only audio effects reorder inside the chain.
     for (const auto& device : track->devices)
-        if (device.id == deviceId && model::deviceRole(device) == model::DeviceRole::AudioEffect)
+        if (device.id == deviceId)
         {
             dragDeviceId_ = deviceId; dragLabel_ = device.displayName;
+            dragReorders_ = model::deviceRole(device) == model::DeviceRole::AudioEffect;
             dragStartX_ = dragX_ = x; dragStartY_ = dragY_ = y;
             break;
         }
@@ -1441,9 +1445,27 @@ void DetailView::beginDeviceDrag(int deviceId, float x, float y)
 void DetailView::updateDeviceDrag(float x, float y)
 {
     if (dragDeviceId_ < 0) return;
+    auto& context = ctx();
+    const bool ours = context.browserDrag && context.browserDrag->kind == BrowserDrag::Kind::TrackDevice;
+    if (outsideDrag_ && ! ours) { cancelDeviceDrag(); repaint(); return; } // Escape or a click cancelled the track drop
     dragX_ = x; dragY_ = y;
     deviceDragging_ |= std::hypot(x - dragStartX_, y - dragStartY_) >= 5;
-    if (deviceDragging_) { updateDeviceDropTarget(); repaint(); }
+    if (! deviceDragging_) return;
+    // UI-7c: outside the device view the drag becomes a drop on a track (Session column, Arrangement lane or header),
+    // shown and dropped by the root like a browser item; back inside it reorders again.
+    outsideDrag_ = ! localBounds().contains(x, y);
+    if (outsideDrag_ && ! ours)
+    {
+        BrowserDrag payload;
+        payload.kind = BrowserDrag::Kind::TrackDevice;
+        payload.label = dragLabel_;
+        payload.sourceTrack = context.selectedTrack;
+        payload.deviceId = dragDeviceId_;
+        context.browserDrag = std::move(payload);
+    }
+    else if (! outsideDrag_ && ours) context.browserDrag.reset();
+    updateDeviceDropTarget();
+    repaint();
 }
 
 void DetailView::updateDeviceDropTarget()
@@ -1464,15 +1486,22 @@ void DetailView::updateDeviceDropTarget()
         }
     }
     dragDestination_ = gap - (source < gap ? 1 : 0);
-    if (source >= 0 && localBounds().contains(dragX_, dragY_))
+    if (source >= 0 && dragReorders_ && localBounds().contains(dragX_, dragY_))
         deviceDropAllowed_ = model::canMoveAudioEffect(*ctx().song, ctx().selectedTrack, dragDeviceId_, dragDestination_);
 }
 
 void DetailView::endDeviceDrag(float x, float y)
 {
     if (dragDeviceId_ < 0) return;
-    updateDeviceDrag(x, y);
     auto& context = ctx();
+    if (outsideDrag_ || ! localBounds().contains(x, y))
+    {
+        // Released over a track: the root drops the payload right after this (UI-7c); nothing to reorder here.
+        cancelDeviceDrag();
+        repaint();
+        return;
+    }
+    updateDeviceDrag(x, y);
     model::EditCommand command;
     if (deviceDragging_ && deviceDropAllowed_ && context.song)
         command = model::moveAudioEffect(*context.song, context.selectedTrack, dragDeviceId_, dragDestination_);

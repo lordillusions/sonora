@@ -225,6 +225,16 @@ EditCommand insertTrackDevice(const Song& song, int track, Device device);
 // on MIDI tracks their destination must follow every MIDI effect and instrument.
 bool canMoveAudioEffect(const Song& song, int track, int deviceId, int destination);
 EditCommand moveAudioEffect(const Song& song, int track, int deviceId, int destination);
+// UI-7c: whether `device` may go on `track` under the browser insertion policy (instruments and MIDI effects need a MIDI track).
+bool canHoldDevice(const Song& song, int track, const Device& device);
+// Automation target ids of a device and everything nested in its chains (On switch, native and plug-in parameters).
+std::vector<int> deviceTargetIds(const Device& device);
+// UI-7c: moves top-level device `deviceId` from track `from` to track `to` in one undo step, placed like a browser drop
+// (MIDI effects first, an instrument after them replacing the destination's instrument(s), effects at the end). It takes
+// `newId` so it cannot collide with a device of the destination's saved list; the source track's automation envelopes of
+// its targets move with it. The device is taken when the command runs and taken back with its state at that time on undo.
+// Empty when either track is missing, they are the same track, or the destination cannot hold the device.
+EditCommand moveDeviceToTrack(const Song& song, int from, int deviceId, int to, int newId);
 // Removes the device with this id from the track (the device chain is rebuilt; undo puts it back at the same position
 // with the state it had when it was removed).
 EditCommand removeDevice(const Song& song, int track, int deviceId);

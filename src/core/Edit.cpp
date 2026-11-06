@@ -865,6 +865,96 @@ EditCommand moveAudioEffect(const Song& song, int track, int deviceId, int desti
     return command;
 }
 
+bool canHoldDevice(const Song& song, int track, const Device& device)
+{
+    const auto* target = trackAt(song, track);
+    if (! target) return false;
+    const auto role = deviceRole(device);
+    return (role != DeviceRole::Instrument && role != DeviceRole::MidiEffect) || target->kind == TrackKind::Midi;
+}
+
+std::vector<int> deviceTargetIds(const Device& device)
+{
+    std::vector<int> ids;
+    std::function<void(const Device&)> collect = [&](const Device& d) {
+        if (d.enabledTargetId >= 0) ids.push_back(d.enabledTargetId);
+        for (const auto& p : d.parameters) if (p.automationTargetId >= 0) ids.push_back(p.automationTargetId);
+        for (const auto& p : d.pluginParams) if (p.automationTargetId >= 0) ids.push_back(p.automationTargetId);
+        for (const auto& chain : d.chains) for (const auto& child : chain.devices) collect(child);
+    };
+    collect(device);
+    return ids;
+}
+
+EditCommand moveDeviceToTrack(const Song& song, int from, int deviceId, int to, int newId)
+{
+    const auto* source = trackAt(song, from);
+    if (! source || from == to || newId < 0 || ! trackAt(song, to)) return {};
+    const auto found = std::find_if(source->devices.begin(), source->devices.end(), [deviceId](const Device& d) { return d.id == deviceId; });
+    if (found == source->devices.end() || ! canHoldDevice(song, to, *found)) return {};
+    const auto targetIds = deviceTargetIds(*found);
+    const auto role = deviceRole(*found);
+    struct State
+    {
+        size_t sourceIndex = 0;
+        std::vector<std::pair<size_t, Device>> replaced; // destination instruments a moved instrument replaced
+        std::vector<AutomationEnvelope> envelopes;       // carried from the source track
+    };
+    const auto state = std::make_shared<State>();
+    auto carries = [targetIds](const AutomationEnvelope& e) {
+        return std::find(targetIds.begin(), targetIds.end(), e.targetId) != targetIds.end();
+    };
+    EditCommand command;
+    command.label = "Move " + found->displayName;
+    command.tracks = {from, to};
+    command.devicesChanged = true;
+    command.apply = [from, to, deviceId, newId, role, state, carries](Song& s) {
+        auto* src = trackAt(s, from);
+        auto* dst = trackAt(s, to);
+        if (! src || ! dst) return;
+        const auto it = std::find_if(src->devices.begin(), src->devices.end(), [deviceId](const Device& d) { return d.id == deviceId; });
+        if (it == src->devices.end()) return;
+        auto device = std::move(*it);
+        state->sourceIndex = (size_t) (it - src->devices.begin());
+        src->devices.erase(it);
+        device.id = newId;
+        size_t at = dst->devices.size();
+        state->replaced.clear();
+        if (role == DeviceRole::MidiEffect) at = 0;
+        else if (role == DeviceRole::Instrument)
+        {
+            for (size_t i = 0; i < dst->devices.size(); ++i)
+                if (deviceRole(dst->devices[i]) == DeviceRole::Instrument) state->replaced.emplace_back(i, dst->devices[i]);
+            std::erase_if(dst->devices, [](const Device& d) { return deviceRole(d) == DeviceRole::Instrument; });
+            at = 0;
+            while (at < dst->devices.size() && deviceRole(dst->devices[at]) == DeviceRole::MidiEffect) ++at;
+        }
+        dst->devices.insert(dst->devices.begin() + (std::ptrdiff_t) at, std::move(device));
+        state->envelopes.clear();
+        for (const auto& e : src->automation) if (carries(e)) state->envelopes.push_back(e);
+        std::erase_if(src->automation, carries);
+        for (const auto& e : state->envelopes) dst->automation.push_back(e);
+    };
+    command.revert = [from, to, deviceId, newId, state, carries](Song& s) {
+        auto* src = trackAt(s, from);
+        auto* dst = trackAt(s, to);
+        if (! src || ! dst) return;
+        const auto it = std::find_if(dst->devices.begin(), dst->devices.end(), [newId](const Device& d) { return d.id == newId; });
+        if (it == dst->devices.end()) return;
+        auto device = std::move(*it);
+        dst->devices.erase(it);
+        for (auto& [index, replaced] : state->replaced)
+            dst->devices.insert(dst->devices.begin() + (std::ptrdiff_t) std::min(index, dst->devices.size()), replaced);
+        device.id = deviceId;
+        src->devices.insert(src->devices.begin() + (std::ptrdiff_t) std::min(state->sourceIndex, src->devices.size()), std::move(device));
+        std::vector<AutomationEnvelope> back;
+        for (const auto& e : dst->automation) if (carries(e)) back.push_back(e);
+        std::erase_if(dst->automation, carries);
+        for (auto& e : back) src->automation.push_back(std::move(e));
+    };
+    return command;
+}
+
 void allocateDeviceIds(Song& song, Device& device)
 {
     if (device.id < 0) device.id = song.nextDeviceId++;

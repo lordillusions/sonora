@@ -2185,6 +2185,87 @@ TEST_CASE("device title drag: reorders effects with undo, rejects instrument bou
     CHECK(context.pluginPadAssignments.empty());
 }
 
+TEST_CASE("device title drag (UI-7c): out of the device view onto another track drops a move, Opt a copy, Escape cancels")
+{
+    model::Song song;
+    for (int t = 0; t < 2; ++t) { model::Track track; track.id = 20 + t; track.kind = model::TrackKind::Midi; song.tracks.push_back(track); }
+    model::Device instrument; instrument.id = 1; instrument.type = "PluginDevice"; instrument.displayName = "Instrument";
+    instrument.plugin.emplace(); instrument.plugin->isInstrument = true;
+    auto delay = devices::nativeDeviceModel("Delay"); delay.id = 2;
+    auto reverb = devices::nativeDeviceModel("Reverb"); reverb.id = 3;
+    song.tracks[0].devices = {instrument, delay, reverb};
+    engine::SampleCache samples; devices::BuildContext build;
+    auto graph = engine::buildGraph(song, build, samples);
+    ui::UiContext context; context.song = &song; context.graph = graph.graph.get(); context.browserVisible = false;
+    context.mainView = ui::MainView::Arrangement;
+    int drops = 0, droppedTrack = -1, edits = 0;
+    ui::BrowserDrag payload;
+    context.dropBrowserItem = [&](const auto& item, int index, double, int) { ++drops; payload = item; droppedTrack = index; };
+    context.applyEdit = [&](auto) { ++edits; };
+    ui::MainLayout root(context); root.setBounds({0, 0, 1600, 800});
+    ui::DetailView* detail = nullptr;
+    ui::ArrangementView* arrangement = nullptr;
+    std::function<void(ui::Widget&)> find = [&](ui::Widget& w) {
+        if (auto* d = dynamic_cast<ui::DetailView*>(&w)) detail = d;
+        if (auto* a = dynamic_cast<ui::ArrangementView*>(&w)) arrangement = a;
+        for (const auto& child : w.children()) find(*child);
+    };
+    find(root);
+    REQUIRE(detail); REQUIRE(arrangement); REQUIRE(arrangement->lanes().size() >= 2);
+    auto event = [](float x, float y, bool alt = false) { ui::MouseEvent e; e.x = x; e.y = y; e.alt = alt; return e; };
+    auto title = [&](size_t index) { const auto b = detail->children()[index]->boundsInRoot(); return event(b.x + 80, b.y + 9); };
+    const auto& lane = arrangement->lanes()[1];
+    const auto onTrack2 = event(arrangement->boundsInRoot().x + 300, arrangement->boundsInRoot().y + lane.y + lane.h * 0.5f);
+
+    // Plain drop: a move of the Delay to track 2.
+    root.dispatchMouseDown(title(1));
+    root.dispatchMouseDrag(onTrack2);
+    REQUIRE(context.browserDrag.has_value());
+    CHECK(context.browserDrag->kind == ui::BrowserDrag::Kind::TrackDevice);
+    CHECK(! context.browserDrag->copy);
+    root.dispatchMouseUp(onTrack2);
+    CHECK(drops == 1); CHECK(droppedTrack == 1);
+    CHECK(payload.kind == ui::BrowserDrag::Kind::TrackDevice);
+    CHECK(payload.deviceId == 2); CHECK(payload.sourceTrack == 0); CHECK(! payload.copy);
+    CHECK(! context.browserDrag); CHECK(edits == 0); // the device view reordered nothing
+
+    // Opt: the label follows the key while dragging, and the drop asks for a copy. Instruments can travel too.
+    root.dispatchMouseDown(title(0));
+    auto altOver = onTrack2; altOver.alt = true;
+    root.dispatchMouseDrag(altOver);
+    REQUIRE(context.browserDrag.has_value()); CHECK(context.browserDrag->copy);
+    const auto image = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_device_track_drag.png");
+    REQUIRE(gfx::renderToPng(root, 1600, 800, 1, image.getFullPathName().toStdString()));
+    image.deleteFile();
+    root.dispatchMouseUp(altOver);
+    CHECK(drops == 2); CHECK(payload.deviceId == 1); CHECK(payload.copy); CHECK(droppedTrack == 1);
+
+    // Out and back in: an in-chain reorder again, no track drop.
+    root.dispatchMouseDown(title(2));
+    root.dispatchMouseDrag(onTrack2);
+    REQUIRE(context.browserDrag.has_value());
+    const auto backOnDelay = event(detail->children()[1]->boundsInRoot().x + 23, detail->children()[1]->boundsInRoot().y + 9);
+    root.dispatchMouseDrag(backOnDelay);
+    CHECK(! context.browserDrag);
+    root.dispatchMouseUp(backOnDelay);
+    CHECK(drops == 2); CHECK(edits == 1);
+
+    // Escape while over a track cancels; the next gesture starts clean.
+    root.dispatchMouseDown(title(1));
+    root.dispatchMouseDrag(onTrack2);
+    ui::KeyEvent escape; escape.keyCode = juce::KeyPress::escapeKey;
+    CHECK(root.dispatchKey(escape));
+    CHECK(! context.browserDrag);
+    root.dispatchMouseDrag(onTrack2);
+    root.dispatchMouseUp(onTrack2);
+    root.tickTree();
+    CHECK(drops == 2); CHECK(! context.browserDrag);
+    root.dispatchMouseDown(title(1));
+    root.dispatchMouseDrag(onTrack2);
+    root.dispatchMouseUp(onTrack2);
+    CHECK(drops == 3); CHECK(payload.deviceId == 2);
+}
+
 TEST_CASE("device title drag: edge scrolling moves viewport while recording and controls never start a reorder")
 {
     model::Song song; model::Track track; track.kind = model::TrackKind::Audio;
