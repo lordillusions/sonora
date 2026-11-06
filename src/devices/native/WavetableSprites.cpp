@@ -15,7 +15,7 @@ namespace sonora::devices
 {
 namespace
 {
-constexpr int kFrame = WavetableData::nativeFrameLength;
+constexpr int kFrame = kWavetableFrameLength;
 constexpr const char* kPrefix = "Vector_Sprite_";
 
 std::mutex& cacheLock()

@@ -91,6 +91,9 @@ public:
 
     // Envelope stage curve shared with the face: fraction of a stage covered at x in 0..1 for slope -1..1.
     static float slopeCurve(float x, float slope);
+    // One sample of the sub oscillator (before its Gain) at `phase` (cycles), `inc` cycles per sample, Tone 0..1;
+    // hpState is the pulse's high-pass memory, hpCoeff its one-pole coefficient.
+    static float subOscillator(double phase, double inc, float tone, float& hpState, float hpCoeff);
 
 private:
     static constexpr int kMaxVoices = 8, kMaxUnison = 8, kControl = 16;
@@ -114,6 +117,7 @@ private:
         std::array<std::array<double, kMaxUnison>, 2> modPhase{}; // FM modulator phases
         std::array<float, kMaxUnison> jitter{}, jitterTarget{}, spread{};
         double subPhase = 0;
+        float subHp = 0;
         Env env[3];
         Lfo lfo[2];
         Filter filter[2];
@@ -145,7 +149,7 @@ private:
     std::array<float, 16> bend_{}, slide_{}, channelPressure_{};
     float modWheel_ = 0;
     bool sustainPedal_ = false;
-    double sampleRate_ = 44100, tempo_ = 120;
+    double sampleRate_ = 44100, tempo_ = 120, subHpCoeff_ = 0.0007;
     uint64_t counter_ = 0;
     int lastNote_ = -1;
     uint32_t random_ = 0x2545F491u;

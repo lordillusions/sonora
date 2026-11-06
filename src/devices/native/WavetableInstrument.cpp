@@ -12,6 +12,9 @@ namespace
 {
 using W = WavetableInstrument;
 constexpr double kTwoPi = 2.0 * dsp::kPi;
+// Output level (measured, DEV-28b2): a full-scale table at Gain 1, Volume 1, sustain 1 peaks at 0.70707 (-3.01 dB),
+// so the voice is scaled by 1 / sqrt 2; Volume and Sustain are linear on top (0.3548 -> 0.2509, x 0.501 -> 0.1257).
+constexpr float kVoiceLevel = 0.70710678f;
 
 const auto& kTargetIds = model::wavetable::kTargetIds;
 const auto& kTargetNames = model::wavetable::kTargetNames;
@@ -158,6 +161,34 @@ float saturate(float x, int circuit)
     return clip(x + bias) - bias;
 }
 
+// Band-limited step correction (polyBLEP) for a unit upward step at phase 0; t = phase in 0..1, dt = increment.
+float polyBlep(double t, double dt)
+{
+    if (dt <= 0) return 0;
+    if (t < dt) { t /= dt; return (float) (t + t - t * t - 1.0); }
+    if (t > 1.0 - dt) { t = (t - 1.0) / dt; return (float) (t * t + t + t + 1.0); }
+    return 0;
+}
+
+// MS2 (measured DEV-28b2, P09: LP 1 kHz, r 0, Drive 12 dB on a saw): no input clipping (the ramp keeps 0.98 of the
+// linear slope, peaks reach 4.4 x the voice level) but the fast edges are slew-limited. A TPT state-variable filter
+// whose two integrators take V tanh(input / V), V = 4.72 (3.34 at the voice level), at 0.86 x the cutoff fits the
+// waveform to -26.4 dB (linear Clean: -14 dB). Small signals see the linear filter. Only that one case is measured.
+constexpr double kMs2Limit = 4.72, kMs2CutoffScale = 0.86;
+float nonlinearSvf(SvfState& st, const SvfCoeffs& c, float x)
+{
+    const double g = c.a2 / c.a1, k = c.k;
+    const double hp = ((double) x - (k + g) * st.ic1 - st.ic2) * c.a1;
+    const double i1 = kMs2Limit * std::tanh(hp / kMs2Limit);
+    const double bp = st.ic1 + g * i1;
+    st.ic1 = bp + g * i1;
+    const double i2 = kMs2Limit * std::tanh(bp / kMs2Limit);
+    const double lp = st.ic2 + g * i2;
+    st.ic2 = lp + g * i2;
+    return (float) (c.mHigh * hp + c.mBand * bp + c.mLow * lp);
+}
+
+
 float uniform(uint32_t& state)
 {
     state ^= state << 13;
@@ -188,15 +219,36 @@ const char* WavetableInstrument::syncedRateName(int index) { return kSyncedNames
 
 float WavetableInstrument::slopeCurve(float x, float slope)
 {
-    // The reference's stage curve (measured on Simpler, docs/PARITY.md): a blend of linear and exp(-9.115 x); negative
-    // slopes mirror it. The capture of Wavetable's envelopes fits the same law (A slope 0.21 / D slope 0.5 midpoints).
+    // Measured on Wavetable's own stems (DEV-28b2; not Simpler's law): a normalised exponential
+    // (1 - e^(-k x)) / (1 - e^(-k)). Slope 0.5 (the default decay / release) fits k = 3.749 within 0.1 % over the whole
+    // stage (P11 decay 1 s to 0.1, P12 release 1 s); slope 0 is linear (P10 attack). k = 7.5 x slope is assumed between
+    // those points (no other slope was measured); negative slopes mirror the curve.
     x = std::clamp(x, 0.0f, 1.0f);
-    const auto positive = [](float u, float s) {
-        const float end = 1.0f - s * std::exp(-9.115f);
-        return (1.0f - ((1.0f - s) * (1.0f - u) + s * std::exp(-9.115f * u))) / end;
-    };
     slope = std::clamp(slope, -1.0f, 1.0f);
-    return slope >= 0 ? positive(x, slope) : 1.0f - positive(1.0f - x, -slope);
+    const float k = 7.5f * std::abs(slope);
+    if (k < 1e-4f) return x;
+    const auto positive = [k](float u) { return -std::expm1(-k * u) / -std::expm1(-k); };
+    return slope > 0 ? positive(x) : 1.0f - positive(1.0f - x);
+}
+
+float WavetableInstrument::subOscillator(double phase, double inc, float tone, float& hpState, float hpCoeff)
+{
+    // Measured (DEV-28b2, P13 / P14): Tone 0 is a pure sine at the oscillators' level (sub Gain 1 = a full-scale
+    // table), starting at phase 0. Tone 1 is a pulse of +-0.923 that is high for 60 % of the cycle, centred on the
+    // sine's positive peak, whose plateaus droop like a ~5 Hz one-pole high-pass (tau 32 ms). The duty is 0.597, not
+    // 0.6: harmonics 5 / 10 / 15 are 39.1 dB down with the phases of a 0.597 pulse (h1..h16 within 0.3 dB / 2 deg once
+    // the 1.1-sample start offset below is applied). Tone in between crossfades the two (assumed).
+    const float sine = (float) std::sin(kTwoPi * phase);
+    if (tone <= 0) { hpState = 0; return sine; }
+    constexpr double duty = 0.597, rise = 0.25 - duty / 2;
+    double p = phase - rise;
+    p -= std::floor(p);
+    double fall = p - duty;
+    fall -= std::floor(fall);
+    const float pulse = 0.921f * ((p < duty ? 1.0f : -1.0f) + polyBlep(p, inc) - polyBlep(fall, inc));
+    // One-pole high-pass y = x - lowpass(x): hpState is the low-pass memory.
+    hpState += (pulse - hpState) * hpCoeff;
+    return sine + ((pulse - hpState) - sine) * std::min(tone, 1.0f);
 }
 
 WavetableInstrument::WavetableInstrument() : NativeDevice(wavetableParameters())
@@ -221,6 +273,7 @@ void WavetableInstrument::setTable(int oscillator, std::shared_ptr<const Wavetab
 void WavetableInstrument::prepare(double sampleRate, int)
 {
     sampleRate_ = std::max(1000.0, sampleRate);
+    subHpCoeff_ = 1.0 - std::exp(-1.0 / (0.0322 * sampleRate_));
     reset();
 }
 
@@ -266,7 +319,11 @@ int WavetableInstrument::filterStages(int index, double freq, double resonance, 
     const int circuit = type <= 1 ? std::clamp((int) std::lround(value(base + 2)), 0, 4) : (value(base + 3) > 0.5f ? 1 : 0);
     const bool steep = value(base + 4) >= 0.5f;
     const double r = std::clamp(resonance, 0.0, 1.0);
-    const double clean = (1.0 - r) / (1.0 + 3.0 * r);
+    // Wavetable's own resonance law (measured DEV-28b2, P08: Clean LP 1 kHz, 24 dB, r = 0.5 fits two RBJ stages with
+    // Q 1.0 / 0.67 = d 0.50 / 0.75, 0.085 dB rms over 24 harmonics; Simpler's (1 - r) / (1 + 3 r) would give Q 2.5):
+    // d = 1 - r (only r = 0 and 0.5 measured; the second stage keeps (1 + d) / 2).
+    const double clean = 1.0 - r;
+    if (circuit == 2) freq *= kMs2CutoffScale;
     freq = std::clamp(freq, 20.0, std::min(22000.0, sampleRate_ * 0.49));
     const double octaves = std::log2(freq / 1000.0), span = std::log2(5.0);
     const double osrScale = octaves < 0 ? 1.0 + (1.0 - 0.14) * std::max(octaves / span, -1.0) : 1.0 + (2.72 - 1.0) * std::min(octaves / span, 1.0);
@@ -399,7 +456,6 @@ void WavetableInstrument::noteOn(int note, int channel, float velocity)
                     if (v == nullptr || voices_[(size_t) i].age < v->age) v = &voices_[(size_t) i];
         }
     }
-    const int fromNote = lastNote_;
     lastNote_ = note;
     if (mono && legato)
     {
@@ -437,11 +493,8 @@ void WavetableInstrument::noteOn(int note, int channel, float velocity)
             v->phase[(size_t) osc][(size_t) u] = mode == 0 || mode == 4 ? 0.0 : (double) uniform(random_);
     }
     if (keepPhase) v->phase = phases;
-    if (value(Glide) > 0 && fromNote >= 0 && fromNote != note)
-    {
-        v->glideSemis = (double) (fromNote - note);
-        v->glideStep = -v->glideSemis / std::max(1.0, (double) value(Glide) * sampleRate_);
-    }
+    // Glide applies only to legato notes in Mono (handled above): measured on P19, a note after a released one (even
+    // while its release still sounds) starts at its own pitch. Linear in semitones over the Glide time (matches).
     for (int l = 0; l < 2; ++l)
     {
         const int base = l == 0 ? L1Retrigger : L2Retrigger;
@@ -452,6 +505,11 @@ void WavetableInstrument::noteOn(int note, int channel, float velocity)
     v->env[1].level = v->env[1].from = value(E2Initial);
     v->env[2].level = v->env[2].from = value(E3Initial);
     v->countdown = 0;
+    // The sub starts 1.1 samples late against the oscillators (measured: every harmonic of P13 / P14 lags by
+    // 1.17 deg x k at 130.8 Hz).
+    const double subNote = (double) note + (double) value(GlobalTranspose) - 12.0 * (double) std::lround(value(SubTranspose));
+    v->subPhase = 1.0 - 1.1 * 440.0 * std::exp2((subNote - 69.0) / 12.0) / sampleRate_;
+    v->subPhase -= std::floor(v->subPhase);
 }
 
 void WavetableInstrument::releaseVoice(Voice& v)
@@ -477,8 +535,10 @@ void WavetableInstrument::noteOff(int note, int channel)
 WavetableInstrument::EnvSettings WavetableInstrument::envSettings(int env, const float* t) const
 {
     // Times: modulation moves a time along its logarithmic travel (0.001 .. 20 s, ~14.3 octaves per unit). The Time
-    // control scales every envelope time by 10^Time (an assumption until measured, DEV-28b2).
-    const float scale = std::pow(10.0f, std::clamp(value(TimeScale) + t[TTime], -1.0f, 1.0f));
+    // control does not scale the Amp envelope (measured DEV-28b2: Drifting Ambient Pad, Time 0.28, ends its 2.9 s
+    // release on time; Release Yourself's tail, Time 0.47, decays like the unscaled 4.7 s release). Env 2 / 3 keep
+    // 10^Time (assumed; their effect on the probes was too small to measure).
+    const float scale = env == 0 ? 1.0f : std::pow(10.0f, std::clamp(value(TimeScale) + t[TTime], -1.0f, 1.0f));
     const auto time = [&](int p, int target) { return std::clamp(value(p) * std::exp2(t[target] * 14.3f), 0.0f, 60.0f) * scale; };
     EnvSettings s{};
     if (env == 0)
@@ -545,7 +605,7 @@ float WavetableInstrument::stepLfo(Lfo& l, int index, float rateMod, float amoun
         rate = tempo_ / 60.0 / syncedRateBeats((int) std::lround(value(b + 7) - rateMod * 21.0f));
     else
         rate = (double) std::clamp(value(b + 6) * std::exp2(rateMod * 12.0f), 0.001f, 200.0f);
-    rate /= std::pow(10.0, (double) std::clamp(value(TimeScale), -1.0f, 1.0f));
+    rate /= std::pow(10.0, (double) std::clamp(value(TimeScale), -1.0f, 1.0f)); // assumed, not measured
     l.phase += rate * samples / sampleRate_;
     if (l.phase >= 1.0)
     {
@@ -561,7 +621,7 @@ float WavetableInstrument::stepLfo(Lfo& l, int index, float rateMod, float amoun
     switch (std::clamp((int) std::lround(value(b + 1)), 0, 4))
     {
         case 0: y = std::sin((float) kTwoPi * p); break;
-        case 1: y = 1.0f - 4.0f * std::abs(std::fmod(p + 0.75f, 1.0f) - 0.5f); break;
+        case 1: y = 4.0f * std::abs(std::fmod(p + 0.75f, 1.0f) - 0.5f) - 1.0f; break; // in phase with the sine: 0, +1, 0, -1 (P31)
         case 2: y = 1.0f - 2.0f * p; break;
         case 3: y = p < 0.5f ? 1.0f : -1.0f; break;
         default: y = l.held; break;
@@ -688,7 +748,8 @@ float WavetableInstrument::renderOscillator(Voice& v, int osc, int u, int voices
     const auto& table = tables_[(size_t) osc];
     if (! table) return 0;
     const int mode = (int) std::lround(value(UnisonMode));
-    float detune = 0, posOffset = 0, pan = 0;
+    float detune = 0, posOffset = 0;
+    bool hardLeft = false, centre = false;
     if (voices > 1)
     {
         const float spread = v.spread[(size_t) u], amount = v.unisonAmount;
@@ -701,38 +762,60 @@ float WavetableInstrument::renderOscillator(Voice& v, int osc, int u, int voices
             case 6: detune = spread * amount * 0.5f; break;                   // Random Note
             default: break;
         }
-        pan = spread * 0.7f;
+        // Measured (P15, Classic, 4 voices, Amount 0.5): the voices sit at -25 / -8.3 / +8.3 / +25 ct and are panned
+        // hard left / right / left / right, each at sqrt(2 / N) (0.707 of a single voice per channel). With an odd
+        // count the middle voice is centred at equal power (assumed: keeps both channels at the same power).
+        const int middle = (voices & 1) != 0 ? voices / 2 : -1;
+        centre = u == middle;
+        hardLeft = ((u > middle && middle >= 0 ? u - 1 : u) & 1) == 0;
     }
     const double inc = 440.0 * std::exp2(((double) v.pitch[osc] + detune - 69.0) / 12.0) / sampleRate_;
     double& phase = v.phase[(size_t) osc][(size_t) u];
     double read = phase;
     double bandwidth = inc;
+    bool classicWindow = false, classicInside = true;
+    double classicEnd = 0, classicEdge[2]{};
     const int effect = (int) std::lround(value(osc == 0 ? Osc1EffectMode : Osc2EffectMode));
     const float fx1 = v.fx1[osc], fx2 = v.fx2[osc];
     if (effect == 1)
     {
-        // FM: a sine modulator at 2^(2 FX1) x the oscillator frequency, phase-modulating the table by up to 1.5 cycles.
+        // FM: a sine modulator at 2^(2 FX1) x the oscillator frequency (FX1 0.5 = ratio 2, P16: odd harmonics only),
+        // starting at phase 0, phase-modulating the table with index 10 x Amount radians (P16: Amount 0.5 fits
+        // beta 5.01 over h1..h16, 0.06 dB^2; linearity in Amount assumed).
         double& mod = v.modPhase[(size_t) osc][(size_t) u];
         const double ratio = std::exp2(2.0 * fx1);
-        read += 1.5 * fx2 * std::sin(kTwoPi * mod);
+        read += (10.0 / kTwoPi) * fx2 * std::sin(kTwoPi * mod);
         mod += inc * ratio;
         mod -= std::floor(mod);
-        bandwidth *= 1.0 + 3.0 * fx2 * ratio;
+        bandwidth *= 1.0 + 10.0 * fx2 * ratio;
     }
     else if (effect == 2)
     {
-        // Classic: pulse width (phase distortion around the half cycle) and hard sync up to 8x.
-        const double width = 0.5 * (1.0 - 0.95 * std::clamp((double) std::abs(fx1), 0.0, 1.0));
-        const double sync = 1.0 + 7.0 * fx2;
-        double p = read - std::floor(read);
-        p = p < width ? 0.5 * p / width : 0.5 + 0.5 * (p - width) / (1.0 - width);
-        p *= sync;
-        read = p - std::floor(p);
-        bandwidth *= sync / std::max(0.05, width * 2.0);
+        // Classic (measured DEV-28b2, P17: saw frame, PW 0.5, Sync 0.5): the table plays inside a window of
+        // w = 0.5186 of the cycle, starting at the cycle's phase 0, and the output is silent for the rest. Inside the
+        // window the table runs S = 2.510 times (hard sync at the window start). A fit of h1..h30 (0.7 dB / 7 deg rms)
+        // gives these two numbers; the laws through them (w = 1 - 0.963 |PW|, S = 1 + 3.02 Sync) and the negative PW
+        // side (window at the cycle's end) are assumed.
+        const double pw = std::clamp((double) fx1, -1.0, 1.0);
+        const double width = std::max(0.037, 1.0 - 0.9628 * std::abs(pw));
+        const double cycles = 1.0 + 3.019 * std::clamp((double) fx2, 0.0, 1.0);
+        const double start = pw < 0 ? 1.0 - width : 0.0;
+        double p = read - std::floor(read) - start;
+        p -= std::floor(p); // phase from the window start
+        classicWindow = true;
+        classicInside = p < width;
+        read = classicInside ? p / width * cycles : 0.0;
+        classicEnd = cycles;
+        classicEdge[0] = p;                           // phase since the window opened
+        classicEdge[1] = p - width - std::floor(p - width); // phase since it closed
+        bandwidth *= cycles / width;
     }
     else if (effect == 3)
     {
-        // Modern: Warp bends the phase (power law), Fold is applied to the sample below.
+        // Modern: Warp bends the phase (power law; a Sonora approximation, not measured). Fold is not applied: with
+        // Warp 0 the reference's Fold adds no harmonics (P28 Fold 0.6 on Spectral 2 leaves the bands between the
+        // table's partials 30-40 dB down; P21 Fold 0.42), so a waveshaper is wrong. With Warp 0.5 / Fold 0.5 (P18) the
+        // reference folds the table phase back and forth (TODO(DEV-28b2): measure Warp and Fold separately).
         double p = read - std::floor(read);
         if (std::abs(fx1) > 1e-4f) p = std::pow(p, std::exp2(-2.0 * fx1));
         read = p;
@@ -740,16 +823,21 @@ float WavetableInstrument::renderOscillator(Voice& v, int osc, int u, int voices
     }
     const int hiq = value(HiQ) >= 0.5f ? 1 : 0;
     const int mip = std::max(0, table->mipForIncrement(bandwidth) - hiq);
-    float y = table->sample(std::clamp(v.position[osc] + posOffset, 0.0f, 1.0f), read, mip);
-    if (effect == 3 && fx2 > 1e-4f)
+    const float position = std::clamp(v.position[osc] + posOffset, 0.0f, 1.0f);
+    float y = classicWindow && ! classicInside ? 0.0f : table->sample(position, read, mip);
+    if (classicWindow)
     {
-        const float folded = std::sin(0.5f * (float) dsp::kPi * y * (1.0f + 4.0f * fx2));
-        y += (folded - y) * std::min(1.0f, fx2 * 2.0f);
+        // Band-limit the window's opening (0 -> table at phase 0) and closing (table at S -> 0) steps (polyBLEP).
+        const double dt = std::min(inc, 0.5);
+        if (classicEdge[0] < dt || classicEdge[0] > 1.0 - dt)
+            y += 0.5f * table->sample(position, 0.0, mip) * polyBlep(classicEdge[0], dt);
+        if (classicEdge[1] < dt || classicEdge[1] > 1.0 - dt)
+            y -= 0.5f * table->sample(position, classicEnd, mip) * polyBlep(classicEdge[1], dt);
     }
     phase += inc;
     phase -= std::floor(phase);
-    float pl = 1, pr = 1;
-    panGains(pan, pl, pr);
+    const float pl = voices <= 1 ? 1.0f : centre ? 0.70710678f : hardLeft ? 1.0f : 0.0f;
+    const float pr = voices <= 1 ? 1.0f : centre ? 0.70710678f : 1.0f - pl;
     left += y * pl * v.panL[osc];
     right += y * pr * v.panR[osc];
     return y;
@@ -759,7 +847,7 @@ void WavetableInstrument::render(float* left, float* right, int from, int to)
 {
     const int mode = std::clamp((int) std::lround(value(UnisonMode)), 0, 6);
     const int unison = mode == 0 ? 1 : std::clamp((int) std::lround(value(UnisonVoices)), 2, kMaxUnison);
-    const float unisonGain = 1.0f / std::sqrt((float) unison);
+    const float unisonGain = unison > 1 ? std::sqrt(2.0f / (float) unison) : 1.0f;
     const int routing = std::clamp((int) std::lround(value(FilterRouting)), 0, 2);
     const bool f1 = value(F1On) >= 0.5f, f2 = value(F2On) >= 0.5f;
     const float volume = value(Volume);
@@ -796,21 +884,30 @@ void WavetableInstrument::render(float* left, float* right, int from, int to)
             float sub = 0;
             if (v.subGain > 0)
             {
-                // Sub: a sine an octave (or two) below, its Tone pushing it towards a rounded square (Sonora's reading).
                 const double inc = 440.0 * std::exp2(((double) v.subPitch - 69.0) / 12.0) / sampleRate_;
-                const float s = (float) std::sin(kTwoPi * v.subPhase);
-                const float k = 1.0f + 6.0f * v.subTone;
-                sub = std::tanh(k * s) / std::tanh(k) * v.subGain;
+                sub = subOscillator(v.subPhase, inc, v.subTone, v.subHp, (float) subHpCoeff_) * v.subGain;
                 v.subPhase += inc;
                 v.subPhase -= std::floor(v.subPhase);
             }
             const auto runFilter = [&](int f, float& a, float& b) {
                 auto& flt = v.filter[f];
+                const int base = f == 0 ? F1On : F2On;
+                const int type = std::clamp((int) std::lround(value(base + 1)), 0, 4);
+                const int circuit = type <= 1 ? (int) std::lround(value(base + 2)) : 1;
+                if (circuit == 2)
+                {
+                    // MS2: Drive is a clean input gain into saturating integrators (see nonlinearSvf).
+                    a *= v.drive[f];
+                    b *= v.drive[f];
+                    for (int s = 0; s < flt.stages; ++s)
+                    {
+                        a = nonlinearSvf(flt.s[s][0], flt.c[s], a);
+                        b = nonlinearSvf(flt.s[s][1], flt.c[s], b);
+                    }
+                    return;
+                }
                 if (v.drive[f] != 1.0f)
                 {
-                    const int base = f == 0 ? F1On : F2On;
-                    const int type = std::clamp((int) std::lround(value(base + 1)), 0, 4);
-                    const int circuit = type <= 1 ? (int) std::lround(value(base + 2)) : 1;
                     a = saturate(a * v.drive[f], circuit);
                     b = saturate(b * v.drive[f], circuit);
                 }
@@ -839,7 +936,7 @@ void WavetableInstrument::render(float* left, float* right, int from, int to)
                     yl = al;
                     yr = ar;
                 }
-                else // Parallel: both filters see the mix and are summed; a switched-off filter passes nothing
+                else // Parallel: both filters see the mix and are summed at half level; a switched-off filter passes nothing
                 {
                     if (! f1 && ! f2) { yl = al; yr = ar; }
                     else
@@ -849,10 +946,14 @@ void WavetableInstrument::render(float* left, float* right, int from, int to)
                         if (f2) runFilter(1, bl, br); else bl = br = 0;
                         yl = al + bl;
                         yr = ar + br;
+                        // The mix is split equally between the two filters (Flux Capacitor: +5.4 dB too loud with
+                        // a plain sum, -0.6 dB with halves; unity when both filters are open).
+                        yl *= 0.5f;
+                        yr *= 0.5f;
                     }
                 }
             }
-            const float gain = v.env[0].level * v.ampMod * volume * 0.5f;
+            const float gain = v.env[0].level * v.ampMod * volume * kVoiceLevel;
             outL += yl * gain;
             outR += yr * gain;
         }

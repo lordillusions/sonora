@@ -1,5 +1,6 @@
 # DEV-30 Channel EQ law probes: white noise through each band at several gains, the 80 Hz high-pass, Output.
 # Transfer functions = Welch cross-spectrum of the reference stems against src-noise (same export).
+# Export 32-bit float: a 24-bit export clips q-hi+15 (DEV-30b, docs/PARITY.md "Channel EQ").
 case src-noise sample=noise notes=long
   device Defaults/Instruments/Simpler.adv Filter/IsOn=false VolumeAndPan/Volume=0 VolumeAndPan/VolumeVelScale=0
 case q-flat sample=noise notes=long

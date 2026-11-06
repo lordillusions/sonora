@@ -4,8 +4,9 @@
 // A set names each oscillator's table by its display name (`SpriteName1` = "Harmonics 1") or stores a user sample
 // (`UserSprite1` SampleRef). Factory tables are the reference's own assets and are never copied into Sonora: when the
 // reference application is installed, they are read at run time from its Builtin/Samples/Vector/Sprites folder
-// ("Vector_Sprite_<Category> <Name>.wav", 2048-sample frames). Otherwise a Sonora-generated stand-in plays and the
-// load reports it (docs/WAVETABLE.md "Tables").
+// ("Vector_Sprite_<Category> <Name>.wav", 1024-sample frames: all 194 files are whole multiples of 1024, 60 are not
+// of 2048, and "Basic Shapes" = 4 frames sine / triangle / saw / square, as the reference plays it, DEV-28b2).
+// Otherwise a Sonora-generated stand-in plays and the load reports it (docs/WAVETABLE.md "Tables").
 
 #include "core/Model.h"
 #include "devices/native/WavetableData.h"
@@ -30,8 +31,10 @@ const std::vector<WavetableSprite>& factoryWavetables();
 std::string factoryWavetableFolder();
 // Finds a factory table by display name ("Harmonics 1") or "Category Name"; nullptr when absent.
 const WavetableSprite* findFactoryWavetable(const std::string& name);
+// Samples per frame of the reference's tables (factory and user samples alike).
+constexpr int kWavetableFrameLength = 1024;
 // Loads a table (cached per file); nullptr with `error` set on failure. Lengths that are not whole frames are cut to
-// whole 2048-sample frames (a shorter file becomes one frame, resampled).
+// whole 1024-sample frames (kWavetableFrameLength; a shorter file becomes one frame, resampled).
 std::shared_ptr<const WavetableData> loadWavetableFile(const std::string& path, std::string& error);
 // Sonora's own stand-in table: a 16-frame sine -> triangle -> saw -> square morph, generated here.
 std::shared_ptr<const WavetableData> standInWavetable();

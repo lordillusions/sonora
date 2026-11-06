@@ -7,7 +7,9 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include <array>
 #include <cmath>
+#include <cstdio>
 #include <random>
 
 using namespace sonora;
@@ -97,43 +99,103 @@ TEST_CASE("channel eq: catalog, parameters and .als values (DEV-30)")
     CHECK(infos[E::HighpassOn].isToggle);
 }
 
-TEST_CASE("channel eq: response laws (HP 80 Hz, shelves, mid peak, high cut low-pass, output) (DEV-30)")
+TEST_CASE("channel eq: response laws (HP 80 Hz, adaptive low shelf, mid peak, high cut low-pass, droop) (DEV-30b)")
 {
     E::Settings flat;
-    for (double hz : {20.0, 100.0, 1000.0, 10000.0, 20000.0}) CHECK_NEAR(responseDb(flat, hz), 0.0, 1e-6);
+    CHECK_NEAR(responseDb(flat, 1000, 44100), 0.0, 1e-4);
+    CHECK_NEAR(responseDb(flat, 20000, 44100), -0.47, 0.02); // the fixed top-end droop
     E::Settings hp;
     hp.highpass = true;
-    CHECK_NEAR(responseDb(hp, 80), -3.01, 0.02);  // first order: -3 dB at the corner
-    CHECK_NEAR(responseDb(hp, 20), -12.3, 0.1);   // 6 dB per octave below it
-    CHECK_NEAR(responseDb(hp, 1000), 0.0, 0.03);
+    CHECK_NEAR(responseDb(hp, 80, 44100), -3.01, 0.02); // first order: -3 dB at the corner
+    // Low shelf: the midpoint follows the linear gain.
+    CHECK_NEAR(E::lowShelfHz(14.9638), 101.0, 0.2);
+    CHECK_NEAR(E::lowShelfHz(3), 178.2, 0.2);
+    CHECK_NEAR(E::lowShelfHz(-3), 191.3, 0.2);
+    CHECK_NEAR(E::lowShelfHz(-14.8945), 201.0, 0.2);
     E::Settings low;
-    low.lowDb = 15;
-    CHECK_NEAR(responseDb(low, 20), 14.8, 0.3);
-    CHECK_NEAR(responseDb(low, E::kLowShelfHz), 7.5, 0.02); // the shelf's midpoint
-    CHECK_NEAR(responseDb(low, 5000), 0.0, 0.05);
-    E::Settings mid;
-    for (double hz : {120.0, 1500.0, 7500.0})
-    {
-        mid.midHz = hz;
-        mid.midDb = 12;
-        CHECK_NEAR(responseDb(mid, hz), 12.0, 0.01);
-        mid.midDb = -12;
-        CHECK_NEAR(responseDb(mid, hz), -12.0, 0.01);
-    }
+    low.lowDb = 9;
+    CHECK_NEAR(responseDb(low, E::lowShelfHz(9), 44100), 4.5, 0.02);
+    // Mid: the set gain at the set frequency at every rate, cuts mirror boosts.
+    for (double rate : {44100.0, 48000.0, 96000.0})
+        for (double hz : {120.0, 1500.0, 7500.0})
+        {
+            E::Settings mid;
+            mid.midHz = hz;
+            mid.midDb = 12;
+            const double boost = responseDb(mid, hz, rate) - responseDb(flat, hz, rate);
+            CHECK_NEAR(boost, 12.0, 0.01);
+            mid.midDb = -12;
+            CHECK_NEAR(responseDb(mid, hz, rate) - responseDb(flat, hz, rate), -boost, 1e-6);
+        }
+    // High cut: no low-pass at or above 0 dB, measured poles at the anchors, continuous from 0 dB.
+    CHECK_NEAR(E::lowpassPoles(0, 44100).hz, 0, 0);
+    CHECK_NEAR(E::lowpassPoles(3, 44100).hz, 0, 0);
+    CHECK_NEAR(E::lowpassPoles(-9, 44100).hz, 14765.5, 1);
+    CHECK_NEAR(E::lowpassPoles(-9, 44100).q, 0.6454, 1e-3);
     E::Settings high;
-    high.highDb = 15;
-    CHECK_NEAR(responseDb(high, E::kHighShelfHz), 7.5, 0.02);
-    CHECK_NEAR(responseDb(high, 50), 0.0, 0.05);
-    CHECK_NEAR(E::lowpassHz(0), 0, 0);
-    CHECK_NEAR(E::lowpassHz(3), 0, 0);
-    CHECK_NEAR(E::lowpassHz(-15), 8000, 0.01);   // manual: 20 kHz at 0 dB down to 8 kHz at -15 dB
-    CHECK_NEAR(E::lowpassHz(-7.5), 12649, 1);
-    high.highDb = -15;
-    CHECK(responseDb(high, 8000) < -15.0);        // the shelf plus the low-pass at its corner
-    CHECK(responseDb(high, 16000) < responseDb(high, 8000) - 6.0);
+    high.highDb = -1e-4;
+    CHECK_NEAR(responseDb(high, 19000, 44100), responseDb(flat, 19000, 44100), 0.01);
     E::Settings out;
     out.outputDb = 6;
-    CHECK_NEAR(responseDb(out, 440), 6.0, 1e-6);
+    CHECK_NEAR(responseDb(out, 440, 44100), 6.0, 1e-4);
+}
+
+TEST_CASE("channel eq: transfer functions match the reference's audio (DEV-30b)")
+{
+    // White noise through the reference's Channel EQ (suite channeleq_laws.txt, 44.1 kHz): Welch transfer functions of
+    // each case stem against the source stem of the same export, in dB at 40 Hz .. 19 kHz. Settings are the stored
+    // (linear) .als values. q-hi+15 is left out: the reference's 24-bit export clipped it.
+    struct Case
+    {
+        const char* name;
+        bool hp;
+        float low, mid, midHz, high, output;
+        std::array<double, 10> db;
+    };
+    const std::array<double, 10> hz{40, 100, 250, 630, 1600, 4000, 7500, 12000, 16000, 19000};
+    const Case cases[] = {
+        {"q-flat", false, 1.0f, 1.0f, 1500, 1.0f, 1.0f, {-0.00, -0.00, 0.00, -0.00, -0.00, -0.00, -0.01, -0.02, -0.06, -0.24}},
+        {"q-hp", true, 1.0f, 1.0f, 1500, 1.0f, 1.0f, {-6.91, -2.14, -0.42, -0.07, -0.01, -0.00, -0.01, -0.02, -0.06, -0.24}},
+        {"q-lo+15", false, 5.6f, 1.0f, 1500, 1.0f, 1.0f, {13.66, 7.55, 1.31, 0.17, 0.02, 0.00, -0.00, -0.02, -0.06, -0.24}},
+        {"q-lo+9", false, 2.81838293f, 1.0f, 1500, 1.0f, 1.0f, {8.72, 6.85, 1.82, 0.22, 0.03, 0.00, -0.00, -0.02, -0.06, -0.24}},
+        {"q-lo+3", false, 1.41253754f, 1.0f, 1500, 1.0f, 1.0f, {2.94, 2.51, 0.82, 0.10, 0.01, 0.00, -0.00, -0.02, -0.06, -0.24}},
+        {"q-lo-3", false, 0.707945784f, 1.0f, 1500, 1.0f, 1.0f, {-2.95, -2.59, -0.94, -0.12, -0.02, -0.00, -0.01, -0.02, -0.06, -0.24}},
+        {"q-lo-9", false, 0.354813389f, 1.0f, 1500, 1.0f, 1.0f, {-8.84, -7.79, -3.08, -0.40, -0.05, -0.01, -0.01, -0.02, -0.06, -0.24}},
+        {"q-lo-15", false, 0.18f, 1.0f, 1500, 1.0f, 1.0f, {-14.62, -12.78, -5.40, -0.76, -0.10, -0.02, -0.01, -0.02, -0.06, -0.24}},
+        {"q-mid+12-1k5", false, 1.0f, 4.0f, 1500, 1.0f, 1.0f, {0.05, 0.28, 1.54, 6.11, 11.97, 5.18, 1.83, 0.58, 0.14, -0.17}},
+        {"q-mid+6-1k5", false, 1.0f, 1.99526231f, 1500, 1.0f, 1.0f, {0.02, 0.11, 0.66, 3.05, 5.97, 2.53, 0.80, 0.23, 0.02, -0.21}},
+        {"q-mid-12-1k5", false, 1.0f, 0.25f, 1500, 1.0f, 1.0f, {-0.05, -0.28, -1.54, -6.11, -11.97, -5.18, -1.84, -0.61, -0.27, -0.31}},
+        {"q-mid-6-1k5", false, 1.0f, 0.501187234f, 1500, 1.0f, 1.0f, {-0.02, -0.11, -0.66, -3.05, -5.97, -2.54, -0.81, -0.26, -0.15, -0.27}},
+        {"q-mid+12-120", false, 1.0f, 4.0f, 120, 1.0f, 1.0f, {4.63, 11.54, 7.16, 1.94, 0.35, 0.05, 0.01, -0.01, -0.06, -0.24}},
+        {"q-mid+12-7k5", false, 1.0f, 4.0f, 7500, 1.0f, 1.0f, {0.00, 0.02, 0.07, 0.37, 2.05, 7.52, 12.04, 8.04, 4.00, 1.57}},
+        {"q-mid+12-400", false, 1.0f, 4.0f, 400, 1.0f, 1.0f, {0.63, 3.02, 9.39, 9.52, 2.99, 0.59, 0.15, 0.03, -0.05, -0.23}},
+        {"q-hi+9", false, 1.0f, 1.0f, 1500, 2.81838293f, 1.0f, {0.00, 0.00, 0.02, 0.17, 1.43, 6.45, 8.45, 8.85, 8.89, 8.75}},
+        {"q-hi+3", false, 1.0f, 1.0f, 1500, 1.41253754f, 1.0f, {0.00, 0.00, 0.01, 0.05, 0.46, 2.17, 2.82, 2.94, 2.92, 2.76}},
+        {"q-hi-3", false, 1.0f, 1.0f, 1500, 0.707945784f, 1.0f, {-0.00, -0.00, -0.01, -0.05, -0.46, -2.19, -2.91, -3.37, -5.01, -10.11}},
+        {"q-hi-9", false, 1.0f, 1.0f, 1500, 0.354813389f, 1.0f, {-0.00, -0.00, -0.03, -0.17, -1.45, -6.55, -9.16, -12.87, -20.13, -28.90}},
+        {"q-hi-15", false, 1.0f, 1.0f, 1500, 0.18f, 1.0f, {-0.00, -0.01, -0.05, -0.32, -2.61, -10.76, -16.03, -23.34, -32.25, -41.36}},
+        {"q-out+6", false, 1.0f, 1.0f, 1500, 1.0f, 1.99526231f, {6.00, 6.00, 6.00, 6.00, 6.00, 6.00, 6.00, 5.98, 5.94, 5.76}},
+        {"q-piano", true, 0.794328235f, 1.0f, 1500, 1.25892541f, 1.0f, {-8.88, -3.86, -1.04, -0.11, 0.28, 1.44, 1.88, 1.95, 1.93, 1.76}},
+        {"q-hp-lo+15", true, 5.6f, 1.0f, 1500, 1.0f, 1.0f, {6.75, 5.41, 0.89, 0.10, 0.01, 0.00, -0.00, -0.02, -0.06, -0.24}},
+    };
+    double worst = 0;
+    for (const auto& c : cases)
+    {
+        E eq;
+        eq.setParameter(E::HighpassOn, c.hp ? 1.0f : 0.0f);
+        eq.setParameter(E::LowShelfGain, c.low);
+        eq.setParameter(E::MidGain, c.mid);
+        eq.setParameter(E::MidFrequency, c.midHz);
+        eq.setParameter(E::HighShelfGain, c.high);
+        eq.setParameter(E::Gain, c.output);
+        const auto s = eq.settings();
+        double caseWorst = 0;
+        for (size_t i = 0; i < hz.size(); ++i)
+            caseWorst = std::max(caseWorst, std::abs(responseDb(s, hz[i], 44100) - c.db[i]));
+        if (caseWorst > 0.15) std::printf("  channel eq %s: %.3f dB off\n", c.name, caseWorst);
+        worst = std::max(worst, caseWorst);
+    }
+    CHECK(worst < 0.15);
 }
 
 TEST_CASE("channel eq: the piano rack setting matches the curve the reference draws (DEV-30)")

@@ -11,7 +11,16 @@ namespace sonora::devices
 
 namespace
 {
-enum Smoothed { LowDb, MidDb, MidOctave, HighDb, OutputDb, HighpassMix, LowpassMix };
+enum Smoothed { LowDb, MidDb, MidOctave, HighDb, OutputDb, HighpassMix };
+
+// The high cut's low-pass (DEV-30b, measured at 44.1 kHz): fixed z-plane zeros, poles measured at three cuts.
+constexpr double kLowpassZero1 = -0.4815504571, kLowpassZero2 = -0.8749352488;
+struct LowpassAnchor { double db, hz, q; };
+constexpr std::array<LowpassAnchor, 3> kLowpassAnchors{{{-3.0, 32792.54, 0.58654}, {-9.0, 14765.52, 0.64542},
+                                                        {-14.8945, 10066.65, 0.65232}}};
+// The fixed top-end droop every setting has (q-flat), as a z-plane biquad.
+constexpr BiquadCoeffs kDroop{0.9802817855804391, 1.7720220809638105, 0.7985110377680459, 1.7704457741798683,
+                              0.7803691301324274};
 
 // First-order bilinear high-pass (pre-warped at the corner), as a biquad with b2 = a2 = 0.
 BiquadCoeffs firstOrderHighpass(double sampleRate, double hz)
@@ -32,46 +41,122 @@ std::complex<double> at(const BiquadCoeffs& c, std::complex<double> z1)
     return (c.b0 + c.b1 * z1 + c.b2 * z2) / (1.0 + c.a1 * z1 + c.a2 * z2);
 }
 
+BiquadCoeffs inverse(const BiquadCoeffs& c)
+{
+    return {1.0 / c.b0, c.a1 / c.b0, c.a2 / c.b0, c.b1 / c.b0, c.b2 / c.b0};
+}
+
+// Orfanidis, "Digital Parametric Equalizer Design With Prescribed Nyquist-Frequency Gain" (JAES 1997), reference gain
+// 1: peak gain g at hz, bandwidth bwHz between the gb points, gain g1 at Nyquist (1 <= g1 < gb < g).
+BiquadCoeffs orfanidisPeak(double sampleRate, double hz, double bwHz, double g, double gb, double g1)
+{
+    const double w0 = 2.0 * M_PI * hz / sampleRate, dw = 2.0 * M_PI * bwHz / sampleRate;
+    const double F = std::abs(g * g - gb * gb), G00 = std::abs(g * g - 1.0), F00 = std::abs(gb * gb - 1.0);
+    const double F01 = std::abs(gb * gb - g1), G01 = std::abs(g * g - g1), G11 = std::abs(g * g - g1 * g1);
+    const double F11 = std::abs(gb * gb - g1 * g1);
+    const double t = std::tan(w0 / 2.0);
+    const double W2 = std::sqrt(G11 / G00) * t * t;
+    const double DW = (1.0 + std::sqrt(F00 / F11) * W2) * std::tan(dw / 2.0);
+    const double C = F11 * DW * DW - 2.0 * W2 * (F01 - std::sqrt(F00 * F11));
+    const double D = 2.0 * W2 * (G01 - std::sqrt(G00 * G11));
+    const double A = std::sqrt((C + D) / F), B = std::sqrt((g * g * C + gb * gb * D) / F);
+    const double den = 1.0 + W2 + A;
+    return {(g1 + W2 + B) / den, -2.0 * (g1 - W2) / den, (g1 - B + W2) / den, -2.0 * (1.0 - W2) / den, (1.0 + W2 - A) / den};
+}
+
+// The Mid band: an analog Q 0.5 peak's shape without the bilinear cramping near Nyquist (laws in ChannelEq.h).
+BiquadCoeffs midPeak(double sampleRate, double hz, double gainDb)
+{
+    if (std::abs(gainDb) < 1e-3) return {};
+    hz = std::clamp(hz, 10.0, sampleRate * 0.45);
+    const double q = ChannelEq::kMidQ, cut = std::abs(gainDb);
+    const double g = std::pow(10.0, cut / 20.0), A = std::pow(10.0, cut / 40.0);
+    // The analog peak (s^2 + s A/Q + 1) / (s^2 + s / (A Q) + 1) at Nyquist.
+    const double o = sampleRate * 0.5 / hz, re = 1.0 - o * o;
+    const double analogNyquist = std::sqrt((re * re + o * o * A * A / (q * q)) / (re * re + o * o / (A * A * q * q)));
+    const double g1 = std::pow(analogNyquist, ChannelEq::kMidNyquistFraction);
+    // Bandwidth: the bilinear-warped edges of the analog half-dB points, widened towards Nyquist.
+    const double t = std::tan(M_PI * hz / sampleRate), r = std::sqrt(1.0 + 1.0 / (4.0 * q * q)), d = 1.0 / (2.0 * q);
+    const double x = hz / sampleRate;
+    const double bw = sampleRate / M_PI * (std::atan(t * (r + d)) - std::atan(t * (r - d))) * (1.0 + ChannelEq::kMidBandwidthWarp * x * x);
+    const auto boost = orfanidisPeak(sampleRate, hz, bw, g, std::sqrt(g), g1);
+    return gainDb > 0 ? boost : inverse(boost);
+}
+
+// The cut low-pass: poles from their analog equivalent through the (unwarped) bilinear transform, DC gain 1.
+BiquadCoeffs cutLowpass(double sampleRate, ChannelEq::LowpassPoles poles)
+{
+    if (poles.hz <= 0) return {};
+    const double k = 2.0 * sampleRate, w = 2.0 * M_PI * poles.hz;
+    const double c1 = k / (w * poles.q), c2 = k * k / (w * w);
+    const double a0 = 1.0 + c1 + c2;
+    BiquadCoeffs c;
+    c.a1 = (2.0 - 2.0 * c2) / a0;
+    c.a2 = (1.0 - c1 + c2) / a0;
+    const double norm = (1.0 + c.a1 + c.a2) / ((1.0 - kLowpassZero1) * (1.0 - kLowpassZero2));
+    c.b0 = norm;
+    c.b1 = -(kLowpassZero1 + kLowpassZero2) * norm;
+    c.b2 = kLowpassZero1 * kLowpassZero2 * norm;
+    return c;
+}
+
 float gainDb(float linear) { return dsp::gainToDb(std::max(linear, 1e-6f)); }
 } // namespace
 
-double ChannelEq::lowpassHz(double highDb)
+double ChannelEq::lowShelfHz(double lowDb)
 {
-    if (highDb >= 0.0) return 0.0;
-    const double depth = std::clamp(-highDb / 15.0, 0.0, 1.0);
-    return kLowpassOpenHz * std::pow(kLowpassClosedHz / kLowpassOpenHz, depth);
+    return kLowShelfHzAtZeroGain - kLowShelfHzPerGain * std::pow(10.0, lowDb / 20.0);
+}
+
+ChannelEq::LowpassPoles ChannelEq::lowpassPoles(double highDb, double sampleRate)
+{
+    if (highDb >= 0.0) return {};
+    // 0 dB: the poles sit on the zeros (transparent). Their analog equivalents at this rate.
+    const double s1 = 2.0 * sampleRate * (1.0 - kLowpassZero1) / (1.0 + kLowpassZero1);
+    const double s2 = 2.0 * sampleRate * (1.0 - kLowpassZero2) / (1.0 + kLowpassZero2);
+    LowpassAnchor previous{0.0, std::sqrt(s1 * s2) / (2.0 * M_PI), std::sqrt(s1 * s2) / (s1 + s2)};
+    for (const auto& next : kLowpassAnchors)
+    {
+        if (highDb >= next.db)
+        {
+            const double f = (previous.db - highDb) / (previous.db - next.db);
+            return {std::exp((1.0 - f) * std::log(previous.hz) + f * std::log(next.hz)), (1.0 - f) * previous.q + f * next.q};
+        }
+        previous = next;
+    }
+    return {previous.hz, previous.q};
+}
+
+ChannelEq::Biquads ChannelEq::designBiquads(const Settings& s, double sampleRate)
+{
+    using T = BiquadCoeffs::Type;
+    Biquads c;
+    c.highpass = firstOrderHighpass(sampleRate, kHighpassHz);
+    c.stages[Low] = BiquadCoeffs::make(T::LowShelf, sampleRate, lowShelfHz(s.lowDb), kLowShelfQ, s.lowDb);
+    c.stages[Mid] = midPeak(sampleRate, s.midHz, s.midDb);
+    c.stages[High] = BiquadCoeffs::make(T::HighShelf, sampleRate, std::min(kHighShelfHz, sampleRate * 0.49), kHighShelfQ, s.highDb);
+    c.stages[Lowpass] = cutLowpass(sampleRate, lowpassPoles(s.highDb, sampleRate));
+    c.stages[Droop] = kDroop;
+    return c;
 }
 
 ChannelEq::Coeffs ChannelEq::design(const Settings& s, double sampleRate)
 {
-    using T = BiquadCoeffs::Type;
-    const double nyquistSafe = sampleRate * 0.49;
+    const auto b = designBiquads(s, sampleRate);
     Coeffs c;
-    c.highpass = firstOrderHighpass(sampleRate, kHighpassHz);
-    const BiquadCoeffs stages[NumStages] = {
-        BiquadCoeffs::make(T::LowShelf, sampleRate, kLowShelfHz, kLowShelfQ, s.lowDb),
-        BiquadCoeffs::make(T::Peak, sampleRate, s.midHz, kMidQ, s.midDb),
-        BiquadCoeffs::make(T::HighShelf, sampleRate, std::min(kHighShelfHz, nyquistSafe), kHighShelfQ, s.highDb),
-        BiquadCoeffs::make(T::LowPass, sampleRate, std::min(std::max(lowpassHz(s.highDb), kLowpassClosedHz), nyquistSafe),
-                           M_SQRT1_2, 0.0),
-    };
-    for (int i = 0; i < NumStages; ++i)
-        c.svf[(size_t) i] = SvfCoeffs::fromBiquad(stages[i]);
+    c.highpass = b.highpass;
+    for (size_t i = 0; i < NumStages; ++i)
+        c.svf[i] = SvfCoeffs::fromBiquad(b.stages[i]);
     return c;
 }
 
 double ChannelEq::response(const Settings& s, double hz, double sampleRate)
 {
-    using T = BiquadCoeffs::Type;
     const auto z1 = std::polar(1.0, -2.0 * M_PI * hz / sampleRate);
-    const double nyquistSafe = sampleRate * 0.49;
+    const auto b = designBiquads(s, sampleRate);
     std::complex<double> h = std::pow(10.0, s.outputDb / 20.0);
-    if (s.highpass) h *= at(firstOrderHighpass(sampleRate, kHighpassHz), z1);
-    h *= at(BiquadCoeffs::make(T::LowShelf, sampleRate, kLowShelfHz, kLowShelfQ, s.lowDb), z1);
-    h *= at(BiquadCoeffs::make(T::Peak, sampleRate, s.midHz, kMidQ, s.midDb), z1);
-    h *= at(BiquadCoeffs::make(T::HighShelf, sampleRate, std::min(kHighShelfHz, nyquistSafe), kHighShelfQ, s.highDb), z1);
-    if (const double lp = lowpassHz(s.highDb); lp > 0)
-        h *= at(BiquadCoeffs::make(T::LowPass, sampleRate, std::min(lp, nyquistSafe), M_SQRT1_2, 0.0), z1);
+    if (s.highpass) h *= at(b.highpass, z1);
+    for (const auto& stage : b.stages) h *= at(stage, z1);
     return std::abs(h);
 }
 
@@ -103,11 +188,21 @@ ChannelEq::Settings ChannelEq::settings() const
     return s;
 }
 
+ChannelEq::Settings ChannelEq::smoothedSettings() const
+{
+    Settings s;
+    s.lowDb = current_[LowDb];
+    s.midDb = current_[MidDb];
+    s.midHz = std::exp2(current_[MidOctave]);
+    s.highDb = current_[HighDb];
+    s.outputDb = current_[OutputDb];
+    return s;
+}
+
 void ChannelEq::retarget(bool snap)
 {
     const auto s = settings();
-    target_ = {s.lowDb, s.midDb, std::log2(std::max(s.midHz, 1.0)), s.highDb, s.outputDb, s.highpass ? 1.0 : 0.0,
-               s.highDb < 0 ? 1.0 : 0.0};
+    target_ = {s.lowDb, s.midDb, std::log2(std::max(s.midHz, 1.0)), s.highDb, s.outputDb, s.highpass ? 1.0 : 0.0};
     if (snap) current_ = target_;
 }
 
@@ -128,10 +223,7 @@ void ChannelEq::reset()
         for (auto& s : channel) s.reset();
     for (auto& s : highpassState_) s.reset();
     current_ = target_;
-    Settings s;
-    s.lowDb = current_[LowDb]; s.midDb = current_[MidDb]; s.midHz = std::exp2(current_[MidOctave]);
-    s.highDb = current_[HighDb]; s.outputDb = current_[OutputDb];
-    coeffs_ = design(s, sampleRate_);
+    coeffs_ = design(smoothedSettings(), sampleRate_);
     phase_ = 0;
     displayTap_.reset();
 }
@@ -159,15 +251,10 @@ void ChannelEq::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
                 moved = true;
             }
             if (moved)
-            {
-                Settings s;
-                s.lowDb = current_[LowDb]; s.midDb = current_[MidDb]; s.midHz = std::exp2(current_[MidOctave]);
-                s.highDb = current_[HighDb]; s.outputDb = current_[OutputDb];
-                coeffs_ = design(s, sampleRate_);
-            }
+                coeffs_ = design(smoothedSettings(), sampleRate_);
         }
         const int run = std::min(n - i, kStep - phase_);
-        const float hpMix = (float) current_[HighpassMix], lpMix = (float) current_[LowpassMix];
+        const float hpMix = (float) current_[HighpassMix];
         const float out = dsp::dbToGain((float) current_[OutputDb]);
         for (int ch = 0; ch < (r != nullptr ? 2 : 1); ++ch)
         {
@@ -179,11 +266,8 @@ void ChannelEq::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
                 float x = d[j];
                 const float filtered = hp.process(coeffs_.highpass, x);
                 x += hpMix * (filtered - x);
-                x = st[Low].process(coeffs_.svf[Low], x);
-                x = st[Mid].process(coeffs_.svf[Mid], x);
-                x = st[High].process(coeffs_.svf[High], x);
-                const float lp = st[Lowpass].process(coeffs_.svf[Lowpass], x);
-                x += lpMix * (lp - x);
+                for (size_t k = 0; k < NumStages; ++k)
+                    x = st[k].process(coeffs_.svf[k], x);
                 d[j] = x * out;
             }
         }

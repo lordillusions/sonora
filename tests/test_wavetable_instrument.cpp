@@ -291,14 +291,16 @@ TEST_CASE("InstrumentVector: filters follow the measured circuit laws, envelopes
     synth->setParameter(W::F1CircuitLpHp, 4); // PRD ladder
     CHECK(synth->filterStages(0, 1000, 0.5, 0, stages) == 2);
     CHECK(stages[0].magnitudeAt(100, 48000) * stages[1].magnitudeAt(100, 48000) > 0.9);
-    // The capture's Amp envelope: attack slope 0.21 covers ~0.6 at its midpoint, decay slope 0.5 covers 0.75.
-    CHECK_NEAR(W::slopeCurve(0.5f, 0.2135f), 0.603, 0.01);
-    CHECK_NEAR(W::slopeCurve(0.5f, 0.5f), 0.745, 0.01);
+    // Measured on the reference's stems (DEV-28b2): slope 0.5 releases 1 s from 0.894 to 0.1189 at 0.5 s (covers 0.867),
+    // 0.0098 left at 0.9 s; slope 0 (attack) is linear.
+    CHECK_NEAR(W::slopeCurve(0.5f, 0.5f), 1 - 0.11882 / 0.89370, 0.002);
+    CHECK_NEAR(W::slopeCurve(0.05f, 0.5f), 1 - 0.73716 / 0.89370, 0.002);
+    CHECK_NEAR(W::slopeCurve(0.9f, 0.5f), 1 - 0.00979 / 0.89370, 0.002);
     CHECK_NEAR(W::slopeCurve(0.5f, 0.0f), 0.5, 1e-6);
-    CHECK_NEAR(W::slopeCurve(0.5f, -0.5f), 1 - 0.745, 0.01);
+    CHECK_NEAR(W::slopeCurve(0.5f, -0.5f), 0.11882 / 0.89370, 0.002);
 }
 
-TEST_CASE("InstrumentVector: table files load as whole 2048-sample frames; factory tables resolve when installed")
+TEST_CASE("InstrumentVector: table files load as whole 1024-sample frames; factory tables resolve when installed")
 {
     juce::TemporaryFile file(".wav");
     {
@@ -308,8 +310,8 @@ TEST_CASE("InstrumentVector: table files load as whole 2048-sample frames; facto
         std::unique_ptr<juce::OutputStream> out(std::move(stream));
         auto writer = wav.createWriterFor(out, juce::AudioFormatWriterOptions{}.withSampleRate(44100.0).withNumChannels(1).withBitsPerSample(16));
         REQUIRE(writer != nullptr);
-        juce::AudioBuffer<float> b(1, 2048 * 3 + 700);
-        for (int i = 0; i < b.getNumSamples(); ++i) b.setSample(0, i, (float) std::sin(2 * M_PI * i / 2048.0) * 0.5f);
+        juce::AudioBuffer<float> b(1, 1024 * 3 + 700);
+        for (int i = 0; i < b.getNumSamples(); ++i) b.setSample(0, i, (float) std::sin(2 * M_PI * i / 1024.0) * 0.5f);
         writer->writeFromAudioSampleBuffer(b, 0, b.getNumSamples());
     }
     std::string error;
@@ -325,6 +327,9 @@ TEST_CASE("InstrumentVector: table files load as whole 2048-sample frames; facto
         const auto factory = devices::loadWavetableFile(sprite->file, error);
         REQUIRE(factory != nullptr);
         CHECK(factory->frames() > 1);
+        // The reference plays "Basic Shapes" (4096 samples) as sine / triangle / saw / square: 4 frames of 1024.
+        if (const auto* shapes = devices::findFactoryWavetable("Basic Shapes"))
+            if (const auto basic = devices::loadWavetableFile(shapes->file, error)) CHECK(basic->frames() == 4);
     }
 }
 
@@ -362,4 +367,228 @@ TEST_CASE("InstrumentVector: a fresh Wavetable from the browser saves, reloads a
     count(*dom);
     CHECK(connections == 2 * W::kTargets); // the fixture's device and the new one
     CHECK(withIds == 2 * W::kTargets);
+}
+
+// ------------------------------------------------------------------------------------------------ DEV-28b2 laws
+// Laws measured on the reference's exported stems (suite tools/parity_probe/suites/wavetable_laws.txt, docs/WAVETABLE.md
+// "Parity"). Numbers in the comments are the reference's.
+
+namespace
+{
+constexpr double kSr = 44100;
+
+std::unique_ptr<W> lawSynth()
+{
+    auto synth = std::make_unique<W>();
+    synth->setTable(0, sawTable(), "Test", "Sine Saw"); // frame 0 sine, frame 1 saw
+    synth->setTable(1, sawTable(), "Test", "Sine Saw");
+    synth->prepare(kSr, 4096);
+    synth->setParameter(W::AmpSustain, 1);
+    synth->setParameter(W::Volume, 1);
+    return synth;
+}
+
+// Renders `seconds` with the given notes ({sample, note, velocity}; velocity 0 = note off) in 512-sample blocks.
+juce::AudioBuffer<float> renderNotes(W& synth, double seconds, std::vector<std::array<int, 3>> events)
+{
+    const int total = (int) (seconds * kSr);
+    juce::AudioBuffer<float> out(2, total);
+    out.clear();
+    for (int start = 0; start < total; start += 512)
+    {
+        const int n = std::min(512, total - start);
+        juce::AudioBuffer<float> view(out.getArrayOfWritePointers(), 2, start, n);
+        juce::MidiBuffer midi;
+        for (const auto& e : events)
+            if (e[0] >= start && e[0] < start + n)
+                midi.addEvent(e[2] > 0 ? juce::MidiMessage::noteOn(1, e[1], (juce::uint8) e[2]) : juce::MidiMessage::noteOff(1, e[1]),
+                              e[0] - start);
+        synth.process(view, midi);
+    }
+    return out;
+}
+
+// Amplitude of the component at `freq` (Hann-windowed projection over [start, start + length)).
+double amplitudeAt(const juce::AudioBuffer<float>& a, int channel, double freq, int start, int length)
+{
+    double re = 0, im = 0, sum = 0;
+    for (int i = 0; i < length; ++i)
+    {
+        const double w = 0.5 - 0.5 * std::cos(2 * M_PI * i / length);
+        const double x = a.getSample(channel, start + i) * w;
+        re += x * std::cos(2 * M_PI * freq * (start + i) / kSr);
+        im += x * std::sin(2 * M_PI * freq * (start + i) / kSr);
+        sum += w;
+    }
+    return 2 * std::hypot(re, im) / sum;
+}
+
+double db(double x) { return 20 * std::log10(std::max(x, 1e-12)); }
+const double kC3 = 440 * std::exp2((60 - 69) / 12.0);
+} // namespace
+
+TEST_CASE("InstrumentVector: output level, velocity and envelope laws measured on the reference")
+{
+    // A full-scale sine at Volume 1, Sustain 1, velocity 127 peaks at 0.70707 (P20); velocity -> Amp 50 % is linear
+    // (velocity 100: 0.894, P12).
+    for (int velocity : {127, 100})
+    {
+        auto synth = lawSynth();
+        const auto a = renderNotes(*synth, 1.0, {{{0, 60, velocity}}});
+        CHECK_NEAR(amplitudeAt(a, 0, kC3, 22050, 22050), 0.70711 * (0.5 + 0.5 * velocity / 127.0), 0.002);
+        CHECK_NEAR(amplitudeAt(a, 1, kC3, 22050, 22050), 0.70711 * (0.5 + 0.5 * velocity / 127.0), 0.002);
+    }
+    // Volume and Sustain are linear: 0.3548 x 0.501 -> 0.1257 (P01).
+    auto synth = lawSynth();
+    synth->setParameter(W::Volume, 0.3548134f);
+    synth->setParameter(W::AmpSustain, 0.5011876f);
+    const auto a = renderNotes(*synth, 2.0, {{{0, 60, 127}}});
+    CHECK_NEAR(amplitudeAt(a, 0, kC3, 66150, 22050), 0.12574, 0.001);
+    // Release, slope 0.5, 1 s from 0.894: 0.11882 left at 0.5 s (P12, normalised to the full-scale level).
+    auto r = lawSynth();
+    r->setParameter(W::AmpRelease, 1);
+    const auto b = renderNotes(*r, 2.0, {{{0, 60, 100}}, {{44100, 60, 0}}});
+    CHECK_NEAR(amplitudeAt(b, 0, kC3, 44100 + 22050 - 1102, 2205) / 0.70711, 0.11882, 0.006);
+}
+
+TEST_CASE("InstrumentVector: sub oscillator, resonance, FM and Classic follow the measured laws")
+{
+    // Sub, Tone 0: a pure sine an octave down at the oscillators' level (P13: 1.000, harmonics < -100 dB).
+    {
+        auto synth = lawSynth();
+        synth->setParameter(W::Osc1On, 0);
+        synth->setParameter(W::SubOn, 1);
+        synth->setParameter(W::SubGain, 1);
+        const auto a = renderNotes(*synth, 1.0, {{{0, 60, 127}}});
+        CHECK_NEAR(amplitudeAt(a, 0, kC3 / 2, 22050, 22050), 0.70711, 0.003);
+        CHECK(db(amplitudeAt(a, 0, kC3, 22050, 22050) / 0.70711) < -80);
+    }
+    // Sub, Tone 1: a +-0.921 pulse high for 59.7 % of the cycle (h5 / h10 39 dB down, P14).
+    {
+        float hp = 0;
+        int high = 0;
+        float peak = 0;
+        const int n = 10000;
+        for (int i = 0; i < n; ++i)
+        {
+            const float y = W::subOscillator((i + 0.5) / n, 1.0 / n, 1.0f, hp, 0.0f);
+            high += y > 0 ? 1 : 0;
+            peak = std::max(peak, std::abs(y));
+        }
+        CHECK_NEAR(high / (double) n, 0.597, 0.002);
+        CHECK_NEAR(peak, 0.921, 0.005);
+    }
+    // Clean resonance: d = 1 - r. LP 1 kHz, 24 dB, r 0.5 = stages of Q 1.0 and 0.67 (P08 fit).
+    {
+        auto synth = lawSynth();
+        synth->setParameter(W::F1Slope, 1);
+        devices::BiquadCoeffs stages[2];
+        REQUIRE(synth->filterStages(0, 1000, 0.5, 0, stages) == 2);
+        CHECK_NEAR(stages[0].magnitudeAt(1000, kSr), 1.0, 0.02);
+        CHECK_NEAR(stages[1].magnitudeAt(1000, kSr), 1.0 / 1.5, 0.02);
+    }
+    // FM 0.5 / 0.5 on a sine: ratio 2, index 5 rad (P16: h1 -6.0, h3 -8.6, h5 -7.8, h9 -3.7 dB re the voice level).
+    {
+        auto synth = lawSynth();
+        synth->setParameter(W::Osc1EffectMode, 1);
+        synth->setParameter(W::Osc1Effect1, 0.5f);
+        synth->setParameter(W::Osc1Effect2, 0.5f);
+        const auto a = renderNotes(*synth, 1.0, {{{0, 60, 127}}});
+        const double expected[][2] = {{1, -6.0}, {3, -8.6}, {5, -7.8}, {9, -3.7}};
+        for (const auto& e : expected) CHECK_NEAR(db(amplitudeAt(a, 0, kC3 * e[0], 22050, 22050) / 0.70711), e[1], 0.5);
+        CHECK(db(amplitudeAt(a, 0, kC3 * 2, 22050, 22050) / 0.70711) < -60); // odd harmonics only
+    }
+    // Classic PW 0.5 / Sync 0.5: the table plays in the first 51.9 % of each cycle, 2.51 times; silent otherwise (P17).
+    {
+        auto synth = lawSynth();
+        synth->setParameter(W::Osc1EffectMode, 2);
+        synth->setParameter(W::Osc1Effect1, 0.5f);
+        synth->setParameter(W::Osc1Effect2, 0.5f);
+        synth->setParameter(W::F1On, 0);
+        const auto a = renderNotes(*synth, 1.0, {{{0, 36, 127}}}); // C1: 674 samples per cycle
+        int silent = 0;
+        const int from = 22050, length = 13480; // 20 cycles
+        for (int i = from; i < from + length; ++i) silent += std::abs(a.getSample(0, i)) < 1e-4f ? 1 : 0;
+        CHECK_NEAR(silent / (double) length, 1 - 0.5186, 0.01);
+    }
+}
+
+TEST_CASE("InstrumentVector: unison panning, legato-only glide, parallel routing and LFO phase follow the reference")
+{
+    // Classic unison, 4 voices, Amount 0.5: voices at -25 / -8.3 / +8.3 / +25 ct, hard left / right / left / right,
+    // each 0.707 of a single voice (P15).
+    {
+        auto synth = lawSynth();
+        synth->setParameter(W::UnisonMode, 1);
+        synth->setParameter(W::UnisonVoices, 4);
+        synth->setParameter(W::UnisonAmount, 0.5f);
+        const auto a = renderNotes(*synth, 3.0, {{{0, 60, 127}}});
+        const double c = std::exp2(1 / 1200.0);
+        const int start = 22050, length = 110250; // 2.5 s resolves 1.3 Hz spacing
+        CHECK_NEAR(amplitudeAt(a, 0, kC3 * std::pow(c, -25.0), start, length), 0.70711 * 0.70711, 0.02);
+        CHECK(amplitudeAt(a, 1, kC3 * std::pow(c, -25.0), start, length) < 0.03);
+        CHECK_NEAR(amplitudeAt(a, 1, kC3 * std::pow(c, -25.0 / 3), start, length), 0.70711 * 0.70711, 0.02);
+        CHECK_NEAR(amplitudeAt(a, 0, kC3 * std::pow(c, 25.0 / 3), start, length), 0.70711 * 0.70711, 0.02);
+        CHECK_NEAR(amplitudeAt(a, 1, kC3 * std::pow(c, 25.0), start, length), 0.70711 * 0.70711, 0.02);
+    }
+    // Mono glide only between legato notes: a note after a released one starts at its own pitch (P19).
+    {
+        auto synth = lawSynth();
+        synth->setParameter(W::MonoPoly, 0);
+        synth->setParameter(W::Glide, 0.2f);
+        synth->setParameter(W::AmpRelease, 0.5f);
+        const auto a = renderNotes(*synth, 1.5, {{{0, 72, 127}}, {{11025, 72, 0}}, {{22050, 48, 127}}});
+        const double f48 = 440 * std::exp2((48 - 69) / 12.0);
+        CHECK(amplitudeAt(a, 0, f48, 22050 + 441, 2205) > 0.5); // at 48 within 10 ms, no glide from 72
+    }
+    // Parallel routing splits the mix: with both filters open it plays at the Serial level (Flux Capacitor).
+    {
+        double level[2]{};
+        for (int routing = 0; routing < 2; ++routing)
+        {
+            auto synth = lawSynth();
+            synth->setParameter(W::F2On, 1);
+            synth->setParameter(W::F2Type, 1);
+            synth->setParameter(W::F2Frequency, 20);
+            synth->setParameter(W::FilterRouting, (float) routing);
+            const auto a = renderNotes(*synth, 1.0, {{{0, 60, 127}}});
+            level[routing] = amplitudeAt(a, 0, kC3, 22050, 22050);
+        }
+        CHECK_NEAR(db(level[1] / level[0]), 0, 0.3);
+    }
+    // The triangle LFO rises first, in phase with the sine (Spacefolder's notch sweep).
+    {
+        auto synth = lawSynth();
+        synth->setParameter(W::Osc1Position, 0.5f);
+        synth->setParameter(W::L1Type, 1);
+        synth->setParameter(W::L1Rate, 1);
+        synth->setParameter(W::matrixParam(W::TOsc1Pos, W::SrcLfo1), 0.4f);
+        juce::AudioBuffer<float> audio(2, 4410);
+        audio.clear();
+        juce::MidiBuffer midi;
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 127), 0);
+        synth->process(audio, midi); // 0.1 s: the triangle is at +0.4
+        CHECK_NEAR(synth->displayPosition(0), 0.5f + 0.4f * 0.4f, 0.02f);
+    }
+}
+
+TEST_CASE("InstrumentVector: MS2 drive is a clean gain into slew-limited integrators")
+{
+    // P09: MS2 LP 1 kHz with Drive 12 dB is 11.8 dB above the Clean, undriven filter (the input is not clipped).
+    double level[2]{};
+    for (int k = 0; k < 2; ++k)
+    {
+        auto synth = lawSynth();
+        synth->setParameter(W::Osc1Position, 1); // saw frame
+        synth->setParameter(W::F1Frequency, 1000);
+        synth->setParameter(W::Volume, 0.25f);
+        if (k == 1)
+        {
+            synth->setParameter(W::F1CircuitLpHp, 2);
+            synth->setParameter(W::F1Drive, 12);
+        }
+        const auto a = renderNotes(*synth, 1.0, {{{0, 60, 127}}});
+        level[k] = rms(a, 0, 22050, 22050);
+    }
+    CHECK_NEAR(db(level[1] / level[0]), 11.8, 1.0);
 }
