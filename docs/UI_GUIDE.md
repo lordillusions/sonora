@@ -381,6 +381,17 @@ All 70 swatches match within tolerance 8 after converting the monitor ICC profil
 median-sampled from 9×9 interiors to limit JPEG noise. This verifies indexed ordering and a capture-tolerance
 match; it does not establish exact RGB values. No reference fonts, themes or audio assets are distributed.
 
+**Captures are Display P3, Sonora's numbers are sRGB (UI-70, 2026-11-07).** `screencapture -l <window>` and the
+computer-use captures are tagged with the display profile (Display P3 on the owner's MacBook). Both apps draw the
+stored palette in sRGB and macOS converts it for the display, so the raw capture pixels of a saturated colour look
+"softer" than the palette value: index 5 `#1AFF2F` reads `#77FB58`, 6 `#25FFA8` -> `#79FBAF`, 19 `#3DC300` ->
+`#67C039`, exactly the sRGB -> Display P3 conversion (linear sRGB -> XYZ D65 -> linear P3, same transfer curve).
+Sonora's own window, captured the same way, shows the identical values (Skia surface tagged `MakeSRGB()`, JUCE's
+CoreGraphics contexts use `kCGColorSpaceSRGB`), so `Theme::paletteColor` stays the stored palette. Never read
+colours off a raw capture: convert to sRGB first (`scripts/compare_ui.py`'s `load()` does it, or
+`sips -m "/System/Library/ColorSync/Profiles/sRGB Profile.icc" in.png --out out.png`; sips clips the most
+saturated greens/cyans by a few units, the matrix does not), or compare capture against capture.
+
 Count-in/punch snapshots: `screenshots/count-in-punch.png`, `count-in-punch-small.png`, actual-window
 `native-count-in.jpg`, and `reference/live-punch-recording.jpg`. `ui_snapshot --count-in N` frames the preference.
 

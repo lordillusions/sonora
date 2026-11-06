@@ -131,8 +131,10 @@ TEST_CASE("view selectors: right-side icon buttons switch and carry hover toolti
     int duplicates = 0; rig.ctx.duplicateSelectedTracks = [&] { ++duplicates; };
     rig.ctx.sessionTrackSelection = true; rig.ctx.selectedClipUid = -1;
     REQUIRE(rig.root->dispatchKey({.textChar = 'd', .cmd = true})); CHECK(duplicates == 1);
-    rig.ctx.sessionTrackSelection = false;
-    rig.root->dispatchKey({.textChar = 'd', .cmd = true}); CHECK(duplicates == 1);
+    rig.ctx.sessionTrackSelection = false; // a track picked from an empty slot or its lane still duplicates
+    REQUIRE(rig.root->dispatchKey({.textChar = 'd', .cmd = true})); CHECK(duplicates == 2);
+    rig.ctx.selectedClipUid = rig.song.tracks[0].slots[0].clip ? rig.song.tracks[0].slots[0].clip->uid : 12345;
+    rig.root->dispatchKey({.textChar = 'd', .cmd = true}); CHECK(duplicates == 2); // a selected clip owns Cmd+D
 }
 
 TEST_CASE("control bar tools: overdub, automation arm, draw mode, computer keyboard, session record, capture and re-enable")
@@ -738,4 +740,43 @@ TEST_CASE("control keyboard focus: Delete resets a parameter, arrows adjust it, 
     event.x = event.y = 10; button->mouseDown(event); button->mouseUp(event); CHECK(toggles == 0);
     root.setBounds({0, 0, 200, 200});
     root.dispatchMouseDown(event); event.right = false; root.dispatchMouseUp(event); CHECK(toggles == 0);
+}
+
+TEST_CASE("Cmd+D duplicates the selected track however it was selected (header, lane, empty slot), not over a time selection")
+{
+    BarRig rig;
+    auto& ctx = rig.ctx;
+    int duplicates = 0; ctx.duplicateSelectedTracks = [&] { ++duplicates; };
+    auto pressCmdD = [&] { return rig.root->dispatchUserKey({.keyCode = 'D', .textChar = 'D', .cmd = true}); };
+    auto click = [&](float x, float y) { rig.root->dispatchMouseDown(mouseAt(x, y)); rig.root->dispatchMouseUp(mouseAt(x, y)); };
+
+    ctx.mainView = ui::MainView::Arrangement; rig.root->layout();
+    auto* arrangement = findWidget<ui::ArrangementView>(*rig.root); REQUIRE(arrangement);
+    const float headerLeft = rig.root->width() - ctx.theme.metrics.outerMargin - ctx.arrangementHeaderWidth();
+    const float laneY = ctx.theme.metrics.controlBarHeight + ui::ArrangementView::rulerHeightFor(! rig.song.locators.empty()) + 8;
+    click(headerLeft + 30, laneY); // the track's name
+    CHECK(ctx.sessionTrackSelection);
+    CHECK(pressCmdD()); CHECK(duplicates == 1);
+    for (const auto& clip : rig.song.tracks[0].arrangementClips) REQUIRE(clip.currentStart > 2.0); // beat 1 of track 1 is empty
+    click(arrangement->boundsInRoot().x + (float) ((1.0 - ctx.scrollBeats) * ctx.pixelsPerBeat), laneY); // the track's empty lane
+    CHECK(! ctx.sessionTrackSelection); CHECK(ctx.selectedClipUid < 0); CHECK(ctx.selectedTrack == 0);
+    CHECK(pressCmdD()); CHECK(duplicates == 2);
+    ctx.arrangementSelection = {true, 4.0, 8.0, 0, 0}; // a time selection duplicates time, not the track
+    CHECK(pressCmdD()); CHECK(duplicates == 2);
+    CHECK(ctx.statusText == "Duplicated time selection");
+    ctx.arrangementSelection = {};
+
+    ctx.mainView = ui::MainView::Session; rig.root->layout();
+    auto* session = findWidget<ui::SessionView>(*rig.root); REQUIRE(session);
+    const auto s = session->boundsInRoot();
+    click(s.x + 40, s.y + 5); // the track's title
+    CHECK(ctx.sessionTrackSelection);
+    CHECK(pressCmdD()); CHECK(duplicates == 3);
+    int emptyScene = -1;
+    for (size_t scene = 0; scene < rig.song.tracks[0].slots.size(); ++scene)
+        if (! rig.song.tracks[0].slots[scene].clip) { emptyScene = (int) scene; break; }
+    REQUIRE(emptyScene >= 0);
+    click(s.x + 40, s.y + ctx.theme.metrics.sessionHeaderHeight + ((float) emptyScene + 0.5f) * ctx.theme.metrics.sessionSlotHeight);
+    CHECK(ctx.selectedTrack == 0); CHECK(ctx.selectedClipUid < 0);
+    CHECK(pressCmdD()); CHECK(duplicates == 4);
 }

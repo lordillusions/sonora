@@ -765,8 +765,7 @@ void MainWindow::menuItemSelected(int itemId, int)
         case Undo: app_.undo(); break;
         case Redo: app_.redo(); break;
         case DuplicateClip:
-            if (ui.sessionTrackSelection && ui.selectedClipUid < 0 && ui.duplicateSelectedTracks) { ui.duplicateSelectedTracks(); break; }
-            if (key('D', true)) break;
+            if (key('D', true)) break; // clip, take lane, time selection, else the selected track(s) (MainLayout)
             if (ui.selectedClipUid >= 0 && ui.song && ui.applyEdit) ui.applyEdit(model::duplicateClip(*ui.song, ui.selectedClipLocation()));
             break;
         case DeleteClip:

@@ -405,7 +405,12 @@ bool MainLayout::keyPressed(const KeyEvent& k)
             if (focus == detail_ || focus == browser_ || focus == top_) return false;
         deleteTrackSelection(x); return true;
     }
-    if (k.cmd && ! k.alt && ! k.ctrl && ! k.shift && ch == 'd' && x.sessionTrackSelection && x.selectedClipUid < 0 && x.selectedTakeLane < 0)
+    // Cmd+D duplicates the selected track(s) whenever nothing narrower took the key (a clip, take lane or time selection is
+    // handled by its view first): a track picked by its header, its lane, an empty slot or its mixer strip all duplicate.
+    const bool timeSelection = x.mainView == MainView::Arrangement && x.arrangementSelection.active
+                               && x.arrangementSelection.end > x.arrangementSelection.start;
+    if (k.cmd && ! k.alt && ! k.ctrl && ! k.shift && ch == 'd' && x.selectedClipUid < 0 && x.selectedTakeLane < 0 && ! timeSelection
+        && x.selectedTrack >= 0 && x.selectedTrack < x.numTracks())
     {
         for (auto* focus = keyboardFocus(); focus; focus = focus->parent())
             if (focus == detail_ || focus == browser_ || focus == top_) return false;
