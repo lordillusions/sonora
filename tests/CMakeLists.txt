@@ -19,7 +19,6 @@ set(SONORA_TEST_SOURCES
     test_serum_state.cpp
     test_native_replacement.cpp
     test_lfotool_state.cpp
-    test_device_menu_swap.cpp
     test_serum_effects_import.cpp
     test_wavetable.cpp
     test_wavetable_routing.cpp
@@ -91,6 +90,7 @@ if(SONORA_WITH_UI)
     list(APPEND SONORA_TEST_SOURCES test_curve_lfo_plugin.cpp ../src/plugin/CurveLfoPlugin.cpp ../src/plugin/CurveLfoPluginEditor.cpp)
     set_source_files_properties(../src/plugin/CurveLfoPlugin.cpp PROPERTIES COMPILE_DEFINITIONS SONORA_PLUGIN_NO_ENTRY=1)
     list(APPEND SONORA_TEST_SOURCES test_hush_plugin.cpp ../src/plugin/HushPlugin.cpp ../src/plugin/HushPluginEditor.cpp)
+    list(APPEND SONORA_TEST_SOURCES test_device_menu_swap.cpp) # PLG-16f: the device menu's replace actions (UI)
     list(APPEND SONORA_TEST_SOURCES test_hush_builtin_ui.cpp) # PLG-14g: the face in the device chain and its window
     set_source_files_properties(../src/plugin/HushPlugin.cpp PROPERTIES COMPILE_DEFINITIONS SONORA_PLUGIN_NO_ENTRY=1)
     set_source_files_properties(../src/plugin/HushPluginEditor.cpp PROPERTIES COMPILE_DEFINITIONS JucePlugin_VersionString="${PROJECT_VERSION}")
