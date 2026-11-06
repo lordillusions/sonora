@@ -6,6 +6,7 @@
 #include "io/als/AlsReader.h"
 #include "io/als/AlsTemplates.h"
 #include "io/als/AlsWriter.h"
+#include "plugins/NativeReplacement.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_core/juce_core.h>
@@ -759,6 +760,48 @@ TEST_CASE("track duplication: complete edited channel has independent clips, dev
     CHECK(std::set<int>(targets.begin(), targets.end()).size() == targets.size());
     CHECK(io::prepareTrackDuplication(song, {-1}).tracks.empty());
     CHECK(io::prepareTrackDuplication(song, {(int) song.tracks.size()}).tracks.empty());
+}
+
+TEST_CASE("track duplication and save after a plug-in was swapped for a Sonora device (LFOTool -> Curve LFO)")
+{
+    // The swap made a device with no XML of its own: Save and Cmd+D refused the whole set ("No XML template/container").
+    const auto dir = freshDirectory("duplicate_after_swap");
+    const auto file = dir.getChildFile("Swapped.als");
+    REQUIRE(juce::File(SONORA_TEST_FIXTURES).getChildFile("two_tracks.xml").copyFileTo(file));
+    auto loaded = io::loadAls(file); REQUIRE(loaded);
+    auto& song = *loaded.song;
+    auto& lfo = song.tracks[0].devices[0];
+    REQUIRE(lfo.plugin);
+    lfo.kind = model::DeviceKind::PluginVst2; lfo.displayName = lfo.plugin->name = "LFOTool";
+    lfo.plugin->vst2UniqueId = 1483105871; // 'XffO'
+    const auto replacement = plugins::nativeReplacementAt(song, 0, {0});
+    REQUIRE(replacement);
+    REQUIRE(replacement->alternative == plugins::NativeAlternative::CurveLfo);
+    model::EditHistory history;
+    history.perform(song, plugins::replaceWithNative(song, {*replacement}));
+    REQUIRE(song.tracks[0].devices[0].type == "SonoraCurveLfo");
+    const auto clips = song.tracks[0].arrangementClips.size();
+    const auto devices = song.tracks[0].devices.size();
+
+    auto prepared = io::prepareTrackDuplication(song, {0});
+    CHECK(prepared.error.empty()); REQUIRE(prepared.tracks.size() == 1);
+    CHECK(prepared.tracks[0].devices.size() == devices);
+    CHECK(prepared.tracks[0].devices[0].type == "SonoraCurveLfo");
+    CHECK(prepared.tracks[0].arrangementClips.size() == clips);
+    CHECK(prepared.before == 1); // right below the original
+    history.perform(song, model::insertTracks(std::move(prepared.tracks), prepared.pointeeEnd, "Duplicate Tracks", prepared.before));
+    REQUIRE(song.tracks.size() == 3);
+
+    const auto saved = io::saveAls(song, file);
+    CHECK(saved.error.empty()); REQUIRE(saved.ok);
+    auto reloaded = io::loadAls(file); REQUIRE(reloaded); REQUIRE(reloaded.song->tracks.size() == 3);
+    for (int index : {0, 1})
+    {
+        const auto& track = reloaded.song->tracks[(size_t) index];
+        REQUIRE(track.devices.size() == devices);
+        CHECK(track.devices[0].type == "SonoraCurveLfo");
+        CHECK(track.arrangementClips.size() == clips);
+    }
 }
 
 TEST_CASE("track duplication: nested groups rebind parents and internal sidechain routes without changing originals")

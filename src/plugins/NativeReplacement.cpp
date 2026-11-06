@@ -2,6 +2,7 @@
 
 #include "devices/DeviceFactory.h"
 #include "devices/DeviceProcessor.h"
+#include "io/als/AlsTemplates.h"
 #include "plugins/LfoToolState.h"
 #include "plugins/SerumPatch.h"
 
@@ -333,6 +334,7 @@ model::EditCommand replaceWithNative(const model::Song& song, const std::vector<
 {
     // Instances inside one top-level rack become one replacement of that rack.
     std::map<std::pair<int, int>, model::Device> tops;
+    std::set<std::pair<int, int>> nested;
     for (const auto& r : replacements)
     {
         const auto* track = model::trackAt(song, r.track);
@@ -343,6 +345,7 @@ model::EditCommand replaceWithNative(const model::Song& song, const std::vector<
         auto* target = nestedDevice(it->second, r.path);
         if (target == nullptr || nativeAlternativeFor(*target) != r.alternative) continue; // the set changed since the offer
         *target = r.device;
+        if (r.path.size() > 1) nested.insert(key);
     }
     if (tops.empty()) return {};
     // A structural edit needs fresh processors: new ids for every replaced top-level device and the Sonora devices.
@@ -352,6 +355,10 @@ model::EditCommand replaceWithNative(const model::Song& song, const std::vector<
     {
         device.id = -1;
         model::allocateDeviceIds(allocator, device);
+        // Save and track duplication write the set from each device's XML: the Sonora device needs its own, like an inserted
+        // one (a swap inside a rack rewrites the rack's chains, which author the new device the same way).
+        if (nested.count(key)) device.chainsEdited = true;
+        else device.sourceXml = std::make_shared<const std::string>(io::deviceTemplate(device));
         parts.push_back(model::replaceDevice(song, key.first, key.second, std::move(device), {}));
     }
     auto command = model::compose(replacements.size() == 1 ? "Replace with " + std::string(nativeAlternativeName(replacements[0].alternative))
