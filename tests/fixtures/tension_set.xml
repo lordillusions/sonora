@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written minimal Live Set with one Tension (StringStudio) instrument, for the face tests and ui_snapshot reviews
+     (DEV-28j). Only a few parameters are written; the rest take Sonora's defaults. Values are Sonora's own choice. -->
+<Ableton MajorVersion="5" MinorVersion="12.0_12120" Creator="Ableton Live 12.1.5">
+	<LiveSet>
+		<Tracks>
+			<MidiTrack Id="20">
+				<Name><EffectiveName Value="1-String" /><UserName Value="" /></Name>
+				<Color Value="12" />
+				<TrackGroupId Value="-1" />
+				<DeviceChain>
+					<Mixer>
+						<Pan><Manual Value="0" /></Pan>
+						<Volume><Manual Value="0.8" /></Volume>
+						<Speaker><Manual Value="true" /></Speaker>
+					</Mixer>
+					<MainSequencer>
+						<ClipSlotList>
+							<ClipSlot Id="0"><ClipSlot><Value>
+								<MidiClip Id="1" Time="0">
+									<CurrentStart Value="0" /><CurrentEnd Value="4" />
+									<Loop><LoopStart Value="0" /><LoopEnd Value="4" /><StartRelative Value="0" /><LoopOn Value="true" /></Loop>
+									<Name Value="Pluck" /><Color Value="12" />
+									<Notes><KeyTracks>
+										<KeyTrack Id="0"><Notes>
+											<MidiNoteEvent Time="0" Duration="1" Velocity="96" OffVelocity="64" Probability="1" IsEnabled="true" />
+											<MidiNoteEvent Time="2" Duration="1" Velocity="80" OffVelocity="64" Probability="1" IsEnabled="true" />
+										</Notes><MidiKey Value="55" /></KeyTrack>
+									</KeyTracks></Notes>
+								</MidiClip>
+							</Value></ClipSlot></ClipSlot>
+						</ClipSlotList>
+					</MainSequencer>
+					<DeviceChain>
+						<Devices>
+							<StringStudio Id="30">
+								<LomId Value="0" />
+								<On><Manual Value="true" /><AutomationTarget Id="400" /></On>
+								<UserName Value="" />
+								<ExcitatorToggle><LomId Value="0" /><Manual Value="true" /><AutomationTarget Id="401" /></ExcitatorToggle>
+								<ExcitatorType><LomId Value="0" /><Manual Value="3" /><AutomationTarget Id="402" /></ExcitatorType>
+								<FilterToggle><LomId Value="0" /><Manual Value="true" /><AutomationTarget Id="403" /></FilterToggle>
+								<FilterType><LomId Value="0" /><Manual Value="1" /><AutomationTarget Id="404" /></FilterType>
+								<BodyType><LomId Value="0" /><Manual Value="0" /><AutomationTarget Id="405" /></BodyType>
+								<CurrentTab Value="0" />
+							</StringStudio>
+						</Devices>
+					</DeviceChain>
+				</DeviceChain>
+			</MidiTrack>
+		</Tracks>
+		<MainTrack>
+			<DeviceChain>
+				<Mixer>
+					<Volume><Manual Value="1" /></Volume>
+					<Tempo><Manual Value="120" /></Tempo>
+					<TimeSignature><Manual Value="201" /></TimeSignature>
+				</Mixer>
+			</DeviceChain>
+		</MainTrack>
+		<Scenes>
+			<Scene Id="0"><Name Value="" /></Scene>
+		</Scenes>
+		<Transport>
+			<LoopOn Value="false" /><LoopStart Value="0" /><LoopLength Value="4" /><CurrentTime Value="0" />
+		</Transport>
+	</LiveSet>
+</Ableton>

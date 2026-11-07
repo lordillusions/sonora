@@ -188,6 +188,24 @@ facets and chips cover the whole list, and Left walks from a row to its group, t
 Categories the reference has but Sonora does not (Modulators, Max for Live, Clips, Grooves, Tunings, Templates) are not
 shown (UI-64b).
 
+**Device presets (LIB-2).** The reference application's own device presets (`.adv`) are listed where its browser has
+them, read at run time from the installed Core Library, the User Library (`Presets/<Role>/<Device>`) and installed packs
+(nothing is copied; `SONORA_REFERENCE_LIBRARY` replaces those roots). A device row with presets (Wavetable, Simpler, Sonora
+Sampler, EQ Eight..., Tension once it runs natively) gets a disclosure triangle left of its name: it opens to the preset
+folders (Bass, Strings, ...) and, after them, presets that sit directly in the device's folder; a folder opens to its
+presets. Only the triangle opens a device row (a click on the name selects it, a drag inserts the plain device);
+Right/Left open, close and walk up. **Sounds** lists the instrument presets by folder (a preset outside a folder goes
+under its device's name). A search outside All opens the devices and folders holding matching presets (name or folder,
+e.g. "slap bass") and shows only those; All finds them once, in its Sounds section. Preset rows carry
+`BrowserDrag::Kind::DevicePreset` (absolute path, preset name), tags Type Preset / Sound / Device, and "Show in Finder".
+Dropping one on a track, the device view or double-clicking/Return loads it: instruments replace the track's instrument
+(MIDI tracks only: "Drop instruments on a MIDI track"), effects append like a device drop, one undo step "Load <name>",
+the device title is the preset's name. Dropped on a top-level device of the same type it replaces that device in place.
+The index is built on a worker at startup and when the User Library / packs folder changes (~800 presets, directory
+listings only). `ui_snapshot --browser-category instruments --browser-open Synthesis --browser-open Wavetable
+--browser-open Bass` opens rows by label; `SONORA_PRESET_AUTOTEST="track:/abs.adv|track@device:/abs.adv"` loads presets
+4 s after a set opens and saves it (use a copy).
+
 Cmd+F searches the selected category/current folder. Add Folder stores a custom Place; disclosure arrows or double-click expand folders inline,
 and the toolbar Up button changes the browser root to its parent. Selecting a sample auditions it when Preview is on; the footer toggle stops preview.
 While a clip is moved, resized, trimmed, stretched or a fade is dragged, a line runs from the edge being placed up into

@@ -18,6 +18,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <cmath>
+#include <span>
 
 namespace sonora::ui
 {
@@ -49,6 +50,26 @@ std::string megabytes(int64_t bytes)
 
 // The Packs row's button and status column: the status column only when the list is wide enough to keep the name readable.
 constexpr float kPackButton = 64, kPackInfo = 104, kPackWide = 360;
+
+// LIB-2: the presets of one device (UiContext::devicePresets is sorted by device tag).
+using Preset = UiContext::BrowserPreset;
+std::span<const Preset> presetsOf(const std::vector<Preset>& presets, const std::string& tag)
+{
+    const auto first = std::partition_point(presets.begin(), presets.end(), [&](const Preset& p) { return p.deviceTag < tag; });
+    const auto last = std::partition_point(first, presets.end(), [&](const Preset& p) { return p.deviceTag == tag; });
+    return {first, last};
+}
+
+bool presetMatches(const Preset& preset, const juce::String& query)
+{
+    return juce::String::fromUTF8(preset.name.c_str()).containsIgnoreCase(query)
+        || juce::String::fromUTF8(preset.folder.c_str()).containsIgnoreCase(query);
+}
+
+BrowserTags::Tags presetTags(const Preset& preset)
+{
+    return {{"Type", "Preset"}, {"Sound", preset.folder.empty() ? preset.deviceName : preset.folder}, {"Device", preset.deviceName}};
+}
 }
 
 const std::vector<BrowserPanel::Category>& BrowserPanel::categories()
@@ -336,6 +357,35 @@ std::string BrowserPanel::rowLabel(int index) const
     return index >= 0 && (size_t) index < entries.size() ? entries[(size_t) index].label : std::string{};
 }
 
+int BrowserPanel::rowIndex(const std::string& label) const
+{
+    const auto& entries = items();
+    for (size_t i = 0; i < entries.size(); ++i)
+        if (entries[i].label == label) return (int) i;
+    return -1;
+}
+
+float BrowserPanel::rowInset(const Item& item)
+{
+    return (! item.heading && ! item.group.empty() ? 34.0f : 24.0f) + (float) item.depth * 14;
+}
+
+Rect BrowserPanel::disclosureBounds(int index) const
+{
+    const auto& entries = items();
+    if (index < 0 || (size_t) index >= entries.size()) return {};
+    const auto& item = entries[(size_t) index];
+    if (! item.heading && ! item.directory && item.disclosure.empty()) return {};
+    const auto row = listRowBounds(index);
+    const float centre = item.disclosure.empty() ? 12 + (float) item.depth * 14 : rowInset(item) - 12;
+    return {row.x + centre - 6, row.y, 12, row.h};
+}
+
+bool BrowserPanel::searchesPresets() const
+{
+    return ! query_.empty() && ! folderMode_ && selectedCategory_ != AllItems;
+}
+
 const std::vector<BrowserPanel::Item>& BrowserPanel::items(bool filtered, bool groupRows) const
 {
     const auto& context = ctx();
@@ -406,6 +456,20 @@ void BrowserPanel::appendCategory(int category, std::vector<Item>& result, bool 
             item.tags.push_back({"Type", plugin.instrument ? "Instrument" : "Audio Effect"});
         }
     }
+    else if (category == Sounds)
+    {
+        // LIB-2: instrument presets grouped by their library folder (Bass, Strings, ...); a preset directly in its
+        // device's folder goes under the device's name.
+        for (const auto& preset : context.devicePresets)
+        {
+            const auto* entry = model::findCatalogEntry(preset.deviceTag);
+            if (! entry || entry->role != model::DeviceRole::Instrument) continue;
+            result.push_back({preset.name, preset.path, false, false, BrowserDrag{BrowserDrag::Kind::DevicePreset, preset.path, preset.name},
+                              preset.folder.empty() ? preset.deviceName : preset.folder});
+            result.back().instrument = true;
+            result.back().tags = presetTags(preset);
+        }
+    }
     else if (category == Projects)
         for (const auto& file : context.projectFiles)
             result.push_back({juce::File(file).getFileNameWithoutExtension().toStdString(), file, false, false, {}});
@@ -427,6 +491,7 @@ void BrowserPanel::appendCategory(int category, std::vector<Item>& result, bool 
             result.back().instrument = role == model::DeviceRole::Instrument;
             result.back().tags = {{"Type", role == model::DeviceRole::Instrument ? "Instrument" : role == model::DeviceRole::MidiEffect ? "MIDI Effect" : "Audio Effect"},
                                   {"Device", result.back().group == "Synthesis" ? "Synthesizer" : result.back().group}};
+            if (! presetsOf(context.devicePresets, tag).empty()) result.back().disclosure = "preset:" + tag; // LIB-2
         }
     }
 }
@@ -451,7 +516,7 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
     for (auto& item : result)
     {
         if (item.directory || ! item.packId.empty()) continue;
-        item.key = item.drag && item.drag->kind != BrowserDrag::Kind::Sample
+        item.key = item.drag && item.drag->kind != BrowserDrag::Kind::Sample && item.drag->kind != BrowserDrag::Kind::DevicePreset
                        ? (item.drag->kind == BrowserDrag::Kind::Plugin ? "plugin:" : "native:") + item.drag->value : "file:" + item.path;
         if (item.tags.empty())
         {
@@ -475,14 +540,17 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
                 else if (item.drag->value == "SonoraFm") alias = " Operator";
             }
             if (indexed && item.depth > 0) return false; // the contents of an opened result folder
+            if (! item.disclosure.empty() && item.drag && searchesPresets()) // LIB-2: a device whose presets match stays
+                for (const auto& preset : presetsOf(context.devicePresets, item.drag->value))
+                    if (presetMatches(preset, query)) return false;
             for (const auto& tag : item.tags) alias += " " + tag.value;
             return ! juce::String::fromUTF8((item.label + " " + item.group + alias).c_str()).containsIgnoreCase(query);
         }), result.end());
     }
     if (filtered && ! filters_.empty())
         std::erase_if(result, [&](const Item& item) { return item.directory || ! BrowserTags::matches(item.tags, filters_); });
-    if (groupRows && ! folderMode_ && selectedCategory_ == AllItems) return groupAll(std::move(result));
-    if (groupRows && ! folderMode_ && selectedCategory_ >= Drums && selectedCategory_ <= PlugIns)
+    if (groupRows && ! folderMode_ && selectedCategory_ == AllItems) return attachPresets(groupAll(std::move(result)));
+    if (groupRows && ! folderMode_ && selectedCategory_ >= Sounds && selectedCategory_ <= PlugIns)
     {
         std::sort(result.begin(), result.end(), [](const Item& a, const Item& b) {
             const int groups = juce::String(a.group).compareIgnoreCase(juce::String(b.group));
@@ -499,7 +567,67 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
             }
             if (! query_.empty() || ! filters_.empty() || expandedGroups_.contains(item.group)) grouped.push_back(std::move(item));
         }
-        return grouped;
+        return attachPresets(std::move(grouped));
+    }
+    return result;
+}
+
+// LIB-2: under each shown device row with presets, its preset folders (then the presets directly in its folder) when the
+// row is open, and under an open folder its presets. A search outside All opens the devices and folders holding matches
+// and lists only those; All leaves them to its Sounds section, so a preset is found once.
+std::vector<BrowserPanel::Item> BrowserPanel::attachPresets(std::vector<Item> rows) const
+{
+    const auto& context = ctx();
+    if (context.devicePresets.empty()) return rows;
+    const auto query = juce::String::fromUTF8(query_.c_str());
+    const bool searching = searchesPresets();
+    std::vector<Item> result;
+    result.reserve(rows.size());
+    for (auto& row : rows)
+    {
+        if (row.disclosure.empty() || ! row.drag || row.drag->kind != BrowserDrag::Kind::NativeDevice)
+        {
+            result.push_back(std::move(row));
+            continue;
+        }
+        const auto presets = presetsOf(context.devicePresets, row.drag->value);
+        std::vector<const Preset*> shown;
+        if (searching)
+            for (const auto& preset : presets)
+                if (presetMatches(preset, query)) shown.push_back(&preset);
+        const bool found = ! shown.empty();
+        row.open = found || expandedFolders_.contains(row.disclosure);
+        const Item parent = row;
+        result.push_back(std::move(row));
+        if (! parent.open) continue;
+        if (! found)
+            for (const auto& preset : presets) shown.push_back(&preset);
+        std::string folderKey;
+        bool folderOpen = false;
+        for (const auto* preset : shown)
+        {
+            const bool loose = preset->folder.empty();
+            if (! loose && folderKey != parent.disclosure + "/" + preset->folder)
+            {
+                folderKey = parent.disclosure + "/" + preset->folder;
+                folderOpen = found || expandedFolders_.contains(folderKey);
+                Item folder{preset->folder, {}, false, false, {}, parent.group, false, parent.depth + 1, parent.disclosure};
+                folder.disclosure = folderKey;
+                folder.open = folderOpen;
+                folder.section = parent.section;
+                folder.instrument = parent.instrument;
+                result.push_back(std::move(folder));
+            }
+            if (! loose && ! folderOpen) continue;
+            Item item{preset->name, preset->path, false, false, BrowserDrag{BrowserDrag::Kind::DevicePreset, preset->path, preset->name},
+                      parent.group, false, parent.depth + (loose ? 1 : 2), loose ? parent.disclosure : folderKey};
+            item.instrument = parent.instrument;
+            item.section = parent.section;
+            item.key = "file:" + preset->path;
+            item.suggestedTags = presetTags(*preset);
+            item.tags = context.browserTags.tagsFor(item.key, item.suggestedTags);
+            result.push_back(std::move(item));
+        }
     }
     return result;
 }
@@ -782,12 +910,13 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
         const bool selected = (int) i == selectedItem_;
         if (selected) paint::fill(canvas, row, selectedBg);
         const auto& item = entries[i];
-        if (item.directory || item.heading)
-            ctl::triangle(canvas, row.x + 12 + (float) item.depth * 14, row.centreY(), 8, 5,
+        if (item.directory || item.heading || ! item.disclosure.empty())
+            ctl::triangle(canvas, row.x + (item.disclosure.empty() ? 12 + (float) item.depth * 14 : rowInset(item) - 12), row.centreY(), 8, 5,
                           ((item.heading && (! query_.empty() || ! filters_.empty() || expandedGroups_.contains(item.group)))
-                           || (item.directory && expandedFolders_.contains(item.path))) ? ctl::Dir::Down : ctl::Dir::Right,
+                           || (item.directory && expandedFolders_.contains(item.path)) || (! item.disclosure.empty() && item.open))
+                              ? ctl::Dir::Down : ctl::Dir::Right,
                           theme.color("TreeRowCategoryForeground"));
-        float inset = (! item.heading && ! item.group.empty() ? 34.0f : 24.0f) + (float) item.depth * 14;
+        float inset = rowInset(item);
         if (! item.format.empty())
         {
             drawPluginIcon(canvas, {row.x + inset, row.centreY() - 7, 17, 14}, item.format, item.instrument, fg,
@@ -908,6 +1037,10 @@ void BrowserPanel::disclose(const Item& item, bool open)
     {
         if (open) expandedGroups_.insert(item.group); else expandedGroups_.erase(item.group);
     }
+    else if (! item.disclosure.empty()) // LIB-2: a device's presets or a preset folder
+    {
+        if (open) expandedFolders_.insert(item.disclosure); else expandedFolders_.erase(item.disclosure);
+    }
     else if (item.directory)
     {
         if (open)
@@ -935,8 +1068,11 @@ void BrowserPanel::activate(const Item& item)
         if (! expandedGroups_.erase(item.group)) expandedGroups_.insert(item.group);
         repaint();
     }
+    else if (! item.disclosure.empty() && ! item.drag) disclose(item, ! item.open); // LIB-2: a preset folder
     else if (item.directory) disclose(item, ! expandedFolders_.contains(item.path));
     else if (item.sample && ctx().previewSample) ctx().previewSample(item.path);
+    else if (item.drag && item.drag->kind == BrowserDrag::Kind::DevicePreset) // LIB-2: loads like a device (selected track)
+    { if (ctx().dropBrowserItem) ctx().dropBrowserItem(*item.drag, ctx().selectedTrack, 0, -1); }
     else if (! item.path.empty() && ctx().openFile) ctx().openFile(item.path);
     else if (item.drag && ctx().dropBrowserItem) ctx().dropBrowserItem(*item.drag, ctx().selectedTrack, 0, -1);
 }
@@ -945,16 +1081,18 @@ void BrowserPanel::showItemMenu(Item item)
 {
     if (! item.packId.empty()) { showPackMenu(item); return; }
     juce::PopupMenu menu;
-    if (item.heading || item.directory)
+    const bool preset = item.drag && item.drag->kind == BrowserDrag::Kind::DevicePreset;
+    if (item.heading || item.directory || (! item.disclosure.empty() && ! item.drag))
     {
-        const bool expanded = item.heading ? expandedGroups_.contains(item.group) : expandedFolders_.contains(item.path);
+        const bool expanded = item.heading ? expandedGroups_.contains(item.group)
+                              : item.directory ? expandedFolders_.contains(item.path) : item.open;
         juce::PopupMenu::Item entry(expanded ? "Collapse" : "Expand");
         entry.action = [this, item, expanded] { if (Widget::isAlive(this)) disclose(item, ! expanded); };
         menu.addItem(std::move(entry));
     }
     else
     {
-        juce::PopupMenu::Item load(item.path.empty() || item.sample ? "Load" : "Open Set");
+        juce::PopupMenu::Item load(item.path.empty() || item.sample || preset ? "Load" : "Open Set");
         load.action = [this, item] {
             if (! Widget::isAlive(this)) return;
             if (item.sample && item.drag && ctx().dropBrowserItem) ctx().dropBrowserItem(*item.drag, ctx().selectedTrack, 0, -1);
@@ -1057,6 +1195,7 @@ void BrowserPanel::mouseDown(const MouseEvent& event)
             const auto& item = entries[(size_t) selectedItem_];
             if (! item.packId.empty() && packButtonBounds(selectedItem_).contains(event.x, event.y)) { packAction(item); repaint(); return; }
             if (item.heading || (item.directory && event.x < listArea().x + 22 + (float) item.depth * 14)) activate(item);
+            else if (! item.disclosure.empty() && event.x < listArea().x + rowInset(item) - 2) disclose(item, ! item.open);
             else pendingDrag_ = item.drag;
         }
         if (selectedItem_ >= 0 && (size_t) selectedItem_ < entries.size() && entries[(size_t) selectedItem_].sample
@@ -1081,7 +1220,10 @@ void BrowserPanel::mouseDoubleClick(const MouseEvent& event)
     if (event.right) { mouseDown(event); return; }
     const auto before = items();
     const int row = (int) ((event.y - listArea().y - 2 + scroll_) / kRow);
-    if (listArea().contains(event.x, event.y) && row >= 0 && (size_t) row < before.size() && (before[(size_t) row].heading || (before[(size_t) row].directory && event.x < listArea().x + 22 + (float) before[(size_t) row].depth * 14))) return;
+    if (listArea().contains(event.x, event.y) && row >= 0 && (size_t) row < before.size()
+        && (before[(size_t) row].heading || (before[(size_t) row].directory && event.x < listArea().x + 22 + (float) before[(size_t) row].depth * 14)
+            || (! before[(size_t) row].disclosure.empty() && event.x < listArea().x + rowInset(before[(size_t) row]) - 2)))
+        return;
     mouseDown(event);
     if (! listArea().contains(event.x, event.y)) return;
     const auto entries = items();
@@ -1173,14 +1315,15 @@ bool BrowserPanel::keyPressed(const KeyEvent& key)
             const auto item = entries[(size_t) selectedItem_];
             if (key.keyCode == juce::KeyPress::rightKey)
             {
-                if (item.heading || item.directory) disclose(item, true);
+                if (item.heading || item.directory || ! item.disclosure.empty()) disclose(item, true);
                 else if (item.sample && ctx().previewSample) ctx().previewSample(item.path);
             }
-            else if ((item.heading && expandedGroups_.contains(item.group)) || (item.directory && expandedFolders_.contains(item.path)))
+            else if ((item.heading && expandedGroups_.contains(item.group)) || (item.directory && expandedFolders_.contains(item.path))
+                     || (! item.disclosure.empty() && item.open))
                 disclose(item, false);
             else
                 for (int i = selectedItem_ - 1; i >= 0; --i)
-                    if ((! item.parentFolder.empty() && entries[(size_t) i].path == item.parentFolder)
+                    if ((! item.parentFolder.empty() && (entries[(size_t) i].path == item.parentFolder || entries[(size_t) i].disclosure == item.parentFolder))
                         || (! item.group.empty() && entries[(size_t) i].heading && entries[(size_t) i].group == item.group)
                         || (item.parentFolder.empty() && entries[(size_t) i].heading && entries[(size_t) i].depth < item.depth))
                     { selectedItem_ = i; break; }

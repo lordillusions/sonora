@@ -414,6 +414,11 @@ struct UiContext
     std::vector<std::string> pluginNames;  // scanned plugins (browser "Plug-ins")
     struct BrowserPlugin { std::string label, identifier, vendor, format; bool instrument = false; std::string category{}; };
     std::vector<BrowserPlugin> browserPlugins;
+    // LIB-2: the reference library's device presets (io::scanDevicePresets, read on a worker): listed under their device in
+    // Instruments / Audio Effects / MIDI Effects and, for instruments, in Sounds by folder. Sorted by device tag, folder,
+    // name. Advance browserContentRevision after publishing.
+    struct BrowserPreset { std::string path, name, folder, deviceTag, deviceName; };
+    std::vector<BrowserPreset> devicePresets;
     BrowserTags browserTags;
     std::function<void()> browserTagsChanged;
     std::optional<BrowserDrag> browserDrag;

@@ -35,6 +35,9 @@ public:
     Rect sidebarRowBounds(int index) const;
     Rect listRowBounds(int index) const;
     std::string rowLabel(int index) const; // tests: the label of a filtered list row (empty past the end)
+    int rowIndex(const std::string& label) const; // tests/ui_snapshot: the first list row with that label, -1 if none
+    // LIB-2: the disclosure triangle of a list row (headings, folders, devices with presets, preset folders); empty if none.
+    Rect disclosureBounds(int index) const;
     void showFolder(const std::string& path) { selectedCategory_ = Samples; filters_.clear(); tagEditing_ = false; navigate(path); }
     void showCategory(int index) { selectCategory(index); repaint(); }
     void focusLost() override { searchFocused_ = keyboardFocused_ = tagEditing_ = false; repaint(); }
@@ -72,12 +75,19 @@ private:
         BrowserTags::Tags tags{}, suggestedTags{};
         int section = -1; // UI-64: the Library category an All row comes from
         std::string packId{}; // LIB-1: a row of the Packs list ("@list" = the catalogue's status row)
+        // LIB-2: a device row with presets or a preset folder row opens with this key in expandedFolders_ ("preset:<tag>",
+        // "preset:<tag>/<folder>"); `open` is whether its children follow (expanded, or a search found presets in it).
+        std::string disclosure{};
+        bool open = false;
     };
     static const std::vector<Category>& categories();
     const std::vector<Item>& items(bool filtered = true, bool grouped = true) const;
     std::vector<Item> buildItems(bool filtered, bool grouped) const;
     void appendCategory(int category, std::vector<Item>& result, bool indexed) const;
     std::vector<Item> groupAll(std::vector<Item> result) const;
+    std::vector<Item> attachPresets(std::vector<Item> rows) const; // LIB-2: preset folders and presets under device rows
+    bool searchesPresets() const; // LIB-2: a search lists matching presets under their device (not in All: Sounds has them)
+    static float rowInset(const Item& item);
     bool listsFolder() const { return folderMode_ || selectedCategory_ == AllItems; }
     struct ItemsKey
     {

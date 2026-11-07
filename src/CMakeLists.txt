@@ -61,6 +61,7 @@ add_library(sonora_core STATIC
     io/als/LiveCompat.cpp
     io/als/AlsNewSet.cpp
     io/als/SampleDrop.cpp
+    io/als/DevicePresets.cpp
     io/midi/MidiFileExport.cpp
 )
 target_include_directories(sonora_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -110,6 +111,7 @@ add_library(sonora_engine STATIC
     devices/native/FmSynth.cpp
     devices/native/VectorSynth.cpp
     devices/native/WavetableInstrument.cpp
+    devices/native/Tension.cpp
     devices/native/WavetableSprites.cpp
     devices/native/Resynth.cpp
     devices/native/Impulse.cpp
@@ -255,6 +257,7 @@ add_library(sonora_ui STATIC
     ui/views/ChannelEqFace.cpp
     ui/views/RackFace.cpp
     ui/views/WavetableFace.cpp
+    ui/views/TensionFace.cpp
     ui/views/EffectFaces.cpp
     ui/views/ResynthEditor.cpp
     ui/views/CurveLfoEditor.cpp
@@ -482,6 +485,7 @@ target_sources(Sonora PRIVATE
     app/AppNativeSwap.cpp
     app/AppHushWindow.cpp
     app/AppSamplePacks.cpp
+    app/AppDevicePresets.cpp
     app/AppStems.cpp
 )
 if (SONORA_UPDATE_ALLOW_LOCAL_HTTP)

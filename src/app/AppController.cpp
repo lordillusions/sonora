@@ -445,6 +445,7 @@ AppController::AppController() : engine_(host_, midi_)
     recentSets_.restoreFromString(settings().getValue("recentSets"));
 
     findProjectsInBackground();
+    scanDevicePresets();
     initialiseCollab();
     startTimerHz(10);
 }
@@ -840,6 +841,7 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     ensureAudioInputs();
     offerNativeReplacements();
     runDeviceDragAutotest();
+    runPresetAutotest();
 }
 
 // Hooks the preferences dialog up to the services it edits. Everything it changes is persisted.
@@ -880,6 +882,7 @@ void AppController::wirePreferences()
                 path = fc.getResult().getFullPathName().toStdString();
                 settings().setValue(packs ? "packsPath" : "userLibraryPath", fc.getResult().getFullPathName());
                 settings().saveIfNeeded();
+                scanDevicePresets(); // LIB-2: the User Library's and packs' presets
                 if (ui_.requestRepaint) ui_.requestRepaint();
             });
     };
@@ -2645,6 +2648,7 @@ void AppController::importWavetablePreset(int trackIndex, int index, const std::
 void AppController::dropDeviceItem(const ui::BrowserDrag& item, int trackIndex, int index, int chainIndex, int zoneIndex, int childIndex)
 {
     if (item.kind == ui::BrowserDrag::Kind::TrackDevice) { ui_.statusText = "Drop the device on a track"; return; } // UI-7c: not into racks yet
+    if (item.kind == ui::BrowserDrag::Kind::DevicePreset) { loadDevicePreset(item, trackIndex, index); return; } // LIB-2
     if (const auto tag = model::insertedDeviceTag(item.value, song_ ? song_->schemaVersion : std::string());
         item.kind == ui::BrowserDrag::Kind::NativeDevice && tag != item.value)
     {
@@ -2869,6 +2873,7 @@ void AppController::runDeviceDragAutotest()
 void AppController::dropBrowserItem(const ui::BrowserDrag& item, int trackIndex, double beat, int scene)
 {
     if (item.kind == ui::BrowserDrag::Kind::TrackDevice) { dropTrackDevice(item, trackIndex); return; }
+    if (item.kind == ui::BrowserDrag::Kind::DevicePreset) { loadDevicePreset(item, trackIndex, -1); return; } // LIB-2
     if (const auto tag = model::insertedDeviceTag(item.value, song_ ? song_->schemaVersion : std::string());
         item.kind == ui::BrowserDrag::Kind::NativeDevice && tag != item.value)
     {

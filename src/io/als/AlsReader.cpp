@@ -591,6 +591,9 @@ Device readDevice(const XmlElement* x, std::vector<std::string>& warnings)
         static const std::vector<const char*> tunerKeys{"ViewMode", "DisplayPitchInHz", "StrobeMode", "AccidentalSpelling"},
             delayKeys{"DryWetMode", "EcoProcessing", "DelayLine_CompatibilityMode"},
             utilityKeys{"MidSideBalanceOn", "BassMonoAudition"}; // root-level plain leaves
+        if (d.type == "StringStudio") // DEV-28j: the face's tab is a plain leaf
+            if (const auto* leaf = x->getChildByName("CurrentTab"); leaf && leaf->hasAttribute("Value"))
+                d.plain["CurrentTab"] = leaf->getDoubleAttribute("Value");
         if (d.type == "Tuner" || d.type == "Delay" || d.type == "StereoGain")
             for (const auto* key : d.type == "Tuner" ? tunerKeys : d.type == "Delay" ? delayKeys : utilityKeys)
                 if (const auto* leaf = x->getChildByName(key); leaf && leaf->hasAttribute("Value"))

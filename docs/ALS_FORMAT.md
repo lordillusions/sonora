@@ -262,6 +262,26 @@ The element is retained and saved back unchanged apart from `On`. Browser insert
 children (PatchSlot with `RelativePathType` 3 to `Presets/Audio Effects/Max Audio Effect/Imported/<patch>.amxd` and the
 absolute path of a copy found on disk; empty parameter/file-drop/id lists, blob and routables) — not yet opened in Live.
 
+### Device presets (`.adv`, LIB-2)
+A device preset is a gzip XML file `<Ableton MajorVersion=… MinorVersion=… Creator=…><DeviceTag>…</DeviceTag></Ableton>`:
+the root's only child is exactly the device element a set's `Devices` list holds, without an `Id` attribute, with
+`UserName` = the preset's name (empty in some factory presets: the file name is the name), every pointee id 0
+(`AutomationTarget`, `ModulationTarget`, `Pointee`; no `PointeeId` references) and `LastPresetRef/Value/FilePresetRef/FileRef`
+naming the preset. Locations (reference app 12.4, macOS): `<app>/Contents/App-Resources/Core Library/Devices/<Instruments|Audio
+Effects|MIDI Effects>/<Device display name>/<Folder>/*.adv` (Wavetable 270, Tension 107, Simpler 38, Sampler 76, ...), the
+defaults in `Core Library/Defaults/<Role>/<Device>.adv`, user presets in `User Library/Presets/<Role>/<Device>/`, packs in
+`<Factory Packs>/<Pack>/{Devices,Presets}/...`; every folder has an `Ableton Folder Info/Properties.cfg`. Factory sample and
+preset references are library-relative: `RelativePathType` 5 (with `LivePackName` "Core Library") or 6, `RelativePath`
+below the library root ("Samples/Loops/…", "Devices/Instruments/…"), and a `Path` from the build machine.
+
+`io/als/DevicePresets` indexes them (folder → catalog entry by display name, else the first preset's root tag; racks and
+devices Sonora does not run are skipped) and `io::readDevicePreset` reads one as a new device of a set: `Id` =
+`song.nextDeviceId`, **each** pointee element its own id from `song.nextPointeeId` (they are all 0, so a map from old to
+new ids as in `prepareDeviceCopy` would give them one id), `Path` of type 5/6 references repointed at the local library
+(the preset's own library first), and the element kept whole as `Device::sourceXml`. Verified: Wavetable, EQ Eight and
+Tension presets loaded into a scratch set and saved keep every element and every `Manual` value of the preset (floats as
+float32), with no duplicate pointee id and `NextPointeeId` above all of them. Not yet opened in the reference app.
+
 ## Writer and authored insertion templates (ALS-10c / UI-7)
 
 The writer patches the loaded XML, retaining unknown fields. Clip history keeps immutable original fragments

@@ -85,7 +85,7 @@ constexpr std::array kCatalog{
     CatalogEntry{"Shifter", "Shifter", R::AudioEffect, false},
     CatalogEntry{"Spectral", "Spectral Time", R::AudioEffect, false},
     CatalogEntry{"Transmute", "Spectral Resonator", R::AudioEffect, false},
-    CatalogEntry{"StringStudio", "Tension", R::Instrument, false},
+    CatalogEntry{"StringStudio", "Tension", R::Instrument, true},
     CatalogEntry{"Tube", "Dynamic Tube", R::AudioEffect, false},
     CatalogEntry{"Vinyl", "Vinyl Distortion", R::AudioEffect, false},
     CatalogEntry{"Vocoder", "Vocoder", R::AudioEffect, false},

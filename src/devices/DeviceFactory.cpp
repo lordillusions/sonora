@@ -23,6 +23,7 @@
 #include "devices/native/Simpler.h"
 #include "devices/native/FmSynth.h"
 #include "devices/native/VectorSynth.h"
+#include "devices/native/Tension.h"
 #include "devices/native/WavetableInstrument.h"
 #include "devices/native/WavetableSprites.h"
 #include "devices/native/Resynth.h"
@@ -314,6 +315,8 @@ std::unique_ptr<DeviceProcessor> createNative(const model::Device& d, std::vecto
         dev = std::make_unique<FmSynth>();
     else if (d.type == "SonoraVector")
         dev = std::make_unique<VectorSynth>();
+    else if (d.type == "StringStudio") // DEV-28j: the reference's Tension
+        dev = std::make_unique<Tension>();
     else if (d.type == "InstrumentVector") // DEV-28b: the reference's Wavetable
     {
         auto synth = std::make_unique<WavetableInstrument>();

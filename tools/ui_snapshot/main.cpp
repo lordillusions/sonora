@@ -35,6 +35,11 @@
 // and, as installed, every pack in ROOT (a pack_tool client --root folder); a following --browser-folder into one of
 // them shows its files with their pack tags.
 //
+// LIB-2: with --browser-category all|sounds|instruments|audio-effects|midi-effects the reference library's device presets are
+// indexed as the app does (io::scanDevicePresets; SONORA_REFERENCE_LIBRARY replaces the installed library). Each
+// --browser-open LABEL (repeatable, in order) clicks the disclosure triangle of the first list row with that label
+// (a device with presets, a preset folder, a heading).
+//
 // Without a .als it renders tests/fixtures/minimal_set.xml.
 
 #include "core/AppDataFolder.h"
@@ -73,6 +78,7 @@
 #include "ui/views/ResynthEditor.h"
 #include "ui/views/CurveLfoEditor.h"
 #include "ui/views/BrowserPanel.h"
+#include "io/als/DevicePresets.h"
 #include "packs/PackLibrary.h"
 #include "ui/views/MonitorPanel.h"
 #include "ui/views/PreferencesPanel.h"
@@ -177,6 +183,7 @@ int main(int argc, char** argv)
     std::string regionDrag;
     int browserCategory = -1, browserSelection = -1;
     std::string browserQuery, browserPacks;
+    std::vector<std::string> browserOpen;
     ui::BrowserTags::Tags browserFilters;
     std::vector<int> selectedTracks;
     bool setView = false;
@@ -267,7 +274,7 @@ int main(int argc, char** argv)
             // 2..6 = Drums..Plug-ins this option took before All was added (UI-64).
             const auto name = juce::String(next()).toLowerCase().replaceCharacter(' ', '-');
             using B = ui::BrowserPanel;
-            const std::map<juce::String, int> names{{"all", B::AllItems}, {"drums", B::Drums}, {"instruments", B::Instruments},
+            const std::map<juce::String, int> names{{"all", B::AllItems}, {"sounds", B::Sounds}, {"drums", B::Drums}, {"instruments", B::Instruments},
                 {"audio-effects", B::AudioEffects}, {"midi-effects", B::MidiEffects}, {"plug-ins", B::PlugIns}, {"plugins", B::PlugIns},
                 {"packs", B::Packs}};
             if (const auto found = names.find(name); found != names.end()) browserCategory = found->second;
@@ -278,6 +285,8 @@ int main(int argc, char** argv)
             browserSelection = std::stoi(next());
         else if (a == "--browser-query")
             browserQuery = next();
+        else if (a == "--browser-open")
+            browserOpen.push_back(next());
         else if (a == "--browser-packs")
             browserPacks = next();
         else if (a == "--rack-chain")
@@ -581,6 +590,14 @@ int main(int argc, char** argv)
     }
     ctx.statusText = "Snapshot of " + juce::File(juce::String::fromUTF8(als.c_str())).getFileName().toStdString();
     ctx.projectFiles = {als};
+    if (browserCategory == ui::BrowserPanel::AllItems
+        || (browserCategory >= ui::BrowserPanel::Sounds && browserCategory <= ui::BrowserPanel::MidiEffects))
+    {
+        const auto userLibrary = juce::File::getSpecialLocation(juce::File::userMusicDirectory).getChildFile("Ableton/User Library");
+        for (const auto& p : io::scanDevicePresets(io::presetLibraries(userLibrary.getFullPathName().toStdString(), {})))
+            ctx.devicePresets.push_back({p.path, p.name, p.folder, p.deviceTag, p.deviceName});
+        std::printf("device presets: %zu\n", ctx.devicePresets.size());
+    }
     if (browserCategory == ui::BrowserPanel::PlugIns || browserCategory == ui::BrowserPanel::AllItems)
     {
         plugins::PluginHost host; host.loadCache();
@@ -967,6 +984,16 @@ int main(int argc, char** argv)
         for (auto& child : root.children())
             if (auto* p = dynamic_cast<ui::PreferencesPanel*>(child.get()))
                 p->setTab(static_cast<ui::PreferencesPanel::Tab>(prefsTab));
+    for (const auto& label : browserOpen)
+        for (auto& child : root.children())
+            if (auto* browser = dynamic_cast<ui::BrowserPanel*>(child.get()))
+            {
+                const int index = browser->rowIndex(label);
+                const auto box = browser->disclosureBounds(index), origin = browser->boundsInRoot();
+                if (box.isEmpty()) { std::fprintf(stderr, "warning: --browser-open: no row \"%s\" with a disclosure\n", label.c_str()); continue; }
+                ui::MouseEvent event; event.x = origin.x + box.centreX(); event.y = origin.y + box.centreY();
+                root.dispatchMouseDown(event); root.dispatchMouseUp(event);
+            }
     if (browserSelection >= 0)
         for (auto& child : root.children())
             if (auto* browser = dynamic_cast<ui::BrowserPanel*>(child.get()))

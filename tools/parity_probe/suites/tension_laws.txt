@@ -1,0 +1,175 @@
+# DEV-29 Tension (StringStudio) law probes. Device XML: the reference's default preset (Plectrum, filter LP 4 open,
+# body/damper/termination/pickup off) read at run time from the installed library, one variable per case.
+case t-default notes=single
+  device Defaults/Instruments/Tension.adv 
+case t-keys notes=keys
+  device Defaults/Instruments/Tension.adv 
+case t-velocities notes=velocities
+  device Defaults/Instruments/Tension.adv 
+case t-melody notes=melody
+  device Defaults/Instruments/Tension.adv 
+case t-decay05 notes=single
+  device Defaults/Instruments/Tension.adv StringDecay=0.5
+case t-decay0 notes=single
+  device Defaults/Instruments/Tension.adv StringDecay=0
+case t-damp0 notes=single
+  device Defaults/Instruments/Tension.adv StringDamping=0
+case t-damp1 notes=single
+  device Defaults/Instruments/Tension.adv StringDamping=1
+case t-inharm0 notes=single
+  device Defaults/Instruments/Tension.adv StringInharmonicity=0
+case t-inharm1 notes=single
+  device Defaults/Instruments/Tension.adv StringInharmonicity=1
+case t-ratio0 notes=single
+  device Defaults/Instruments/Tension.adv StringDecayRatio=0
+case t-ratio1 notes=single
+  device Defaults/Instruments/Tension.adv StringDecayRatio=1
+case t-dampkbd notes=keys
+  device Defaults/Instruments/Tension.adv StringDampingKbdMod=1
+case t-decaykbd notes=keys
+  device Defaults/Instruments/Tension.adv StringDecayKbdMod=1
+case t-hammer notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorType=1
+case t-hammer-keys notes=keys
+  device Defaults/Instruments/Tension.adv ExcitatorType=1
+case t-hammer-vel notes=velocities
+  device Defaults/Instruments/Tension.adv ExcitatorType=1
+case t-bounce notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorType=2
+case t-bow notes=long
+  device Defaults/Instruments/Tension.adv ExcitatorType=0
+case t-bow-keys notes=keys
+  device Defaults/Instruments/Tension.adv ExcitatorType=0
+case t-bow-force0 notes=long
+  device Defaults/Instruments/Tension.adv ExcitatorType=0 ExcitatorParameterX=0
+case t-bow-force1 notes=long
+  device Defaults/Instruments/Tension.adv ExcitatorType=0 ExcitatorParameterX=1
+case t-bow-fric0 notes=long
+  device Defaults/Instruments/Tension.adv ExcitatorType=0 ExcitatorStiffness=0
+case t-bow-fric1 notes=long
+  device Defaults/Instruments/Tension.adv ExcitatorType=0 ExcitatorStiffness=1
+case t-bow-vel0 notes=long
+  device Defaults/Instruments/Tension.adv ExcitatorType=0 ExcitatorVelocity=0
+case t-bow-vel1 notes=long
+  device Defaults/Instruments/Tension.adv ExcitatorType=0 ExcitatorVelocity=1
+case t-pos01 notes=single
+  device Defaults/Instruments/Tension.adv GeoExcitatorPosition=0.1
+case t-pos09 notes=single
+  device Defaults/Instruments/Tension.adv GeoExcitatorPosition=0.9
+case t-posabs notes=single
+  device Defaults/Instruments/Tension.adv GeoExcitatorAbsolute=true GeoExcitatorPosition=0.1
+case t-prot0 notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorParameterX=0
+case t-prot1 notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorParameterX=1
+case t-stiff0 notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorStiffness=0
+case t-stiff1 notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorStiffness=1
+case t-vel0 notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorVelocity=0
+case t-vel1 notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorVelocity=1
+case t-edamp0 notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorDamping=0
+case t-edamp1 notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorDamping=1
+case t-hmass0 notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorType=1 ExcitatorParameterX=0
+case t-hmass1 notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorType=1 ExcitatorParameterX=1
+case t-hstiff1 notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorType=1 ExcitatorStiffness=1
+case t-hvel1 notes=single
+  device Defaults/Instruments/Tension.adv ExcitatorType=1 ExcitatorVelocity=1
+case t-pickup01 notes=single
+  device Defaults/Instruments/Tension.adv PickupToggle=true PickupPosition=0.1
+case t-pickup05 notes=single
+  device Defaults/Instruments/Tension.adv PickupToggle=true PickupPosition=0.5
+case t-damper notes=single
+  device Defaults/Instruments/Tension.adv DamperToggle=true
+case t-damper-gated notes=single
+  device Defaults/Instruments/Tension.adv DamperToggle=true DamperGated=true
+case t-damper-pos01 notes=single
+  device Defaults/Instruments/Tension.adv DamperToggle=true GeoDamperPosition=0.1
+case t-damper-mass1 notes=single
+  device Defaults/Instruments/Tension.adv DamperToggle=true DamperMass=1
+case t-term notes=single
+  device Defaults/Instruments/Tension.adv TerminationToggle=true
+case t-term-keys notes=keys
+  device Defaults/Instruments/Tension.adv TerminationToggle=true
+case t-body0 notes=single
+  device Defaults/Instruments/Tension.adv BodyToggle=true BodyType=0
+case t-body1 notes=single
+  device Defaults/Instruments/Tension.adv BodyToggle=true BodyType=1
+case t-body2 notes=single
+  device Defaults/Instruments/Tension.adv BodyToggle=true BodyType=2
+case t-body3 notes=single
+  device Defaults/Instruments/Tension.adv BodyToggle=true BodyType=3
+case t-body-xs notes=single
+  device Defaults/Instruments/Tension.adv BodyToggle=true BodySize=0
+case t-body-xl notes=single
+  device Defaults/Instruments/Tension.adv BodyToggle=true BodySize=4
+case t-body-decay1 notes=single
+  device Defaults/Instruments/Tension.adv BodyToggle=true BodyDecay=1
+case t-body-cuts notes=single
+  device Defaults/Instruments/Tension.adv BodyToggle=true BodyLowCut=0.5 BodyHighCut=0.5
+case t-body-mix0 notes=single
+  device Defaults/Instruments/Tension.adv BodyToggle=true BodyMix=0
+case t-body-mix1 notes=single
+  device Defaults/Instruments/Tension.adv BodyToggle=true BodyMix=1
+case t-volume1 notes=single
+  device Defaults/Instruments/Tension.adv BodyLevel=1
+case t-volume035 notes=single
+  device Defaults/Instruments/Tension.adv BodyLevel=0.35
+case t-cut05 notes=single
+  device Defaults/Instruments/Tension.adv FilterCutoffFrequency=0.5
+case t-cut025 notes=single
+  device Defaults/Instruments/Tension.adv FilterCutoffFrequency=0.25
+case t-q05 notes=single
+  device Defaults/Instruments/Tension.adv FilterCutoffFrequency=0.5 FilterQFactor=0.5
+case t-q1 notes=single
+  device Defaults/Instruments/Tension.adv FilterCutoffFrequency=0.5 FilterQFactor=1
+case t-ftype0 notes=single
+  device Defaults/Instruments/Tension.adv FilterType=0 FilterCutoffFrequency=0.5 FilterQFactor=0.5
+case t-ftype2 notes=single
+  device Defaults/Instruments/Tension.adv FilterType=2 FilterCutoffFrequency=0.5 FilterQFactor=0.5
+case t-ftype3 notes=single
+  device Defaults/Instruments/Tension.adv FilterType=3 FilterCutoffFrequency=0.5 FilterQFactor=0.5
+case t-ftype4 notes=single
+  device Defaults/Instruments/Tension.adv FilterType=4 FilterCutoffFrequency=0.5 FilterQFactor=0.5
+case t-ftype5 notes=single
+  device Defaults/Instruments/Tension.adv FilterType=5 FilterCutoffFrequency=0.5 FilterQFactor=0.5
+case t-ftype6 notes=single
+  device Defaults/Instruments/Tension.adv FilterType=6 FilterCutoffFrequency=0.5 FilterQFactor=0.5
+case t-ftype7 notes=single
+  device Defaults/Instruments/Tension.adv FilterType=7 FilterCutoffFrequency=0.5 FilterQFactor=0.5
+case t-ftype8 notes=single
+  device Defaults/Instruments/Tension.adv FilterType=8 FilterCutoffFrequency=0.5 FilterQFactor=0.5
+case t-ftype9 notes=single
+  device Defaults/Instruments/Tension.adv FilterType=9 FilterCutoffFrequency=0.5 FilterQFactor=0.5
+case t-filteroff notes=single
+  device Defaults/Instruments/Tension.adv FilterToggle=false
+case t-fenv notes=single
+  device Defaults/Instruments/Tension.adv FilterCutoffFrequency=0.3 FilterEnvelopeToggle=true FilterCutoffFrequencyEnvMod=1
+case t-fkbd notes=keys
+  device Defaults/Instruments/Tension.adv FilterCutoffFrequency=0.5 FilterCutoffFrequencyKbdMod=1
+case t-lfo notes=long
+  device Defaults/Instruments/Tension.adv ExcitatorType=0 FilterCutoffFrequency=0.5 LFOToggle=true FilterCutoffFrequencyLFOMod=1
+case t-vibrato notes=long
+  device Defaults/Instruments/Tension.adv ExcitatorType=0 VibratoToggle=true VibratoDelay=0 VibratoFadeIn=0
+case t-unison notes=single
+  device Defaults/Instruments/Tension.adv KeyboardUnisonToggle=true KeyboardUnison=0 KeyboardDetune=0.5
+case t-unison4 notes=single
+  device Defaults/Instruments/Tension.adv KeyboardUnisonToggle=true KeyboardUnison=1 KeyboardDetune=0.5
+case t-finetune0 notes=single
+  device Defaults/Instruments/Tension.adv KeyboardFineTune=0
+case t-stretch1 notes=keys
+  device Defaults/Instruments/Tension.adv KeyboardStretch=1
+case t-octave notes=single
+  device Defaults/Instruments/Tension.adv Octave=1 Transpose=5
+case t-porta notes=legato
+  device Defaults/Instruments/Tension.adv PortamentoToggle=true Polyphony=0
+case t-chords notes=chords
+  device Defaults/Instruments/Tension.adv 
+presets Devices/Instruments/Tension

@@ -72,6 +72,7 @@ existed before COM-7, moved without behaviour changes.
 |---|---|---|---|
 | `platform/CNumeric.h` — C-locale `strtod` (Serum JSON, SFZ) | `newlocale` + `strtod_l` | same | `_create_locale` + `_strtod_l` |
 | `platform/Paths.h` — `appDataFolder()` | `~/Library/Application Support/Sonora` | `~/.config/Sonora` | `%APPDATA%\Sonora` |
+| `platform/ReferenceLibrary.h` — the reference app's Core Library, User Library and pack folders (LIB-2 device presets, read only) | `/Applications/Ableton Live*.app/Contents/App-Resources/Core Library`, `~/Music/Ableton/...` | none (User Library / packs under `~/Music`) | `%ProgramData%\Ableton\Live*\Resources\Core Library`, `Documents\Ableton\...` |
 | `platform/HttpClient.h` — no-redirect HTTPS POST (agent providers); resumable GET into a file (LIB-1 sample packs) | `HttpClientMac.mm` (NSURLSession, ephemeral) | `HttpClientJuce.cpp` (JUCE + libcurl) | `HttpClientJuce.cpp` (JUCE + WinINet) |
 | `platform/SecretStore.h` — provider API keys | `SecretStoreMac.mm` (Keychain) | `SecretStoreFile.cpp` (`Secrets.json`, mode 0600) | `SecretStoreFile.cpp` (profile ACL only) |
 | `gfx/MetalRenderer.h` — GPU canvas | `MetalLayerView.mm` | `MetalRendererNone.cpp` → raster | same |

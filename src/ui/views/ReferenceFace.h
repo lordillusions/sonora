@@ -122,6 +122,11 @@ ReferenceFace* addReferenceFace(Widget& parent, const model::Device&, devices::D
 ReferenceFace* addAutoFilterFace(Widget& parent, devices::DeviceProcessor*, ReferenceFace::Tag tag);
 // Wavetable (`InstrumentVector`, DEV-28b) face, WavetableFace.cpp; also adds its title tabs to `parent` (the device box).
 ReferenceFace* addWavetableFace(Widget& parent, const model::Device&, devices::DeviceProcessor*, ReferenceFace::Tag tag);
+// Tension (`StringStudio`, DEV-28j) face, TensionFace.cpp; also adds its String / Filter-Global title tabs to `parent` (the
+// device box). nullptr for any other processor.
+ReferenceFace* addTensionFace(Widget& parent, devices::DeviceProcessor*, ReferenceFace::Tag tag);
+// The text Tension's face shows for `parameter` at `value` (the reference's value laws, Tension::filterHz ...).
+std::string tensionValueText(const devices::DeviceProcessor& tension, int parameter, float value);
 // Channel EQ (`ChannelEq`, DEV-30) face, ChannelEqFace.cpp; nullptr for any other processor. `model` marks the knobs that
 // follow a rack macro.
 ReferenceFace* addChannelEqFace(Widget& parent, const model::Device& model, devices::DeviceProcessor*, ReferenceFace::Tag tag);

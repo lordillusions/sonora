@@ -28,6 +28,7 @@
 #include "io/als/AlsNewSet.h"
 #include "io/als/AlsReader.h"
 #include "io/als/AlsWriter.h"
+#include "io/als/DevicePresets.h"
 #include "midi/MidiManager.h"
 #include "plugins/PluginHost.h"
 
@@ -212,15 +213,6 @@ juce::File libraryFile(const juce::File& library, const std::string& path)
     return juce::File::isAbsolutePath(path) ? juce::File(path) : library.getChildFile(path);
 }
 
-// Root device tag of a preset file ("OriginalSimpler", "Eq8", ...), or empty.
-std::string presetDeviceTag(const juce::File& preset)
-{
-    std::string error;
-    auto dom = io::readAlsDom(preset, error);
-    if (dom == nullptr || dom->getFirstChildElement() == nullptr) return {};
-    return dom->getFirstChildElement()->getTagName().toStdString();
-}
-
 bool parseSuite(const juce::File& file, const juce::File& library, std::vector<Case>& cases, std::string& error)
 {
     std::ifstream in(file.getFullPathName().toStdString());
@@ -281,7 +273,7 @@ bool parseSuite(const juce::File& file, const juce::File& library, std::vector<C
             for (const auto& preset : files)
             {
                 if (added >= maximum) break;
-                const auto tag = presetDeviceTag(preset);
+                const auto tag = io::devicePresetTag(preset); // LIB-2: io/als/DevicePresets
                 const auto* entry = model::findCatalogEntry(tag);
                 if (entry == nullptr || ! entry->implemented)
                 {
@@ -421,18 +413,6 @@ std::unique_ptr<XmlElement> findTemplatePart(const juce::File& library)
     return nullptr;
 }
 
-// Factory presets reference installed library samples by library-relative path; point them at the local copy.
-void localizeLibrarySamples(XmlElement& e, const juce::File& library)
-{
-    if (e.getTagName() == "FileRef")
-        if (auto* rel = e.getChildByName("RelativePath"); rel != nullptr)
-            if (auto* type = e.getChildByName("RelativePathType"); type != nullptr && type->getIntAttribute("Value") == 5)
-            {
-                const auto local = library.getChildFile(rel->getStringAttribute("Value"));
-                if (local.existsAsFile()) setValue(&e, "Path", local.getFullPathName());
-            }
-    for (auto* c : e.getChildIterator()) localizeLibrarySamples(*c, library);
-}
 
 // ------------------------------------------------------------------------------------------------ make
 
@@ -511,7 +491,7 @@ int make(const juce::File& requestedDir, const juce::File& suite, const juce::Fi
                     parts->addChildElement(samplePart(*templatePart, wav, frames, 0).release());
                 }
             }
-            localizeLibrarySamples(*device, library);
+            io::localizeLibraryRefs(*device, {library}); // factory presets name library samples by library-relative path
             for (const auto& edit : spec.edits)
             {
                 auto* target = edit.part ? childPath(device.get(), "Player/MultiSampleMap/SampleParts/MultiSamplePart") : device.get();

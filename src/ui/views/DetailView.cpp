@@ -595,6 +595,15 @@ public:
 
     bool isMidiEffect() const { return model::deviceRole(model_) == model::DeviceRole::MidiEffect; }
 
+    // LIB-2: a preset dropped on a top-level device replaces it in place when it is a preset of that device (the app
+    // checks the type; any other preset is inserted like a drop on the track).
+    bool browserDrop(const BrowserDrag& payload, const MouseEvent&) override
+    {
+        if (payload.kind != BrowserDrag::Kind::DevicePreset || chain_ >= 0 || ! ctx().dropDeviceItem) return false;
+        ctx().dropDeviceItem(payload, trackIndex_, deviceIndex_, -1, -1, -1);
+        return true;
+    }
+
     // UI-55: takes the device's output level for the meter in the gap after this box (DetailView paints it).
     bool tickMeter()
     {
