@@ -11,6 +11,7 @@
 #include "ui/views/SampleView.h"
 #include "ui/views/NativeEditors.h"
 #include "ui/views/DeviceFace.h"
+#include "ui/views/SamplerFace.h"
 #include "ui/views/ReferenceFace.h"
 #include "ui/views/RackFace.h"
 #include "ui/views/ResynthEditor.h"
@@ -242,6 +243,10 @@ public:
                                          [this](Widget* widget, int parameter) { tag(widget, parameter); });
             return;
         }
+        // DEV-14b: the Sampler's face edits its layers and view settings in the model, so it knows where the device sits.
+        if ((referenceFace_ = addSamplerFace(*this, model, proc_, {trackIndex, deviceIndex, chain, child},
+                                             [this](Widget* widget, int parameter) { tag(widget, parameter); })))
+            return;
         if ((referenceFace_ = addReferenceFace(*this, model, proc_, [this](Widget* widget, int parameter) { tag(widget, parameter); })))
             return;
         if (auto* lfo = dynamic_cast<devices::CurveLfo*>(proc_))

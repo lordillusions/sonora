@@ -2,6 +2,7 @@
 #include "core/WavetableFormat.h"
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
 #include <string_view>
 #include <tuple>
 
@@ -185,18 +186,34 @@ std::unique_ptr<juce::XmlElement> samplePartXml(const model::SamplePart& part, i
     value(*p, "Name", juce::String(part.name));
     leaf("KeyRange/Min", part.keyMin); leaf("KeyRange/Max", part.keyMax);
     leaf("VelocityRange/Min", part.velMin); leaf("VelocityRange/Max", part.velMax);
-    if (fresh)
-    {
-        leaf("KeyRange/CrossfadeMin", part.keyMin); leaf("KeyRange/CrossfadeMax", part.keyMax);
-        leaf("VelocityRange/CrossfadeMin", part.velMin); leaf("VelocityRange/CrossfadeMax", part.velMax);
-    }
+    // Crossfades stay inside their range (a zone edited smaller keeps no fade outside itself; DEV-14b).
+    const auto fades = [&](const char* tag, int low, int high, int fadeLow, int fadeHigh) {
+        leaf(std::string(tag) + "/CrossfadeMin", std::clamp(fadeLow, low, std::max(low, high)));
+        leaf(std::string(tag) + "/CrossfadeMax", std::clamp(fadeHigh, low, std::max(low, high)));
+    };
+    fades("KeyRange", part.keyMin, part.keyMax, part.keyFadeMin, part.keyFadeMax);
+    fades("VelocityRange", part.velMin, part.velMax, part.velFadeMin, part.velFadeMax);
+    leaf("SelectorRange/Min", part.selMin); leaf("SelectorRange/Max", part.selMax);
+    fades("SelectorRange", part.selMin, part.selMax, part.selFadeMin, part.selFadeMax);
     leaf("RootKey", part.rootKey); leaf("Detune", part.detuneCents); leaf("Panorama", part.pan); leaf("Volume", part.volume);
+    leaf("TuneScale", part.tuneScale);
+    value(*p, "Link", part.link ? "true" : "false");
+    value(*p, "IsActive", part.active ? "true" : "false");
+    value(*p, "Solo", part.solo ? "true" : "false");
     leaf("SampleStart", (double) part.sampleStart); leaf("SampleEnd", (double) part.sampleEnd);
     // The reference writes an unused sustain loop over the whole region (mode 0), not 0..0.
     const bool unusedLoop = fresh && part.loopMode == 0 && part.loopEnd <= part.loopStart;
     leaf("SustainLoop/Start", (double) (unusedLoop ? part.sampleStart : part.loopStart));
     leaf("SustainLoop/End", (double) (unusedLoop ? part.sampleEnd : part.loopEnd));
     leaf("SustainLoop/Mode", part.loopMode); leaf("SustainLoop/Crossfade", (double) part.loopCrossfade);
+    leaf("SustainLoop/Detune", part.loopDetune);
+    if (! fresh || part.releaseMode != 3 || part.releaseStart != 0)
+    {
+        leaf("ReleaseLoop/Start", (double) part.releaseStart);
+        leaf("ReleaseLoop/End", (double) (part.releaseEnd > 0 ? part.releaseEnd : part.sampleEnd));
+        leaf("ReleaseLoop/Mode", part.releaseMode); leaf("ReleaseLoop/Crossfade", (double) part.releaseCrossfade);
+        leaf("ReleaseLoop/Detune", part.releaseDetune);
+    }
     auto* ref = path(*p, "SampleRef/FileRef");
     value(*ref, "RelativePathType", juce::String(part.sample.relativePathType));
     value(*ref, "RelativePath", juce::String(part.sample.relativePath));
@@ -353,7 +370,11 @@ std::string deviceTemplate(const model::Device& device)
             auto* parent = slash == std::string::npos ? &root : path(root, key.substr(0, slash));
             const auto leaf = key.substr(slash == std::string::npos ? 0 : slash + 1);
             const bool boolean = leaf == "RetriggerMode" || leaf == "DisplayPitchInHz" || leaf == "StrobeMode" || leaf == "UseConstPowCrossfade"
-                                 || leaf == "MidSideBalanceOn" || leaf == "BassMonoAudition" || leaf == "EcoProcessing";
+                                 || leaf == "MidSideBalanceOn" || leaf == "BassMonoAudition" || leaf == "EcoProcessing"
+                                 // Sampler (DEV-14b): RemoteableBool leaves of the map, globals and view settings
+                                 || leaf == "LoadInRam" || leaf == "RoundRobin" || leaf == "NumVoicesEnvTimeControl" || leaf == "IsSimpler"
+                                 || leaf == "LegacyMode" || leaf == "IsModulated" || leaf == "ZoneEditorVisible" || leaf == "Seconds"
+                                 || leaf == "IsAutoSelectEnabled" || leaf == "SimplerBreakoutVisible";
             value(*parent, leaf.c_str(), boolean ? juce::String(number >= 0.5 ? "true" : "false") : io::number(number));
         }
         if (! device.sampleParts.empty() || device.samplePartsEdited)
@@ -375,11 +396,13 @@ std::string deviceTemplate(const model::Device& device)
                     if (std::string_view(tag) == "SourceContext") map->createNewChildElement(tag);
                     else value(*map, tag, text);
                 }
-            if (device.type == "OriginalSimpler")
             {
+                // DEV-14b: a new Sampler is the same engine with IsSimpler false.
+                const bool simpler = device.type == "OriginalSimpler";
                 auto* globals = path(root, "Globals");
                 for (const auto& [tag, text] : std::initializer_list<std::pair<const char*, const char*>>{
-                         {"PitchBendRange", "5"}, {"MpePitchBendRange", "48"}, {"IsSimpler", "true"}, {"PlaybackMode", "0"}, {"LegacyMode", "false"}})
+                         {"PitchBendRange", "5"}, {"MpePitchBendRange", "48"}, {"IsSimpler", simpler ? "true" : "false"}, {"PlaybackMode", "0"},
+                         {"LegacyMode", "false"}})
                     if (! globals->getChildByName(tag)) value(*globals, tag, text);
                 if (! root.getChildByName("SimplerSlicing")) value(*path(root, "SimplerSlicing"), "PlaybackMode", "0");
             }

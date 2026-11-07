@@ -1,5 +1,7 @@
 #pragma once
-// Sonora Simpler (.als tag "OriginalSimpler", ROADMAP DEV-4 / DEV-4c) and Sonora Sampler ("MultiSampler").
+// Sonora Simpler (.als tag "OriginalSimpler", ROADMAP DEV-4 / DEV-4c). The Sonora Sampler ("MultiSampler", DEV-14b) is
+// devices::Sampler (Sampler.h), which shares this engine's laws (parameterInfos, simplerFilterStages, readSample...); the
+// `multisampler` constructor flag only remains for older tests.
 //
 // Implemented: sample zones (key / velocity ranges, root key, detune, per-zone volume and pan),
 // Classic, One-Shot and onset-Slice playback, the Simpler sample region and loop (Start / Length /
@@ -23,6 +25,17 @@
 
 namespace sonora::devices
 {
+
+// The filter of the shared sampling engine (Simpler and Sampler, DEV-22 measurements): `type` 0 LP, 1 HP, 2 BP, 3 Notch,
+// 4 Morph; `circuit` 0 Clean, 1 OSR, 2 MS2, 3 SMP, 4 PRD; `res` 0..1.25; `steep` = 24 dB; `morph` 0..1. Fills 1 or 2
+// biquad stages for the cutoff `freq` and returns their count.
+struct SimplerFilterSettings
+{
+    int type = 0, circuit = 0;
+    double res = 0, morph = 0;
+    bool steep = true;
+};
+int simplerFilterStages(const SimplerFilterSettings& settings, double sampleRate, double freq, BiquadCoeffs* out);
 
 class Simpler final : public NativeDevice
 {
@@ -127,6 +140,18 @@ public:
     int slices(const Zone& zone, const engine::SampleData& sample, double start, double end, double* out, int max) const;
     static double divisionBeats(int division); // SlicingBeatGrid enum -> beats
 
+    // Shared with the Sonora Sampler (DEV-14b), which runs the same engine with more of the reference's controls.
+    static std::vector<ParameterInfo> parameterInfos(); // the list above, by Param index (XML paths, ranges, defaults)
+    // The measured playback kernel (Kaiser-windowed sinc, stretched by `step` above the source rate).
+    static float readSample(const float* d, int len, double pos, double step);
+    static float saturate(float x, int circuit);  // a non-Clean circuit's drive stage
+    static int voiceCount(int index);             // Globals/NumVoices enum -> voices
+    static double lfoBeatQuarters(int index);     // LFO BeatRate enum -> quarter notes
+    static double repeatQuarters(int index);      // envelope RepeatTime enum -> quarter notes
+    // Envelope slope law (DEV-22): |slope| < 1 blends linear with exp(-kEnvSlopeRate x); slope +1 approaches the target
+    // dB-linearly down to kEnvSlopeFloor (kPitchSlopeFloor for the pitch envelope).
+    static constexpr double kEnvSlopeRate = 9.115, kEnvSlopeFloor = 6.3e-5, kPitchSlopeFloor = 1.23e-4;
+
 private:
     static constexpr int kMaxVoices = 32;
 
@@ -188,8 +213,6 @@ private:
     static float stepEnv(Env& e, bool released, const EnvShape& shape);
     EnvShape envShape(int attack, int decay, int sustain, int release, int attackSlope, int decaySlope, int releaseSlope) const;
     void updateFilter(Voice& v, float lfo);
-    static float readSample(const float* d, int len, double pos, double step);
-    static float saturate(float x, int circuit);
     double snappedLoopEnd(const engine::SampleData& sample, double loopStart, double loopEnd) const;
     void startGlide(Voice& v, int fromNote, bool legato);
 

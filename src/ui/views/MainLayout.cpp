@@ -10,6 +10,7 @@
 #include "ui/views/BrowserPanel.h"
 #include "ui/views/DetailView.h"
 #include "ui/views/ResynthEditor.h"
+#include "ui/views/SamplerFace.h"
 #include "ui/views/PreferencesPanel.h"
 #include "ui/views/CollabPanel.h"
 #include "ui/views/CollabVideo.h"
@@ -36,6 +37,7 @@ MainLayout::MainLayout(UiContext& ctx) : RootWidget(ctx)
     session_ = add<SessionView>();
     arrangement_ = add<ArrangementView>();
     detail_ = add<DetailView>();
+    zones_ = add<SamplerZoneEditor>();
     status_ = add<StatusBar>();
     status_->detailView = detail_;
     sessionButton_ = add<IconButton>(IconButton::Icon::SessionView);
@@ -155,6 +157,18 @@ void MainLayout::layout()
         r.removeFromBottom(m.panelGap);
     }
     detailSplit_->visible = detail_->visible && ! compactDevices() && ! hasResynthEditor();
+    {
+        // DEV-14b: the reference opens a Sampler's zone editor between the main view and the device view.
+        const auto target = sampler::zoneEditorTarget(context());
+        zones_->visible = target.device != nullptr && r.h > SamplerZoneEditor::kHeight + 80;
+        if (zones_->visible)
+        {
+            zones_->setBounds(r.removeFromBottom(SamplerZoneEditor::kHeight));
+            r.removeFromBottom(m.panelGap);
+        }
+        zones_->cornerRadius = m.panelRadius;
+        lastZoneDevice_ = target.device != nullptr ? target.device->id : -1;
+    }
 
     browser_->visible = context().browserVisible;
     if (browser_->visible)
@@ -276,7 +290,8 @@ void MainLayout::tick()
 {
     RootWidget::tick();
     auto& x = context();
-    if (compactDevices() != lastCompact_ || hasResynthEditor() != lastResynth_ || x.detailTab != lastTab_ || x.mainView != lastView_ || x.browserVisible != lastBrowser_ || x.detailVisible != lastDetail_
+    const auto zoneTarget = sampler::zoneEditorTarget(x);
+    if ((zoneTarget.device != nullptr ? zoneTarget.device->id : -1) != lastZoneDevice_ || compactDevices() != lastCompact_ || hasResynthEditor() != lastResynth_ || x.detailTab != lastTab_ || x.mainView != lastView_ || x.browserVisible != lastBrowser_ || x.detailVisible != lastDetail_
         || x.preferencesOpen != lastPrefs_ || x.exportOpen != lastExport_ || x.collabOpen != lastCollab_
         || x.collab.videoTiles.size() != lastVideoTiles_ || x.collab.showVideo != lastShowVideo_)
     {

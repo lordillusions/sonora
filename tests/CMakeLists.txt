@@ -8,6 +8,7 @@ set(SONORA_TEST_SOURCES
     test_engine.cpp
     test_devices.cpp
     test_simpler_parity.cpp
+    test_sampler.cpp
     test_channel_eq.cpp
     test_eq_display.cpp
     test_delay_reverb.cpp
@@ -87,7 +88,7 @@ set(SONORA_TEST_SOURCES
 )
 if(SONORA_WITH_UI)
     list(APPEND SONORA_TEST_SOURCES test_resynth_ui.cpp test_transport_warp_ui.cpp test_sample_drop_ui.cpp)
-    list(APPEND SONORA_TEST_SOURCES test_device_faces.cpp test_wavetable_face_ui.cpp test_tension_face_ui.cpp test_editor_workflow_ui.cpp test_browser_tags_ui.cpp test_device_presets_ui.cpp test_sample_packs_ui.cpp test_context_track_ui.cpp test_locators_ui.cpp test_inline_rename_ui.cpp test_drag_guide_ui.cpp test_clip_editing_ui.cpp test_ruler_zoom_ui.cpp test_track_state_ui.cpp test_set_view_ui.cpp test_shortcuts_ui.cpp test_updates_ui.cpp)
+    list(APPEND SONORA_TEST_SOURCES test_device_faces.cpp test_wavetable_face_ui.cpp test_tension_face_ui.cpp test_sampler_face_ui.cpp test_editor_workflow_ui.cpp test_browser_tags_ui.cpp test_device_presets_ui.cpp test_sample_packs_ui.cpp test_context_track_ui.cpp test_locators_ui.cpp test_inline_rename_ui.cpp test_drag_guide_ui.cpp test_clip_editing_ui.cpp test_ruler_zoom_ui.cpp test_track_state_ui.cpp test_set_view_ui.cpp test_shortcuts_ui.cpp test_updates_ui.cpp)
     list(APPEND SONORA_TEST_SOURCES test_ui.cpp test_clip_envelope_ui.cpp test_audio_clip.cpp test_grid.cpp test_grid_ui.cpp test_tools_ui.cpp test_automation_ui.cpp test_clip_launch_ui.cpp test_native_plugin_ui.cpp test_rack_face_ui.cpp test_curve_lfo_ui.cpp test_wavetable_ui.cpp test_wavetable_fx_ui.cpp test_wavetable_modulation_ui.cpp test_wavetable_routing_ui.cpp test_wavetable_sub_ui.cpp test_wavetable_quality_ui.cpp test_wavetable_noise_ui.cpp test_wavetable_window_ui.cpp test_wavetable_drag_modulation_ui.cpp test_wavetable_preset_browser_ui.cpp test_brand_ui.cpp)
     # PLG-11: the VST3's processor and editor, built here against the app's JUCE (no plug-in wrapper needed).
     list(APPEND SONORA_TEST_SOURCES test_wavetable_plugin.cpp ../src/plugin/WavetablePlugin.cpp ../src/plugin/WavetablePluginEditor.cpp)

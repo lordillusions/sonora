@@ -109,6 +109,7 @@ add_library(sonora_engine STATIC
     devices/native/Utility.cpp
     devices/native/EqEight.cpp
     devices/native/Simpler.cpp
+    devices/native/Sampler.cpp
     devices/native/FmSynth.cpp
     devices/native/VectorSynth.cpp
     devices/native/WavetableInstrument.cpp
@@ -253,6 +254,8 @@ add_library(sonora_ui STATIC
     ui/views/MonitorPanel.cpp
     ui/views/NativeEditors.cpp
     ui/views/DeviceFace.cpp
+    ui/views/SamplerFace.cpp
+    ui/views/SamplerZoneEditor.cpp
     ui/views/ReferenceFace.cpp
     ui/views/AutoFilterFace.cpp
     ui/views/ChannelEqFace.cpp

@@ -12,7 +12,7 @@ class NativeDevicePanel;
 class DeviceFace final : public Widget
 {
 public:
-    enum class Kind { Fm, Simpler, Sampler, Vector, Impulse, Echo, Redux, Tuner, Gate, AutoPan, Meter, Utility };
+    enum class Kind { Fm, Simpler, Vector, Impulse, Echo, Redux, Tuner, Gate, AutoPan, Meter, Utility };
     static bool supports(devices::DeviceProcessor*);
     // A parameter's value text as this face shows it (rack macros show their mapped parameter this way, UI-66).
     static std::string valueText(devices::DeviceProcessor*, int parameter);
@@ -76,7 +76,6 @@ private:
     double strobePhase_ = 0;
     std::array<float, 2> meterLevel_{}, meterHold_{}; // Meter: shown bar heights 0..1 and peak-hold marks
     std::array<int, 2> meterHoldAge_{};
-    NativeDevicePanel* zones_ = nullptr;
     std::vector<Control> controls_;
     std::function<void(Widget*, int)> tag_;
 };

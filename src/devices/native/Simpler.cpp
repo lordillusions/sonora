@@ -34,9 +34,9 @@ const std::array<float, 2 * kKernelHalf * kKernelResolution + 2>& kernelTable()
 }
 // Envelope slope curves (DEV-22 measurements): |slope| < 1 blends linear with exp(-kSlopeRate x); slope +1 approaches
 // the target dB-linearly down to kSlopeFloor; voices end once the release falls below -60 dB.
-constexpr double kSlopeRate = 9.115, kSlopeFloor = 6.3e-5;
-// The pitch envelope's slope +1 stages stop at a higher floor (measured: +12 st, 300 ms decay falls at 30 / s, not 32).
-constexpr double kPitchSlopeFloor = 1.23e-4;
+// The pitch envelope's slope +1 stages stop at a higher floor, Simpler::kPitchSlopeFloor (measured: +12 st, 300 ms decay
+// falls at 30 / s, not 32).
+constexpr double kSlopeRate = Simpler::kEnvSlopeRate, kSlopeFloor = Simpler::kEnvSlopeFloor;
 constexpr float kReleaseCut = 0.001f;
 // Voices chooser entries (enum index -> voice count). Index 5 = 6 voices is the reference default.
 constexpr int kVoiceCounts[] = {1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 24, 32}; // indices 0-11 measured
@@ -151,6 +151,11 @@ double slopeCurve(double x, double slope, double term)
     return slope >= 0 ? 1.0 - ((1.0 - slope) * (1.0 - x) + slope * term) : (1.0 + slope) * x + (-slope) * term;
 }
 } // namespace
+
+std::vector<ParameterInfo> Simpler::parameterInfos() { return makeInfos(); }
+int Simpler::voiceCount(int index) { return kVoiceCounts[std::clamp(index, 0, kVoiceChoices - 1)]; }
+double Simpler::lfoBeatQuarters(int index) { return kBeatLengths[std::clamp(index, 0, kBeatChoices - 1)]; }
+double Simpler::repeatQuarters(int index) { return kRepeatBeats[std::clamp(index, 0, kRepeatChoices - 1)]; }
 
 Simpler::Simpler(std::vector<Zone> zones, Mode mode, int pitchBendRange, bool multisampler)
     : NativeDevice(makeInfos()), zones_(std::move(zones)), mode_(mode), multisampler_(multisampler), bendRange_(pitchBendRange)
@@ -606,15 +611,26 @@ float Simpler::saturate(float x, int circuit)
 
 int Simpler::filterStages(double freq, BiquadCoeffs* out) const
 {
+    SimplerFilterSettings settings;
+    settings.type = std::clamp((int) std::lround(value(FilterType)), 0, 4);
+    settings.circuit = filterCircuit();
+    settings.res = value(FilterRes);
+    settings.morph = value(FilterMorph);
+    settings.steep = value(FilterSlope) >= 0.5f;
+    return simplerFilterStages(settings, sampleRate_, freq, out);
+}
+
+int simplerFilterStages(const SimplerFilterSettings& settings, double sampleRate, double freq, BiquadCoeffs* out)
+{
     // Clean circuit (measured): RBJ biquads, Q = 1 / (2 d) with resonance damping d = (1 - r) / (1 + 3 r) (Q <= 18.2);
     // 24 dB adds a second stage with damping (1 + d) / 2. Band-pass stages have a peak gain of Q.
     // OSR / MS2 / SMP (measured with noise at 1 kHz, r = 0 .. 1, 12 / 24 dB, LP / HP / BP): the same structure with their
     // own damping (fitted per resonance step within 0.4 dB); the drive saturation is applied before the filter (render).
-    const double r = std::clamp((double) value(FilterRes), 0.0, 1.0);
+    const double r = std::clamp(settings.res, 0.0, 1.0);
     const double clean = (1.0 - r) / (1.0 + 3.0 * r);
-    const int circuit = filterCircuit();
+    const int circuit = settings.circuit;
     // Modulated cutoff stays inside the Frequency range (measured: low velocities stop at ~30 Hz).
-    freq = std::clamp(freq, 30.0, std::min(22000.0, sampleRate_ * 0.49));
+    freq = std::clamp(freq, 30.0, std::min(22000.0, sampleRate * 0.49));
     // OSR's extra damping grows with the cutoff (Q at r = 0.5: 2.44 / 2.12 / 1.68 at 200 Hz / 1 kHz / 5 kHz): scale
     // measured at 1 kHz, interpolated in octaves through 0.14 at 200 Hz and 2.72 at 5 kHz.
     const double octaves = std::log2(freq / 1000.0), span = std::log2(5.0);
@@ -625,8 +641,8 @@ int Simpler::filterStages(double freq, BiquadCoeffs* out) const
                                   : std::max(clean, 0.0274);
     const double d2 = circuit == 1 ? std::max((1.0 + d) * 0.5, 0.595) : (1.0 + d) * 0.5;
     const double q1 = 0.5 / d, q2 = 0.5 / d2;
-    const int type = std::clamp((int) std::lround(value(FilterType)), 0, 4);
-    const bool steep = value(FilterSlope) >= 0.5f;
+    const int type = std::clamp(settings.type, 0, 4);
+    const bool steep = settings.steep;
     if (circuit == 4 && type <= 1)
     {
         // PRD (measured): a gain-compensated four-pole ladder, H = (1 + k) / ((1 + s)^4 + k) with s normalised to the
@@ -639,7 +655,7 @@ int Simpler::filterStages(double freq, BiquadCoeffs* out) const
         const double k = (kLadder[i] + (kLadder[i + 1] - kLadder[i]) * (pos - i)) * (steep ? 1.0 : 0.735);
         const double q = std::pow(k, 0.25) / std::sqrt(2.0);
         const double wa = (1 - q) * (1 - q) + q * q, wb = (1 + q) * (1 + q) + q * q;
-        const double K = 1.0 / std::tan(juce::MathConstants<double>::pi * freq / sampleRate_);
+        const double K = 1.0 / std::tan(juce::MathConstants<double>::pi * freq / sampleRate);
         // Bilinear transform of (b2 s^2 + b1 s + b0) / (a2 s^2 + a1 s + a0).
         const auto section = [K](double b2, double b1, double b0, double a2, double a1, double a0) {
             const double kk = K * K, n = a2 * kk + a1 * K + a0;
@@ -658,16 +674,16 @@ int Simpler::filterStages(double freq, BiquadCoeffs* out) const
         }
         return 2;
     }
-    const auto stageCoeffs = [this, freq](int kind, double q) {
+    const auto stageCoeffs = [sampleRate, freq](int kind, double q) {
         constexpr BiquadCoeffs::Type kinds[4] = {BiquadCoeffs::Type::LowPass, BiquadCoeffs::Type::HighPass, BiquadCoeffs::Type::BandPass, BiquadCoeffs::Type::Notch};
-        auto c = BiquadCoeffs::make(kinds[kind], sampleRate_, freq, q, 0.0);
+        auto c = BiquadCoeffs::make(kinds[kind], sampleRate, freq, q, 0.0);
         if (kind == 2) { c.b0 *= q; c.b2 *= q; } // constant-skirt band-pass: peak gain Q
         return c;
     };
     // Morph (measured at nine positions): each stage mixes its low-, band- and high-pass outputs (same poles) as
     // LP (0) > BP (.25) > HP (.5) > Notch = LP + HP (.75) > LP (1). The LP and HP weights move linearly; the BP weight
     // takes the remaining power, sqrt(1 - lp^2 - hp^2): 0.125 is 0.5 LP + 0.866 BP per stage.
-    const double morph = std::clamp((double) value(FilterMorph), 0.0, 1.0);
+    const double morph = std::clamp(settings.morph, 0.0, 1.0);
     const double lpWeight = std::clamp(morph < 0.5 ? 1.0 - 4.0 * morph : 4.0 * morph - 2.0, 0.0, 1.0);
     const double hpWeight = std::clamp(morph < 0.75 ? 4.0 * morph - 1.0 : 4.0 - 4.0 * morph, 0.0, 1.0);
     const double bpWeight = std::sqrt(std::max(0.0, 1.0 - lpWeight * lpWeight - hpWeight * hpWeight));

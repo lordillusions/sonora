@@ -382,6 +382,34 @@ void collectGlobals(const XmlElement* device, std::map<std::string, double>& out
             }
 }
 
+// Numeric / boolean leaves below a device that are not parameters (no <Manual>): the Sampler's matrix
+// (`KeyDst/ModConnections.0/Connection`), map settings (`Player/MultiSampleMap/RoundRobin`), view state. Keys are paths
+// like the parameter paths; the writer writes them back at the same place (DEV-14b).
+void collectPlainLeaves(const XmlElement* e, const juce::String& prefix, std::map<std::string, double>& out, int depth)
+{
+    if (depth > 8) return;
+    for (const auto* child : e->getChildIterator())
+    {
+        const auto tag = child->getTagName();
+        if (tag == "SampleParts" || tag == "SourceContext" || tag == "LastPresetRef" || tag == "LomId" || tag == "LomIdView"
+            || tag == "AutomationTarget" || tag == "ModulationTarget" || tag == "Pointee" || tag == "LockedScripts" || tag == "ViewData"
+            || child->getChildByName("Manual") != nullptr)
+            continue;
+        const auto path = prefix.isEmpty() ? tag : prefix + "/" + tag;
+        if (child->getNumChildElements() > 0)
+        {
+            collectPlainLeaves(child, path, out, depth + 1);
+            continue;
+        }
+        if (depth == 0 || ! child->hasAttribute("Value")) continue; // device-level leaves (UserName, IsFolded...) are not settings
+        const auto value = child->getStringAttribute("Value");
+        if (value.equalsIgnoreCase("true") || value.equalsIgnoreCase("false"))
+            out[path.toStdString()] = value.equalsIgnoreCase("true") ? 1.0 : 0.0;
+        else if (value.isNotEmpty() && value.containsOnly("0123456789.-+eE"))
+            out[path.toStdString()] = value.getDoubleValue();
+    }
+}
+
 std::vector<SamplePart> readSampleParts(const XmlElement* device)
 {
     std::vector<SamplePart> out;
@@ -407,6 +435,25 @@ std::vector<SamplePart> readSampleParts(const XmlElement* device)
         sp.loopEnd = (int64_t) num(p, "SustainLoop/End", 0.0);
         sp.loopMode = integer(p, "SustainLoop/Mode", 0);
         sp.loopCrossfade = (int64_t) num(p, "SustainLoop/Crossfade", 0.0);
+        // Sampler zone settings (DEV-14b): crossfades default to the range itself (no fade).
+        sp.keyFadeMin = integer(p, "KeyRange/CrossfadeMin", sp.keyMin);
+        sp.keyFadeMax = integer(p, "KeyRange/CrossfadeMax", sp.keyMax);
+        sp.velFadeMin = integer(p, "VelocityRange/CrossfadeMin", sp.velMin);
+        sp.velFadeMax = integer(p, "VelocityRange/CrossfadeMax", sp.velMax);
+        sp.selMin = integer(p, "SelectorRange/Min", 0);
+        sp.selMax = integer(p, "SelectorRange/Max", 127);
+        sp.selFadeMin = integer(p, "SelectorRange/CrossfadeMin", sp.selMin);
+        sp.selFadeMax = integer(p, "SelectorRange/CrossfadeMax", sp.selMax);
+        sp.tuneScale = num(p, "TuneScale", 100.0);
+        sp.link = boolean(p, "Link", false);
+        sp.active = boolean(p, "IsActive", true);
+        sp.solo = boolean(p, "Solo", false);
+        sp.loopDetune = num(p, "SustainLoop/Detune", 0.0);
+        sp.releaseStart = (int64_t) num(p, "ReleaseLoop/Start", 0.0);
+        sp.releaseEnd = (int64_t) num(p, "ReleaseLoop/End", (double) sp.sampleEnd);
+        sp.releaseMode = integer(p, "ReleaseLoop/Mode", 3);
+        sp.releaseCrossfade = (int64_t) num(p, "ReleaseLoop/Crossfade", 0.0);
+        sp.releaseDetune = num(p, "ReleaseLoop/Detune", 0.0);
         sp.sample.absolutePath = str(p, "SampleRef/FileRef/Path").toStdString();
         sp.sample.relativePath = str(p, "SampleRef/FileRef/RelativePath").toStdString();
         sp.sample.relativePathType = integer(p, "SampleRef/FileRef/RelativePathType", 0);
@@ -692,6 +739,8 @@ Device readDevice(const XmlElement* x, std::vector<std::string>& warnings)
                     const auto value = leaf->getStringAttribute("Value");
                     d.plain[key] = value.equalsIgnoreCase("true") ? 1.0 : value.equalsIgnoreCase("false") ? 0.0 : value.getDoubleValue();
                 }
+            // DEV-14b: the Sampler's plain leaves (modulation matrix connections, round robin, zone fade mode, view state).
+            if (d.type == "MultiSampler") collectPlainLeaves(x, {}, d.plain, 0);
         }
     }
 

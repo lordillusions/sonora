@@ -6,6 +6,7 @@
 #include "ui/views/MainLayout.h"
 #include "ui/views/BrowserPanel.h"
 #include "ui/views/NativeEditors.h"
+#include "ui/views/SamplerFace.h"
 #include "ui/widgets/Knob.h"
 #include "ui/widgets/Buttons.h"
 
@@ -45,7 +46,7 @@ TEST_CASE("plugin browser: vendor folders include AU and VST3 with stable search
     CHECK(! context.browserDrag); root.dispatchMouseUp(end);
 }
 
-TEST_CASE("native plugin UI: draw the LFO curve, edit zones, address empty drum pads and select rack chains")
+TEST_CASE("native plugin UI: draw the LFO curve, show the Sampler face, address empty drum pads and select rack chains")
 {
     model::Song song; song.tracks.resize(1); song.tracks[0].kind = model::TrackKind::Midi;
     auto lfo = devices::nativeDeviceModel("SonoraLfo"), sampler = devices::nativeDeviceModel("MultiSampler");
@@ -71,20 +72,12 @@ TEST_CASE("native plugin UI: draw the LFO curve, edit zones, address empty drum 
     CHECK_NEAR(processor->getParameter(devices::LfoShaper::Shape), 6, 0);
     CHECK(processor->getParameter(devices::LfoShaper::PointStart) < 0.05f);
     CHECK(processor->getParameter(devices::LfoShaper::PointStart + 16) > 0.95f);
-    std::vector<ui::NativeDevicePanel*> panels; collect(root, panels); REQUIRE(panels.size() == 2);
-    auto& zones = *panels[0];
-    // The compact sampler face opens the existing zone table from its Zones tab.
-    if (! zones.visible)
-    {
-        std::vector<ui::TextButton*> tabs; collect(*zones.parent(), tabs);
-        auto tab = std::find_if(tabs.begin(), tabs.end(), [](auto* button) { return button->label() == "Zones"; });
-        REQUIRE(tab != tabs.end()); const auto click = centre(**tab, (*tab)->localBounds());
-        root.dispatchMouseDown(click); root.dispatchMouseUp(click); REQUIRE(zones.visible);
-    }
-    auto cell = centre(zones, zones.cellBounds(0, 0)); cell.wheelDeltaY = -1; root.dispatchMouseWheel(cell);
-    CHECK(edits == 1); CHECK(song.tracks[0].devices[1].sampleParts[0].rootKey == 59);
-    CHECK(song.tracks[0].devices[1].samplePartsEdited);
-    auto& pads = *panels[1];
+    // DEV-14b: the Sampler shows its reference face (zones live in its zone editor, test_sampler_face_ui.cpp), not a zone table.
+    std::vector<ui::NativeDevicePanel*> panels; collect(root, panels); REQUIRE(panels.size() == 1);
+    std::vector<ui::ReferenceFace*> faces; collect(root, faces);
+    CHECK(std::any_of(faces.begin(), faces.end(), [](auto* face) { return ui::samplerFacePage(*face) >= 0; }));
+    CHECK(edits == 0);
+    auto& pads = *panels[0];
     ui::BrowserDrag payload{ui::BrowserDrag::Kind::Sample, "/tmp/snare.wav", "Snare"};
     ui::MouseEvent pad; pad.x = pads.padBounds(37).centreX(); pad.y = pads.padBounds(37).centreY();
     CHECK(pads.browserDrop(payload, pad)); CHECK(dropChain == 128 + 37); CHECK(dropZone == 0);
@@ -101,11 +94,11 @@ TEST_CASE("native plugin UI: draw the LFO curve, edit zones, address empty drum 
     bool mapped = false;
     for (const auto& p : song.tracks[0].devices[2].chains[0].devices[0].parameters) if (p.macroIndex == 2) mapped = true;
     CHECK(mapped);
-    panels.clear(); collect(root, panels); REQUIRE(panels.size() == 2);
-    ui::MouseEvent bank; bank.x = 30; bank.y = 100; bank.wheelDeltaY = 1; panels[1]->mouseWheel(bank);
+    panels.clear(); collect(root, panels); REQUIRE(panels.size() == 1);
+    ui::MouseEvent bank; bank.x = 30; bank.y = 100; bank.wheelDeltaY = 1; panels[0]->mouseWheel(bank);
     CHECK(context.drumPadBanks[42] == 52);
     context.selectedRackChain = 1; root.layout(); // rebuild the editor, retaining the displayed bank
-    panels.clear(); collect(root, panels); REQUIRE(panels.size() == 2);
-    pad.x = panels[1]->padBounds(53).centreX(); pad.y = panels[1]->padBounds(53).centreY();
-    CHECK(panels[1]->browserDrop(payload, pad)); CHECK(dropChain == 128 + 53);
+    panels.clear(); collect(root, panels); REQUIRE(panels.size() == 1);
+    pad.x = panels[0]->padBounds(53).centreX(); pad.y = panels[0]->padBounds(53).centreY();
+    CHECK(panels[0]->browserDrop(payload, pad)); CHECK(dropChain == 128 + 53);
 }

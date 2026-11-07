@@ -217,6 +217,18 @@ AppController::AppController() : engine_(host_, midi_)
         dropBrowserItem(item, track, beat, scene);
     };
     ui_.editDevice = [this](int track, int device, const auto& edit, const std::string& label) { editDevice(track, device, edit, label); };
+    // DEV-14b: view leaves (the Sampler's tab and zone editor switch) go straight into the model: saved, not an undo step.
+    ui_.setDeviceViewValue = [this](int track, int device, int chain, int child, const std::string& key, double value) {
+        auto* t = song_ ? model::trackAt(*song_, track) : nullptr;
+        if (! t || device < 0 || (size_t) device >= t->devices.size()) return;
+        auto* d = &t->devices[(size_t) device];
+        if (chain >= 0)
+        {
+            if ((size_t) chain >= d->chains.size() || child < 0 || (size_t) child >= d->chains[(size_t) chain].devices.size()) return;
+            d = &d->chains[(size_t) chain].devices[(size_t) child];
+        }
+        d->plain[key] = value;
+    };
     ui_.importWavetable = [this](int track, int device, int oscillator, const auto& path, int chain, int child) {
         importWavetable(track, device, oscillator, path, chain, child);
     };
@@ -2476,6 +2488,7 @@ void AppController::editDeviceIf(int trackIndex, int index, const std::function<
     model::allocateDeviceIds(*song_, device);
     if (const auto bank = ui_.drumPadBanks.find(oldId); bank != ui_.drumPadBanks.end()) ui_.drumPadBanks[device.id] = bank->second;
     if (const auto view = ui_.rackViews.find(oldId); view != ui_.rackViews.end()) ui_.rackViews[device.id] = view->second; // UI-66
+    if (const auto view = ui_.samplerViews.find(oldId); view != ui_.samplerViews.end()) ui_.samplerViews[device.id] = view->second; // DEV-14b
     if (ui_.rackMapId == oldId) ui_.rackMapId = device.id;
     if (const auto view = ui_.wavetableFxViews.find(oldId); view != ui_.wavetableFxViews.end())
         ui_.wavetableFxViews[device.id] = view->second;

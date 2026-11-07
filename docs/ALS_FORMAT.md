@@ -513,6 +513,18 @@ from the reference app drops them, so hidden/deactivated tracks come back as ord
   **13 returns crash the reference app while loading** (12 open), so Sonora caps returns at 12.
 
 
+## Sampler (`MultiSampler`, DEV-14b)
+
+Full parameter list, enums and laws: docs/SAMPLER.md. Format facts found on the way:
+- Sections that are switched off often have an empty `<Slot><Value/></Slot>` (Filter, Shaper, Aux, LFOs, pitch envelope,
+  Osc); the element under `<Value>` carries `Id="0"` (ALS-15c). Their defaults are the reference's "switched on" values.
+- `MultiSamplePart/KeyRange|VelocityRange|SelectorRange/CrossfadeMin|Max` lie inside Min..Max: full level between them.
+- `ReleaseLoop/Mode`: 3 = OFF (the default), 0 = play on to the sample end, 1 = forward release loop, 2 = back-and-forth.
+- The matrix is `SimplerModDst` rows of plain `ModConnections.{0,1}/{Connection,Amount}`; `MidiCtrl.0..5` = Pressure,
+  Pitch Bend, Mod Wheel, Foot Ctrl, Slide, Note PB. `Connection` 0..31 = the destination list in docs/SAMPLER.md.
+- `Player/MultiSampleMap/RoundRobinRandomSeed` is a full 32-bit integer: kept as a double, never through a float.
+- `Globals/PitchBendRange` / `MpePitchBendRange` are plain UserFloats.
+
 ## Wavetable (`InstrumentVector`, DEV-28b)
 
 Root plain leaves (effect modes, unison mode / voices, filter routing, MonoPoly, PolyVoices, HiQ) are read into

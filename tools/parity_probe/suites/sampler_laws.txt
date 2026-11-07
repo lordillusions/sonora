@@ -1,0 +1,30 @@
+# DEV-14b Sonora Sampler (MultiSampler). Device XML: the reference's default Sampler (Filter on, other sections empty)
+# with our saw sample, one variable per case, then every factory Sampler preset with its own library samples.
+# No reference stems exist yet: `render` proves every case plays (docs/SAMPLER.md); `compare` once the owner exports them.
+case s-default notes=melody
+  device Defaults/Instruments/Sampler.adv
+case s-velocities notes=velocities
+  device Defaults/Instruments/Sampler.adv
+case s-keys notes=keys
+  device Defaults/Instruments/Sampler.adv
+case s-reverse notes=single
+  device Defaults/Instruments/Sampler.adv Player/Reverse=true
+case s-filter-lp500 notes=single
+  device Defaults/Instruments/Sampler.adv Filter/Slot/Value/SimplerFilter/Freq=500
+case s-vel-to-volume notes=velocities
+  device Defaults/Instruments/Sampler.adv VelDst/ModConnections.0/Connection=18 VelDst/ModConnections.0/Amount=100
+case s-modwheel-filter notes=single
+  device Defaults/Instruments/Sampler.adv MidiCtrl.2/ModConnections.0/Connection=12 MidiCtrl.2/ModConnections.0/Amount=-50
+case s-time-plus notes=single
+  device Defaults/Instruments/Sampler.adv Globals/EnvScale/EnvTime=100 VolumeAndPan/Envelope/ReleaseTime=1000
+case s-initial-peak notes=single
+  device Defaults/Instruments/Sampler.adv VolumeAndPan/Envelope/AttackLevel=1 VolumeAndPan/Envelope/DecayLevel=0.5 VolumeAndPan/Envelope/AttackTime=500
+case s-loop-env notes=single
+  device Defaults/Instruments/Sampler.adv VolumeAndPan/Envelope/LoopMode=1 VolumeAndPan/Envelope/DecayTime=100 VolumeAndPan/Envelope/SustainLevel=0.5
+case s-portamento notes=legato
+  device Defaults/Instruments/Sampler.adv Globals/PortamentoMode=2 Globals/PortamentoTime=200
+case s-zone-tune0 notes=keys
+  device Defaults/Instruments/Sampler.adv part:TuneScale=0
+case s-sustain-loop notes=single
+  device Defaults/Instruments/Sampler.adv part:SustainLoop/Mode=1 part:SustainLoop/Start=4410 part:SustainLoop/End=8820 part:ReleaseLoop/Mode=0
+presets Devices/Instruments/Sampler

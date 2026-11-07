@@ -651,7 +651,7 @@ DeviceFace::DeviceFace(const model::Device& model, P* p, int track, int device, 
     : model_(model), processor_(p), track_(track), device_(device), chain_(chain), child_(child), tag_(std::move(tag))
 {
     if (dynamic_cast<F*>(p)) kind_ = Kind::Fm;
-    else if (dynamic_cast<S*>(p)) kind_ = model.type == "MultiSampler" ? Kind::Sampler : Kind::Simpler;
+    else if (dynamic_cast<S*>(p)) kind_ = Kind::Simpler; // the Sampler has its own face (SamplerFace.cpp)
     else if (dynamic_cast<V*>(p)) kind_ = Kind::Vector;
     else if (dynamic_cast<I*>(p)) kind_ = Kind::Impulse;
     else if (dynamic_cast<G*>(p)) kind_ = Kind::Gate;
@@ -842,43 +842,6 @@ DeviceFace::DeviceFace(const model::Device& model, P* p, int track, int device, 
         pair(S::Detune, "Detune", {523.5f, 106, 58, 11}, 1);
         pair(S::GlideTime, "Time", {591.8f, 106, 62, 11}, 1);
     }
-    else if (kind_ == Kind::Sampler)
-    {
-        tab("Sample", {0, 0, 70, 18}, 0); tab("Filter / Env", {74, 0, 90, 18}, 1); tab("Zones", {168, 0, 58, 18}, 2); tab("Modulation", {230, 0, 86, 18}, 3);
-        zones_ = add<NativeDevicePanel>(model, track, device, chain, child);
-        graph_ = {kind_ == Kind::Simpler ? 66.0f : 0.0f, 24, kind_ == Kind::Simpler ? 438.0f : 504.0f, 78};
-        int col = 0;
-        for (int parameter : {S::Transpose, S::Detune, S::Attack, S::Decay, S::Sustain, S::Release, S::VelToVolume, S::Pan})
-            control(parameter, p->parameters()[(size_t) parameter].name, {(float) col++ * 63, 110, 60, 54}, true, 0);
-        control(S::Volume, "Volume", {514, 34, 60, 58});
-        control(S::KeyZoneShift, "Key Shift", {514, 112, 60, 52});
-        int mod = 0;
-        for (int parameter : {S::Voices, S::Retrigger, S::LfoOn, S::LfoRate, S::LfoShape, S::LfoPitch, S::LfoVolume, S::LfoPan, S::LfoSync, S::LfoBeat})
-            control(parameter, p->parameters()[(size_t) parameter].name, {(float) (mod % 5) * 100, 30 + (float) (mod / 5) * 64, 96, 56}, true, 3), ++mod;
-        control(S::FilterOn, "Filter", {0, 25, 60, 18}, false, 1);
-        control(S::FilterType, "Type", {66, 25, 103, 18}, false, 1);
-        control(S::FilterSlope, "Slope", {176, 25, 72, 18}, false, 1);
-        int x = 0;
-        for (int parameter : {S::FilterFreq, S::FilterRes, S::FilterKeyTrack, S::FilterEnvAmount, S::FilterAttack, S::FilterDecay, S::FilterSustain, S::FilterRelease})
-            control(parameter, p->parameters()[(size_t) parameter].name, {(float) x++ * 63, 110, 60, 54}, true, 1);
-        control(S::FilterEnvOn, "Envelope", {266, 25, 80, 18}, false, 1);
-        control(S::FadeIn, "In", {365, 25, 67, 18}, false, 1); control(S::FadeOut, "Out", {438, 25, 66, 18}, false, 1);
-        // Shared voice engine settings (DEV-22). Simpler's region / loop fractions do not apply to zones (see applies()).
-        tab("Voice", {320, 0, 58, 18}, 4);
-        int slot = 0;
-        for (int parameter : {S::AttackSlope, S::DecaySlope, S::ReleaseSlope, S::FilterAttackSlope, S::FilterDecaySlope, S::FilterReleaseSlope,
-                              S::FilterMorph, S::FilterVelMod, S::FilterLfoMod, S::FilterDrive, S::GlideTime, S::VolKeyScale, S::PanKeyScale,
-                              S::PanRandom, S::PitchEnvAmount, S::PitchAttack, S::PitchDecay, S::PitchSustain, S::PitchRelease,
-                              S::PitchAttackSlope, S::PitchDecaySlope, S::PitchReleaseSlope, S::LfoAttack, S::Spread})
-        {
-            auto* knob = static_cast<Knob*>(control(parameter, p->parameters()[(size_t) parameter].name, {(float) (slot % 10) * 58, 22 + (float) (slot / 10) * 40, 56, 38}, true, 4));
-            knob->style = Knob::Style::Compact;
-            ++slot;
-        }
-        slot = 0;
-        for (int parameter : {S::GlideMode, S::PitchEnvOn, S::ConstPowerFade, S::Interpolation, S::LfoRetrigger, S::OneShotGate, S::FilterCircuit, S::FilterCircuitBp})
-            control(parameter, p->parameters()[(size_t) parameter].name, {(float) slot++ * 72, 146, 70, 13}, false, 4);
-    }
     else if (kind_ == Kind::Vector)
     {
         graph_ = {0, 24, 246, 78};
@@ -1004,23 +967,13 @@ DeviceFace::DeviceFace(const model::Device& model, P* p, int track, int device, 
         control(E::Output, "Output", {382, 55, 78, 54}); control(E::DryWet, "Dry/Wet", {382, 110, 78, 54});
     }
 }
-bool DeviceFace::applies(const std::string& parameterId) const
-{
-    // Simpler's sample region and loop are not part of a Sampler zone (zones carry their own region and loop); the
-    // Simpler-only LFO offset / key scale and envelope loop settings are not read for the Sampler either.
-    if (kind_ != Kind::Sampler) return true;
-    for (int parameter : {S::LoopOn, S::SampleStartMod, S::SampleLengthMod, S::LoopLengthMod, S::LoopFadeMod, S::Snap,
-                          S::LfoOffset, S::LfoKeyScale, S::AmpLoopMode, S::AmpLoopTime, S::AmpRepeatTime, S::SlicePlayback})
-        if (processor_->parameters()[(size_t) parameter].id == parameterId) return false;
-    return true;
-}
+bool DeviceFace::applies(const std::string&) const { return true; }
 float DeviceFace::preferredWidth() const
 {
     switch (kind_)
     {
         case Kind::Fm: return 570;
         case Kind::Simpler: return 660;
-        case Kind::Sampler: return 580;
         case Kind::Vector: return 724;
         case Kind::Impulse: return 592;
         case Kind::Echo: return 472;
@@ -1141,7 +1094,6 @@ void DeviceFace::layout()
         control.widget->visible = show;
         control.widget->setBounds(scaled(control.bounds));
     }
-    if (zones_) { zones_->visible = page_ == 2; zones_->setBounds(scaled({0, 24, 504, 140})); }
     if (kind_ == Kind::Utility)
     {
         // Text measured against the reference grows with the face, like its geometry.
@@ -1767,15 +1719,6 @@ void DeviceFace::paint(SkCanvas& c, const Theme& t)
         }
         for (float x : {244.0f, 377.5f}) paint::line(c, x, scaled({0, 121, 0, 0}).y, x, height() - 2, separator);
     }
-    else if (kind_ == Kind::Sampler)
-    {
-        if (page_ == 0) waveform(c, t, graphBounds());
-        else if (page_ == 1)
-        {
-            filter(c, t, scaled({0, 50, 246, 52}), S::FilterFreq, S::FilterRes, S::FilterType);
-            envelope(c, t, scaled({256, 50, 248, 52}), S::FilterAttack, S::FilterDecay, S::FilterSustain, S::FilterRelease);
-        }
-    }
     else if (kind_ == Kind::Vector)
     {
         const auto r = graphBounds(); grid(c, t, r);
@@ -2007,17 +1950,6 @@ void DeviceFace::mouseDown(const MouseEvent& e)
             if (x >= 0 && std::abs(e.x - x) <= best) { best = std::abs(e.x - x); dragHandle_ = handle; }
         if (dragHandle_ < 0) return;
     }
-    else if (kind_ == Kind::Sampler && page_ == 0 && graphBounds().contains(e.x, e.y))
-    {
-        const auto* sampler = dynamic_cast<S*>(processor_);
-        if (sampler->zones().empty()) return;
-        const auto& z = sampler->zones()[0]; const auto* data = z.slot ? z.slot->get() : nullptr;
-        if (! data || model_.sampleParts.empty()) return;
-        const auto r = graphBounds();
-        const float start = r.x + (float) z.part.sampleStart / (float) data->audio.getNumSamples() * r.w;
-        const float end = r.x + (float) (z.part.sampleEnd > 0 ? z.part.sampleEnd : data->audio.getNumSamples()) / (float) data->audio.getNumSamples() * r.w;
-        if (std::min(std::abs(e.x - start), std::abs(e.x - end)) <= 9) dragHandle_ = std::abs(e.x - start) < std::abs(e.x - end) ? 0 : 1;
-    }
     else dragHandle_ = 2;
     mouseDrag(e);
 }
@@ -2064,12 +1996,6 @@ void DeviceFace::mouseDrag(const MouseEvent& e)
         else if (dragHandle_ == 3)
             processor_->setParameter(S::LoopLengthMod, (float) std::clamp((end - view) / std::max(1e-9, end - start), 0.0, 1.0));
     }
-    else if (kind_ == Kind::Sampler && page_ == 0 && dragHandle_ < 2)
-    {
-        const auto& z = dynamic_cast<S*>(processor_)->zones()[0]; const auto* data = z.slot->get();
-        const int64_t end = z.part.sampleEnd > 0 ? z.part.sampleEnd : data->audio.getNumSamples();
-        dragFrame_ = std::clamp<int64_t>((int64_t) (x * (float) data->audio.getNumSamples()), dragHandle_ == 0 ? 0 : z.part.sampleStart + 1, dragHandle_ == 0 ? end - 1 : data->audio.getNumSamples());
-    }
     else if (kind_ == Kind::Echo && page_ == 0 && r.contains(e.x, e.y))
     {
         const bool right = e.shift;
@@ -2081,31 +2007,9 @@ void DeviceFace::mouseDrag(const MouseEvent& e)
         processor_->setParameter(F::oscParam(selected_, F::Decay), 1 + x * x * 19999);
         processor_->setParameter(F::oscParam(selected_, F::Sustain), y);
     }
-    else if (kind_ == Kind::Sampler && page_ == 1)
-    {
-        const auto filterRect = scaled(Rect{0, 50, 246, 52});
-        if (filterRect.contains(e.x, e.y))
-        {
-            processor_->setParameter(S::FilterFreq, 20 * std::pow(1000.0f, std::clamp(e.x / filterRect.w, 0.0f, 1.0f)));
-            processor_->setParameter(S::FilterRes, std::clamp(1 - (e.y - filterRect.y) / filterRect.h, 0.0f, 1.0f));
-        }
-    }
     repaint();
 }
-void DeviceFace::mouseUp(const MouseEvent& e)
-{
-    const int handle = dragHandle_; dragHandle_ = -1;
-    if (e.right || handle < 0 || handle > 1 || kind_ != Kind::Sampler) return; // Simpler flags are live parameters
-    const int64_t frame = dragFrame_;
-    // Structural edit may synchronously destroy this face. No member access after commit.
-    edit([handle, frame](auto& d) {
-        if (d.sampleParts.empty()) return;
-        auto& z = d.sampleParts[0]; if (handle == 0) z.sampleStart = frame; else z.sampleEnd = frame;
-        z.loopStart = std::max(z.loopStart, z.sampleStart); z.loopEnd = std::min(z.loopEnd, z.sampleEnd);
-        if (z.loopEnd <= z.loopStart) z.loopMode = 0;
-        d.samplePartsEdited = true;
-    }, "Sample Boundary");
-}
+void DeviceFace::mouseUp(const MouseEvent&) { dragHandle_ = -1; }
 bool DeviceFace::mouseWheel(const MouseEvent& e)
 {
     if (kind_ != Kind::Simpler || page_ != 0 || ! graphBounds().contains(e.x, e.y) || ! simplerView(processor_).sample) return false;
@@ -2135,7 +2039,7 @@ bool DeviceFace::mouseWheel(const MouseEvent& e)
 bool DeviceFace::browserDrop(const BrowserDrag& payload, const MouseEvent& e)
 {
     if (payload.kind != BrowserDrag::Kind::Sample) return false;
-    if (kind_ != Kind::Sampler && kind_ != Kind::Simpler && kind_ != Kind::Impulse) return false;
+    if (kind_ != Kind::Simpler && kind_ != Kind::Impulse) return false;
     int zone = 0;
     if (kind_ == Kind::Impulse) zone = e.y < scaled({0, 0, 0, 50}).h ? std::clamp((int) (e.x / 65), 0, 7) : selected_;
     if (ctx().dropDeviceItem) ctx().dropDeviceItem(payload, track_, device_, chain_, zone, child_);

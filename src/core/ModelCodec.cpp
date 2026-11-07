@@ -407,6 +407,18 @@ template <class IO> void visit(IO& io, SamplePart& s)
     io.v(s.loopEnd);
     io.v(s.loopMode);
     io.v(s.loopCrossfade);
+    for (int* x : {&s.keyFadeMin, &s.keyFadeMax, &s.velFadeMin, &s.velFadeMax, &s.selMin, &s.selMax, &s.selFadeMin, &s.selFadeMax})
+        io.v(*x); // 8: Sampler zone settings (DEV-14b)
+    io.v(s.tuneScale);
+    io.v(s.link);
+    io.v(s.active);
+    io.v(s.solo);
+    io.v(s.loopDetune);
+    io.v(s.releaseStart);
+    io.v(s.releaseEnd);
+    io.v(s.releaseMode);
+    io.v(s.releaseCrossfade);
+    io.v(s.releaseDetune);
     visit(io, s.sample);
     io.v(s.sampleRate);
     io.v(s.lengthSamples);
@@ -740,7 +752,7 @@ static_assert(sizeof(Track) == 1144, "model::Track changed: update ModelCodec");
 static_assert(sizeof(Mixer) == 200, "model::Mixer changed: update ModelCodec");
 static_assert(sizeof(Song) == 1528, "model::Song changed: update ModelCodec");
 static_assert(sizeof(MidiNote) == 48, "model::MidiNote changed: update ModelCodec");
-static_assert(sizeof(SamplePart) == 344, "model::SamplePart changed: update ModelCodec");
+static_assert(sizeof(SamplePart) == 440, "model::SamplePart changed: update ModelCodec");
 static_assert(sizeof(PluginInfo) == 184, "model::PluginInfo changed: update ModelCodec");
 static_assert(sizeof(Parameter) == 80, "model::Parameter changed: update ModelCodec");
 static_assert(sizeof(TakeLane) == 104, "model::TakeLane changed: update ModelCodec");

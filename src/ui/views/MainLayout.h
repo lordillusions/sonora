@@ -29,6 +29,7 @@ class PreferencesPanel;
 class ExportPanel;
 class Splitter;
 class IconButton;
+class SamplerZoneEditor;
 
 class MainLayout : public RootWidget
 {
@@ -53,6 +54,8 @@ private:
     SessionView* session_;
     ArrangementView* arrangement_;
     DetailView* detail_;
+    SamplerZoneEditor* zones_ = nullptr; // DEV-14b: a Sampler's zone editor, above the device view while its Zone tab is open
+    int lastZoneDevice_ = -1;
     StatusBar* status_;
     Splitter* browserSplit_ = nullptr;
     Splitter* detailSplit_ = nullptr;

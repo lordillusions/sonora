@@ -14,6 +14,7 @@
 #include "engine/EngineGraph.h"
 #include "ui/views/DeviceFace.h"
 #include "ui/views/ReferenceFace.h"
+#include "ui/views/SamplerFace.h"
 #include "devices/native/EqEight.h"
 #include "devices/native/Limiter.h"
 #include "devices/native/Bands.h"
@@ -211,7 +212,7 @@ TEST_CASE("device faces: Simpler One-Shot draws its fades and Slicing its slices
 }
 TEST_CASE("device faces: all native parameters remain reachable and inside the compact face across tabs")
 {
-    for (const auto* type : {"SonoraFm", "OriginalSimpler", "MultiSampler", "SonoraVector", "SonoraImpulse", "SonoraEcho", "Redux2", "Gate", "AutoPan"})
+    for (const auto* type : {"SonoraFm", "OriginalSimpler", "SonoraVector", "SonoraImpulse", "SonoraEcho", "Redux2", "Gate", "AutoPan"} /* Sampler: test_sampler_face_ui */)
     {
         auto model = devices::nativeDeviceModel(type); devices::BuildContext build; auto processor = devices::createDevice(model, build);
         ui::UiContext context; ui::RootWidget root(context);
@@ -329,10 +330,18 @@ TEST_CASE("device faces: every face renders at normal detail height and creates 
     for (size_t i = 0; i < types.size(); ++i)
     {
         context.selectedTrack = (int) i; root.layout();
-        if (i == 5 || i == 6) REQUIRE(find<ui::ReferenceFace>(root)); // Limiter, Compressor: matched to the Live 12 capture (UI-42)
+        // Limiter, Compressor (UI-42) and the Sampler (DEV-14b): matched to captures of the reference.
+        if (i == 3 || i == 5 || i == 6) REQUIRE(find<ui::ReferenceFace>(root));
         else if (i != 1 && i != 2) REQUIRE(find<ui::DeviceFace>(root));
         REQUIRE(gfx::renderToPng(root, 1440, 700, 2, dir.getChildFile(types[i] + ".png").getFullPathName().toStdString()));
-        if (i == 3 || i == 4)
+        if (i == 3)
+        {
+            auto* face = find<ui::ReferenceFace>(root); REQUIRE(face);
+            ui::selectSamplerFacePage(*face, 2); // Filter / Global
+            CHECK(ui::samplerFacePage(*face) == 2);
+            REQUIRE(gfx::renderToPng(root, 1440, 700, 2, dir.getChildFile(types[i] + "-filter.png").getFullPathName().toStdString()));
+        }
+        if (i == 4)
         {
             auto* face = find<ui::DeviceFace>(root); REQUIRE(face);
             if (i == 4) face->selectPage(1);

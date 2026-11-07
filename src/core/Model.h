@@ -291,6 +291,20 @@ struct SamplePart
     int64_t loopStart = 0, loopEnd = 0;
     int loopMode = 0;
     int64_t loopCrossfade = 0;
+    // Sonora Sampler zone settings (DEV-14b, docs/SAMPLER.md). Crossfades: the zone plays at full level from
+    // Crossfade{Min,Max} inward and fades towards Min / Max (CrossfadeMin >= Min, CrossfadeMax <= Max).
+    int keyFadeMin = 0, keyFadeMax = 127, velFadeMin = 1, velFadeMax = 127;
+    int selMin = 0, selMax = 127, selFadeMin = 0, selFadeMax = 127; // <SelectorRange>: the Sample Selector zone
+    double tuneScale = 100.0;      // <TuneScale> %: key tracking (0: every key plays the root pitch)
+    bool link = false;             // <Link>: Sample Start follows the sustain loop start
+    bool active = true, solo = false; // <IsActive> / <Solo>
+    double loopDetune = 0.0;       // <SustainLoop/Detune> cents while the loop plays
+    // <ReleaseLoop>: Mode 0 = play on to the sample end on release, 1 forward release loop, 2 back-and-forth, 3 off (the
+    // sustain loop keeps looping through the release). Start is the release loop's start; it ends at the sample end.
+    int64_t releaseStart = 0, releaseEnd = 0;
+    int releaseMode = 3;
+    int64_t releaseCrossfade = 0;
+    double releaseDetune = 0.0;
     FileRef sample;
     double sampleRate = 0.0;
     int64_t lengthSamples = 0;

@@ -460,6 +460,13 @@ struct UiContext
     struct RackView { bool macros = true, chains = false; int zones = 0; };
     std::map<int, RackView> rackViews;
     int rackMapId = -1; // UI-66: the rack whose macro Map mode is on, -1 none
+    // DEV-14b: the Sampler face's view state not saved by the set: the selected sample layer (-1: the part the set marks
+    // <Selection>) and the zone editor's tab (0 Key, 1 Velocity, 2 Selector). Keyed by device id like rackViews.
+    struct SamplerView { int part = -1; int zoneTab = 0; };
+    std::map<int, SamplerView> samplerViews;
+    // DEV-14b: writes a device's plain view leaf (the Sampler's ViewSettings/SelectedPage, ZoneEditorVisible ...) into the
+    // model so the set saves it, without an undo step or a new processor. `chain` / `child` < 0: a track-level device.
+    std::function<void(int track, int device, int chain, int child, const std::string& key, double value)> setDeviceViewValue;
     // Sonora Prism editor placement (UI-27): a floating window or docked in the device chain, chosen per instance.
     // Keyed by track id + device ids because imported device ids repeat across tracks. View state only: never saved.
     struct WavetableKey

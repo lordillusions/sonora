@@ -21,6 +21,7 @@
 #include "devices/native/SwissArmyMeter.h"
 #include "devices/native/Tuner.h"
 #include "devices/native/Simpler.h"
+#include "devices/native/Sampler.h"
 #include "devices/native/FmSynth.h"
 #include "devices/native/VectorSynth.h"
 #include "devices/native/Tension.h"
@@ -172,8 +173,14 @@ std::unique_ptr<DeviceProcessor> createSimpler(const model::Device& d, BuildCont
         dev->loadFromModel(d);
         return dev;
     }
+    if (d.type == "MultiSampler") // DEV-14b: the Sampler's own device (same engine laws, every Sampler control)
+    {
+        auto sampler = std::make_unique<Sampler>(std::move(zones), (int) plain("Player/MultiSampleMap/RoundRobinRandomSeed", 0));
+        sampler->loadFromModel(d);
+        return sampler;
+    }
     auto dev = std::make_unique<Simpler>(std::move(zones), static_cast<Simpler::Mode>((int) plain("Globals/PlaybackMode", 0)),
-                                         (int) plain("Globals/PitchBendRange", 5), d.type == "MultiSampler");
+                                         (int) plain("Globals/PitchBendRange", 5));
     dev->loadFromModel(d);
     return dev;
 }
@@ -499,9 +506,16 @@ void captureDeviceState(model::Device& d, DeviceProcessor* processor)
     for (size_t i = 0; i < infos.size(); ++i)
     {
         const float value = processor->getParameter((int) i);
-        if (infos[i].plainValue) { d.plain[infos[i].id] = value; continue; }
         const auto found = std::find_if(d.parameters.begin(), d.parameters.end(), [&](const auto& p) { return p.path == infos[i].id; });
-        if (found != d.parameters.end()) found->value = value;
+        // The processor holds floats: a value that only differs by float rounding keeps the file's double, so saving an
+        // untouched device rewrites nothing (DEV-14b round trip).
+        const auto changed = [&](double stored) { return std::abs(stored - (double) value) > 1e-6 * std::max(1.0, std::abs(stored)); };
+        if (infos[i].plainValue)
+        {
+            if (const auto it = d.plain.find(infos[i].id); it == d.plain.end() || changed(it->second)) d.plain[infos[i].id] = value;
+            continue;
+        }
+        if (found != d.parameters.end()) { if (changed(found->value)) found->value = value; }
         else if (! d.plugin && std::abs(value - infos[i].defaultValue) > 1e-6f)
         {
             model::Parameter p; p.path = infos[i].id; p.value = value; p.booleanValue = infos[i].isToggle && ! infos[i].intNode;

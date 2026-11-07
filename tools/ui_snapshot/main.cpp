@@ -8,7 +8,7 @@
 //                       [--wavetable-browser] [--wavetable-preset NAME] [--wavetable-search TEXT]
 //                       [--collab share|share-wifi|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N] [--all-automation]
 //                       [--bench N [--gpu] [--warmup N] [--no-sweep|--device-sweep]]
-//                       [--native-swap-prompt]
+//                       [--native-swap-prompt] [--sampler-zones k|v|s]
 // Benchmarks exclude 20 warm-up frames by default; --warmup 0 includes first-use work.
 //
 // --play-at plays the transport from that song beat, or with --clip/--scene from that many beats into the Session clip,
@@ -70,6 +70,8 @@
 #include "ui/SetView.h"
 #include "ui/Shortcuts.h"
 #include "ui/views/MainLayout.h"
+#include "ui/views/SamplerFace.h"
+#include "core/Edit.h"
 #include "ui/views/ArrangementView.h"
 #include "ui/views/AutomationEditor.h"
 #include "ui/views/ClipControls.h"
@@ -170,6 +172,7 @@ int main(int argc, char** argv)
     float scale = 2.0f, deviceScroll = -1;
     int devicePage = -1, deviceSection = -1;
     std::string rackView; // UI-66: --rack-view letters for the selected track's racks
+    std::string samplerZones; // DEV-14b: --sampler-zones k|v|s opens the selected track's Sampler zone editor on that tab
     ui::UiContext ctx;
     midi::MidiManager mappingInput; // no hardware ports opened by the snapshot tool
     ctx.midi = &mappingInput;
@@ -298,6 +301,8 @@ int main(int argc, char** argv)
             ctx.mixerVisible = false;
         else if (a == "--no-sends")
             ctx.sendsVisible = false;
+        else if (a == "--sampler-zones")
+            samplerZones = next();
         else if (a == "--rack-view") // UI-66: m macros, c chain list, k/v/s Key/Vel/Chain zones, d chain devices, p Map mode
             rackView = next();
         else if (a == "--device-scroll")
@@ -549,6 +554,18 @@ int main(int argc, char** argv)
     engine::PeakCache peaks(samples); // synchronous: the snapshot must show finished waveforms
     ctx.peaks = [&](const model::Clip& clip) { return peaks.request(*loaded.song, clip); };
     ctx.song = loaded.song.get();
+    // DEV-14b: view leaves (the Sampler's tab and zone editor) go straight into the loaded set, as in the app.
+    ctx.setDeviceViewValue = [song = loaded.song.get()](int track, int device, int chain, int child, const std::string& key, double value) {
+        auto* t = model::trackAt(*song, track);
+        if (! t || device < 0 || (size_t) device >= t->devices.size()) return;
+        auto* d = &t->devices[(size_t) device];
+        if (chain >= 0)
+        {
+            if ((size_t) chain >= d->chains.size() || child < 0 || (size_t) child >= d->chains[(size_t) chain].devices.size()) return;
+            d = &d->chains[(size_t) chain].devices[(size_t) child];
+        }
+        d->plain[key] = value;
+    };
     ctx.transport = &transport;
     ctx.controls = graph.graph->controls;
     ctx.graph = graph.graph.get();
@@ -1007,6 +1024,18 @@ int main(int argc, char** argv)
             }
     if (! fileDragPaths.empty() && ! root.dispatchFileDragMove(fileDragX, fileDragY, fileDragPaths))
         std::fprintf(stderr, "warning: --file-drag paths hold no audio file\n");
+    if (! samplerZones.empty() && ctx.song)
+        if (auto* track = model::trackAt(*loaded.song, ctx.selectedTrack))
+        {
+            for (auto& device : track->devices)
+                if (device.type == "MultiSampler")
+                {
+                    device.plain["ViewSettings/ZoneEditorVisible"] = 1;
+                    ctx.samplerViews[device.id].zoneTab = samplerZones == "v" ? 1 : samplerZones == "s" ? 2 : 0;
+                    break;
+                }
+            root.layout();
+        }
     if (! rackView.empty() && ctx.song)
         if (const auto* track = ctx.trackAt(ctx.selectedTrack))
         {
@@ -1031,6 +1060,7 @@ int main(int argc, char** argv)
     {
         std::function<void(ui::Widget&)> select = [&](ui::Widget& widget) {
             if (auto* face = dynamic_cast<ui::DeviceFace*>(&widget)) { if (deviceSection >= 0) face->selectSection(deviceSection); face->selectPage(devicePage); }
+            if (ui::samplerFacePage(widget) >= 0) ui::selectSamplerFacePage(widget, devicePage); // DEV-14b
             if (auto* resynth = dynamic_cast<ui::ResynthEditor*>(&widget)) resynth->selectPage(devicePage);
             if (auto* lfo = dynamic_cast<ui::CurveLfoEditor*>(&widget)) lfo->selectPage(devicePage);
             for (const auto& child : widget.children()) select(*child);
