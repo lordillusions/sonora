@@ -1,5 +1,6 @@
 #include "TestFramework.h"
 
+#include "app/AboutUpdates.h"
 #include "gfx/Brand.h"
 #include "ui/UiContext.h"
 
@@ -124,4 +125,88 @@ TEST_CASE("brand: About window buttons stay inside the panel, apart, and the hei
     REQUIRE(surface->peekPixels(&pixels));
     const auto& support = rects[gfx::brand::AboutSupport];
     CHECK(SkColorGetR(pixels.getColor((int) support.left() + 6, (int) support.centerY())) > 200); // the primary button
+}
+
+namespace
+{
+// Only what About's update row reads (COM-4).
+class FakeUpdater final : public app::Updater
+{
+public:
+    FakeUpdater() : Updater(Host{}) {}
+    bool on = true, idle = true, automatic = true, pending = false;
+    app::UpdateChannel current = app::UpdateChannel::Stable;
+    bool available() const override { return on; }
+    std::string unavailableReason() const override { return on ? "" : "Updates are off in this build (no update feed or signing key configured)"; }
+    std::string backendName() const override { return "fake"; }
+    std::string currentVersion() const override { return "0.1.2 (1)"; }
+    bool canCheckNow() const override { return idle; }
+    void checkNow() override {}
+    bool automaticChecks() const override { return automatic; }
+    void setAutomaticChecks(bool enabled) override { automatic = enabled; }
+    app::UpdateChannel channel() const override { return current; }
+    void setChannel(app::UpdateChannel channel) override { current = channel; }
+    std::vector<app::UpdateChannel> channels() const override { return {app::UpdateChannel::Stable, app::UpdateChannel::Beta}; }
+    bool installPending() const override { return pending; }
+    void installPendingNow() override {}
+};
+
+bool contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
+} // namespace
+
+TEST_CASE("brand: About's update row follows the updater and sits between the credit and the supporters (COM-4)")
+{
+    CHECK(! app::aboutUpdateRow(nullptr).enabled);
+    CHECK(app::aboutUpdateRow(nullptr).status == "This build has no updater");
+
+    FakeUpdater updater;
+    auto row = app::aboutUpdateRow(&updater);
+    CHECK(row.enabled);
+    CHECK(row.label == "Check for Updates...");
+    CHECK(contains(row.status, "Checks automatically every day") && contains(row.status, "Stable channel"));
+    updater.automatic = false;
+    updater.current = app::UpdateChannel::Beta;
+    row = app::aboutUpdateRow(&updater);
+    CHECK(contains(row.status, "Automatic checks are off") && contains(row.status, "Beta channel"));
+    updater.idle = false; // a check is running: the button waits
+    CHECK(! app::aboutUpdateRow(&updater).enabled);
+    updater.pending = true; // downloaded, restart postponed: the same button installs it
+    row = app::aboutUpdateRow(&updater);
+    CHECK(row.enabled);
+    CHECK(row.label == "Install and Restart...");
+    updater.on = false;
+    row = app::aboutUpdateRow(&updater);
+    CHECK(! row.enabled);
+    CHECK(contains(row.status, "Updates are off in this build"));
+
+    gfx::brand::AboutState state;
+    state.version = "Version 0.1.2";
+    state.credit = "Created by Wellington Chaves";
+    state.emptyText = "No supporters listed yet.";
+    state.updates = row; // the longest status: two lines beside the button
+    const float w = gfx::brand::aboutWidth, h = gfx::brand::aboutHeight(state);
+    const auto rects = gfx::brand::aboutButtonRects(state, w, h);
+    const auto& button = rects[gfx::brand::AboutUpdates];
+    CHECK(button.left() > 0 && button.width() > 100 && button.top() > 130);
+    CHECK(button.bottom() + 40 < rects[gfx::brand::AboutWebsite].top()); // the supporters text stays between them
+    for (size_t i = 0; i < rects.size(); ++i)
+        if (i != gfx::brand::AboutUpdates) CHECK(! SkRect::Intersects(button, rects[i]));
+
+    // Disabled: the label is drawn dim; enabled: light.
+    auto labelBrightness = [&](const gfx::brand::AboutState& s) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul((int) w, (int) h));
+        gfx::brand::drawAbout(*surface->getCanvas(), w, h, s);
+        SkPixmap pixels;
+        REQUIRE(surface->peekPixels(&pixels));
+        unsigned brightest = 0;
+        for (int y = (int) button.top() + 6; y < (int) button.bottom() - 6; ++y)
+            for (int x = (int) button.left() + 10; x < (int) button.right() - 10; ++x)
+                brightest = std::max(brightest, SkColorGetR(pixels.getColor(x, y)));
+        return brightest;
+    };
+    const unsigned off = labelBrightness(state);
+    state.updates = app::aboutUpdateRow(nullptr);
+    state.updates.enabled = true;
+    CHECK(off < 140);
+    CHECK(labelBrightness(state) > 200);
 }

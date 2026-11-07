@@ -125,14 +125,23 @@ void drawSwitch(SkCanvas& canvas, const SkRect& rect, bool on, bool hot, bool en
 // A text field's well.
 void drawField(SkCanvas& canvas, const SkRect& rect);
 
-// About Sonora (COM-8): the splash's panel with the wordmark, version, licence, the author's credit and the supporters by
-// tier (or an invitation when there are none), and four buttons.
-enum AboutButton { AboutWebsite, AboutGitHub, AboutClose, AboutSupport, aboutButtonCount };
-inline constexpr std::array<const char*, aboutButtonCount> aboutButtonLabels{"Website", "GitHub", "Close", "Support on Ko-fi"};
+// About Sonora (COM-8): the splash's panel with the wordmark, version, licence, the author's credit, an update row (COM-4),
+// the supporters by tier (or an invitation when there are none), and four buttons at the bottom.
+enum AboutButton { AboutWebsite, AboutGitHub, AboutClose, AboutSupport, AboutUpdates, aboutButtonCount };
+inline constexpr std::array<const char*, aboutButtonCount> aboutButtonLabels{"Website", "GitHub", "Close", "Support on Ko-fi",
+                                                                             "Check for Updates..."};
+// The update row under the credit: the app's updater fills it (app/AboutWindow.cpp). The status wraps onto two lines at most.
+struct AboutUpdateRow
+{
+    std::string label = aboutButtonLabels[AboutUpdates]; // or "Install and Restart..." when an update waits
+    std::string status;                                  // "Checks daily · Stable channel", or why updates are off
+    bool enabled = false;
+};
 struct AboutState
 {
     std::string version; // "Version 0.1.2"
     std::string credit;  // "Created by ..."
+    AboutUpdateRow updates;
     std::vector<std::pair<std::string, std::vector<std::string>>> groups; // tier title, names
     std::string emptyText;           // shown when there are no supporters
     int hovered = -1, pressed = -1;  // AboutButton, -1 for none

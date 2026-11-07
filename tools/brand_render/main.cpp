@@ -100,6 +100,10 @@ int main(int argc, char** argv)
         if (sample)
             about.groups = {{"Studio", {"Example Studio"}}, {"Producers", {"Ana B.", "Kenji M."}},
                             {"Supporters", {"Lucas R.", "Mika T.", "Jordan P.", "Sam O.", "Chiara L.", "Noah W."}}};
+        // COM-4: a release build's update row, and a developer build's (updates off).
+        about.updates.enabled = sample;
+        about.updates.status = sample ? "Checks automatically every day \u00B7 Stable channel"
+                                      : "Updates are off in this build (no update feed or signing key configured)";
         about.hovered = brand::AboutSupport;
         const float h = brand::aboutHeight(about);
         ok &= writePng((dir / (sample ? "preview-about.png" : "preview-about-empty.png")).string(), (int) brand::aboutWidth * 2,

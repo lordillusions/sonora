@@ -203,6 +203,7 @@ MainWindow::~MainWindow()
     app_.ui().checkForUpdates = nullptr;
     app_.ui().setAutomaticUpdateChecks = nullptr;
     app_.ui().setUpdateChannel = nullptr;
+    AboutWindow::setUpdater(nullptr);
     updater_.reset();
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
     app_.onControlActivity = nullptr;
@@ -248,11 +249,13 @@ void MainWindow::createUpdater()
     };
     host.changed = [this] {
         menuItemsChanged();
+        AboutWindow::updatesChanged();
         if (app_.ui().requestRepaint) app_.ui().requestRepaint();
     };
     host.loadSetting = [this](const std::string& key) { return app_.setting(key); };
     host.storeSetting = [this](const std::string& key, const std::string& value) { app_.storeSetting(key, value); };
     updater_ = Updater::create(std::move(host));
+    AboutWindow::setUpdater(updater_.get()); // About's "Check for Updates..." row
 
     auto& ui = app_.ui();
     ui.updateSettings = [this] {

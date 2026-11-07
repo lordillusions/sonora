@@ -1,5 +1,7 @@
 #include "app/AboutWindow.h"
 
+#include "app/AboutUpdates.h"
+
 #include "core/Supporters.h"
 
 #include "include/core/SkCanvas.h"
@@ -12,6 +14,7 @@ namespace sonora::app
 namespace
 {
 AboutWindow* current = nullptr;
+Updater* updater = nullptr;
 
 constexpr const char* websiteUrl = "https://sonoradaw.com";
 constexpr const char* sourceUrl = "https://github.com/lordillusions/sonora";
@@ -37,7 +40,21 @@ gfx::brand::AboutState AboutWindow::currentState()
     state.emptyText = "No supporters listed yet. Monthly supporters on Ko-fi can have their name here and on sonoradaw.com.";
     for (const auto& group : model::parseSupporters(supportersFile().loadFileAsString().toStdString()))
         state.groups.push_back({model::supporterTierTitle(group.tier), group.names});
+    state.updates = aboutUpdateRow(updater);
     return state;
+}
+
+void AboutWindow::setUpdater(Updater* source)
+{
+    updater = source;
+    updatesChanged();
+}
+
+void AboutWindow::updatesChanged()
+{
+    if (current == nullptr) return;
+    current->state_.updates = aboutUpdateRow(updater);
+    current->repaint();
 }
 
 void AboutWindow::show()
@@ -79,7 +96,7 @@ int AboutWindow::buttonAt(juce::Point<float> p) const
 {
     const auto rects = gfx::brand::aboutButtonRects(state_, (float) getWidth(), (float) getHeight());
     for (size_t i = 0; i < rects.size(); ++i)
-        if (rects[i].contains(p.x, p.y)) return (int) i;
+        if (rects[i].contains(p.x, p.y) && (i != gfx::brand::AboutUpdates || state_.updates.enabled)) return (int) i;
     return -1;
 }
 
@@ -137,6 +154,10 @@ void AboutWindow::press(int button)
         case gfx::brand::AboutGitHub: juce::URL(sourceUrl).launchInDefaultBrowser(); break;
         case gfx::brand::AboutSupport: juce::URL(supportUrl).launchInDefaultBrowser(); break;
         case gfx::brand::AboutClose: close(); break;
+        case gfx::brand::AboutUpdates:
+            if (updater != nullptr) updater->checkNow(); // Sparkle's own window comes up in front of this one
+            updatesChanged();
+            break;
         default: break;
     }
 }

@@ -561,6 +561,9 @@ namespace
 // About window layout (COM-8), in points.
 constexpr float aboutPad = 34, aboutTop = 66;
 constexpr float aboutNameSize = 12.5f, aboutLine = 18, aboutTitleSize = 11;
+constexpr float aboutStatusSize = 11.5f, aboutStatusLine = 14, aboutStatusGap = 12; // the update row's status (COM-4)
+constexpr size_t aboutUpdateRowBefore = 2; // the update row sits between the credit (line 1) and the supporters
+const SkColor aboutDim = SkColorSetRGB(0x8e, 0x8e, 0x8e);
 
 float aboutTextWidth(float width) { return width - 2 * aboutPad; }
 
@@ -569,54 +572,78 @@ struct AboutLine { std::string text; float size; SkColor color; bool bold; float
 std::vector<AboutLine> aboutLines(const AboutState& state, float width)
 {
     std::vector<AboutLine> lines;
-    const SkColor light = panel::text, dim = SkColorSetRGB(0x8e, 0x8e, 0x8e);
-    lines.push_back({state.version + "  \u00B7  Free and open source (AGPL-3.0-or-later)", 12, dim, false, 0});
+    const SkColor light = panel::text;
+    lines.push_back({state.version + "  \u00B7  Free and open source (AGPL-3.0-or-later)", 12, aboutDim, false, 0});
     lines.push_back({state.credit, 12.5f, light, false, 4});
     lines.push_back({"Thank you, supporters", 14, panel::title, true, 26});
     if (state.groups.empty())
         for (const auto& line : wrapText(state.emptyText, aboutNameSize, aboutTextWidth(width)))
-            lines.push_back({line, aboutNameSize, dim, false, lines.size() == 3 ? 6.0f : 0.0f});
+            lines.push_back({line, aboutNameSize, aboutDim, false, lines.size() == 3 ? 6.0f : 0.0f});
     for (const auto& [title, names] : state.groups)
     {
-        lines.push_back({title, aboutTitleSize, dim, true, 12});
+        lines.push_back({title, aboutTitleSize, aboutDim, true, 12});
         std::string joined;
         for (size_t i = 0; i < names.size(); ++i) joined += (i ? "   " : "") + names[i];
         for (const auto& line : wrapText(joined, aboutNameSize, aboutTextWidth(width))) lines.push_back({line, aboutNameSize, light, false, 0});
     }
     return lines;
 }
-float aboutContentBottom(const AboutState& state)
+
+float aboutButtonWidth(const std::string& label)
 {
+    const auto f = font(promptMessageSize, true);
+    return std::max(promptButtonMinW, f.measureText(label.data(), label.size(), SkTextEncoding::kUTF8) + 30);
+}
+
+// Each content line's baseline, the update button (between the credit and the supporters) and the content's bottom.
+struct AboutLayout
+{
+    std::vector<AboutLine> lines;
+    std::vector<float> baselines;
+    SkRect updateButton = SkRect::MakeEmpty();
+    float bottom = 0;
+};
+AboutLayout aboutLayout(const AboutState& state, float width)
+{
+    AboutLayout layout;
+    layout.lines = aboutLines(state, width);
     float y = aboutTop + 70;
-    for (const auto& line : aboutLines(state, aboutWidth)) y += line.gap + aboutLine;
-    return y;
+    for (size_t i = 0; i < layout.lines.size(); ++i)
+    {
+        if (i == aboutUpdateRowBefore)
+        {
+            layout.updateButton = SkRect::MakeXYWH(aboutPad, y + 2, aboutButtonWidth(state.updates.label), promptButtonH);
+            y = layout.updateButton.bottom() + aboutLine - 12;
+        }
+        y += layout.lines[i].gap;
+        layout.baselines.push_back(y);
+        y += aboutLine;
+    }
+    layout.bottom = y;
+    return layout;
 }
 } // namespace
 
-float aboutHeight(const AboutState& state) { return aboutContentBottom(state) + 26 + promptButtonH + 24; }
+float aboutHeight(const AboutState& state) { return aboutLayout(state, aboutWidth).bottom + 26 + promptButtonH + 24; }
 
 std::array<SkRect, aboutButtonCount> aboutButtonRects(const AboutState& state, float width, float height)
 {
-    (void) state;
-    const auto f = font(promptMessageSize, true);
-    auto widthOf = [&](const char* label) {
-        return std::max(promptButtonMinW, f.measureText(label, std::strlen(label), SkTextEncoding::kUTF8) + 30);
-    };
     std::array<SkRect, aboutButtonCount> rects;
     const float y = height - 24 - promptButtonH;
     float left = aboutPad, right = width - aboutPad;
     for (int i : {AboutWebsite, AboutGitHub})
     {
-        const float w = widthOf(aboutButtonLabels[(size_t) i]);
+        const float w = aboutButtonWidth(aboutButtonLabels[(size_t) i]);
         rects[(size_t) i] = SkRect::MakeXYWH(left, y, w, promptButtonH);
         left += w + promptButtonGap;
     }
     for (int i : {AboutSupport, AboutClose})
     {
-        const float w = widthOf(aboutButtonLabels[(size_t) i]);
+        const float w = aboutButtonWidth(aboutButtonLabels[(size_t) i]);
         rects[(size_t) i] = SkRect::MakeXYWH(right - w, y, w, promptButtonH);
         right -= w + promptButtonGap;
     }
+    rects[AboutUpdates] = aboutLayout(state, width).updateButton;
     return rects;
 }
 
@@ -635,17 +662,37 @@ void drawAbout(SkCanvas& canvas, float width, float height, const AboutState& st
     }
     drawWordmark(canvas, aboutPad, aboutTop, 34, panel::title);
     drawText(canvas, "Music production, open.", aboutPad + 2, aboutTop + 28, 14, SkColorSetRGB(0x9a, 0x9a, 0x9a));
-    float y = aboutTop + 70;
-    for (const auto& line : aboutLines(state, width))
+    const auto layout = aboutLayout(state, width);
+    for (size_t i = 0; i < layout.lines.size(); ++i)
     {
-        y += line.gap;
-        drawText(canvas, line.text, aboutPad + 2, y, line.size, line.color, line.bold, false, aboutTextWidth(width));
-        y += aboutLine;
+        const auto& line = layout.lines[i];
+        drawText(canvas, line.text, aboutPad + 2, layout.baselines[i], line.size, line.color, line.bold, false, aboutTextWidth(width));
+    }
+    {
+        // The update row: its status beside the button, centred on it, two lines at most (the rest ends in an ellipsis).
+        const auto& button = layout.updateButton;
+        const float x = button.right() + aboutStatusGap, maxWidth = width - aboutPad - x;
+        auto status = wrapText(state.updates.status, aboutStatusSize, maxWidth);
+        if (status.size() > 2)
+        {
+            for (size_t i = 2; i < status.size(); ++i) status[1] += " " + status[i];
+            status.resize(2);
+        }
+        float baseline = button.centerY() + aboutStatusSize * 0.36f - (float) (status.size() > 1 ? aboutStatusLine / 2 : 0);
+        for (const auto& line : status)
+        {
+            drawText(canvas, line, x, baseline, aboutStatusSize, aboutDim, false, false, maxWidth);
+            baseline += aboutStatusLine;
+        }
     }
     const auto rects = aboutButtonRects(state, width, height);
     for (int i = 0; i < aboutButtonCount; ++i)
-        drawButton(canvas, rects[(size_t) i], aboutButtonLabels[(size_t) i],
-                   {.primary = i == AboutSupport, .hot = state.hovered == i, .down = state.pressed == i && state.hovered == i});
+    {
+        const bool updates = i == AboutUpdates, enabled = ! updates || state.updates.enabled;
+        drawButton(canvas, rects[(size_t) i], updates ? state.updates.label : std::string(aboutButtonLabels[(size_t) i]),
+                   {.primary = i == AboutSupport, .hot = enabled && state.hovered == i,
+                    .down = enabled && state.pressed == i && state.hovered == i, .enabled = enabled});
+    }
     canvas.restore();
     drawPanelBorder(canvas, bounds);
 }

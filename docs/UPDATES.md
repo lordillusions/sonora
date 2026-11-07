@@ -15,7 +15,8 @@ archive instead.
 | `src/app/UpdaterWinSparkle.cpp` | Windows backend (COM-4l): WinSparkle 0.9.4, its own window; Sonora answers "may I close?" with the same safe-restart rules. |
 | `src/app/UpdaterLinux.cpp` | Linux backend (COM-4l): AppImage self-replace or `.deb` via `pkexec apt-get`, using `UpdateFeed.cpp` (feed parsing, Monocypher Ed25519). |
 | `src/app/UpdaterStub.cpp` | Inert backend for builds without any of the above. |
-| `src/app/MainWindow.cpp` | Owns the updater. "Check for Updates..." is in the Sonora menu and the Help menu. Wires Settings > Updates. |
+| `src/app/MainWindow.cpp` | Owns the updater. "Check for Updates..." is in the Sonora menu and the Help menu. Wires Settings > Updates and About. |
+| `src/app/AboutUpdates.h`, `src/app/AboutWindow.cpp` | About Sonora's update row (COM-4q): "Check for Updates..." (or "Install and Restart..." when a download waits) calls `checkNow`, like the menu; disabled with `unavailableReason()` when the build has no updater. Drawn by `gfx::brand::drawAbout`; `tests/test_brand_ui.cpp`. |
 | `src/app/AppController.cpp` | `prepareForRestart()`: Save / Don't Save / Cancel before an update restarts. The quit that follows does not ask again. |
 | `src/ui/views/PreferencesPanel.cpp` | Settings > Updates: version, Check Automatically, Update Channel, Check Now / Install and Restart. `tests/test_updates_ui.cpp`. |
 | `scripts/release/make_release.sh` | Builds, signs, (notarizes), zips, runs `generate_appcast`, prints what to upload. Publishes nothing. |
