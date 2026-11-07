@@ -94,6 +94,7 @@ std::vector<ParameterInfo> makeInfos()
     p[S::LfoVolume] = makeParam("VolumeAndPan/VolumeLfoAmount", "Vol LFO", 0, 1, 0, "%");
     p[S::LfoPan] = makeParam("VolumeAndPan/PanoramaLfoAmount", "Pan LFO", 0, 1, 0, "%");
     p[S::LfoSync] = makeParam(lfo + "RateType", "Sync", 0, 1, 0, "", true);
+    p[S::LfoSync].intNode = true; // TimeableEnum in the reference: "false" there makes it refuse the set
     p[S::LfoBeat] = makeParam(lfo + "BeatRate", "Beat", 0, (float) kBeatChoices - 1, 4, "", false,
                               {"1/64", "1/48", "1/32", "1/24", "1/16", "1/12", "1/8", "1/6", "3/16", "1/4", "5/16", "1/3", "3/8", "1/2", "3/4", "1", "1.5"});
     p[S::LoopOn] = makeParam(loop + "LoopOn", "Loop", 0, 1, 1, "", true);

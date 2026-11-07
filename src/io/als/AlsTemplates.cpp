@@ -34,6 +34,9 @@ XmlElement* path(XmlElement& parent, const std::string& key)
         while (next == nullptr)
         {
             auto* made = result->createNewChildElement(name);
+            // The reference refuses a slot value without an Id ("Not all list members have Ids"): every element it
+            // writes under <Value> (SimplerFilter, SimplerLfo, FilePresetRef...) carries one.
+            if (result->hasTagName("Value")) made->setAttribute("Id", 0);
             if (seen++ == index) next = made;
         }
         result = next;

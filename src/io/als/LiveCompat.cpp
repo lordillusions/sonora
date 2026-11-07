@@ -41,9 +41,24 @@ juce::String wholeNumberText(const juce::String& text)
     return whole == "-0" ? juce::String("0") : whole;
 }
 
+// Saves before 0.1.23 wrote a Simpler LFO's RateType (an enum in the reference) as "true"/"false": "Unexpected value for
+// int node". Returns that <Manual>, or nullptr.
+XmlElement* booleanEnumManual(const XmlElement& e)
+{
+    if (! e.hasTagName("RateType")) return nullptr;
+    auto* manual = e.getChildByName("Manual");
+    if (manual == nullptr) return nullptr;
+    const auto v = manual->getStringAttribute("Value");
+    return v == "true" || v == "false" ? manual : nullptr;
+}
+
 bool needsChange(const XmlElement& e)
 {
     if (e.hasAttribute("Value") && wholeNumberText(e.getStringAttribute("Value")).isNotEmpty()) return true;
+    if (e.hasTagName("Value"))
+        for (const auto* c : e.getChildIterator())
+            if (! c->hasAttribute("Id")) return true;
+    if (booleanEnumManual(e) != nullptr) return true;
     const bool devices = e.hasTagName("Devices");
     for (const auto* c : e.getChildIterator())
         if ((devices && isSonoraOnlyDevice(*c)) || needsChange(*c)) return true;
@@ -88,9 +103,12 @@ void makeCompatible(XmlElement& e)
     if (e.hasAttribute("Value"))
         if (const auto whole = wholeNumberText(e.getStringAttribute("Value")); whole.isNotEmpty()) e.setAttribute("Value", whole);
     const bool devices = e.hasTagName("Devices");
+    if (auto* manual = booleanEnumManual(e)) manual->setAttribute("Value", manual->getStringAttribute("Value") == "true" ? "1" : "0");
+    const bool slotValue = e.hasTagName("Value"); // sets saved before 0.1.23 wrote Simpler slot values without an Id
     for (int i = 0; i < e.getNumChildElements(); ++i)
     {
         auto* c = e.getChildElement(i);
+        if (slotValue && ! c->hasAttribute("Id")) c->setAttribute("Id", 0);
         makeCompatible(*c);
         if (! devices || ! isSonoraOnlyDevice(*c)) continue;
         auto wrapper = wrapperFor(*c);

@@ -548,7 +548,7 @@ public:
             if ((size_t) chain >= rack.chains.size() || (size_t) child >= rack.chains[(size_t) chain].devices.size()) return;
             auto& device = rack.chains[(size_t) chain].devices[(size_t) child];
             if (std::none_of(device.parameters.begin(), device.parameters.end(), [&](const auto& p) { return p.path == info.id; }))
-            { model::Parameter p; p.path = info.id; p.value = info.defaultValue; p.booleanValue = info.isToggle; device.parameters.push_back(std::move(p)); }
+            { model::Parameter p; p.path = info.id; p.value = info.defaultValue; p.booleanValue = info.isToggle && ! info.intNode; device.parameters.push_back(std::move(p)); }
             for (auto& p : device.parameters) if (p.path == info.id)
             {
                 if (remove) { p.macroIndex = -1; p.midi.channel = -1; }

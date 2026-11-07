@@ -60,6 +60,7 @@ struct ParameterInfo
     bool isToggle = false;
     std::vector<std::string> choices; // non-empty for enum parameters
     bool plainValue = false; // Remoteable/user value leaf, without Manual/automation children
+    bool intNode = false;    // a two-state toggle the reference stores as an enum ("0"/"1", e.g. an LFO RateType), not "true"/"false"
 };
 
 inline ParameterInfo makeParam(std::string id, std::string name, float minValue, float maxValue, float defaultValue,

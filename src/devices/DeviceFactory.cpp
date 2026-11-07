@@ -469,7 +469,7 @@ model::Device nativeDeviceModel(const std::string& type)
             const float value = fresh ? fresh->getParameter((int) i) : info.defaultValue;
             if (info.plainValue) { d.plain[info.id] = value; continue; }
             model::Parameter parameter;
-            parameter.path = info.id; parameter.value = value; parameter.booleanValue = info.isToggle;
+            parameter.path = info.id; parameter.value = value; parameter.booleanValue = info.isToggle && ! info.intNode;
             d.parameters.push_back(std::move(parameter));
         }
         if (fresh) d.nativeContent = hushContent(fresh->session());
@@ -504,7 +504,7 @@ void captureDeviceState(model::Device& d, DeviceProcessor* processor)
         if (found != d.parameters.end()) found->value = value;
         else if (! d.plugin && std::abs(value - infos[i].defaultValue) > 1e-6f)
         {
-            model::Parameter p; p.path = infos[i].id; p.value = value; p.booleanValue = infos[i].isToggle;
+            model::Parameter p; p.path = infos[i].id; p.value = value; p.booleanValue = infos[i].isToggle && ! infos[i].intNode;
             d.parameters.push_back(std::move(p));
         }
     }
