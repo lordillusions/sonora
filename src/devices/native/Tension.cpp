@@ -303,7 +303,7 @@ void Tension::prepare(double sampleRate, int)
 
 void Tension::reset()
 {
-    for (auto& s : strings_) s = {};
+    for (auto& s : strings_) s = Str{};
     std::fill(lineR_.begin(), lineR_.end(), 0.0f);
     std::fill(lineL_.begin(), lineL_.end(), 0.0f);
     bend_ = {};
@@ -488,7 +488,7 @@ void Tension::startString(Str& s, int note, int channel, float velocity, int mem
     const double base = note + 12.0 * std::round(k(Octave)) + std::round(k(Transpose));
     if (retrigger)
     {
-        s = {};
+        s = Str{};
         std::fill(R, R + lineLength_, 0.0f);
         std::fill(L, L + lineLength_, 0.0f);
         s.semis = s.targetSemis = base;

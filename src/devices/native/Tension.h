@@ -161,7 +161,7 @@ private:
 
     std::vector<float> lineR_, lineL_; // kMaxStrings x lineLength_
     int lineLength_ = 4096, lineMask_ = 4095;
-    std::array<Str, kMaxStrings> strings_{};
+    std::array<Str, kMaxStrings> strings_; // no {} here: GCC (PR 96645) would need Str() before Tension is complete
     std::array<float, 16> bend_{}, slide_{}, pressure_{};
     float modWheel_ = 0, channelPressure_ = 0;
     bool sustainPedal_ = false;
