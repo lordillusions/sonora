@@ -45,6 +45,7 @@ add_library(sonora_core STATIC
     core/ResynthModel.cpp
     core/Edit.cpp
     core/ClipOperations.cpp
+    core/ClipGeometry.cpp
     core/Op.cpp
     core/OpJson.cpp
     core/ModelCodec.cpp

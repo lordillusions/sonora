@@ -43,6 +43,19 @@ void stroke(SkCanvas& c, const Rect& r, SkColor color, float width)
     c.drawRect(r.reduced(width * 0.5f).sk(), p);
 }
 
+void frozenOverlay(SkCanvas& c, const Rect& r, SkColor freezeColor)
+{
+    if (r.w <= 0 || r.h <= 0) return;
+    c.save();
+    c.clipRect(r.sk());
+    fill(c, r, withAlpha(freezeColor, 70));
+    const SkColor stripe = withAlpha(freezeColor, 120);
+    constexpr float step = 6.0f;
+    for (float x = r.x - r.h; x < r.right(); x += step)
+        line(c, x, r.bottom(), x + r.h, r.y, stripe, 1.0f);
+    c.restore();
+}
+
 void linkGlyph(SkCanvas& c, const Rect& r, SkColor color)
 {
     SkPaint p;

@@ -2,6 +2,9 @@
 #include "core/WavetableFormat.h"
 #include <juce_core/juce_core.h>
 
+#include <string_view>
+#include <tuple>
+
 namespace sonora::io
 {
 namespace
@@ -53,6 +56,155 @@ juce::String hex(const std::vector<uint8_t>& bytes)
 {
     return juce::String::toHexString(bytes.data(), (int) bytes.size(), 0).toUpperCase();
 }
+}
+
+namespace
+{
+void slicePoints(XmlElement& parent, const char* tag, const std::vector<double>& seconds, const std::vector<double>* energies)
+{
+    auto* list = parent.getChildByName(tag);
+    if (! list) list = parent.createNewChildElement(tag);
+    list->deleteAllChildElements();
+    for (size_t i = 0; i < seconds.size(); ++i)
+    {
+        auto* point = list->createNewChildElement("SlicePoint");
+        point->setAttribute("TimeInSeconds", number(seconds[i]));
+        point->setAttribute("Rank", 0);
+        point->setAttribute("NormalizedEnergy", number(energies && i < energies->size() ? (*energies)[i] : 1.0));
+    }
+}
+// A <MultiSamplePart> with every node the reference writes for a sample it loads itself (ALS-15b): a part with only the
+// zone, region and file path opens without an error but loses its sample in the reference.
+std::unique_ptr<XmlElement> freshSamplePart(const model::SamplePart& part)
+{
+    auto p = std::make_unique<XmlElement>("MultiSamplePart");
+    p->setAttribute("InitUpdateAreSlicesFromOnsetsEditableAfterRead", "false");
+    p->setAttribute("HasImportedSlicePoints", part.slicePoints.empty() ? "false" : "true");
+    p->setAttribute("NeedsAnalysisData", "true");
+    const juce::String last = number((double) std::max<int64_t>(0, part.sampleEnd > 0 ? part.sampleEnd : part.lengthSamples - 1));
+    value(*p, "LomId", "0");
+    value(*p, "Name", "");
+    value(*p, "Selection", "true");
+    value(*p, "IsActive", "true");
+    value(*p, "Solo", "false");
+    for (const auto& [tag, low, high] : {std::tuple{"KeyRange", part.keyMin, part.keyMax}, std::tuple{"VelocityRange", part.velMin, part.velMax},
+                                         std::tuple{"SelectorRange", 0, 127}})
+    {
+        auto* range = p->createNewChildElement(tag);
+        value(*range, "Min", juce::String(low)); value(*range, "Max", juce::String(high));
+        value(*range, "CrossfadeMin", juce::String(low)); value(*range, "CrossfadeMax", juce::String(high));
+    }
+    value(*p, "RootKey", "60");
+    value(*p, "Detune", "0");
+    value(*p, "TuneScale", "100");
+    value(*p, "Panorama", "0");
+    value(*p, "Volume", "1");
+    value(*p, "Link", "false");
+    value(*p, "SampleStart", "0");
+    value(*p, "SampleEnd", last);
+    for (const auto& [tag, mode] : {std::pair{"SustainLoop", "0"}, std::pair{"ReleaseLoop", "3"}})
+    {
+        auto* loop = p->createNewChildElement(tag);
+        value(*loop, "Start", "0"); value(*loop, "End", last); value(*loop, "Mode", mode);
+        value(*loop, "Crossfade", "0"); value(*loop, "Detune", "0");
+    }
+    auto* sample = p->createNewChildElement("SampleRef");
+    auto* ref = sample->createNewChildElement("FileRef");
+    const juce::File file(juce::String(part.sample.absolutePath));
+    value(*ref, "RelativePathType", "0");
+    value(*ref, "RelativePath", "");
+    value(*ref, "Path", "");
+    value(*ref, "Type", "2");
+    value(*ref, "LivePackName", "");
+    value(*ref, "LivePackId", "");
+    value(*ref, "OriginalFileSize", juce::String(part.sample.absolutePath.empty() ? (juce::int64) 0 : file.getSize()));
+    value(*ref, "OriginalCrc", "0");
+    value(*ref, "SourceHint", "");
+    value(*sample, "LastModDate", juce::String(part.sample.absolutePath.empty() || ! file.existsAsFile() ? (juce::int64) 0
+                                                                                                           : file.getLastModificationTime().toMilliseconds() / 1000));
+    sample->createNewChildElement("SourceContext");
+    value(*sample, "SampleUsageHint", "0");
+    value(*sample, "DefaultDuration", "0");
+    value(*sample, "DefaultSampleRate", "44100");
+    value(*sample, "SamplesToAutoWarp", "1");
+    value(*p, "SlicingThreshold", "100");
+    value(*p, "SlicingBeatGrid", "4");
+    value(*p, "SlicingRegions", "8");
+    value(*p, "SlicingStyle", "0");
+    auto* warp = p->createNewChildElement("SampleWarpProperties");
+    auto* markers = warp->createNewChildElement("WarpMarkers");
+    const double seconds = part.sampleRate > 0 ? (double) part.lengthSamples / part.sampleRate : 0.0;
+    const double perBeat = part.secondsPerBeat > 0 ? part.secondsPerBeat : 0.5;
+    for (int i = 0; i < 2; ++i)
+    {
+        auto* marker = markers->createNewChildElement("WarpMarker");
+        marker->setAttribute("Id", i);
+        marker->setAttribute("SecTime", number(i == 0 ? 0.0 : std::max(seconds, 1e-3)));
+        marker->setAttribute("BeatTime", number(i == 0 ? 0.0 : std::max(seconds, 1e-3) / perBeat));
+    }
+    for (const auto& [tag, text] : std::initializer_list<std::pair<const char*, const char*>>{
+             {"WarpMode", "0"}, {"GranularityTones", "30"}, {"GranularityTexture", "65"}, {"FluctuationTexture", "25"},
+             {"ComplexProFormants", "100"}, {"ComplexProEnvelope", "128"}, {"TransientResolution", "6"},
+             {"TransientLoopMode", "2"}, {"TransientEnvelope", "100"}, {"IsWarped", "false"}})
+        value(*warp, tag, text);
+    auto* onsets = warp->createNewChildElement("Onsets");
+    onsets->createNewChildElement("UserOnsets");
+    value(*onsets, "HasUserOnsets", "false");
+    auto* signature = warp->createNewChildElement("TimeSignature")->createNewChildElement("TimeSignatures")->createNewChildElement("RemoteableTimeSignature");
+    signature->setAttribute("Id", 0);
+    value(*signature, "Numerator", "4"); value(*signature, "Denominator", "4"); value(*signature, "Time", "0");
+    auto* grid = warp->createNewChildElement("BeatGrid");
+    for (const auto& [tag, text] : std::initializer_list<std::pair<const char*, const char*>>{
+             {"FixedNumerator", "1"}, {"FixedDenominator", "16"}, {"GridIntervalPixel", "20"}, {"Ntoles", "2"},
+             {"SnapToGrid", "true"}, {"Fixed", "false"}})
+        value(*grid, tag, text);
+    for (const char* tag : {"InitialSlicePointsFromOnsets", "SlicePoints", "ManualSlicePoints", "BeatSlicePoints", "RegionSlicePoints"})
+        p->createNewChildElement(tag);
+    slicePoints(*p, "SlicePoints", part.slicePoints, &part.sliceEnergies);
+    value(*p, "UseDynamicBeatSlices", "true");
+    value(*p, "UseDynamicRegionSlices", "true");
+    value(*p, "AreSlicesFromOnsetsEditable", "false");
+    return p;
+}
+}
+
+std::unique_ptr<juce::XmlElement> samplePartXml(const model::SamplePart& part, int id)
+{
+    std::unique_ptr<XmlElement> p;
+    if (part.sourceXml) p = juce::parseXML(juce::String(*part.sourceXml));
+    const bool fresh = p == nullptr;
+    if (fresh) p = freshSamplePart(part);
+    p->setAttribute("Id", id);
+    auto leaf = [&](const std::string& key, double n) {
+        const auto slash = key.find_last_of('/');
+        value(slash == std::string::npos ? *p : *path(*p, key.substr(0, slash)), key.substr(slash == std::string::npos ? 0 : slash + 1).c_str(), number(n));
+    };
+    value(*p, "Name", juce::String(part.name));
+    leaf("KeyRange/Min", part.keyMin); leaf("KeyRange/Max", part.keyMax);
+    leaf("VelocityRange/Min", part.velMin); leaf("VelocityRange/Max", part.velMax);
+    if (fresh)
+    {
+        leaf("KeyRange/CrossfadeMin", part.keyMin); leaf("KeyRange/CrossfadeMax", part.keyMax);
+        leaf("VelocityRange/CrossfadeMin", part.velMin); leaf("VelocityRange/CrossfadeMax", part.velMax);
+    }
+    leaf("RootKey", part.rootKey); leaf("Detune", part.detuneCents); leaf("Panorama", part.pan); leaf("Volume", part.volume);
+    leaf("SampleStart", (double) part.sampleStart); leaf("SampleEnd", (double) part.sampleEnd);
+    // The reference writes an unused sustain loop over the whole region (mode 0), not 0..0.
+    const bool unusedLoop = fresh && part.loopMode == 0 && part.loopEnd <= part.loopStart;
+    leaf("SustainLoop/Start", (double) (unusedLoop ? part.sampleStart : part.loopStart));
+    leaf("SustainLoop/End", (double) (unusedLoop ? part.sampleEnd : part.loopEnd));
+    leaf("SustainLoop/Mode", part.loopMode); leaf("SustainLoop/Crossfade", (double) part.loopCrossfade);
+    auto* ref = path(*p, "SampleRef/FileRef");
+    value(*ref, "RelativePathType", juce::String(part.sample.relativePathType));
+    value(*ref, "RelativePath", juce::String(part.sample.relativePath));
+    value(*ref, "Path", juce::String(part.sample.absolutePath));
+    leaf("SampleRef/DefaultDuration", (double) part.lengthSamples); leaf("SampleRef/DefaultSampleRate", part.sampleRate);
+    // Simpler slicing (DEV-4c): the Slice By settings and the manual slices are Sonora's to write; the transients the
+    // reference found stay as it saved them.
+    leaf("SlicingThreshold", part.slicingThreshold); leaf("SlicingBeatGrid", part.slicingBeatGrid);
+    leaf("SlicingRegions", part.slicingRegions); leaf("SlicingStyle", part.slicingStyle);
+    if (! fresh || ! part.manualSlicePoints.empty()) slicePoints(*p, "ManualSlicePoints", part.manualSlicePoints, nullptr);
+    return p;
 }
 
 std::string audioClipTemplate(const model::Clip& clip)
@@ -205,31 +357,28 @@ std::string deviceTemplate(const model::Device& device)
         {
             auto* parts = path(root, "Player/MultiSampleMap/SampleParts");
             int index = 0;
-            for (const auto& part : device.sampleParts)
+            for (const auto& part : device.sampleParts) parts->addChildElement(samplePartXml(part, index++).release());
+        }
+        if ((device.type == "OriginalSimpler" || device.type == "MultiSampler") && ! device.sourceXml)
+        {
+            // ALS-15b: the rest of the reference's sample map and the Simpler globals it writes for a new device.
+            auto* map = path(root, "Player/MultiSampleMap");
+            if (! map->getChildByName("SampleParts")) map->createNewChildElement("SampleParts");
+            for (const auto& [tag, text] : std::initializer_list<std::pair<const char*, const char*>>{
+                     {"LoadInRam", "false"}, {"LayerCrossfade", "0"}, {"SourceContext", ""}, {"RoundRobin", "false"},
+                     {"RoundRobinMode", "0"}, {"RoundRobinResetPeriod", "0"}, {"RoundRobinRandomSeed", "0"}})
+                if (! map->getChildByName(tag))
+                {
+                    if (std::string_view(tag) == "SourceContext") map->createNewChildElement(tag);
+                    else value(*map, tag, text);
+                }
+            if (device.type == "OriginalSimpler")
             {
-                auto* p = parts->createNewChildElement("MultiSamplePart");
-                if (part.sourceXml)
-                    if (auto source = juce::XmlDocument::parse(juce::String(*part.sourceXml)))
-                    {
-                        parts->removeChildElement(p, true); p = source.release(); parts->addChildElement(p);
-                    }
-                p->setAttribute("Id", index++);
-                auto leaf = [&](const std::string& key, double n) {
-                    const auto slash = key.find_last_of('/');
-                    value(slash == std::string::npos ? *p : *path(*p, key.substr(0, slash)),
-                          key.substr(slash == std::string::npos ? 0 : slash + 1).c_str(), number(n));
-                };
-                value(*p, "Name", juce::String(part.name));
-                leaf("KeyRange/Min", part.keyMin); leaf("KeyRange/Max", part.keyMax);
-                leaf("VelocityRange/Min", part.velMin); leaf("VelocityRange/Max", part.velMax);
-                leaf("RootKey", part.rootKey); leaf("Detune", part.detuneCents); leaf("Panorama", part.pan); leaf("Volume", part.volume);
-                leaf("SampleStart", (double) part.sampleStart); leaf("SampleEnd", (double) part.sampleEnd);
-                leaf("SustainLoop/Start", (double) part.loopStart); leaf("SustainLoop/End", (double) part.loopEnd);
-                leaf("SustainLoop/Mode", part.loopMode); leaf("SustainLoop/Crossfade", (double) part.loopCrossfade);
-                auto* ref = path(*p, "SampleRef/FileRef");
-                value(*ref, "Path", juce::String(part.sample.absolutePath)); value(*ref, "RelativePath", juce::String(part.sample.relativePath));
-                value(*ref, "RelativePathType", juce::String(part.sample.relativePathType));
-                leaf("SampleRef/DefaultSampleRate", part.sampleRate); leaf("SampleRef/DefaultDuration", (double) part.lengthSamples);
+                auto* globals = path(root, "Globals");
+                for (const auto& [tag, text] : std::initializer_list<std::pair<const char*, const char*>>{
+                         {"PitchBendRange", "5"}, {"MpePitchBendRange", "48"}, {"IsSimpler", "true"}, {"PlaybackMode", "0"}, {"LegacyMode", "false"}})
+                    if (! globals->getChildByName(tag)) value(*globals, tag, text);
+                if (! root.getChildByName("SimplerSlicing")) value(*path(root, "SimplerSlicing"), "PlaybackMode", "0");
             }
         }
         if (device.kind == model::DeviceKind::Rack)

@@ -26,6 +26,7 @@ public:
     void mouseDown(const MouseEvent&) override;
     void mouseDrag(const MouseEvent&) override;
     void mouseUp(const MouseEvent&) override;
+    bool mouseWheel(const MouseEvent&) override;
     bool browserDrop(const BrowserDrag&, const MouseEvent&) override;
     Kind kind() const { return kind_; }
     Rect graphBounds() const { return scaled(graph_); }
@@ -33,6 +34,18 @@ public:
     void selectPage(int page) { page_ = page; layout(); repaint(); }
     int selectedSection() const { return selected_; }
     void selectSection(int section) { selected_ = section; layout(); repaint(); }
+    // Simpler sample display (DEV-4c): x positions (face pixels) of what the display draws from the device's live values;
+    // -1 when not shown. The played region (start / end flags), Classic's loop start and the crossfade before it, One-Shot
+    // fade-in end and fade-out start, the slice lines (manual: Slice By Manual).
+    struct SampleMarks
+    {
+        float start = -1, end = -1, loopStart = -1, loopFade = -1, fadeIn = -1, fadeOut = -1;
+        std::vector<float> slices;
+        bool manualSlices = false;
+    };
+    SampleMarks sampleMarks() const;
+    // The visible part of the zone (0..1 of its region); Cmd + wheel zooms around the pointer, the wheel scrolls.
+    std::pair<double, double> sampleView() const { return {viewStart_, viewEnd_}; }
 private:
     struct Control { Widget* widget; Rect bounds; int page; };
     Widget* control(int parameter, std::string label, Rect, bool knob = true, int page = -1, bool dark = false);
@@ -41,6 +54,8 @@ private:
     Rect scaled(Rect) const;
     void envelope(SkCanvas&, const Theme&, Rect, int a, int d, int s, int r);
     void waveform(SkCanvas&, const Theme&, Rect);
+    void simplerSample(SkCanvas&, const Theme&, Rect);
+    float frameX(double frame) const; // Simpler display: a sample frame's x in the visible view
     void filter(SkCanvas&, const Theme&, Rect, int frequency, int resonance, int type = -1);
     void routing(SkCanvas&, const Theme&, Rect);
     void meter(SkCanvas&, const Theme&);
@@ -52,6 +67,7 @@ private:
     Kind kind_;
     int selected_ = 0, page_ = 0, dragHandle_ = -1;
     int64_t dragFrame_ = 0;
+    double viewStart_ = 0, viewEnd_ = 1;
     Rect graph_;
     std::shared_ptr<const engine::Peaks> preview_;
     const engine::SampleData* previewSource_ = nullptr;

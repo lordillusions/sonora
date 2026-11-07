@@ -751,6 +751,7 @@ void SessionView::paint(SkCanvas& c, const Theme& t)
                 const float linkW = clip->linkGroup >= 0 ? 15.0f : 0.0f; // TRK-5
                 if (linkW > 0) paint::linkGlyph(c, {slot.x + 19, slot.y, 14, slot.h}, paint::contrastText(cc));
                 paint::text(c, clip->name, Rect{slot.x + 20 + linkW, slot.y, slot.w - 22 - linkW, slot.h}, paint::contrastText(cc), m.fontSize);
+                if (track->frozen) paint::frozenOverlay(c, {slot.x + 18, slot.y, slot.w - 18, slot.h}, t.color("FreezeColor"));
 
                 if (playing && x.transport != nullptr && x.graph != nullptr)
                 {

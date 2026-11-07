@@ -38,7 +38,12 @@ const model::CatalogEntry* entryForFolder(const File& folder, model::DeviceRole 
 {
     const auto name = folder.getFileName().toStdString();
     for (const auto& entry : model::deviceCatalog())
-        if (entry.role == role && entry.displayName == name) return &entry;
+    {
+        // Sonora's own devices carry a "Sonora " prefix; the reference library's folders use the plain name.
+        auto plain = entry.displayName;
+        if (plain.rfind("Sonora ", 0) == 0) plain.remove_prefix(7);
+        if (entry.role == role && (entry.displayName == name || plain == name)) return &entry;
+    }
     // Display names differ for some devices (the reference's Sampler is "Sonora Sampler" here): read one preset's root.
     for (const auto& entry : juce::RangedDirectoryIterator(folder, true, "*.adv", File::findFiles))
         if (! entry.getFile().getFullPathName().contains(kFolderInfo))

@@ -841,6 +841,7 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     ensureAudioInputs();
     offerNativeReplacements();
     runDeviceDragAutotest();
+    runSampleDropAutotest();
     runPresetAutotest();
 }
 
@@ -2725,6 +2726,11 @@ void AppController::dropDeviceItem(const ui::BrowserDrag& item, int trackIndex, 
                 return;
             }
             device->samplePartsEdited = true;
+            // DEV-4c: the reference loads a sample into an empty Simpler with Loop off (every Simpler it made from a
+            // dropped sample in real sets has LoopOn false), so a held note plays the sample once.
+            if (device->type == "OriginalSimpler" && device->sampleParts.empty())
+                for (auto& parameter : device->parameters)
+                    if (parameter.path == "Player/LoopModulators/LoopOn") parameter.value = 0;
             if (zoneIndex >= 0 && (size_t) zoneIndex < device->sampleParts.size())
             {
                 auto replacement = *part;
@@ -2758,7 +2764,8 @@ void AppController::dropDeviceItem(const ui::BrowserDrag& item, int trackIndex, 
         model::SamplePart part;
         part.name = juce::File(item.value).getFileNameWithoutExtension().toStdString();
         part.sample.absolutePath = item.value;
-        if (reader) { part.sampleRate = reader->sampleRate; part.lengthSamples = part.sampleEnd = reader->lengthInSamples; }
+        // The reference's region of a loaded sample ends on its last frame (SampleEnd = DefaultDuration - 1).
+        if (reader) { part.sampleRate = reader->sampleRate; part.lengthSamples = reader->lengthInSamples; part.sampleEnd = std::max<int64_t>(1, part.lengthSamples - 1); }
         juce::MessageManager::callAsync([this, alive, generation, deviceId, trackIndex, index, insert, part] {
             if (! *alive || generation != documentGeneration_ || ! song_) return;
             const auto* current = model::trackAt(*song_, trackIndex);
@@ -2867,6 +2874,59 @@ void AppController::runDeviceDragAutotest()
         }
         saveFile();
         logf("device drag: saved, status \"%s\"", ui_.statusText.c_str());
+    });
+}
+
+// SONORA_SAMPLE_DROP_AUTOTEST="track:/path/to/sample.wav[:mode]" (DEV-4c) puts a Sonora Simpler on the MIDI track when it
+// has none (the browser's device drop), loads the sample into it the way a browser drop on the device does, optionally
+// sets the playback mode (0 Classic, 1 One-Shot, 2 Slicing) with the face's own edit, logs the part ("[sonora] sample
+// drop:") and saves the set in place. Use a copy.
+void AppController::runSampleDropAutotest()
+{
+    const auto spec = juce::SystemStats::getEnvironmentVariable("SONORA_SAMPLE_DROP_AUTOTEST", {});
+    if (spec.isEmpty()) return;
+    const int track = spec.upToFirstOccurrenceOf(":", false, false).getIntValue();
+    auto path = spec.fromFirstOccurrenceOf(":", false, false);
+    int mode = -1;
+    if (const int colon = path.lastIndexOfChar(':'); colon > 0 && path.substring(colon + 1).containsOnly("012"))
+    {
+        mode = path.substring(colon + 1).getIntValue();
+        path = path.substring(0, colon);
+    }
+    const std::weak_ptr<bool> alive = alive_;
+    const auto simplerIndex = [this, track] {
+        const auto* t = song_ ? model::trackAt(*song_, track) : nullptr;
+        if (t) for (size_t i = 0; i < t->devices.size(); ++i) if (t->devices[i].type == "OriginalSimpler") return (int) i;
+        return -1;
+    };
+    juce::Timer::callAfterDelay(4000, [this, alive, track, simplerIndex] {
+        if (alive.expired() || ! song_ || simplerIndex() >= 0) return;
+        ui::BrowserDrag device{ui::BrowserDrag::Kind::NativeDevice, "OriginalSimpler", "Sonora Simpler"};
+        dropBrowserItem(device, track, 0, -1);
+        logf("sample drop: added a Simpler, \"%s\"", ui_.statusText.c_str());
+    });
+    juce::Timer::callAfterDelay(6000, [this, alive, track, path, simplerIndex] {
+        if (alive.expired() || ! song_) return;
+        const int index = simplerIndex();
+        if (index < 0) { logf("sample drop: no Simpler on track %d", track); return; }
+        ui::BrowserDrag sample{ui::BrowserDrag::Kind::Sample, path.toStdString(), juce::File(path).getFileNameWithoutExtension().toStdString()};
+        dropDeviceItem(sample, track, index, -1, -1, -1);
+        logf("sample drop: dropped %s on device %d", path.toRawUTF8(), index);
+    });
+    juce::Timer::callAfterDelay(9000, [this, alive, track, mode, simplerIndex] {
+        if (alive.expired() || ! song_) return;
+        const int index = simplerIndex();
+        if (index >= 0 && mode >= 0) editDevice(track, index, [mode](auto& d) { d.plain["Globals/PlaybackMode"] = mode; }, "Sample Playback Mode");
+        if (const auto* t = model::trackAt(*song_, track); t && index >= 0 && ! t->devices[(size_t) index].sampleParts.empty())
+        {
+            const auto& d = t->devices[(size_t) index];
+            const auto& part = d.sampleParts[0];
+            logf("sample drop: \"%s\" %s frames %lld..%lld of %lld, mode %d, LoopOn %g", d.displayName.c_str(), part.name.c_str(),
+                 (long long) part.sampleStart, (long long) part.sampleEnd, (long long) part.lengthSamples,
+                 (int) (d.plain.contains("Globals/PlaybackMode") ? d.plain.at("Globals/PlaybackMode") : 0), d.param("Player/LoopModulators/LoopOn", -1));
+        }
+        saveFile();
+        logf("sample drop: saved, status \"%s\"", ui_.statusText.c_str());
     });
 }
 

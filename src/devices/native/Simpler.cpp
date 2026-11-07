@@ -140,6 +140,7 @@ std::vector<ParameterInfo> makeInfos()
     p[S::AmpLoopTime] = makeParam(e + "LoopTime", "Loop Time", 0.2f, 20000.0f, 100.0f, "ms");
     p[S::AmpRepeatTime] = makeParam(e + "RepeatTime", "Repeat", 0, (float) kRepeatChoices - 1, 3, "", false,
                                     {"1/64", "1/48", "1/32", "1/16", "1/12", "1/8", "1/6", "3/16", "1/4", "1/3", "3/8", "1/2", "3/4", "1", "2"});
+    p[S::SlicePlayback] = makePlainParam(makeParam("SimplerSlicing/PlaybackMode", "Playback", 0, 2, 0, "", false, {"Mono", "Poly", "Thru"}));
     return p;
 }
 
@@ -283,8 +284,8 @@ void Simpler::noteOn(int note, float velocity)
 
 void Simpler::noteOff(int note)
 {
-    if (mode_ != Mode::Classic && ! (mode_ == Mode::OneShot && value(OneShotGate) > 0.5f))
-        return; // One-Shot (Trigger) and Slice play to the end
+    if (mode_ != Mode::Classic && value(OneShotGate) < 0.5f)
+        return; // One-Shot and Slicing with Trigger play to the end; Gate fades out on release (DEV-4c)
     for (auto& v : voices_)
         if (v.active && v.note == note && v.keyDown)
         {
@@ -308,8 +309,10 @@ void Simpler::startVoice(const Zone& zone, int note, float velocity)
     if (sample == nullptr)
         return; // not loaded (yet)
 
-    // One-Shot and glide (both modes, measured) play one voice.
-    const int limit = mode_ == Mode::OneShot || value(GlideMode) > 0.5f ? 1 : kVoiceCounts[std::clamp((int) std::lround(value(Voices)), 0, kVoiceChoices - 1)];
+    // One-Shot and glide (both modes, measured) play one voice; Slicing plays one with Playback Mono / Thru.
+    const int playback = std::clamp((int) std::lround(value(SlicePlayback)), 0, 2);
+    const bool mono = mode_ == Mode::OneShot || (mode_ == Mode::Slice && playback != 1) || value(GlideMode) > 0.5f;
+    const int limit = mono ? 1 : kVoiceCounts[std::clamp((int) std::lround(value(Voices)), 0, kVoiceChoices - 1)];
     // A legato note in mono mode takes over the sounding voice (its pitch glides from the previous note).
     const int fromNote = lastNote_;
     bool legato = false;
@@ -334,51 +337,25 @@ void Simpler::startVoice(const Zone& zone, int note, float velocity)
     v->zone = &zone;
     v->sample = sample;
     v->age = ++counter_;
-    const int len = sample->audio.getNumSamples();
-    const double zoneStart = std::clamp<double>((double) zone.part.sampleStart, 0.0, (double) len - 1.0);
-    const double zoneEnd = zone.part.sampleEnd > 0 ? std::min<double>((double) zone.part.sampleEnd, (double) len) : (double) len;
-    v->startFrame = zoneStart;
-    v->endFrame = zoneEnd;
-    if (! multisampler_)
+    const auto played = region(zone, *sample);
+    v->startFrame = played.start;
+    v->endFrame = played.end;
+    if (played.loop)
     {
-        // Simpler's sample region and loop: Start / Length are fractions of the zone, the loop is the last
-        // LoopLength of the region and the crossfade a fraction of the loop (measured, DEV-22).
-        const double zoneLength = zoneEnd - zoneStart;
-        v->startFrame = zoneStart + std::clamp((double) value(SampleStartMod), 0.0, 1.0) * zoneLength;
-        v->endFrame = std::min(zoneEnd, v->startFrame + std::clamp((double) value(SampleLengthMod), 0.0, 1.0) * zoneLength);
-        const double loopStart = v->endFrame - std::clamp((double) value(LoopLengthMod), 0.0, 1.0) * (v->endFrame - v->startFrame);
-        // Snap moves the region end (loop or not) back to a point that continues the waveform at the start.
-        if (value(Snap) > 0.5f && v->endFrame - v->startFrame > 0.06 * sample->sampleRate)
-            v->endFrame = snappedLoopEnd(*sample, v->startFrame, v->endFrame);
-        if (mode_ == Mode::Classic && value(LoopOn) > 0.5f && v->endFrame - v->startFrame > 4)
-        {
-            v->loopMode = 1;
-            v->loopEnd = v->endFrame;
-            v->loopStart = std::min(loopStart, v->loopEnd - 4);
-            v->fadeLength = std::min(std::clamp((double) value(LoopFadeMod), 0.0, 1.0) * (v->loopEnd - v->loopStart),
-                                     v->loopStart - v->startFrame);
-        }
-    }
-    else if (mode_ == Mode::Classic && zone.part.loopMode != 0 && zone.part.loopEnd > zone.part.loopStart + 4)
-    {
-        v->loopMode = zone.part.loopMode == 2 ? 2 : 1;
-        v->loopStart = (double) zone.part.loopStart;
-        v->loopEnd = (double) zone.part.loopEnd;
-        v->fadeLength = std::min((double) zone.part.loopCrossfade, (v->loopEnd - v->loopStart) * 0.5);
+        v->loopMode = multisampler_ && zone.part.loopMode == 2 ? 2 : 1;
+        v->loopStart = played.loopStart;
+        v->loopEnd = played.loopEnd;
+        v->fadeLength = played.fade;
     }
     if (mode_ == Mode::Slice)
     {
+        // Slices from C1 up (note 36 = the first slice); Thru plays on to the end of the region.
         const int slice = note - 36;
-        int index = 0;
-        bool found = false;
-        for (double seconds : sample->onsets)
-        {
-            const double frame = seconds * sample->sampleRate;
-            if (frame < v->startFrame || frame >= v->endFrame) continue;
-            if (found) { v->endFrame = frame; break; }
-            if (index++ == slice) { v->startFrame = frame; found = true; }
-        }
-        if (! found) { v->active = false; return; }
+        std::array<double, kMaxSlices> starts{};
+        const int count = slices(zone, *sample, v->startFrame, v->endFrame, starts.data(), kMaxSlices);
+        if (slice < 0 || slice >= count) { v->active = false; return; }
+        v->startFrame = starts[(size_t) slice];
+        if (playback != 2 && slice + 1 < count) v->endFrame = starts[(size_t) slice + 1];
     }
     v->pos = v->posR = v->startFrame;
 
@@ -399,8 +376,9 @@ void Simpler::startVoice(const Zone& zone, int note, float velocity)
     v->gainL = vol * std::sqrt(2.0f) * std::cos(angle);
     v->gainR = vol * std::sqrt(2.0f) * std::sin(angle);
 
+    // One-Shot and Slicing shape the volume with the fades only (render), so their envelope starts at full level.
     const auto& amp = envShape(Attack, Decay, Sustain, Release, AttackSlope, DecaySlope, ReleaseSlope);
-    startStage(v->amp, Env::Stage::Attack, 1.0f, amp.attack, amp.attackSlope);
+    startStage(v->amp, Env::Stage::Attack, 1.0f, mode_ == Mode::Classic ? amp.attack : 1.0, mode_ == Mode::Classic ? amp.attackSlope : 0.0f);
     v->amp.level = v->amp.from = 0.0f;
     const auto& filterShape = envShape(FilterAttack, FilterDecay, FilterSustain, FilterRelease, FilterAttackSlope, FilterDecaySlope, FilterReleaseSlope);
     startStage(v->filter, Env::Stage::Attack, 1.0f, filterShape.attack, filterShape.attackSlope);
@@ -416,6 +394,104 @@ void Simpler::startVoice(const Zone& zone, int note, float velocity)
     // LFO Key (measured, 2 Hz LFO at C1-C5): rate x (1 + key 2^((note - 60) / 12)), e.g. 4 Hz at C3 with key 100 %.
     v->lfoRateScale = 1.0 + value(LfoKeyScale) * std::exp2((note - 60) / 12.0);
     updateFilter(*v, 0.0f);
+}
+
+Simpler::Region Simpler::region(const Zone& zone, const engine::SampleData& sample) const
+{
+    Region r;
+    const int len = sample.audio.getNumSamples();
+    const double zoneStart = std::clamp<double>((double) zone.part.sampleStart, 0.0, std::max(0.0, (double) len - 1.0));
+    const double zoneEnd = zone.part.sampleEnd > 0 ? std::min<double>((double) zone.part.sampleEnd, (double) len) : (double) len;
+    r.start = zoneStart;
+    r.end = zoneEnd;
+    if (multisampler_)
+    {
+        if (mode_ == Mode::Classic && zone.part.loopMode != 0 && zone.part.loopEnd > zone.part.loopStart + 4)
+        {
+            r.loop = true;
+            r.loopStart = (double) zone.part.loopStart;
+            r.loopEnd = (double) zone.part.loopEnd;
+            r.fade = std::min((double) zone.part.loopCrossfade, (r.loopEnd - r.loopStart) * 0.5);
+        }
+        return r;
+    }
+    // Simpler's sample region and loop: Start / Length are fractions of the zone, the loop is the last LoopLength of the
+    // region and the crossfade a fraction of the loop (measured, DEV-22).
+    const double zoneLength = zoneEnd - zoneStart;
+    r.start = zoneStart + std::clamp((double) value(SampleStartMod), 0.0, 1.0) * zoneLength;
+    r.end = std::min(zoneEnd, r.start + std::clamp((double) value(SampleLengthMod), 0.0, 1.0) * zoneLength);
+    const double loopStart = r.end - std::clamp((double) value(LoopLengthMod), 0.0, 1.0) * (r.end - r.start);
+    // Snap moves the region end (loop or not) back to a point that continues the waveform at the start.
+    if (value(Snap) > 0.5f && r.end - r.start > 0.06 * sample.sampleRate)
+        r.end = snappedLoopEnd(sample, r.start, r.end);
+    if (mode_ == Mode::Classic && value(LoopOn) > 0.5f && r.end - r.start > 4)
+    {
+        r.loop = true;
+        r.loopEnd = r.end;
+        r.loopStart = std::min(loopStart, r.end - 4);
+        r.fade = std::min(std::clamp((double) value(LoopFadeMod), 0.0, 1.0) * (r.end - r.loopStart), r.loopStart - r.start);
+    }
+    return r;
+}
+
+double Simpler::divisionBeats(int division)
+{
+    // Slice by Beat Division chooser: 1/16, 1/16T, 1/8, 1/8T, 1/4, 1/4T, 1/2, 1/2T, 1 Bar, 2 Bars, 4 Bars (the reference's
+    // remote scripts list "1 Bar / 2 Bars / 4 Bars" at the end; the order of the rest is assumed, TODO(DEV-4c): measure).
+    static constexpr double beats[] = {0.25, 1.0 / 6, 0.5, 1.0 / 3, 1, 2.0 / 3, 2, 4.0 / 3, 4, 8, 16};
+    return beats[std::clamp(division, 0, (int) (sizeof beats / sizeof beats[0]) - 1)];
+}
+
+int Simpler::slices(const Zone& zone, const engine::SampleData& sample, double start, double end, double* out, int max) const
+{
+    int count = 0;
+    const auto add = [&](double frame) {
+        if (count < max && frame >= start && frame < end && (count == 0 || frame > out[count - 1] + 1)) out[count++] = frame;
+    };
+    const double rate = sample.sampleRate;
+    const auto& part = zone.part;
+    const int style = std::clamp(part.slicingStyle, 0, 3);
+    if (style == 1) // Beat: every Division of the sample's own beat grid (its warp markers), else of the set tempo
+    {
+        const double secondsPerBeat = part.secondsPerBeat > 0 ? part.secondsPerBeat : 60.0 / std::max(1.0, tempo_);
+        const double step = std::max(1.0, divisionBeats(part.slicingBeatGrid) * secondsPerBeat * rate);
+        for (double frame = start; frame < end && count < max; frame += step) add(frame);
+    }
+    else if (style == 2) // Region: equal parts
+    {
+        const int parts = std::clamp(part.slicingRegions, 1, 64);
+        for (int i = 0; i < parts; ++i) add(start + (end - start) * i / parts);
+    }
+    else if (style == 3) // Manual: the region start, then the manual slice points in time order
+    {
+        add(start);
+        double previous = start;
+        for (int guard = 0; guard < max; ++guard) // selection by increasing time without sorting (no allocation)
+        {
+            double next = end;
+            for (double seconds : part.manualSlicePoints)
+                if (const double frame = seconds * rate; frame > previous + 1 && frame < next) next = frame;
+            if (next >= end) break;
+            add(next);
+            previous = next;
+        }
+    }
+    else // Transient (at most 64 slices): the reference's saved transients, else Sonora's onset detection
+    {
+        const int limit = std::min(max, 64);
+        if (! part.slicePoints.empty())
+        {
+            // Sensitivity keeps the transients whose normalised energy reaches 1 - Sensitivity (100 % keeps all).
+            // TODO(DEV-4c): the reference's exact Sensitivity law is not measured.
+            const double floor = 1.0 - std::clamp(part.slicingThreshold, 0.0, 100.0) / 100.0;
+            for (size_t i = 0; i < part.slicePoints.size() && count < limit; ++i)
+                if (i >= part.sliceEnergies.size() || part.sliceEnergies[i] >= floor - 1e-9) add(part.slicePoints[i] * rate);
+        }
+        else
+            for (double seconds : sample.onsets)
+                if (count < limit) add(seconds * rate);
+    }
+    return count;
 }
 
 Simpler::EnvShape Simpler::envShape(int attack, int decay, int sustain, int release, int attackSlope, int decaySlope, int releaseSlope) const

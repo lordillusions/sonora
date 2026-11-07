@@ -15,7 +15,7 @@ using R = DeviceRole;
 // When you implement a device, flip `implemented` and register it in
 // src/devices/DeviceFactory.cpp.
 constexpr std::array kCatalog{
-    CatalogEntry{"OriginalSimpler", "Simpler", R::Instrument, true},
+    CatalogEntry{"OriginalSimpler", "Sonora Simpler", R::Instrument, true},
     CatalogEntry{"Eq8", "EQ Eight", R::AudioEffect, true},
     CatalogEntry{"Reverb", "Reverb", R::AudioEffect, true},
     CatalogEntry{"MultibandDynamics", "Multiband Dynamics", R::AudioEffect, true},
@@ -40,7 +40,7 @@ constexpr std::array kCatalog{
     CatalogEntry{"AutoPan2", "Auto Pan-Tremolo", R::AudioEffect, false},
     CatalogEntry{"Roar", "Roar", R::AudioEffect, false},
     CatalogEntry{"DrumCell", "Drum Sampler", R::Instrument, false},
-    CatalogEntry{"InstrumentVector", "Wavetable", R::Instrument, true},
+    CatalogEntry{"InstrumentVector", "Sonora Wavetable", R::Instrument, true},
     CatalogEntry{"MultiSampler", "Sonora Sampler", R::Instrument, true},
     CatalogEntry{"SonoraFm", "Sonora FM", R::Instrument, true},
     CatalogEntry{"SonoraVector", "Sonora Vector", R::Instrument, true},
@@ -85,7 +85,7 @@ constexpr std::array kCatalog{
     CatalogEntry{"Shifter", "Shifter", R::AudioEffect, false},
     CatalogEntry{"Spectral", "Spectral Time", R::AudioEffect, false},
     CatalogEntry{"Transmute", "Spectral Resonator", R::AudioEffect, false},
-    CatalogEntry{"StringStudio", "Tension", R::Instrument, true},
+    CatalogEntry{"StringStudio", "Sonora Tension", R::Instrument, true},
     CatalogEntry{"Tube", "Dynamic Tube", R::AudioEffect, false},
     CatalogEntry{"Vinyl", "Vinyl Distortion", R::AudioEffect, false},
     CatalogEntry{"Vocoder", "Vocoder", R::AudioEffect, false},

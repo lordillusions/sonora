@@ -233,15 +233,18 @@ public:
                 return true;
             }
             case DarkChooser:
+            {
+                const float rowSize = compact ? size - 1.5f : size;
                 paint::fill(c, r, dark);
-                paint::text(c, label_, {0, 0, r.w, r.h * 0.5f}, label, size);
-                paint::text(c, formatted(p_, index_), {0, r.h * 0.5f, r.w * 0.5f, r.h * 0.5f}, cyan, size);
-                ctl::triangle(c, r.w * 0.62f, r.h * 0.75f, 6, 3.5f, ctl::Dir::Down, cyan);
+                paint::text(c, label_, {0, 0, r.w, r.h * 0.5f}, label, rowSize);
+                paint::text(c, formatted(p_, index_), {0, r.h * 0.5f, r.w - 9, r.h * 0.5f}, cyan, rowSize);
+                ctl::triangle(c, std::min(r.w - 4, gfx::measureText(formatted(p_, index_), rowSize) + 6), r.h * 0.75f, 6, 3.5f, ctl::Dir::Down, cyan);
                 return true;
+            }
             case RetrigBox:
             {
                 paint::fill(c, r, dark);
-                paint::text(c, label_, {0, 0, r.w, r.h * 0.5f}, label, size);
+                paint::text(c, label_, {0, 0, r.w, r.h * 0.5f}, label, compact ? size - 1.5f : size);
                 const Rect box{r.w * 0.5f - 7, r.h * 0.5f + 1, 9, 9};
                 paint::fill(c, box, on ? cyan : dark);
                 paint::stroke(c, box.reduced(0.5f), cyan, 1);
@@ -379,29 +382,53 @@ private:
 class SampleReadout final : public Widget
 {
 public:
+    // A sample-row field that edits the device model (zone gain, Simpler slicing settings): drag vertically, or with
+    // `choices` click for a menu. Commits once on release (a structural edit: no member access after commit).
     std::function<float()> get;
     std::function<void(float)> commit;
+    std::function<std::string(float)> format; // value text; default: percent or dB
+    std::vector<std::string> choices;
     std::string label;
     float low = 0, high = 1;
-    bool percent = true;
+    bool percent = true, integer = false, compact = false;
     void paint(SkCanvas& c, const Theme& t) override
     {
+        const float size = compact ? t.metrics.smallFontSize - 1.5f : t.metrics.smallFontSize;
         paint::fill(c, localBounds(), t.color("RetroDisplayBackground"));
-        paint::text(c, label, {0, 0, width(), height() * 0.5f}, t.color("RetroDisplayScaleText"), t.metrics.smallFontSize);
+        paint::text(c, label, {0, 0, width(), height() * 0.5f}, t.color("RetroDisplayScaleText"), size);
         const float v = pressed_ ? pending_ : get();
-        paint::text(c, percent ? number(v * 100, "%.1f %%") : number(v, "%.1f dB"), {0, height() * 0.5f, width(), height() * 0.5f},
-                    t.color("RangeDefault"), t.metrics.smallFontSize);
+        const auto text = ! choices.empty() ? choices[(size_t) std::clamp((int) std::lround(v), 0, (int) choices.size() - 1)]
+                        : format ? format(v) : percent ? number(v * 100, "%.1f %%") : number(v, "%.1f dB");
+        paint::text(c, text, {0, height() * 0.5f, width() - (choices.empty() ? 0.0f : 9.0f), height() * 0.5f}, t.color("RangeDefault"), size);
+        if (! choices.empty()) ctl::triangle(c, std::min(width() - 4, gfx::measureText(text, size) + 6), height() * 0.75f, 6, 3.5f, ctl::Dir::Down, t.color("RangeDefault"));
     }
     void mouseDown(const MouseEvent& e) override { if (! e.right) { pressed_ = true; y_ = e.y; start_ = pending_ = get(); } }
     void mouseDrag(const MouseEvent& e) override
     {
-        if (! pressed_) return;
-        pending_ = std::clamp(start_ + (y_ - e.y) * (high - low) / (e.shift ? 1800 : 180), low, high); repaint();
+        if (! pressed_ || ! choices.empty()) return;
+        pending_ = std::clamp(start_ + (y_ - e.y) * (high - low) / (e.shift ? 1800 : 180), low, high);
+        if (integer) pending_ = std::round(pending_);
+        repaint();
     }
-    void mouseUp(const MouseEvent&) override
+    void mouseUp(const MouseEvent& e) override
     {
         if (! pressed_) return;
         pressed_ = false;
+        if (! choices.empty())
+        {
+            if (e.right || std::abs(e.y - y_) > 3 || ! commit) return;
+            const int current = (int) std::lround(get());
+            std::vector<bool> ticks(choices.size()); ticks[(size_t) std::clamp(current, 0, (int) ticks.size() - 1)] = true;
+            auto pick = [callback = commit, current](int chosen) { if (chosen >= 0 && chosen != current) callback((float) chosen); };
+            if (ctx().showChoices) ctx().showChoices(choices, ticks, std::move(pick));
+            else
+            {
+                juce::PopupMenu menu;
+                for (size_t i = 0; i < choices.size(); ++i) menu.addItem((int) i + 1, choices[i], true, ticks[i]);
+                menu.showMenuAsync(juce::PopupMenu::Options(), [selection = std::move(pick)](int choice) { if (choice > 0) selection(choice - 1); });
+            }
+            return;
+        }
         if (std::abs(pending_ - start_) > 1e-7f && commit) { auto callback = commit; callback(pending_); }
     }
 private:
@@ -660,8 +687,11 @@ DeviceFace::DeviceFace(const model::Device& model, P* p, int track, int device, 
     {
         // Geometry measured from the reference's Simpler (660 px wide; y scaled to this 164-unit face). Page 0 is the
         // Sample view (display, sample row); page 1 is the Controls view; both share the Filter / LFO / amplitude row.
-        // Page codes: 30 Classic only, 31 One-Shot only, 32 not One-Shot; 20 / 21 LFO beat / rate; 33-37 shared row
-        // (conditional circuit / drive / morph); 40-43 Controls display views; 44 / 45 loop time / beat repeat.
+        // Page codes: 30 Classic only, 31 One-Shot only, 32 not One-Shot, 38 Slicing only, 39 not Slicing, 46 Slicing with
+        // Poly playback, 49-51 the Slicing Sensitivity / Division / Regions field (by Slice By); 20 / 21 LFO beat / rate;
+        // 33-37 shared row (conditional circuit / drive / morph), 47 its envelope (Classic) and 48 its Transpose (One-Shot
+        // and Slicing, whose volume is shaped by the fades, DEV-4c); 40-43 Controls display views; 44 / 45 loop time / beat
+        // repeat.
         const auto look = [](Widget* widget, int value) { static_cast<Readout*>(widget)->look = value; return widget; };
         const auto knob = [this](int parameter, std::string label, Rect rect, int page) {
             auto* widget = static_cast<Knob*>(control(parameter, std::move(label), rect, true, page));
@@ -685,15 +715,45 @@ DeviceFace::DeviceFace(const model::Device& model, P* p, int track, int device, 
         look(control(S::FadeOut, "Fade Out", {211, 88, 41, 26}, false, 31), Readout::Row);
         look(control(S::LoopOn, "LOOP", {253, 92, 34, 9}, false, 30), Readout::CyanToggle);
         look(control(S::Snap, "SNAP", {253, 105, 34, 9}, false, 0), Readout::CyanToggle);
-        look(control(S::Voices, "Voices", {296, 88, 36, 26}, false, 32), Readout::DarkChooser);
-        look(control(S::Retrigger, "Retrig", {334, 88, 30, 26}, false, 32), Readout::RetrigBox);
+        look(control(S::Voices, "Voices", {296, 88, 36, 26}, false, 30), Readout::DarkChooser);
+        look(control(S::Retrigger, "Retrig", {334, 88, 30, 26}, false, 30), Readout::RetrigBox);
         look(control(S::OneShotGate, "Mode", {296, 88, 50, 26}, false, 31), Readout::DarkChooser);
+
+        // Slicing (DEV-4c): Slice By and its Sensitivity / Division / Regions (zone settings, edited in the model), the
+        // Playback chooser, Trigger / Gate and the per-slice fades; Voices / Retrig with Poly.
+        const auto sliceField = [this](std::string label, Rect rect, int page, std::vector<std::string> choices, std::function<float(const model::SamplePart&)> get,
+                                       std::function<void(model::SamplePart&, float)> set, float low = 0, float high = 1) {
+            auto* readout = add<SampleReadout>();
+            readout->label = std::move(label); readout->choices = std::move(choices); readout->low = low; readout->high = high; readout->compact = true;
+            readout->get = [this, get] { return model_.sampleParts.empty() ? get(model::SamplePart{}) : get(model_.sampleParts[0]); };
+            readout->commit = [this, set](float value) {
+                edit([set, value](auto& d) { if (d.sampleParts.empty()) return; set(d.sampleParts[0], value); d.samplePartsEdited = true; }, "Slicing");
+            };
+            controls_.push_back({readout, rect, page});
+            return readout;
+        };
+        sliceField("Slice By", {293, 88, 46, 26}, 38, {"Transient", "Beat", "Region", "Manual"},
+                   [](const auto& part) { return (float) part.slicingStyle; }, [](auto& part, float v) { part.slicingStyle = (int) std::lround(v); });
+        sliceField("Sensitivity", {340, 88, 46, 26}, 49, {}, [](const auto& part) { return (float) part.slicingThreshold / 100.0f; },
+                   [](auto& part, float v) { part.slicingThreshold = std::clamp(v, 0.0f, 1.0f) * 100.0; });
+        sliceField("Division", {340, 88, 46, 26}, 50, {"1/16", "1/16T", "1/8", "1/8T", "1/4", "1/4T", "1/2", "1/2T", "1 Bar", "2 Bars", "4 Bars"},
+                   [](const auto& part) { return (float) part.slicingBeatGrid; }, [](auto& part, float v) { part.slicingBeatGrid = (int) std::lround(v); });
+        auto* regions = sliceField("Regions", {340, 88, 46, 26}, 51, {}, [](const auto& part) { return (float) part.slicingRegions; },
+                                   [](auto& part, float v) { part.slicingRegions = std::clamp((int) std::lround(v), 2, 64); }, 2, 64);
+        regions->integer = true; regions->format = [](float v) { return number(v, "%.0f"); };
+        for (const auto& [parameter, label, x, w, page, kind] : std::array<std::tuple<int, const char*, float, float, int, int>, 4>{
+                 {{S::SlicePlayback, "Playback", 387, 40, 38, Readout::DarkChooser}, {S::OneShotGate, "Mode", 428, 42, 38, Readout::DarkChooser},
+                  {S::Voices, "Voices", 471, 28, 46, Readout::DarkChooser}, {S::Retrigger, "Retrig", 500, 29, 46, Readout::RetrigBox}}})
+            static_cast<Readout*>(look(control(parameter, label, {x, 88, w, 26}, false, page), kind))->compact = true;
+        // The fades sit where One-Shot has them (Fade In after Start, Fade Out after Length).
+        look(control(S::FadeIn, "Fade In", {129, 88, 41, 26}, false, 38), Readout::Row);
+        look(control(S::FadeOut, "Fade Out", {211, 88, 41, 26}, false, 38), Readout::Row);
 
         // Sonora-only voice settings (the reference keeps them in menus) in the free part of the sample row.
         for (const auto& [parameter, label, x, w] : std::array<std::tuple<int, const char*, float, float>, 5>{
                  {{S::KeyZoneShift, "Zone", 368, 24}, {S::VolKeyScale, "Vol<Key", 392, 35}, {S::PanKeyScale, "Pan<Key", 427, 35},
                   {S::ConstPowerFade, "X-Fade", 462, 32}, {S::Interpolation, "Interp", 494, 35}}})
-            static_cast<Readout*>(look(control(parameter, label, {x, 88, w, 26}, false, 0), Readout::Row))->compact = true;
+            static_cast<Readout*>(look(control(parameter, label, {x, 88, w, 26}, false, 39), Readout::Row))->compact = true;
 
         // Filter / LFO / amplitude row, on both pages (33). Circuit choosers: 34 low/high-pass, 35 band/notch/morph;
         // 36 Drive (non-Clean circuits), 37 Morph (Morph type) share the slot after Res, as in the reference.
@@ -715,7 +775,8 @@ DeviceFace::DeviceFace(const model::Device& model, P* p, int track, int device, 
         look(control(S::LfoBeat, "Beat", {313, 142, 47, 11}, false, 20), Readout::Field);
         int col = 0;
         for (int parameter : {S::Attack, S::Decay, S::Sustain, S::Release, S::Volume})
-            knob(parameter, p->parameters()[(size_t) parameter].name, {386 + (float) col++ * 55, 120, 54, 38}, 33);
+            knob(parameter, p->parameters()[(size_t) parameter].name, {386 + (float) col++ * 55, 120, 54, 38}, parameter == S::Volume ? 33 : 47);
+        knob(S::Transpose, "Transp", {386, 120, 54, 38}, 48);
 
         // Controls page (measured from a capture of the reference): three
         // displays above the shared row. Filter: Frequency (40) / Envelope (41) views; LFO; Amplitude (42) / Pitch (43)
@@ -949,7 +1010,7 @@ bool DeviceFace::applies(const std::string& parameterId) const
     // Simpler-only LFO offset / key scale and envelope loop settings are not read for the Sampler either.
     if (kind_ != Kind::Sampler) return true;
     for (int parameter : {S::LoopOn, S::SampleStartMod, S::SampleLengthMod, S::LoopLengthMod, S::LoopFadeMod, S::Snap,
-                          S::LfoOffset, S::LfoKeyScale, S::AmpLoopMode, S::AmpLoopTime, S::AmpRepeatTime})
+                          S::LfoOffset, S::LfoKeyScale, S::AmpLoopMode, S::AmpLoopTime, S::AmpRepeatTime, S::SlicePlayback})
         if (processor_->parameters()[(size_t) parameter].id == parameterId) return false;
     return true;
 }
@@ -1058,8 +1119,14 @@ void DeviceFace::layout()
             const int type = (int) std::lround(processor_->getParameter(S::FilterType));
             const bool lowHigh = type <= 1, circuit = processor_->getParameter(lowHigh ? S::FilterCircuit : S::FilterCircuitBp) > 0.5f;
             const bool shared = page_ == 0 || page_ == 1;
+            const int style = model_.sampleParts.empty() ? 0 : std::clamp(model_.sampleParts[0].slicingStyle, 0, 3);
+            const bool poly = (int) std::lround(processor_->getParameter(S::SlicePlayback)) == 1;
             if (page == 20 || page == 21) show = shared && sync == (page == 20);
             else if (page >= 30 && page <= 32) show = page_ == 0 && (page == 30 ? mode == 0 : page == 31 ? mode == 1 : mode != 1);
+            else if (page == 38 || page == 39) show = page_ == 0 && (mode == 2) == (page == 38);
+            else if (page == 46) show = page_ == 0 && mode == 2 && poly;
+            else if (page >= 49 && page <= 51) show = page_ == 0 && mode == 2 && style == page - 49;
+            else if (page == 47 || page == 48) show = shared && (mode == 0) == (page == 47);
             else if (page == 33) show = shared;
             else if (page == 34 || page == 35) show = shared && lowHigh == (page == 34);
             else if (page == 36) show = shared && circuit && type != 4;
@@ -1088,7 +1155,7 @@ void DeviceFace::layout()
 }
 void DeviceFace::tick()
 {
-    if (kind_ == Kind::Echo) layout();
+    if (kind_ == Kind::Echo || kind_ == Kind::Simpler) layout(); // Simpler: Sync / circuit / Playback choose the controls
     if (kind_ == Kind::Tuner)
     {
         const float hz = dynamic_cast<T*>(processor_)->frequency();
@@ -1248,6 +1315,190 @@ void DeviceFace::waveform(SkCanvas& c, const Theme& t, Rect r)
         }
     }
     if (kind_ != Kind::Simpler) paint::text(c, zone->part.name, {r.x + 8, r.y + 2, r.w - 16, 12}, t.color("RetroDisplayScaleText"), t.metrics.smallFontSize);
+}
+namespace
+{
+// The Simpler's first zone and its loaded sample, with the zone's region in frames (DEV-4c display).
+struct SimplerView
+{
+    const S* simpler = nullptr;
+    const S::Zone* zone = nullptr;
+    const engine::SampleData* sample = nullptr;
+    double zoneStart = 0, zoneEnd = 0;
+};
+SimplerView simplerView(devices::DeviceProcessor* p)
+{
+    SimplerView v;
+    v.simpler = dynamic_cast<const S*>(p);
+    if (! v.simpler || v.simpler->zones().empty()) return v;
+    v.zone = &v.simpler->zones()[0];
+    v.sample = v.zone->slot ? v.zone->slot->get() : nullptr;
+    if (! v.sample || v.sample->audio.getNumSamples() < 2) { v.sample = nullptr; return v; }
+    const double length = v.sample->audio.getNumSamples();
+    v.zoneStart = std::clamp((double) v.zone->part.sampleStart, 0.0, length - 2);
+    v.zoneEnd = v.zone->part.sampleEnd > 0 ? std::min((double) v.zone->part.sampleEnd, length) : length;
+    if (v.zoneEnd <= v.zoneStart + 1) v.zoneEnd = length;
+    return v;
+}
+}
+float DeviceFace::frameX(double frame) const
+{
+    const auto v = simplerView(processor_);
+    const auto r = graphBounds();
+    if (! v.sample) return r.x;
+    const double span = v.zoneEnd - v.zoneStart, a = v.zoneStart + viewStart_ * span, b = v.zoneStart + viewEnd_ * span;
+    return r.x + (float) ((frame - a) / std::max(1.0, b - a)) * r.w;
+}
+DeviceFace::SampleMarks DeviceFace::sampleMarks() const
+{
+    SampleMarks m;
+    const auto v = kind_ == Kind::Simpler ? simplerView(processor_) : SimplerView{};
+    if (! v.sample) return m;
+    // The same region the voices play (Start / Length / Loop / Fade, Snap), from the live parameter values.
+    const auto region = v.simpler->region(*v.zone, *v.sample);
+    m.start = frameX(region.start);
+    m.end = frameX(region.end);
+    const int mode = (int) v.simpler->playbackMode();
+    if (region.loop)
+    {
+        m.loopStart = frameX(region.loopStart);
+        if (region.fade > 0) m.loopFade = frameX(region.loopStart - region.fade);
+    }
+    const double ms = v.sample->sampleRate * 0.001;
+    if (mode == 1)
+    {
+        // Fade In from the start; Trigger fades out over Fade Out before the region end, Gate only on release (the end
+        // keeps the measured ~1 ms fade).
+        m.fadeIn = frameX(std::min(region.end, region.start + processor_->getParameter(S::FadeIn) * ms));
+        const bool gate = processor_->getParameter(S::OneShotGate) > 0.5f;
+        const double out = std::max(1.03, gate ? 0.0 : (double) processor_->getParameter(S::FadeOut)) * ms;
+        m.fadeOut = frameX(std::max(region.start, region.end - out));
+    }
+    if (mode == 2)
+    {
+        std::array<double, S::kMaxSlices> starts{};
+        const int count = v.simpler->slices(*v.zone, *v.sample, region.start, region.end, starts.data(), S::kMaxSlices);
+        for (int i = 0; i < count; ++i) m.slices.push_back(frameX(starts[(size_t) i]));
+        m.manualSlices = v.zone->part.slicingStyle == 3;
+    }
+    return m;
+}
+void DeviceFace::simplerSample(SkCanvas& c, const Theme& t, Rect r)
+{
+    paint::fill(c, r, t.color("SampleDisplayBackground"));
+    const auto v = simplerView(processor_);
+    if (! v.sample)
+    {
+        paint::text(c, v.zone ? "Sample unavailable" : "Drop Sample Here", r, t.color("RetroDisplayScaleText"), t.metrics.fontSize, Align::Centre);
+        return;
+    }
+    const auto* sample = v.sample;
+    const int count = sample->audio.getNumSamples();
+    if (previewSource_ != sample) { preview_.reset(); previewSource_ = sample; }
+    if (! preview_)
+    {
+        if (ctx().peaks)
+        {
+            model::Clip clip; clip.kind = model::Clip::Kind::Audio; clip.sample = v.zone->part.sample;
+            preview_ = ctx().peaks(clip);
+        }
+        else preview_ = engine::computePeaks(sample->audio, sample->sampleRate);
+    }
+    c.save();
+    c.clipRect(SkRect::MakeXYWH(r.x, r.y, r.w, r.h));
+    const double span = v.zoneEnd - v.zoneStart, first = v.zoneStart + viewStart_ * span, last = v.zoneStart + viewEnd_ * span;
+    const float centre = r.y + (r.h - 16) * 0.5f, amplitude = (r.h - 24) * 0.48f;
+    SkPathBuilder upper, lower, trace;
+    const bool close = last - first <= (double) r.w * 2;
+    bool begun = false;
+    for (float x = 0; x <= r.w; x += 0.5f)
+    {
+        const double frame = first + (double) x / r.w * (last - first);
+        if (close)
+        {
+            const int i = std::clamp((int) frame, 0, count - 1), j = std::min(count - 1, i + 1);
+            const float f = (float) (frame - std::floor(frame));
+            const float s0 = sample->audio.getSample(0, i) * (1 - f) + sample->audio.getSample(0, j) * f;
+            if (! begun) trace.moveTo(r.x + x, centre - s0 * amplitude); else trace.lineTo(r.x + x, centre - s0 * amplitude);
+        }
+        else if (preview_)
+        {
+            float lo = 0, hi = 0;
+            preview_->range(frame / sample->sampleRate, std::min((double) count, frame + (last - first) / r.w * 0.5) / sample->sampleRate, lo, hi, 0);
+            if (! begun) { upper.moveTo(r.x + x, centre - hi * amplitude); lower.moveTo(r.x + x, centre - lo * amplitude); }
+            else { upper.lineTo(r.x + x, centre - hi * amplitude); lower.lineTo(r.x + x, centre - lo * amplitude); }
+        }
+        begun = true;
+    }
+    const auto ink = t.color("RetroDisplayForeground");
+    if (close) stroke(c, trace, ink, 1);
+    else if (preview_) { stroke(c, upper, ink, 1); stroke(c, lower, ink, 1); }
+
+    const auto m = sampleMarks();
+    const float top = r.y + 2, bottom = r.bottom() - 14;
+    // Outside the played region the sample is dimmed, as the reference greys what the flags leave out.
+    const auto shade = paint::withAlpha(t.color("SampleDisplayBackground"), 170);
+    if (m.start > r.x) paint::fill(c, {r.x, r.y, m.start - r.x, r.h - 12}, shade);
+    if (m.end < r.right()) paint::fill(c, {m.end, r.y, r.right() - m.end, r.h - 12}, shade);
+    const auto cyan = t.color("RangeDefault"), amber = t.color("ChosenDefault");
+    if (m.loopStart >= 0)
+    {
+        paint::fill(c, {m.loopStart, top, std::max(0.0f, m.end - m.loopStart), bottom - top}, paint::withAlpha(cyan, 34)); // the loop
+        paint::fill(c, {m.loopStart, r.y, std::max(0.0f, m.end - m.loopStart), 3}, paint::withAlpha(cyan, 200));       // its brace
+        if (m.loopFade >= 0)
+        {
+            // Loop Fade: the audio before the loop start fades in as the loop end fades out.
+            SkPathBuilder fade;
+            fade.moveTo(m.loopFade, bottom).lineTo(m.loopStart, top);
+            stroke(c, fade, amber, 1.2f);
+            SkPathBuilder out;
+            out.moveTo(m.end - (m.loopStart - m.loopFade), top).lineTo(m.end, bottom);
+            stroke(c, out, amber, 1.2f);
+        }
+    }
+    if (m.fadeIn >= 0)
+    {
+        // One-Shot volume: Fade In from the start flag, Fade Out before the end flag.
+        SkPathBuilder envelope;
+        envelope.moveTo(m.start, bottom).lineTo(m.fadeIn, top).lineTo(std::max(m.fadeIn, m.fadeOut), top).lineTo(m.end, bottom);
+        stroke(c, envelope, amber, 1.2f);
+    }
+    for (size_t i = 0; i < m.slices.size(); ++i)
+    {
+        // Slices: automatic ones in blue, manual ones in white, as the reference draws them; numbered from 1.
+        const float x = m.slices[i];
+        const auto colour = m.manualSlices ? t.color("ControlForeground") : cyan;
+        paint::line(c, x, r.y, x, bottom, colour, 1);
+        if (m.slices.size() <= 64) paint::text(c, std::to_string(i + 1), {x + 2, r.y + 1, 20, 10}, colour, t.metrics.smallFontSize - 2);
+    }
+    // Ruler: ticks every 1/2/5 x 10^n ms with "m:ss:mmm" labels, over the visible part.
+    const double t0 = first / sample->sampleRate, seconds = (last - first) / sample->sampleRate;
+    double step = 1000;
+    bool chosen = false;
+    for (double base = 0.0001; base < 1000 && ! chosen; base *= 10)
+        for (double k : {1.0, 2.0, 5.0})
+            if (! chosen && seconds / (base * k) <= 5.5) { step = base * k; chosen = true; }
+    const auto scale = paint::withAlpha(t.color("RetroDisplayScaleText"), 150);
+    for (double at = std::ceil(t0 / step - 1e-9) * step; at < t0 + seconds; at += step)
+    {
+        const float x = r.x + (float) ((at - t0) / seconds) * r.w;
+        const int ms = (int) std::lround(at * 1000);
+        char text[32];
+        if (ms % 1000 == 0) std::snprintf(text, sizeof text, "%d:%02d", ms / 60000, ms / 1000 % 60);
+        else std::snprintf(text, sizeof text, "%d:%02d:%03d", ms / 60000, ms / 1000 % 60, ms % 1000);
+        paint::line(c, x, r.bottom() - 11, x, r.bottom() - 2, scale, 0.6f);
+        paint::text(c, text, {x + 2, r.bottom() - 12, 60, 10}, scale, t.metrics.smallFontSize - 1);
+    }
+    // Start / end flags.
+    const auto flag = t.color("RetroDisplayScaleText");
+    for (int end = 0; end < 2; ++end)
+    {
+        const float x = end ? m.end : m.start;
+        paint::line(c, x, r.y + 2, x, r.bottom() - 2, flag);
+        ctl::triangle(c, x + (end ? -3.0f : 3.0f), r.y + 5, 6, 7, end ? ctl::Dir::Left : ctl::Dir::Right, flag);
+    }
+    if (m.loopStart >= 0) ctl::triangle(c, m.loopStart + 3, r.y + 5, 6, 7, ctl::Dir::Right, cyan);
+    c.restore();
 }
 void DeviceFace::routing(SkCanvas& c, const Theme& t, Rect r)
 {
@@ -1451,7 +1702,7 @@ void DeviceFace::paint(SkCanvas& c, const Theme& t)
             paint::fill(c, scaled({0, 0, 660, 118}), t.color("RetroDisplayBackground"));
             for (int row = 1; row < 3; ++row)
                 paint::line(c, 4, scaled({0, (float) row * 39.5f - 0.5f, 0, 0}).y, 40, scaled({0, (float) row * 39.5f - 0.5f, 0, 0}).y, t.color("ControlContrastFrame"));
-            waveform(c, t, graphBounds());
+            simplerSample(c, t, graphBounds());
             // Warp is not implemented (DEV-4b): drawn like the reference's unwarped state, without controls.
             const auto dim = paint::withAlpha(t.color("ChosenDefault"), 150), muted = t.color("TextDisabled");
             const auto warp = scaled({531, 90, 49, 10});
@@ -1745,7 +1996,18 @@ void DeviceFace::mouseDown(const MouseEvent& e)
         }
         return;
     }
-    if ((kind_ == Kind::Simpler || kind_ == Kind::Sampler) && page_ == 0 && graphBounds().contains(e.x, e.y))
+    if (kind_ == Kind::Simpler && page_ == 0 && graphBounds().contains(e.x, e.y))
+    {
+        // The flags are the Start / Length controls and the loop marker the Loop control (DEV-4c, as in the reference):
+        // dragging them sets those parameters, so knobs, display and sound stay one.
+        const auto m = sampleMarks();
+        if (m.start < 0) return;
+        float best = 9;
+        for (const auto& [handle, x] : std::array<std::pair<int, float>, 3>{{{0, m.start}, {1, m.end}, {3, m.loopStart}}})
+            if (x >= 0 && std::abs(e.x - x) <= best) { best = std::abs(e.x - x); dragHandle_ = handle; }
+        if (dragHandle_ < 0) return;
+    }
+    else if (kind_ == Kind::Sampler && page_ == 0 && graphBounds().contains(e.x, e.y))
     {
         const auto* sampler = dynamic_cast<S*>(processor_);
         if (sampler->zones().empty()) return;
@@ -1782,7 +2044,27 @@ void DeviceFace::mouseDrag(const MouseEvent& e)
             processor_->setParameter(V::Sustain, 1 - (e.y - envelopeRect.y) / envelopeRect.h);
         }
     }
-    else if ((kind_ == Kind::Simpler || kind_ == Kind::Sampler) && page_ == 0 && dragHandle_ < 2)
+    else if (kind_ == Kind::Simpler && page_ == 0 && dragHandle_ != 2)
+    {
+        const auto v = simplerView(processor_);
+        if (! v.sample) return;
+        const double span = std::max(1.0, v.zoneEnd - v.zoneStart);
+        const double view = viewStart_ + (viewEnd_ - viewStart_) * x; // 0..1 of the zone
+        const double start = processor_->getParameter(S::SampleStartMod);
+        const double end = std::min(1.0, start + processor_->getParameter(S::SampleLengthMod));
+        const double minimum = 64.0 / span;
+        if (dragHandle_ == 0) // the start flag moves, the end flag stays
+        {
+            const double moved = std::clamp(view, 0.0, std::max(0.0, end - minimum));
+            processor_->setParameter(S::SampleStartMod, (float) moved);
+            processor_->setParameter(S::SampleLengthMod, (float) (end - moved));
+        }
+        else if (dragHandle_ == 1)
+            processor_->setParameter(S::SampleLengthMod, (float) std::clamp(view - start, minimum, 1.0 - start));
+        else if (dragHandle_ == 3)
+            processor_->setParameter(S::LoopLengthMod, (float) std::clamp((end - view) / std::max(1e-9, end - start), 0.0, 1.0));
+    }
+    else if (kind_ == Kind::Sampler && page_ == 0 && dragHandle_ < 2)
     {
         const auto& z = dynamic_cast<S*>(processor_)->zones()[0]; const auto* data = z.slot->get();
         const int64_t end = z.part.sampleEnd > 0 ? z.part.sampleEnd : data->audio.getNumSamples();
@@ -1813,7 +2095,7 @@ void DeviceFace::mouseDrag(const MouseEvent& e)
 void DeviceFace::mouseUp(const MouseEvent& e)
 {
     const int handle = dragHandle_; dragHandle_ = -1;
-    if (e.right || handle < 0 || handle > 1 || (kind_ != Kind::Simpler && kind_ != Kind::Sampler)) return;
+    if (e.right || handle < 0 || handle > 1 || kind_ != Kind::Sampler) return; // Simpler flags are live parameters
     const int64_t frame = dragFrame_;
     // Structural edit may synchronously destroy this face. No member access after commit.
     edit([handle, frame](auto& d) {
@@ -1823,6 +2105,32 @@ void DeviceFace::mouseUp(const MouseEvent& e)
         if (z.loopEnd <= z.loopStart) z.loopMode = 0;
         d.samplePartsEdited = true;
     }, "Sample Boundary");
+}
+bool DeviceFace::mouseWheel(const MouseEvent& e)
+{
+    if (kind_ != Kind::Simpler || page_ != 0 || ! graphBounds().contains(e.x, e.y) || ! simplerView(processor_).sample) return false;
+    const auto r = graphBounds();
+    const double width = viewEnd_ - viewStart_;
+    const float delta = std::abs(e.wheelDeltaY) >= std::abs(e.wheelDeltaX) ? e.wheelDeltaY : -e.wheelDeltaX;
+    if (std::abs(delta) < 1e-6f) return false;
+    if (e.cmd)
+    {
+        // Zoom around the pointer, from the whole zone down to ~64 frames.
+        const double at = viewStart_ + width * std::clamp((e.x - r.x) / std::max(1.0f, r.w), 0.0f, 1.0f);
+        const auto v = simplerView(processor_);
+        const double narrowest = std::min(1.0, 64.0 / std::max(1.0, v.zoneEnd - v.zoneStart));
+        const double zoomed = std::clamp(width * (delta > 0 ? 0.8 : 1.25), narrowest, 1.0);
+        viewStart_ = std::clamp(at - (at - viewStart_) * zoomed / width, 0.0, 1.0 - zoomed);
+        viewEnd_ = viewStart_ + zoomed;
+    }
+    else if (width < 1.0)
+    {
+        const double moved = std::clamp(viewStart_ - (delta > 0 ? 0.1 : -0.1) * width, 0.0, 1.0 - width);
+        viewStart_ = moved; viewEnd_ = moved + width;
+    }
+    else return false; // not zoomed: the chain scrolls
+    repaint();
+    return true;
 }
 bool DeviceFace::browserDrop(const BrowserDrag& payload, const MouseEvent& e)
 {

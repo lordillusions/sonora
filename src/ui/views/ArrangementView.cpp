@@ -1156,6 +1156,8 @@ void ArrangementView::paint(SkCanvas& c, const Theme& t)
                 const bool hovered = lane.takeLaneId < 0 && lane.controlIndex == hoverTrack_ && clip.uid == hoverUid_;
                 drawClip(c, t, clip, {x0, lane.y + 1, std::max(2.0f, x1 - x0), clipHeight - 2}, (float) x.pixelsPerBeat,
                          waveFor(clip), selectedClip, false, lane.takeLaneId < 0 && (selectedClip || hovered));
+                if (track->frozen && lane.takeLaneId < 0)
+                    paint::frozenOverlay(c, {x0, lane.y + 1, std::max(2.0f, x1 - x0), clipHeight - 2}, t.color("FreezeColor"));
                 if (lane.takeLaneId >= 0)
                     paint::fill(c, {x0, lane.y + 1, std::max(2.0f, x1 - x0), clipHeight - 2}, paint::withAlpha(t.color("SurfaceArea"), 95));
                 if (lane.takeLaneId >= 0 && clip.takeId >= 0)
@@ -1584,7 +1586,7 @@ double ArrangementView::gridBeats() const
 
 double ArrangementView::snapUnit(const MouseEvent& e) const
 {
-    return ui::snapSize(ctx().arrangementGrid, ctx().pixelsPerBeat, beatsPerBar(), e.alt || e.cmd);
+    return ui::snapSize(ctx().arrangementGrid, ctx().pixelsPerBeat, beatsPerBar(), e.cmd); // Live (macOS): Cmd, not Option
 }
 
 void ArrangementView::zoomAt(float anchorX, double factor)
@@ -2413,11 +2415,39 @@ void ArrangementView::mouseDrag(const MouseEvent& e)
     if (! drag_.moved)
         return;
     const double deltaBeats = (e.x - drag_.startX) / x.pixelsPerBeat;
+    // Moving can also change the track, if the lane under the mouse takes the same kind of clip.
+    drag_.targetTrack = drag_.track;
+    const char* refusal = nullptr;
+    if (drag_.laneId < 0 && drag_.mode == ui::DragMode::Move && x.song != nullptr)
+    {
+        const int lane = laneTrackAt(e.y);
+        if (lane >= 0 && x.song->tracks[(size_t) lane].kind == x.song->tracks[(size_t) drag_.track].kind
+            && x.song->tracks[(size_t) lane].kind != model::TrackKind::Group)
+            drag_.targetTrack = lane;
+        else if (lane >= 0 && lane != drag_.track)
+            // The clip stays on its track; say why instead of ignoring the move silently.
+            refusal = x.song->tracks[(size_t) drag_.track].kind == model::TrackKind::Audio
+                          ? "Audio clips can only move to audio tracks"
+                          : "MIDI clips can only move to MIDI tracks";
+    }
     // Option means "copy" for a clip body drag, so only Cmd skips the grid there
     const double unit = drag_.copy ? ui::snapSize(x.arrangementGrid, x.pixelsPerBeat, beatsPerBar(), e.cmd) : snapUnit(e);
     drag_.alignEnd = drag_.mode == ui::DragMode::Move && e.shift;
-    drag_.preview = ui::dragClip(drag_.original, drag_.mode, deltaBeats, unit, unit > 0.0, x.song ? x.song->tempo : 120.0, drag_.alignEnd);
-    if (drag_.mode == ui::DragMode::Move)
+    // UI-71 (Live): besides the grid, the dragged edge is drawn to the edges of the other clips on the destination lane and to
+    // the locators.
+    std::vector<double> targets;
+    if (x.song != nullptr)
+    {
+        if (drag_.laneId < 0)
+            for (const auto& other : x.song->tracks[(size_t) drag_.targetTrack].arrangementClips)
+                if (other.uid != drag_.uid) { targets.push_back(other.currentStart); targets.push_back(other.currentEnd); }
+        for (const auto& locator : x.song->locators) targets.push_back(locator.time);
+    }
+    drag_.preview = ui::dragClip(drag_.original, drag_.mode, deltaBeats, unit, unit > 0.0, x.song ? x.song->tempo : 120.0, drag_.alignEnd,
+                                 targets);
+    if (refusal != nullptr)
+        x.statusText = refusal;
+    else if (drag_.mode == ui::DragMode::Move)
         x.statusText = drag_.alignEnd ? "Move Clip: its end snaps to the grid" : "Move Clip: its start snaps to the grid (hold Shift to snap its end)";
     if (drag_.mode != ui::DragMode::FadeInCurve && drag_.mode != ui::DragMode::FadeOutCurve)
         x.dragRange = std::make_pair(drag_.preview.currentStart, drag_.preview.currentEnd);
@@ -2427,20 +2457,6 @@ void ArrangementView::mouseDrag(const MouseEvent& e)
         auto& shape = drag_.mode == ui::DragMode::FadeInCurve ? drag_.preview.fadeInCurve : drag_.preview.fadeOutCurve;
         const double before = drag_.mode == ui::DragMode::FadeInCurve ? drag_.original.fadeInCurve : drag_.original.fadeOutCurve;
         shape = std::clamp(before + (e.y - drag_.startY) * 0.012, -0.95, 0.95);
-    }
-    // Moving can also change the track, if the lane under the mouse takes the same kind of clip.
-    drag_.targetTrack = drag_.track;
-    if (drag_.laneId < 0 && drag_.mode == ui::DragMode::Move && x.song != nullptr)
-    {
-        const int lane = laneTrackAt(e.y);
-        if (lane >= 0 && x.song->tracks[(size_t) lane].kind == x.song->tracks[(size_t) drag_.track].kind
-            && x.song->tracks[(size_t) lane].kind != model::TrackKind::Group)
-            drag_.targetTrack = lane;
-        else if (lane >= 0 && lane != drag_.track)
-            // The clip stays on its track; say why instead of ignoring the move silently.
-            x.statusText = x.song->tracks[(size_t) drag_.track].kind == model::TrackKind::Audio
-                               ? "Audio clips can only move to audio tracks"
-                               : "MIDI clips can only move to MIDI tracks";
     }
     repaint();
 }
@@ -2504,28 +2520,22 @@ void ArrangementView::mouseUp(const MouseEvent& e)
         const char* label = drag_.mode == ui::DragMode::Move ? "Move Clip" : drag_.mode == ui::DragMode::ResizeEnd ? "Resize Clip"
                           : drag_.mode == ui::DragMode::TrimStart ? "Trim Clip"
                           : (drag_.mode == ui::DragMode::StretchStart || drag_.mode == ui::DragMode::StretchEnd) ? "Stretch Clip" : "Change Fade";
-        if (drag_.copy)
-        {
-            // Option+drag: copy the clip to the dropped position, on this track or another one of the same kind
-            x.applyEdit(model::copyClipToTrack(*x.song, drag_.track, drag_.uid, drag_.targetTrack, drag_.preview.currentStart));
-            for (const auto& c : x.song->tracks[(size_t) drag_.targetTrack].arrangementClips)
-                if (c.uid != drag_.uid && std::fabs(c.currentStart - drag_.preview.currentStart) < 1e-9)
-                {
-                    x.selectedTrack = x.selectedClipTrack = drag_.targetTrack;
-                    x.selectedClipUid = c.uid;
-                    x.selectedClipScene = -1;
-                }
-            x.statusText = "Copied clip";
-        }
-        else if (drag_.targetTrack != drag_.track)
-        {
-            x.applyEdit(model::moveClipToTrack(*x.song, drag_.track, drag_.uid, drag_.targetTrack, drag_.preview.currentStart));
-            x.selectedClipTrack = x.selectedClipUid = -1; // the clip on the new track is a new object
-        }
+        if (drag_.laneId >= 0)
+            x.applyEdit(model::modifyClip(*x.song, model::ClipLocation::take(drag_.track, drag_.uid, drag_.laneId), drag_.preview, label));
         else
         {
-            x.applyEdit(model::modifyClip(*x.song, drag_.laneId >= 0 ? model::ClipLocation::take(drag_.track, drag_.uid, drag_.laneId)
-                                                                       : model::ClipLocation::arrangement(drag_.track, drag_.uid), drag_.preview, label));
+            // UI-71 (Live): the moved / resized / Option-copied clip overwrites what it lands on (one undo step).
+            int placedUid = -1;
+            auto command = model::placeArrangementClip(*x.song, drag_.track, drag_.uid, drag_.targetTrack, drag_.preview, drag_.copy,
+                                                       drag_.copy ? "Copy Clip" : label, &placedUid);
+            if (command.apply)
+            {
+                x.applyEdit(std::move(command));
+                x.selectedTrack = x.selectedClipTrack = drag_.targetTrack;
+                x.selectedClipUid = placedUid;
+                x.selectedClipScene = -1;
+                if (drag_.copy) x.statusText = "Copied clip";
+            }
         }
     }
     drag_ = {};
@@ -2745,11 +2755,20 @@ bool ArrangementView::keyPressed(const KeyEvent& k)
         {
             model::Clip fresh;
             const double bar = x.song->timeSigNumerator * 4.0 / x.song->timeSigDenominator;
-            const double at = x.transport ? std::floor(x.transport->positionBeats() / bar) * bar : 0.0;
-            if (model::makeEmptyMidiClip(*x.song, at, bar, fresh))
+            // Live (Insert Empty MIDI Clip): the clip spans the time selection; without one it is a bar at the play position's bar.
+            const auto& span = x.arrangementSelection;
+            const bool selection = span.active && span.end > span.start + 1e-9;
+            const double at = selection ? span.start : x.transport ? std::floor(x.transport->positionBeats() / bar) * bar : 0.0;
+            const double length = selection ? span.end - span.start : bar;
+            if (model::makeEmptyMidiClip(*x.song, at, length, fresh))
             {
                 fresh.colorIndex = x.song->tracks[(size_t) lane].colorIndex;
-                x.applyEdit(model::insertClip(lane, fresh, "Insert MIDI Clip"));
+                const auto& clips = x.song->tracks[(size_t) lane].arrangementClips;
+                // Never on top of existing clips (overlapping clips cannot exist in the reference app).
+                if (std::any_of(clips.begin(), clips.end(), [&](const auto& c) { return c.currentStart < at + length - 1e-9 && c.currentEnd > at + 1e-9; }))
+                    x.statusText = "Insert MIDI Clip needs empty space on the track";
+                else
+                    x.applyEdit(model::insertClip(lane, fresh, "Insert MIDI Clip"));
             }
             else
                 x.statusText = "Cannot create a MIDI clip: this set has no MIDI clip to copy the format from";

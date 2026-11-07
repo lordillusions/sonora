@@ -663,7 +663,8 @@ is the reusable divider; per-view edge zones use `cursorAt`. Minimum/maximum siz
 Modelled on Live 12 (measured in Live: adaptive grid, ruler labels and the corner indicator).
 - **Adaptive grid** (default): the grid is the smallest size whose lines are at least 10 px apart (Narrowest 3 px, Narrow 6 px, Wide 20 px, Widest 40 px),
   so zooming in goes 1 bar, 1/2, 1/4 ... 1/64. **Fixed Grid** keeps one size (8 Bars ... 1/64), **Triplet Grid** uses 2/3 of
-  every sub-bar size, **Snap to Grid** can be switched off, and holding Cmd or Alt while dragging ignores the grid.
+  every sub-bar size, **Snap to Grid** can be switched off, and holding Cmd while dragging ignores the grid (with Snap to
+  Grid off, Cmd snaps; UI-71, docs/CLIP_EDITING.md).
   Options menu and right-click (Arrangement, note editor) offer Narrow/Widen/Triplet/Snap/Fixed, the density and sizes.
   The Arrangement and the clip editors (notes, envelopes) keep separate settings (`UiContext::arrangementGrid/clipGrid`), saved
   with the layout. The current size is shown in the lower right corner ("1/8", "1/16T", "4 Bars"). Automation points use the
@@ -691,9 +692,10 @@ Modelled on Live 12 (measured in Live: adaptive grid, ruler labels and the corne
   without starting playback; Space starts there. Take-range Return retains its comp action. The ruler brace has a dark
   outline and inward end handles; its edges/body retain resize/move gestures. Creating a MIDI clip from the menu uses an
   active time selection's position/length, otherwise one bar at the play position.
-- Opening a different MIDI clip, or explicitly double-clicking it again, fits its content horizontally. Arrangement
-  clips use their visible duration and content offset; Session loops use their loop length. A one-bar clip fills the
-  available note area; manual zoom stays until another explicit open. The adaptive grid follows the fitted zoom.
+- Opening a different MIDI clip, or explicitly double-clicking it again, shows the view saved with the clip
+  (`ScrollerTimePreserver`) or else its region: start marker (or loop start) to loop end, or start to end marker with the
+  loop off — never the Arrangement length of a looped clip (UI-71). A one-bar clip fills the available note area; manual
+  zoom stays until another explicit open. The adaptive grid follows the fitted zoom. Clip editing rules: docs/CLIP_EDITING.md.
 - Click/hold the piano keys to audition the selected track; drag between keys to glide. Release outside the keyboard,
   focus loss, document/control-bank changes and disabling Options > MIDI Note Editor Preview release the note.
   Preview works with arm off and monitoring off and does not enter the recording input or Capture MIDI path.

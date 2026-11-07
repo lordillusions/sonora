@@ -338,7 +338,7 @@ TEST_CASE("InstrumentVector: a fresh Wavetable from the browser saves, reloads a
     auto loaded = io::loadAls(wavetableFixture());
     REQUIRE(loaded);
     auto device = devices::nativeDeviceModel("InstrumentVector");
-    CHECK(device.displayName == "Wavetable");
+    CHECK(device.displayName == "Sonora Wavetable");
     device.id = 77;
     device.sourceXml = std::make_shared<const std::string>(io::deviceTemplate(device)); // as the browser / control insert does
     loaded.song->tracks[0].devices.push_back(device);

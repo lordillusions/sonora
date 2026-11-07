@@ -26,10 +26,10 @@ struct PresetRig
         context.selectedTrack = 0;
         // Sorted by device tag as io::scanDevicePresets returns them (folders first, then loose presets).
         context.devicePresets = {{"/lib/Presets/Audio Effects/EQ Eight/Sonora Air.adv", "Sonora Air", "", "Eq8", "EQ Eight"},
-                                 {"/lib/Devices/Instruments/Wavetable/Bass/Deep Wave.adv", "Deep Wave", "Bass", "InstrumentVector", "Wavetable"},
-                                 {"/lib/Devices/Instruments/Wavetable/Bass/Slap Wave.adv", "Slap Wave", "Bass", "InstrumentVector", "Wavetable"},
-                                 {"/lib/Devices/Instruments/Wavetable/Pads/Soft Pad.adv", "Soft Pad", "Pads", "InstrumentVector", "Wavetable"},
-                                 {"/lib/Devices/Instruments/Wavetable/Plain Lead.adv", "Plain Lead", "", "InstrumentVector", "Wavetable"}};
+                                 {"/lib/Devices/Instruments/Wavetable/Bass/Deep Wave.adv", "Deep Wave", "Bass", "InstrumentVector", "Sonora Wavetable"},
+                                 {"/lib/Devices/Instruments/Wavetable/Bass/Slap Wave.adv", "Slap Wave", "Bass", "InstrumentVector", "Sonora Wavetable"},
+                                 {"/lib/Devices/Instruments/Wavetable/Pads/Soft Pad.adv", "Soft Pad", "Pads", "InstrumentVector", "Sonora Wavetable"},
+                                 {"/lib/Devices/Instruments/Wavetable/Plain Lead.adv", "Plain Lead", "", "InstrumentVector", "Sonora Wavetable"}};
         context.dropBrowserItem = [this](const ui::BrowserDrag& drag, int track, double, int) { dropped.push_back(drag); droppedTracks.push_back(track); };
         root = std::make_unique<ui::MainLayout>(context); root->setBounds({0, 0, 1300, 800}); root->layout();
         for (const auto& child : root->children()) if (auto* b = dynamic_cast<ui::BrowserPanel*>(child.get())) browser = b;
@@ -68,7 +68,7 @@ TEST_CASE("browser presets (LIB-2): a device row opens to its preset folders and
     PresetRig rig;
     rig.browser->showCategory(ui::BrowserPanel::Instruments);
     rig.click(rig.browser->listRowBounds(rig.browser->rowIndex("Synthesis")));
-    const int wavetable = rig.browser->rowIndex("Wavetable");
+    const int wavetable = rig.browser->rowIndex("Sonora Wavetable");
     REQUIRE(wavetable >= 0);
     CHECK(! rig.browser->disclosureBounds(wavetable).isEmpty());
     CHECK(rig.browser->disclosureBounds(rig.browser->rowIndex("Sonora FM")).isEmpty()); // no presets, no triangle
@@ -77,9 +77,9 @@ TEST_CASE("browser presets (LIB-2): a device row opens to its preset folders and
     // A click on the name selects the device (and could drag it); only the triangle opens it.
     rig.click(rig.browser->listRowBounds(wavetable));
     CHECK(rig.browser->rowIndex("Bass") < 0);
-    rig.open("Wavetable");
+    rig.open("Sonora Wavetable");
     auto rows = rig.rows();
-    const auto after = std::find(rows.begin(), rows.end(), "Wavetable");
+    const auto after = std::find(rows.begin(), rows.end(), "Sonora Wavetable");
     REQUIRE(after + 3 < rows.end());
     CHECK(*(after + 1) == "Bass"); CHECK(*(after + 2) == "Pads"); CHECK(*(after + 3) == "Plain Lead");
     CHECK(rig.browser->rowIndex("Slap Wave") < 0); // folders start closed
@@ -97,7 +97,7 @@ TEST_CASE("browser presets (LIB-2): a device row opens to its preset folders and
     CHECK(rig.context.browserDrag->value == "/lib/Devices/Instruments/Wavetable/Bass/Slap Wave.adv");
     CHECK(rig.context.browserDrag->label == "Slap Wave");
     rig.root->dispatchMouseUp(drag); rig.context.browserDrag.reset();
-    CHECK(ui::BrowserTags::matches(rig.browser->selectedTags(), {{"Type", "Preset"}, {"Sound", "Bass"}, {"Device", "Wavetable"}}));
+    CHECK(ui::BrowserTags::matches(rig.browser->selectedTags(), {{"Type", "Preset"}, {"Sound", "Bass"}, {"Device", "Sonora Wavetable"}}));
 
     // Left goes from a preset to its folder; Return loads the selected preset on the selected track.
     rig.key(juce::KeyPress::leftKey);
@@ -116,7 +116,7 @@ TEST_CASE("browser presets (LIB-2): a device row opens to its preset folders and
     CHECK(rig.droppedTracks[0] == 0);
 
     // Closing the device hides everything below it.
-    rig.open("Wavetable");
+    rig.open("Sonora Wavetable");
     CHECK(rig.browser->rowIndex("Bass") < 0); CHECK(rig.browser->rowIndex("Plain Lead") < 0);
 
     // Audio effect presets hang under their device the same way.
@@ -131,7 +131,7 @@ TEST_CASE("browser presets (LIB-2): search finds presets by name; Sounds groups 
     PresetRig rig;
     rig.browser->showCategory(ui::BrowserPanel::Instruments);
     rig.search("slap wave");
-    CHECK(rig.rows() == std::vector<std::string>({"Synthesis", "Wavetable", "Bass", "Slap Wave"}));
+    CHECK(rig.rows() == std::vector<std::string>({"Synthesis", "Sonora Wavetable", "Bass", "Slap Wave"}));
     rig.search("bass"); // a folder name matches all of its presets
     auto rows = rig.rows();
     CHECK(std::count(rows.begin(), rows.end(), std::string("Deep Wave")) == 1);
@@ -139,9 +139,9 @@ TEST_CASE("browser presets (LIB-2): search finds presets by name; Sounds groups 
 
     rig.search("");
     rig.browser->showCategory(ui::BrowserPanel::Sounds);
-    CHECK(rig.rows() == std::vector<std::string>({"Bass", "Pads", "Wavetable"})); // instruments only; loose ones by device
+    CHECK(rig.rows() == std::vector<std::string>({"Bass", "Pads", "Sonora Wavetable"})); // instruments only; loose ones by device
     rig.click(rig.browser->listRowBounds(0));
-    CHECK(rig.rows() == std::vector<std::string>({"Bass", "Deep Wave", "Slap Wave", "Pads", "Wavetable"}));
+    CHECK(rig.rows() == std::vector<std::string>({"Bass", "Deep Wave", "Slap Wave", "Pads", "Sonora Wavetable"}));
     const auto grab = rig.at(rig.browser->listRowBounds(2));
     rig.root->dispatchMouseDown(grab); auto drag = grab; drag.x += 20; rig.root->dispatchMouseDrag(drag);
     REQUIRE(rig.context.browserDrag);

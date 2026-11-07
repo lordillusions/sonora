@@ -107,7 +107,7 @@ TEST_CASE("device presets (LIB-2): a library folder is indexed by device and fol
     const auto presets = io::scanDevicePresets(libraries);
     REQUIRE(presets.size() == 4); // no folder info, no Analog (not implemented), no rack
     CHECK(presets[0].deviceTag == "Eq8"); CHECK(presets[0].deviceName == "EQ Eight"); CHECK(presets[0].name == "Sonora Air");
-    CHECK(presets[1].deviceTag == "InstrumentVector"); CHECK(presets[1].deviceName == "Wavetable");
+    CHECK(presets[1].deviceTag == "InstrumentVector"); CHECK(presets[1].deviceName == "Sonora Wavetable");
     CHECK(presets[1].folder == "Bass"); CHECK(presets[1].name == "Sonora Test Bass");
     CHECK(presets[1].path == library.bass.getFullPathName().toStdString());
     CHECK(presets[2].name == "Plain Lead"); CHECK(presets[2].folder.empty()); // loose presets after the folders

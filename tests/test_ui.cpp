@@ -420,8 +420,9 @@ TEST_CASE("piano roll: select, move, resize, add, velocity, transpose and delete
     root.dispatchMouseUp(mouse(at(end + 0.97, 66)));
     CHECK_NEAR(notes()[0].duration, 1.5, 1e-9);
 
-    // Scroll the keyboard down a row so pitch 60 is visible below the toolbar.
-    piano->view.topPitch = 68;
+    // Scroll the keyboard down two rows so pitch 60 is visible above the velocity lane (the ruler's marker strip, UI-71,
+    // takes 4 px of the note area).
+    piano->view.topPitch = 67;
     // double-click an empty cell adds a note (grid 0.25 at this zoom)
     root.dispatchMouseDown(mouse(at(6.6, 60), 2));
     root.dispatchMouseUp(mouse(at(6.6, 60), 2));
@@ -884,7 +885,7 @@ TEST_CASE("session piano roll: selection does not launch, edits save undo redo a
     juce::TemporaryFile image(".png");
     REQUIRE(gfx::renderToPng(root, 1200, 700, 1, image.getFile().getFullPathName().toStdString()));
     auto* piano = findRoll(root); REQUIRE(piano); piano->view.pixelsPerBeat = 40; // exercise gestures at a manually selected zoom
-    const float notesTop = 700 - metrics.statusBarHeight - metrics.detailHeight + 22 + 36;
+    const float notesTop = 700 - metrics.statusBarHeight - metrics.detailHeight + 22 + findRoll(root)->noteAreaBounds().y;
     const float notesLeft = [&] { auto* r = findRoll(root); return r ? r->boundsInRoot().x + r->noteAreaBounds().x : 0.0f; }();
     auto note = [&](double beat, int pitch, int clicks = 1) { return mouse(notesLeft + (float) beat * 40, notesTop + (float) (64 - pitch) * 11 + 5, clicks); };
     root.dispatchMouseDown(note(0.2, 60));
@@ -1022,11 +1023,12 @@ TEST_CASE("clip controls: Session start and loop gestures, scale and note probab
     };
     dragControl(CId::Start, 16); // start marker one beat forward
     CHECK_NEAR(context.selectedClip()->loop.startRelative, 1, 1e-9);
-    dragControl(CId::Position, 8); // loop start moves half a beat; preserve absolute start marker
+    dragControl(CId::Position, 8); // the loop moves half a beat (Live: its Length stays); preserve absolute start marker
     CHECK_NEAR(context.selectedClip()->loop.loopStart, 0.5, 1e-9);
+    CHECK_NEAR(context.selectedClip()->loop.loopEnd, 4.5, 1e-9);
     CHECK_NEAR(context.selectedClip()->loop.startRelative, 0.5, 1e-9);
     dragControl(CId::Length, -16); // shorten loop by one beat
-    CHECK_NEAR(context.selectedClip()->loop.loopEnd, 3, 1e-9);
+    CHECK_NEAR(context.selectedClip()->loop.loopEnd, 3.5, 1e-9);
     // Local scale display settings do not dirty the set.
     const int version = history.version();
     const auto highlight = audioControl(root, CId::ScaleIcon);
@@ -1277,7 +1279,7 @@ TEST_CASE("take editors: MIDI and audio property gestures edit their selected la
     render();
     auto mouse = [](float x, float y) { ui::MouseEvent e; e.x = x; e.y = y; return e; };
     const auto& metrics = ctx.theme.metrics;
-    const float notesTop = 700 - metrics.statusBarHeight - metrics.detailHeight + 22 + 36;
+    const float notesTop = 700 - metrics.statusBarHeight - metrics.detailHeight + 22 + findRoll(root)->noteAreaBounds().y;
     const float notesLeft = [&] { auto* r = findRoll(root); return r ? r->boundsInRoot().x + r->noteAreaBounds().x : 0.0f; }();
     const float noteY = notesTop + 4 * 11 + 5;
     auto* piano = findRoll(root); REQUIRE(piano); piano->view.pixelsPerBeat = 40;

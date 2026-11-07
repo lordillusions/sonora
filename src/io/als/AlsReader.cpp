@@ -412,6 +412,38 @@ std::vector<SamplePart> readSampleParts(const XmlElement* device)
         sp.sample.relativePathType = integer(p, "SampleRef/FileRef/RelativePathType", 0);
         sp.sampleRate = num(p, "SampleRef/DefaultSampleRate", 0.0);
         sp.lengthSamples = (int64_t) num(p, "SampleRef/DefaultDuration", 0.0);
+        // Simpler slicing (DEV-4c) and the sample's warp properties.
+        sp.slicingStyle = integer(p, "SlicingStyle", 0);
+        sp.slicingThreshold = num(p, "SlicingThreshold", 100.0);
+        sp.slicingBeatGrid = integer(p, "SlicingBeatGrid", 4);
+        sp.slicingRegions = integer(p, "SlicingRegions", 8);
+        if (const auto* points = p->getChildByName("SlicePoints"))
+            for (const auto* point : points->getChildWithTagNameIterator("SlicePoint"))
+            {
+                sp.slicePoints.push_back(point->getDoubleAttribute("TimeInSeconds"));
+                sp.sliceEnergies.push_back(point->getDoubleAttribute("NormalizedEnergy", 1.0));
+            }
+        if (const auto* points = p->getChildByName("ManualSlicePoints"))
+            for (const auto* point : points->getChildWithTagNameIterator("SlicePoint"))
+                sp.manualSlicePoints.push_back(point->getDoubleAttribute("TimeInSeconds"));
+        if (const auto* warp = p->getChildByName("SampleWarpProperties"))
+        {
+            sp.warped = str(warp, "IsWarped").equalsIgnoreCase("true");
+            sp.warpMode = integer(warp, "WarpMode", 0);
+            const XmlElement *first = nullptr, *last = nullptr;
+            if (const auto* markers = warp->getChildByName("WarpMarkers"))
+                for (const auto* marker : markers->getChildWithTagNameIterator("WarpMarker"))
+                {
+                    if (! first) first = marker;
+                    last = marker;
+                }
+            if (first && last && first != last)
+            {
+                const double beats = last->getDoubleAttribute("BeatTime") - first->getDoubleAttribute("BeatTime");
+                const double seconds = last->getDoubleAttribute("SecTime") - first->getDoubleAttribute("SecTime");
+                if (beats > 1e-6 && seconds > 0) sp.secondsPerBeat = seconds / beats;
+            }
+        }
         out.push_back(std::move(sp));
     }
     return out;
@@ -653,16 +685,23 @@ Device readDevice(const XmlElement* x, std::vector<std::string>& warnings)
         if (d.type == "OriginalSimpler" || d.type == "MultiSampler" || d.type == "SonoraImpulse")
         {
             d.sampleParts = readSampleParts(x);
-            for (const char* key : {"UseConstPowCrossfade", "InterpolationMode"}) // plain playback settings (DEV-22)
-                if (const auto* leaf = at(x, (juce::String("Player/") + key).toRawUTF8()); leaf && leaf->hasAttribute("Value"))
+            // Plain playback settings (DEV-22) and the slice Playback chooser (DEV-4c).
+            for (const char* key : {"Player/UseConstPowCrossfade", "Player/InterpolationMode", "SimplerSlicing/PlaybackMode"})
+                if (const auto* leaf = at(x, key); leaf && leaf->hasAttribute("Value"))
                 {
                     const auto value = leaf->getStringAttribute("Value");
-                    d.plain[std::string("Player/") + key] = value.equalsIgnoreCase("true") ? 1.0 : value.equalsIgnoreCase("false") ? 0.0 : value.getDoubleValue();
+                    d.plain[key] = value.equalsIgnoreCase("true") ? 1.0 : value.equalsIgnoreCase("false") ? 0.0 : value.getDoubleValue();
                 }
         }
     }
 
-    if (! userName.empty())
+    // The reference names a device after the preset it came from; its default preset carries the plain device name
+    // ("Wavetable", "Tension", "Simpler"), which Sonora shows with its own prefix ("Sonora Wavetable"). The file keeps it.
+    bool plainReferenceName = false;
+    if (d.kind == DeviceKind::Native)
+        if (const auto* entry = findCatalogEntry(d.type); entry && entry->displayName.rfind("Sonora ", 0) == 0)
+            plainReferenceName = userName == entry->displayName.substr(7);
+    if (! userName.empty() && ! plainReferenceName)
         d.displayName = userName;
     return d;
 }
@@ -766,6 +805,36 @@ Track readTrack(const XmlElement* x, TrackKind kind, std::vector<std::string>& w
             if (scene < 0) t.frozenArrangement.push_back(std::move(clip));
             else if ((size_t) scene < t.frozenSlots.size()) t.frozenSlots[(size_t) scene].clip = std::move(clip);
         }
+    }
+    // The reference's own freeze: <Freeze Value="true"/> on the track, renders in DeviceChain/FreezeSequencer (a Session
+    // ClipSlotList with one slot per scene, Arrangement renders under Sample/ArrangerAutomation). The sequencer keeps
+    // stale renders after an unfreeze, so only the flag says whether they play.
+    if (boolean(x, "Freeze", false))
+    {
+        t.frozenInFile = true;
+        if (! t.frozen)
+            if (const auto* sequencer = at(chain, "FreezeSequencer"))
+            {
+                t.frozen = true;
+                t.frozenSlots.resize(t.slots.size());
+                if (const auto* slots = at(sequencer, "ClipSlotList"))
+                {
+                    size_t scene = 0;
+                    for (const auto* slot : slots->getChildWithTagNameIterator("ClipSlot"))
+                    {
+                        if (scene < t.frozenSlots.size())
+                            if (auto clip = readClipIn(at(slot, "ClipSlot/Value")); clip && clip->kind == Clip::Kind::Audio)
+                                t.frozenSlots[scene].clip = std::move(clip);
+                        ++scene;
+                    }
+                }
+                if (const auto* events = at(sequencer, "Sample/ArrangerAutomation/Events"))
+                    for (const auto* clipX : events->getChildWithTagNameIterator("AudioClip"))
+                    {
+                        auto clip = readAudioClip(clipX);
+                        if (clip.currentEnd > clip.currentStart) t.frozenArrangement.push_back(std::move(clip));
+                    }
+            }
     }
     // MIDI tracks keep arrangement clips under ClipTimeable, audio tracks under Sample.
     for (const char* path : {"MainSequencer/ClipTimeable/ArrangerAutomation/Events",

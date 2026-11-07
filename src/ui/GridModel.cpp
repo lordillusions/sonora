@@ -165,13 +165,13 @@ std::string rulerText(double beat, double beatsPerBar, double beatUnit)
 }
 
 std::vector<RulerMark> rulerMarks(double firstBeat, double lastBeat, double ppb, double beatsPerBar, double beatUnit,
-                                  float charWidth, float minTickPixels)
+                                  float charWidth, float minTickPixels, bool allowNegative)
 {
     std::vector<RulerMark> marks;
     if (ppb <= 0.0 || lastBeat <= firstBeat)
         return marks;
     const double bar = std::max(0.25, beatsPerBar), unit = std::max(0.0625, beatUnit);
-    firstBeat = std::max(0.0, firstBeat);
+    if (! allowNegative) firstBeat = std::max(0.0, firstBeat);
 
     // Levels from coarse to fine: bar multiples (descending), bar, beat, then halves of a beat.
     struct Level { double step; int level; int chars; };
@@ -202,13 +202,13 @@ std::vector<RulerMark> rulerMarks(double firstBeat, double lastBeat, double ppb,
     for (long long i = first; (double) i * tickStep <= lastBeat + tickStep; ++i)
     {
         const double beat = (double) i * tickStep;
-        if (beat < -kEps)
+        if (beat < -kEps && ! allowNegative)
             continue;
         RulerMark m;
         m.beat = beat;
-        const double inBar = std::fmod(beat, bar);
+        const double inBar = beat - std::floor(beat / bar) * bar;
         const bool onBar = inBar < kEps || bar - inBar < kEps;
-        const double inBeat = std::fmod(beat, unit);
+        const double inBeat = beat - std::floor(beat / unit) * unit;
         const bool onBeat = inBeat < kEps || unit - inBeat < kEps;
         m.level = onBar ? 0 : onBeat ? 1 : 2;
         const double ratio = beat / labelStep;
@@ -220,13 +220,14 @@ std::vector<RulerMark> rulerMarks(double firstBeat, double lastBeat, double ppb,
     return marks;
 }
 
-std::vector<GridLine> gridLines(double firstBeat, double lastBeat, double ppb, double beatsPerBar, double beatUnit, double grid)
+std::vector<GridLine> gridLines(double firstBeat, double lastBeat, double ppb, double beatsPerBar, double beatUnit, double grid,
+                                bool allowNegative)
 {
     std::vector<GridLine> lines;
     if (ppb <= 0.0 || lastBeat <= firstBeat || grid <= 0.0)
         return lines;
     const double bar = std::max(0.25, beatsPerBar), unit = std::max(0.0625, beatUnit);
-    firstBeat = std::max(0.0, firstBeat);
+    if (! allowNegative) firstBeat = std::max(0.0, firstBeat);
     // Never draw lines closer than 3 px; very coarse zoom still shows bars.
     double step = grid;
     while (step * ppb < 3.0)
@@ -235,10 +236,10 @@ std::vector<GridLine> gridLines(double firstBeat, double lastBeat, double ppb, d
     for (long long i = first; (double) i * step <= lastBeat + step; ++i)
     {
         const double beat = (double) i * step;
-        if (beat < -kEps)
+        if (beat < -kEps && ! allowNegative)
             continue;
-        const double inBar = std::fmod(beat, bar);
-        const double inBeat = std::fmod(beat, unit);
+        const double inBar = beat - std::floor(beat / bar) * bar;
+        const double inBeat = beat - std::floor(beat / unit) * unit;
         const int strength = (inBar < kEps || bar - inBar < kEps) ? 2 : (inBeat < kEps || unit - inBeat < kEps) ? 1 : 0;
         lines.push_back({beat, strength});
     }
@@ -248,7 +249,7 @@ std::vector<GridLine> gridLines(double firstBeat, double lastBeat, double ppb, d
         std::vector<GridLine> withBars;
         const long long firstBar = (long long) std::floor(firstBeat / bar - kEps);
         for (long long i = firstBar; (double) i * bar <= lastBeat + bar; ++i)
-            if ((double) i * bar >= -kEps)
+            if ((double) i * bar >= -kEps || allowNegative)
                 withBars.push_back({(double) i * bar, 2});
         return withBars;
     }

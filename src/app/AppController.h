@@ -309,6 +309,7 @@ private:
     void dropBrowserItem(const ui::BrowserDrag&, int track, double beat, int scene);
     void dropTrackDevice(const ui::BrowserDrag&, int track); // UI-7c: a device dragged to a track (Opt copies)
     void runDeviceDragAutotest(); // SONORA_DEVICE_DRAG_AUTOTEST (UI-7c verification without driving the UI)
+    void runSampleDropAutotest(); // SONORA_SAMPLE_DROP_AUTOTEST (DEV-4c: a sample loaded into a Simpler, then saved)
     // LIB-2 (AppDevicePresets.cpp): the reference library's device presets in the Browser; loading one onto a track
     // (replaceIndex >= 0: replaces that top-level device in place when the preset is of its type).
     void scanDevicePresets();

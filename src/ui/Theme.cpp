@@ -57,6 +57,7 @@ Theme::Theme()
         {"ControlTextBack", 0xe4e5e9},
         {"TextDisabled", 0x575b67},
         {"ChosenDefault", 0xffb901},
+        {"FreezeColor", 0x4391e6},
         {"ChosenAlternative", 0x00eeff},
         {"ChosenRecord", 0xff595f},
         {"ChosenPlay", 0x00faa3},

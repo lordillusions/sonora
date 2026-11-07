@@ -410,6 +410,14 @@ template <class IO> void visit(IO& io, SamplePart& s)
     visit(io, s.sample);
     io.v(s.sampleRate);
     io.v(s.lengthSamples);
+    io.v(s.slicingStyle); // 7: Simpler slicing and the sample's warp properties (DEV-4c)
+    io.v(s.slicingThreshold);
+    io.v(s.slicingBeatGrid);
+    io.v(s.slicingRegions);
+    for (auto* points : {&s.slicePoints, &s.sliceEnergies, &s.manualSlicePoints}) io.vec(*points, [&](double& x) { io.v(x); }, 8);
+    io.v(s.warped);
+    io.v(s.warpMode);
+    io.v(s.secondsPerBeat);
 }
 
 template <class IO> void visit(IO& io, Sidechain& s)
@@ -732,7 +740,7 @@ static_assert(sizeof(Track) == 1144, "model::Track changed: update ModelCodec");
 static_assert(sizeof(Mixer) == 200, "model::Mixer changed: update ModelCodec");
 static_assert(sizeof(Song) == 1528, "model::Song changed: update ModelCodec");
 static_assert(sizeof(MidiNote) == 48, "model::MidiNote changed: update ModelCodec");
-static_assert(sizeof(SamplePart) == 232, "model::SamplePart changed: update ModelCodec");
+static_assert(sizeof(SamplePart) == 344, "model::SamplePart changed: update ModelCodec");
 static_assert(sizeof(PluginInfo) == 184, "model::PluginInfo changed: update ModelCodec");
 static_assert(sizeof(Parameter) == 80, "model::Parameter changed: update ModelCodec");
 static_assert(sizeof(TakeLane) == 104, "model::TakeLane changed: update ModelCodec");

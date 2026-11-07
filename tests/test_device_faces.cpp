@@ -122,21 +122,92 @@ TEST_CASE("device faces: sparse Impulse pad drops address slot eight independent
     click(root, localEvent({455, 0, 61, 42})); CHECK(face->selectedSection() == 7);
     CHECK(face->browserDrop(sample, localEvent(face->graphBounds()))); CHECK(addressedSlot == 7);
 }
-TEST_CASE("device faces: sample boundary editing commits once and preserves the other boundary")
+TEST_CASE("device faces: Simpler flags are the Start / Length / Loop controls and the display follows them (DEV-4c)")
 {
+    using S = devices::Simpler;
     model::Device model = devices::nativeDeviceModel("OriginalSimpler");
-    model::SamplePart part; part.sampleEnd = 1000; model.sampleParts.push_back(part);
-    auto data = std::make_shared<engine::SampleData>(); data->audio.setSize(2, 1000); data->audio.clear();
-    devices::Simpler::Zone zone; zone.part = part; zone.slot = engine::SampleSlot::makeReady(data);
-    devices::Simpler processor({zone}, devices::Simpler::Mode::Classic, 2);
+    model::SamplePart part; part.sampleEnd = 10000; model.sampleParts.push_back(part);
+    auto data = std::make_shared<engine::SampleData>(); data->audio.setSize(2, 10000); data->audio.clear(); data->sampleRate = 44100;
+    S::Zone zone; zone.part = part; zone.slot = engine::SampleSlot::makeReady(data);
+    S processor({zone}, S::Mode::Classic, 2);
+    processor.setParameter(S::Snap, 0); processor.setParameter(S::LoopOn, 0);
     ui::UiContext context; ui::RootWidget root(context);
     auto* face = root.add<ui::DeviceFace>(model, &processor, 0, 0, -1, -1, std::function<void(ui::Widget*, int)>{});
-    root.setBounds({0, 0, 600, 164}); face->setBounds({0, 0, face->preferredWidth(), 164}); face->layout();
-    int commits = 0; context.editDevice = [&](int, int, const auto& operation, const auto&) { ++commits; operation(model); };
-    auto e = localEvent(face->graphBounds(), 0, 0.3f); root.dispatchMouseDown(e);
-    e.x += face->graphBounds().w * 0.25f; root.dispatchMouseDrag(e);
-    CHECK(commits == 0); root.dispatchMouseUp(e); CHECK(commits == 1);
-    CHECK(model.sampleParts[0].sampleStart == 250); CHECK(model.sampleParts[0].sampleEnd == 1000); CHECK(model.samplePartsEdited);
+    root.setBounds({0, 0, 700, 164}); face->setBounds({0, 0, face->preferredWidth(), 164}); face->layout();
+    int commits = 0; context.editDevice = [&](int, int, const auto&, const auto&) { ++commits; };
+    const auto r = face->graphBounds();
+    auto marks = face->sampleMarks();
+    CHECK(std::abs(marks.start - r.x) < 0.5f); CHECK(std::abs(marks.end - r.right()) < 0.5f);
+    CHECK(marks.loopStart < 0); // the loop shows only with Loop on
+    // Knobs move the flags: Start 20 %, Length 50 % -> 20 % .. 70 % of the display.
+    processor.setParameter(S::SampleStartMod, 0.2f); processor.setParameter(S::SampleLengthMod, 0.5f);
+    marks = face->sampleMarks();
+    CHECK(std::abs(marks.start - (r.x + 0.2f * r.w)) < 0.5f); CHECK(std::abs(marks.end - (r.x + 0.7f * r.w)) < 0.5f);
+    processor.setParameter(S::LoopOn, 1); processor.setParameter(S::LoopLengthMod, 0.5f); processor.setParameter(S::LoopFadeMod, 0.5f);
+    marks = face->sampleMarks();
+    CHECK(std::abs(marks.loopStart - (r.x + 0.45f * r.w)) < 0.5f); // the last half of the region
+    CHECK(marks.loopFade >= 0); CHECK(marks.loopFade < marks.loopStart);
+    // Dragging the end flag sets Length (no structural edit), the start flag keeps the end where it is.
+    auto e = localEvent(r, 0, 0.5f); e.x = marks.end; root.dispatchMouseDown(e);
+    e.x = r.x + 0.9f * r.w; root.dispatchMouseDrag(e); root.dispatchMouseUp(e);
+    CHECK(std::abs(processor.getParameter(S::SampleLengthMod) - 0.7f) < 0.01f); CHECK(commits == 0);
+    e.x = face->sampleMarks().start; root.dispatchMouseDown(e);
+    e.x = r.x + 0.4f * r.w; root.dispatchMouseDrag(e); root.dispatchMouseUp(e);
+    CHECK(std::abs(processor.getParameter(S::SampleStartMod) - 0.4f) < 0.01f);
+    CHECK(std::abs(processor.getParameter(S::SampleLengthMod) - 0.5f) < 0.01f); // the end stays at 90 %
+    CHECK(std::abs(face->sampleMarks().end - (r.x + 0.9f * r.w)) < 0.5f);
+    CHECK(model.sampleParts[0].sampleStart == 0); CHECK(! model.samplePartsEdited); // the zone itself is untouched
+    // Cmd + wheel zooms around the pointer; the flags follow the view.
+    auto wheel = localEvent(r, 0.5f, 0.5f); wheel.cmd = true; wheel.wheelDeltaY = 1;
+    CHECK(face->mouseWheel(wheel));
+    const auto [from, to] = face->sampleView();
+    CHECK(to - from < 0.81); CHECK(from > 0.0);
+    CHECK(std::abs(face->sampleMarks().start - (r.x + (float) ((0.4 - from) / (to - from)) * r.w)) < 0.5f);
+}
+TEST_CASE("device faces: Simpler One-Shot draws its fades and Slicing its slices (DEV-4c)")
+{
+    using S = devices::Simpler;
+    auto data = std::make_shared<engine::SampleData>(); data->audio.setSize(2, 44100); data->audio.clear(); data->sampleRate = 44100;
+    model::SamplePart part; part.sampleEnd = 44100;
+    S::Zone zone; zone.part = part; zone.slot = engine::SampleSlot::makeReady(data);
+    {
+        model::Device model = devices::nativeDeviceModel("OriginalSimpler"); model.sampleParts = {part}; model.plain["Globals/PlaybackMode"] = 1;
+        S processor({zone}, S::Mode::OneShot, 2);
+        processor.setParameter(S::Snap, 0); processor.setParameter(S::FadeIn, 100); processor.setParameter(S::FadeOut, 250);
+        ui::UiContext context; ui::RootWidget root(context);
+        auto* face = root.add<ui::DeviceFace>(model, &processor, 0, 0, -1, -1, std::function<void(ui::Widget*, int)>{});
+        root.setBounds({0, 0, 700, 164}); face->setBounds({0, 0, face->preferredWidth(), 164}); face->layout();
+        const auto r = face->graphBounds();
+        auto marks = face->sampleMarks();
+        CHECK(std::abs(marks.fadeIn - (r.x + 0.1f * r.w)) < 0.5f);   // 100 ms of a 1 s sample
+        CHECK(std::abs(marks.fadeOut - (r.x + 0.75f * r.w)) < 0.5f); // Trigger: 250 ms before the end
+        processor.setParameter(S::FadeIn, 300);
+        CHECK(std::abs(face->sampleMarks().fadeIn - (r.x + 0.3f * r.w)) < 0.5f); // follows the control at once
+        processor.setParameter(S::OneShotGate, 1);
+        CHECK(face->sampleMarks().fadeOut > r.x + 0.99f * r.w); // Gate: the fade starts on release
+        CHECK(marks.slices.empty()); CHECK(marks.loopStart < 0);
+        // One-Shot shows the fades, not the loop; the envelope knobs give way to Transpose.
+        std::set<std::string> shown;
+        for (const auto& child : face->children()) if (child->visible) if (auto* knob = dynamic_cast<ui::Knob*>(child.get())) shown.insert(knob->label());
+        CHECK(shown.contains("Transp")); CHECK(! shown.contains("Attack")); CHECK(shown.contains("Volume"));
+    }
+    {
+        part.slicingStyle = 2; part.slicingRegions = 4; zone.part = part;
+        model::Device model = devices::nativeDeviceModel("OriginalSimpler"); model.sampleParts = {part}; model.plain["Globals/PlaybackMode"] = 2;
+        S processor({zone}, S::Mode::Slice, 2);
+        processor.setParameter(S::Snap, 0);
+        ui::UiContext context; ui::RootWidget root(context);
+        auto* face = root.add<ui::DeviceFace>(model, &processor, 0, 0, -1, -1, std::function<void(ui::Widget*, int)>{});
+        root.setBounds({0, 0, 700, 164}); face->setBounds({0, 0, face->preferredWidth(), 164}); face->layout();
+        const auto r = face->graphBounds();
+        const auto marks = face->sampleMarks();
+        REQUIRE(marks.slices.size() == 4);
+        for (int i = 0; i < 4; ++i) CHECK(std::abs(marks.slices[(size_t) i] - (r.x + r.w * (float) i / 4)) < 0.5f);
+        CHECK(! marks.manualSlices);
+        std::set<std::string> shown;
+        for (const auto& child : face->children()) if (child->visible) if (auto* knob = dynamic_cast<ui::Knob*>(child.get())) shown.insert(knob->label());
+        CHECK(! shown.contains("Decay")); CHECK(shown.contains("Transp"));
+    }
 }
 TEST_CASE("device faces: all native parameters remain reachable and inside the compact face across tabs")
 {
@@ -177,6 +248,18 @@ TEST_CASE("device faces: all native parameters remain reachable and inside the c
             for (const auto& child : oneShotFace->children())
                 if (child->visible && child->midiTarget) seen.insert(child->midiTarget->param);
             oneShotFace->visible = false;
+            // Slicing shows Playback, Trigger / Gate and the fades (DEV-4c).
+            auto sliceModel = model; sliceModel.plain["Globals/PlaybackMode"] = 2;
+            auto slicing = devices::createDevice(sliceModel, build);
+            auto* sliceFace = root.add<ui::DeviceFace>(sliceModel, slicing.get(), 0, 0, -1, -1, [&](auto* widget, int parameter) { tagControl(widget, parameter, slicing.get()); });
+            sliceFace->setBounds({0, 0, sliceFace->preferredWidth(), 164}); sliceFace->layout();
+            for (const auto& child : sliceFace->children())
+                if (child->visible && child->midiTarget)
+                {
+                    seen.insert(child->midiTarget->param);
+                    CHECK(child->bounds().right() <= sliceFace->width() + 0.01f);
+                }
+            sliceFace->visible = false;
         }
         for (int pass = 0; pass < 2; ++pass)
         {

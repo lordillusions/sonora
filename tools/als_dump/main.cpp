@@ -94,10 +94,11 @@ void printTrack(const model::Track& t, bool notes, bool params, bool automation)
     for (const auto& s : t.slots)
         sessionClips += s.clip.has_value() ? 1 : 0;
 
-    std::printf("%-6s #%-4d %-28s color=%-2d group=%-4d vol=%.3f pan=%+.2f %s session=%d arrangement=%zu takes=%zu%s%s\n",
+    std::printf("%-6s #%-4d %-28s color=%-2d group=%-4d vol=%.3f pan=%+.2f %s session=%d arrangement=%zu takes=%zu%s%s%s\n",
                 model::toString(t.kind), t.id, t.name.c_str(), t.colorIndex, t.groupId, t.mixer.volume,
                 t.mixer.pan, t.mixer.speakerOn ? "on " : "OFF", sessionClips, t.arrangementClips.size(), t.takeLanes.size(),
-                t.hidden ? " hidden" : "", t.deactivated ? " deactivated" : "");
+                t.hidden ? " hidden" : "", t.deactivated ? " deactivated" : "",
+                t.frozen ? (" frozen(" + std::to_string(t.frozenArrangement.size()) + " renders" + (t.frozenInFile ? ", reference" : "") + ")").c_str() : "");
     printDevices(t.devices, 4, params);
     if (automation)
         printAutomation(t);

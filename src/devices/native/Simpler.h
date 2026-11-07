@@ -1,5 +1,5 @@
 #pragma once
-// Simpler (.als tag "OriginalSimpler", ROADMAP DEV-4) and Sonora Sampler ("MultiSampler").
+// Sonora Simpler (.als tag "OriginalSimpler", ROADMAP DEV-4 / DEV-4c) and Sonora Sampler ("MultiSampler").
 //
 // Implemented: sample zones (key / velocity ranges, root key, detune, per-zone volume and pan),
 // Classic, One-Shot and onset-Slice playback, the Simpler sample region and loop (Start / Length /
@@ -65,6 +65,7 @@ public:
         FilterCircuit, FilterCircuitBp, // circuit models (measured linear laws + drive saturation, DEV-22a)
         LfoOffset, LfoKeyScale, AmpLoopMode, AmpLoopTime, // reference Controls view (DEV-22a)
         AmpRepeatTime, // amplitude envelope Beat / Sync repeat (beat division enum)
+        SlicePlayback, // Slicing mode Playback: 0 Mono, 1 Poly, 2 Thru (SimplerSlicing/PlaybackMode, DEV-4c)
         NumParams
     };
 
@@ -83,7 +84,7 @@ public:
 
     Simpler(std::vector<Zone> zones, Mode mode, int pitchBendRange, bool multisampler = false);
 
-    std::string name() const override { return multisampler_ ? "Sonora Sampler" : "Simpler"; }
+    std::string name() const override { return multisampler_ ? "Sonora Sampler" : "Sonora Simpler"; }
     bool isInstrument() const override { return true; }
     void prepare(double sampleRate, int maxBlockSize) override;
     void reset() override;
@@ -109,6 +110,22 @@ public:
     // The filter's biquad stages at `freq` (the unmodulated response when freq = Frequency); returns 1 or 2 stages.
     int filterStages(double freq, BiquadCoeffs* out) const;
     int filterCircuit() const; // circuit of the current filter type: 0 Clean, 1 OSR, 2 MS2, 3 SMP, 4 PRD
+
+    // The part of a zone's sample a note plays (frames), from the zone's region and Start / Length / Loop / Fade, as
+    // the voice computes it; the face draws the same region. Allocation free (audio and message thread).
+    struct Region
+    {
+        double start = 0, end = 0;               // played region; end is exclusive (after Snap)
+        bool loop = false;                       // Classic with Loop on
+        double loopStart = 0, loopEnd = 0, fade = 0; // loop and the crossfade length before the loop end
+    };
+    Region region(const Zone& zone, const engine::SampleData& sample) const;
+    // Slicing (DEV-4c): the start frames of the slices inside [start, end), in order, by the zone's Slice By setting
+    // (Transient: the reference's saved transients filtered by Sensitivity, else Sonora's onsets; Beat: every Division
+    // of the sample's beat grid; Region: Regions equal parts; Manual: the manual slice points). Returns the count.
+    static constexpr int kMaxSlices = 128;
+    int slices(const Zone& zone, const engine::SampleData& sample, double start, double end, double* out, int max) const;
+    static double divisionBeats(int division); // SlicingBeatGrid enum -> beats
 
 private:
     static constexpr int kMaxVoices = 32;

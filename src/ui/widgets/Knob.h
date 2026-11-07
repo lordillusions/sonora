@@ -48,6 +48,7 @@ public:
     float markerGap = 0.0f, markerWidth = 7.0f;
     std::function<void()> onLabelClick; // Ring: a click on the label (e.g. Width <-> Mid/Side) instead of a drag
     void setLabel(std::string label) { label_ = std::move(label); }
+    const std::string& label() const { return label_; }
     bool showLabel = true;
     bool showValue = true;
     std::function<bool()> isEnabled; // Compact / Device: drawn without the value arc when false (Device also ignores input)

@@ -674,7 +674,7 @@ TEST_CASE("simpler: loads zones and settings from a Live set")
     ctx.song = &song;
     auto dev = devices::createDevice(d, ctx);
     REQUIRE(dev != nullptr);
-    CHECK(dev->name() == "Simpler");
+    CHECK(dev->name() == "Sonora Simpler");
     CHECK(dev->isInstrument());
     CHECK_NEAR(dev->getParameter((int) devices::Simpler::Volume), -8.56, 1e-4);
     REQUIRE(log.size() == 1);

@@ -8,6 +8,7 @@
 #include "ui/MidiClipEdits.h"
 #include "ui/Painter.h"
 #include "ui/UiContext.h"
+#include "core/ClipGeometry.h"
 #include "core/TimeUtils.h"
 #include "engine/Transport.h"
 
@@ -210,8 +211,13 @@ std::string ClipControls::valueText(Id id, const model::Clip& clip) const
     auto position = [&](double v, bool oneBased) { return beats ? audioedit::formatBeats(v, perBar, oneBased) : audioedit::formatSeconds(v); };
     switch (id)
     {
-        case Id::Start: return position(clip.loop.loopStart + clip.loop.startRelative, true);
-        case Id::End: return position(clip.loop.loopEnd, true);
+        // UI-71: an unlooped Arrangement clip ends where its right edge is (Live keeps the end marker there).
+        case Id::Start: return position(model::clipMarkers(clip, location_.kind != model::ClipLocation::Kind::Session, song ? song->tempo : 120.0).start, true);
+        case Id::End:
+        {
+            const auto m = model::clipMarkers(clip, location_.kind != model::ClipLocation::Kind::Session, song ? song->tempo : 120.0);
+            return position(m.looping ? m.loopEnd : m.end, true);
+        }
         case Id::Position: return position(clip.loop.loopStart, true);
         case Id::Length: return position(clip.loop.loopEnd - clip.loop.loopStart, false);
         case Id::Bpm: return editingBpm_ && clip.uid == location_.uid && song == bpmSong_ ? bpmText_ + "|"
@@ -689,8 +695,17 @@ void ClipControls::paint(SkCanvas& c, const Theme& t)
 void ClipControls::commit(model::Clip changed, const char* label)
 {
     auto& x = ctx();
-    if (x.song && x.applyEdit && model::findClip(*x.song, location_))
-        x.applyEdit(model::modifyClip(*x.song, location_, std::move(changed), label));
+    const auto* current = x.song ? model::findClip(*x.song, location_) : nullptr;
+    if (! current || ! x.applyEdit) return;
+    // UI-71: when markers change an Arrangement clip's extent (loop off), it overwrites what it now covers, like Live.
+    if (location_.kind == model::ClipLocation::Kind::Arrangement
+        && (std::fabs(current->currentEnd - changed.currentEnd) > 1e-9 || std::fabs(current->currentStart - changed.currentStart) > 1e-9))
+        if (auto command = model::placeArrangementClip(*x.song, location_.track, location_.uid, location_.track, changed, false, label); command.apply)
+        {
+            x.applyEdit(std::move(command));
+            return;
+        }
+    x.applyEdit(model::modifyClip(*x.song, location_, std::move(changed), label));
 }
 
 model::Clip ClipControls::dragged(Id id, const model::Clip& base, float dy, bool fine) const
@@ -701,29 +716,31 @@ model::Clip ClipControls::dragged(Id id, const model::Clip& base, float dy, bool
     const double unit = beats ? (fine ? 0.0625 : 0.25) : (fine ? 0.001 : 0.01);
     const double steps = std::round(dy / 4.0);
     const double delta = steps * unit;
-    const auto& L = base.loop;
+    // UI-71: markers go through core/ClipGeometry, so an unlooped Arrangement clip's length follows Start / End (Live) and
+    // Position moves the whole loop brace (its Length stays).
+    const bool arrangement = location_.kind != model::ClipLocation::Kind::Session;
+    auto m = model::clipMarkers(base, arrangement, tempo);
     switch (id)
     {
         case Id::Start:
-            c.loop.startRelative = std::clamp(L.loopStart + L.startRelative + delta, 0.0, std::max(0.0, L.loopEnd - unit)) - L.loopStart;
-            c.resetSourceMarkers = true;
-            break;
+            m.start = std::clamp(m.start + delta, 0.0, std::max(0.0, (m.looping ? m.loopEnd : m.end) - unit));
+            return model::withMarkers(base, m, arrangement, tempo);
         case Id::End:
-            c.loop.loopEnd = std::max(std::max(L.loopStart, L.loopStart + L.startRelative) + unit, L.loopEnd + delta);
-            c.resetSourceMarkers = true;
-            break;
+            if (m.looping) m.loopEnd = std::max(std::max(m.loopStart, m.start) + unit, m.loopEnd + delta);
+            else m.end = std::max(m.start + unit, m.end + delta);
+            return model::withMarkers(base, m, arrangement, tempo);
         case Id::Position:
         {
-            const double start = L.loopStart + L.startRelative;
-            c.loop.loopStart = std::clamp(L.loopStart + delta, 0.0, std::max(0.0, L.loopEnd - unit));
-            c.loop.startRelative = start - c.loop.loopStart;
-            c.resetSourceMarkers = true;
-            break;
+            if (! m.looping) return base; // the loop brace is off: Live greys Position out
+            const double moved = std::max(0.0, m.loopStart + delta);
+            m.loopEnd += moved - m.loopStart;
+            m.loopStart = moved;
+            return model::withMarkers(base, m, arrangement, tempo);
         }
         case Id::Length:
-            c.loop.loopEnd = std::max(L.loopStart + unit, L.loopEnd + delta);
-            c.resetSourceMarkers = true;
-            break;
+            if (! m.looping) return base;
+            m.loopEnd = std::max(m.loopStart + unit, m.loopEnd + delta);
+            return model::withMarkers(base, m, arrangement, tempo);
         case Id::Bpm:
         {
             const double bpm = audioedit::clipBpm(base, tempo);
@@ -935,11 +952,14 @@ void ClipControls::mouseDown(const MouseEvent& e)
             if (! ctx().transport || (clip.kind == model::Clip::Kind::Audio && ! clip.warped)) break; // loop units must be beats
             const double position = std::max(0.0, model::clipContentPosition(ctx().transport->positionBeats(), clip.currentStart,
                 clip.loop.loopStart, clip.loop.loopEnd, clip.loop.startRelative, clip.loop.enabled));
-            auto changed = clip;
-            if (hit->id == Id::StartSet) changed.loop.startRelative = std::min(position, clip.loop.loopEnd - 0.0625) - clip.loop.loopStart;
-            else if (hit->id == Id::EndSet || hit->id == Id::LengthSet) changed.loop.loopEnd = std::max(clip.loop.loopStart + 0.0625, position);
-            else { const double length = clip.loop.loopEnd - clip.loop.loopStart; changed.loop.loopStart = position; changed.loop.loopEnd = position + length; }
-            changed.resetSourceMarkers = true; commit(std::move(changed), "Set Clip Marker"); break;
+            const bool arrangement = location_.kind != model::ClipLocation::Kind::Session;
+            const double tempo = ctx().song ? ctx().song->tempo : 120.0;
+            auto m = model::clipMarkers(clip, arrangement, tempo);
+            if (hit->id == Id::StartSet) m.start = std::min(position, (m.looping ? m.loopEnd : m.end) - 0.0625);
+            else if (hit->id == Id::EndSet && ! m.looping) m.end = std::max(m.start + 0.0625, position);
+            else if (hit->id == Id::EndSet || hit->id == Id::LengthSet) m.loopEnd = std::max(m.loopStart + 0.0625, position);
+            else { const double length = m.loopEnd - m.loopStart; m.loopStart = position; m.loopEnd = position + length; }
+            commit(model::withMarkers(clip, m, arrangement, tempo), "Set Clip Marker"); break;
         }
         case Id::NoteRev: { auto saved = transform_; transform_.tool = midiedit::Tool::Reverse; applyTool(false); transform_ = saved; break; }
         case Id::NoteInv: { auto saved = transform_; transform_.tool = midiedit::Tool::Invert; applyTool(false); transform_ = saved; break; }

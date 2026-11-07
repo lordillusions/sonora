@@ -5,6 +5,7 @@
 #include "ui/WheelScale.h"
 
 #include "ui/ClipEditing.h"
+#include "core/ClipGeometry.h"
 #include "core/TimeUtils.h"
 #include "engine/EngineGraph.h"
 #include "engine/Transport.h"
@@ -14,6 +15,7 @@
 #include "ui/Controls.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "include/core/SkPathBuilder.h"
 
 #include <algorithm>
 #include <cmath>
@@ -23,7 +25,8 @@ namespace sonora::ui
 
 namespace
 {
-constexpr float kKeysW = 40.0f, kToolbarH = 20.0f, kRulerH = 36.0f;
+// The ruler: bar numbers on top, the marker strip (start / end flags, loop brace; UI-71) under them.
+constexpr float kKeysW = 40.0f, kToolbarH = 20.0f, kRulerH = 40.0f, kMarkerStripH = 9.0f;
 bool isBlackKey(int pitch)
 {
     const int pc = ((pitch % 12) + 12) % 12;
@@ -118,6 +121,7 @@ Rect PianoRoll::headerControlBounds(HeaderControl control) const
     return {98, 1, 115, 17};
 }
 Rect PianoRoll::notesArea() const { return {kKeysW, kRulerH, width() - kKeysW, height() - kRulerH - velocityHeight()}; }
+Rect PianoRoll::markerStrip() const { const auto r = rulerArea(); return {r.x, r.bottom() - kMarkerStripH, r.w, kMarkerStripH}; }
 Rect PianoRoll::velocityArea() const { return {kKeysW, height() - velocityHeight(), width() - kKeysW, velocityHeight()}; }
 
 // The top edge of the velocity lane drags to resize it.
@@ -126,9 +130,45 @@ Cursor PianoRoll::cursorAt(float x, float y) const
     return x >= kKeysW && std::fabs(y - velocityArea().y) <= 2.5f ? Cursor::ResizeVertical : Cursor::Default;
 }
 
+// Live: the clip editor's ruler and grid follow the clip's own signature (Clip panel > Signature), not the set's.
 double PianoRoll::beatsPerBar() const
 {
+    if (const auto* cl = clip()) return std::max(1, cl->timeSigNumerator) * 4.0 / std::max(1, cl->timeSigDenominator);
     return ctx().song ? ctx().song->timeSigNumerator * 4.0 / ctx().song->timeSigDenominator : 4.0;
+}
+double PianoRoll::beatUnit() const
+{
+    if (const auto* cl = clip()) return 4.0 / std::max(1, cl->timeSigDenominator);
+    return ctx().song ? 4.0 / std::max(1, ctx().song->timeSigDenominator) : 1.0;
+}
+bool PianoRoll::arrangementClip() const { return ctx().selectedClipScene < 0; }
+model::ClipMarkers PianoRoll::markers() const
+{
+    if (markerPreview_) return *markerPreview_;
+    const auto* cl = clip();
+    return cl ? model::clipMarkers(*cl, arrangementClip(), ctx().song ? ctx().song->tempo : 120.0) : model::ClipMarkers{};
+}
+// The view may scroll a little before the clip's first marker (content before 1.1.1 included), never before that.
+double PianoRoll::minScroll() const
+{
+    const auto* cl = clip();
+    if (! cl) return 0.0;
+    const double tempo = ctx().song ? ctx().song->tempo : 120.0;
+    const auto range = model::clipEditorRange(*cl, arrangementClip(), tempo);
+    double first = std::min({0.0, range.first, model::openingEditorRange(*cl, arrangementClip(), tempo).first});
+    for (const auto& n : cl->notes) first = std::min(first, n.start);
+    return first < 0.0 ? first - beatsPerBar() : 0.0;
+}
+void PianoRoll::fitClip()
+{
+    const auto* cl = clip();
+    if (! cl) return;
+    // Live: opening a clip shows the view saved with it (ScrollerTimePreserver), else its whole region: from the start
+    // marker (or the loop start, when that is earlier) to the loop end, or to the end marker when the loop is off. A looped
+    // Arrangement clip is NOT shown at its Arrangement length.
+    const auto range = model::openingEditorRange(*cl, arrangementClip(), ctx().song ? ctx().song->tempo : 120.0);
+    view.scrollBeats = range.first;
+    view.pixelsPerBeat = std::clamp((double) std::max(1.0f, notesArea().w - 1) / std::max(0.0625, range.second - range.first), 2.0, 2400.0);
 }
 
 double PianoRoll::grid() const
@@ -138,7 +178,7 @@ double PianoRoll::grid() const
 
 double PianoRoll::snapUnit(const MouseEvent& e) const
 {
-    return ui::snapSize(ctx().clipGrid, view.pixelsPerBeat, beatsPerBar(), e.alt || e.cmd);
+    return ui::snapSize(ctx().clipGrid, view.pixelsPerBeat, beatsPerBar(), e.cmd); // Live (macOS): Cmd; Option copies notes
 }
 
 void PianoRoll::clampVertical()
@@ -178,7 +218,7 @@ void PianoRoll::zoomTime(float anchorX, double factor)
 {
     const double anchor = xToBeat(anchorX);
     view.pixelsPerBeat = std::clamp(view.pixelsPerBeat * factor, 2.0, 2400.0);
-    view.scrollBeats = std::max(0.0, anchor - (anchorX - notesArea().x) / view.pixelsPerBeat);
+    view.scrollBeats = std::max(minScroll(), anchor - (anchorX - notesArea().x) / view.pixelsPerBeat);
 }
 
 bool PianoRoll::mouseMagnify(const MouseEvent& e, float factor)
@@ -212,9 +252,9 @@ void PianoRoll::revealSelection()
         view.topPitch = pitchRow(lo) + rows - 1.0;
     const double visibleBeats = notesArea().w / view.pixelsPerBeat;
     if (first < view.scrollBeats)
-        view.scrollBeats = std::max(0.0, first - 0.25);
+        view.scrollBeats = std::max(minScroll(), first - 0.25);
     else if (last > view.scrollBeats + visibleBeats)
-        view.scrollBeats = std::max(0.0, last - visibleBeats + 0.25);
+        view.scrollBeats = std::max(minScroll(), last - visibleBeats + 0.25);
     clampVertical();
 }
 
@@ -232,7 +272,7 @@ void PianoRoll::autoScroll(const MouseEvent& e)
     if (dy != 0.0f)
         view.topPitch += dy * 0.35;
     if (dx != 0.0f)
-        view.scrollBeats = std::max(0.0, view.scrollBeats + dx * 12.0 / view.pixelsPerBeat);
+        view.scrollBeats = std::max(minScroll(), view.scrollBeats + dx * 12.0 / view.pixelsPerBeat);
     clampVertical();
 }
 
@@ -343,10 +383,8 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
         editing_ = false;
         selected_.clear();
         timeRange_ = selectingRuler_ = false;
-        view.scrollBeats = std::max(0.0, cl->loop.loopStart + cl->loop.startRelative);
-        const double length = ctx().selectedClipScene >= 0 && cl->loop.enabled ? cl->loop.loopEnd - cl->loop.loopStart
-                                                                            : cl->currentEnd - cl->currentStart;
-        view.pixelsPerBeat = std::clamp((double) std::max(1.0f, notesArea().w - 1) / std::max(0.0625, length), 2.0, 2400.0);
+        markerDrag_ = MarkerDrag::None; markerPreview_.reset();
+        fitClip();
         int hi = 0;
         for (const auto& n : cl->notes)
             hi = std::max(hi, n.pitch);
@@ -378,22 +416,38 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
     }
     // alternating tiles (per beat when there is room, else per bar) and the adaptive / fixed grid lines
     const double bar = beatsPerBar();
-    const double beatUnit = ctx().song ? 4.0 / std::max(1, ctx().song->timeSigDenominator) : 1.0;
+    const double beatUnit = this->beatUnit();
     const double firstBeat = xToBeat(area.x), lastBeat = xToBeat(area.right());
     double tileUnit = beatUnit;
     while (tileUnit * view.pixelsPerBeat < 28.0)
         tileUnit = tileUnit < bar - 1e-9 ? bar : tileUnit * 2.0;
-    for (double b = std::floor(std::max(0.0, firstBeat) / tileUnit) * tileUnit; b < lastBeat; b += tileUnit)
+    for (double b = std::floor(firstBeat / tileUnit) * tileUnit; b < lastBeat; b += tileUnit)
         if (((long long) std::llround(b / tileUnit)) % 2 != 0)
             paint::fill(c, {beatToX(b), area.y, (float) (tileUnit * view.pixelsPerBeat), area.h}, t.color("ArrangerGridTiles"));
     const double gridSize = grid();
     const double subFade = std::clamp((gridSize * view.pixelsPerBeat - 3.0) / 9.0, 0.0, 1.0);
-    for (const auto& line : ui::gridLines(firstBeat, lastBeat, view.pixelsPerBeat, bar, beatUnit, gridSize))
+    for (const auto& line : ui::gridLines(firstBeat, lastBeat, view.pixelsPerBeat, bar, beatUnit, gridSize, true))
         paint::line(c, beatToX(line.beat), area.y, beatToX(line.beat), area.bottom(),
                     paint::withAlpha(t.color("GridLineBase"), line.strength == 2 ? (uint8_t) 255 : line.strength == 1 ? (uint8_t) 150 : (uint8_t) (70 * subFade)));
-    // loop region of the clip
-    paint::fill(c, {beatToX(cl->loop.loopEnd), area.y, 1.5f, area.h}, paint::withAlpha(t.color("LoopColor"), 200));
-    paint::fill(c, {beatToX(cl->loop.loopStart), area.y, 1.5f, area.h}, paint::withAlpha(t.color("LoopColor"), 200));
+    // UI-71: outside the clip's region (before the start / loop start, after the loop end or the end marker) the note area
+    // is shaded like Live's, with a line at each region edge.
+    const auto mk = markers();
+    {
+        const double regionStart = mk.looping ? std::min(mk.start, mk.loopStart) : mk.start;
+        const double regionEnd = mk.looping ? mk.loopEnd : mk.end;
+        const SkColor shade = paint::withAlpha(t.color("SurfaceArea"), 70);
+        const float rx0 = beatToX(regionStart), rx1 = beatToX(regionEnd);
+        if (rx0 > area.x) paint::fill(c, {area.x, area.y, std::min(rx0, area.right()) - area.x, area.h}, shade);
+        if (rx1 < area.right()) paint::fill(c, {std::max(rx1, area.x), area.y, area.right() - std::max(rx1, area.x), area.h}, shade);
+        if (mk.looping)
+        {
+            paint::fill(c, {beatToX(mk.loopStart), area.y, 1.5f, area.h}, paint::withAlpha(t.color("LoopColor"), 200));
+            paint::fill(c, {beatToX(mk.loopEnd), area.y, 1.5f, area.h}, paint::withAlpha(t.color("LoopColor"), 200));
+        }
+        paint::line(c, beatToX(mk.start) + 0.5f, area.y, beatToX(mk.start) + 0.5f, area.bottom(), paint::withAlpha(t.color("ControlForeground"), 120));
+        if (! mk.looping)
+            paint::line(c, beatToX(mk.end) + 0.5f, area.y, beatToX(mk.end) + 0.5f, area.bottom(), paint::withAlpha(t.color("ControlForeground"), 120));
+    }
 
     if (timeRange_)
     {
@@ -409,7 +463,10 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
         const float y0 = pitchToY(n.pitch);
         if (x1 < area.x || x0 > area.right() || y0 + view.rowHeight < area.y || y0 > area.bottom())
             continue;
-        const SkColor fill = clipColor;
+        // UI-71 (Live): notes outside the region the clip plays (after the loop end, before the start) are drawn faded.
+        const bool outside = n.start >= (mk.looping ? mk.loopEnd : mk.end) - 1e-9
+                             || n.start + n.duration <= (mk.looping ? std::min(mk.start, mk.loopStart) : mk.start) + 1e-9;
+        const SkColor fill = outside ? paint::mix(clipColor, t.color("DetailViewBackground"), 0.55f) : clipColor;
         const Rect r{x0, y0 + 0.5f, x1 - x0 - 0.5f, view.rowHeight - 1.0f};
         paint::fill(c, r, n.enabled ? fill : paint::withAlpha(fill, 90));
         paint::stroke(c, r, isSelected(i) ? SkColorSetRGB(255, 255, 255) : paint::mix(clipColor, SkColorSetRGB(0, 0, 0), 0.6f));
@@ -469,26 +526,45 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
     paint::fill(c, ruler, t.color("SurfaceBackground"));
     c.save();
     c.clipRect(ruler.sk());
-    for (const auto& mark : ui::rulerMarks(firstBeat, lastBeat, view.pixelsPerBeat, bar, beatUnit, 5.5f))
+    // Numbers are the clip's own time (1 = its content's 1.1.1, Live), so a clip anywhere in the Arrangement starts at "1"
+    // unless its markers say otherwise; positions before 1.1.1 read 0.4, 0, -1 ...
+    const float numbersBottom = kRulerH - kMarkerStripH;
+    for (const auto& mark : ui::rulerMarks(firstBeat, lastBeat, view.pixelsPerBeat, bar, beatUnit, 5.5f, 9.0f, true))
     {
         const float mx = beatToX(mark.beat);
         if (mark.labelled)
         {
-            paint::line(c, mx + 0.5f, kToolbarH + 2, mx + 0.5f, kRulerH, t.color("ArrangementRulerMarkings"));
+            paint::line(c, mx + 0.5f, kToolbarH + 2, mx + 0.5f, numbersBottom, t.color("ArrangementRulerMarkings"));
             paint::text(c, mark.text, {mx + 3, kToolbarH + 1, 56, 13}, t.color("ControlForeground"), t.metrics.smallFontSize);
         }
         else
-            paint::line(c, mx + 0.5f, kToolbarH + (mark.level == 0 ? 8.0f : mark.level == 1 ? 10.0f : 12.0f), mx + 0.5f, kRulerH,
+            paint::line(c, mx + 0.5f, kToolbarH + (mark.level == 0 ? 8.0f : mark.level == 1 ? 10.0f : 12.0f), mx + 0.5f, numbersBottom,
                         paint::withAlpha(t.color("ArrangementRulerMarkings"), 150));
     }
-    c.restore();
-
-    // loop brace of the clip along the bottom edge of the ruler
+    // ---- marker strip (UI-71): the loop brace (grey while the loop is off) and the start / end flags, all draggable
+    const Rect strip = markerStrip();
+    paint::fill(c, strip, paint::mix(t.color("SurfaceBackground"), t.color("SurfaceArea"), 0.25f));
+    paint::line(c, strip.x, strip.y + 0.5f, strip.right(), strip.y + 0.5f, t.color("ControlContrastFrame"));
     {
-        const float x0 = std::max(ruler.x, beatToX(cl->loop.loopStart)), x1 = std::min(ruler.right(), beatToX(cl->loop.loopEnd));
+        const float x0 = beatToX(mk.loopStart), x1 = beatToX(mk.loopEnd);
         if (x1 > x0)
-            paint::fill(c, {x0, ruler.bottom() - 5, x1 - x0, 5}, cl->loop.enabled ? t.color("ChosenDefault") : t.color("SurfaceArea"));
+            ctl::loopBrace(c, t, {x0, strip.y + 2, x1 - x0, strip.h - 4}, mk.looping);
     }
+    const SkColor flagInk = t.color("ControlContrastFrame");
+    auto flag = [&](double beat, bool pointsRight) {
+        const float fx = beatToX(beat);
+        SkPathBuilder path;
+        const float top = strip.y + 1, bottom = strip.bottom() - 1, tip = pointsRight ? fx + 7 : fx - 7;
+        path.moveTo(fx, top); path.lineTo(tip, strip.centreY()); path.lineTo(fx, bottom); path.close();
+        SkPaint p; p.setAntiAlias(true); p.setColor(t.color("ControlTextBack"));
+        auto shape = path.detach();
+        c.drawPath(shape, p);
+        p.setStyle(SkPaint::kStroke_Style); p.setColor(flagInk);
+        c.drawPath(shape, p);
+    };
+    flag(mk.start, true);
+    if (! mk.looping) flag(mk.end, false); // Live hides the end marker while the clip loops
+    c.restore();
 
     // ---- velocity lane
     const auto vel = velocityArea();
@@ -538,6 +614,15 @@ void PianoRoll::mouseDown(const MouseEvent& e)
     }
     if (! e.right && keysArea().contains(e.x, e.y)) { audition(yToPitch(e.y)); return; }
     if (! x.applyEdit) return;
+    if (! e.right && markerStrip().contains(e.x, e.y))
+        if (const auto hit = markerAt(e.x); hit != MarkerDrag::None)
+        {
+            markerDrag_ = hit;
+            markerOriginal_ = markers();
+            markerGrab_ = xToBeat(e.x);
+            editingLocation_ = x.selectedClipLocation();
+            return;
+        }
     if (! e.right && e.x >= kKeysW && rulerArea().contains(e.x, e.y))
     {
         timeRange_ = selectingRuler_ = true;
@@ -750,9 +835,75 @@ void PianoRoll::updateMarquee(const MouseEvent& e)
     }
 }
 
+// UI-71: which marker a click in the marker strip grabs: the start flag (pointing right from the start), the end flag
+// (pointing left to the end, loop off), the loop brace's edges or its body (loop on).
+PianoRoll::MarkerDrag PianoRoll::markerAt(float px) const
+{
+    const auto m = markers();
+    const float xs = beatToX(m.start), xe = beatToX(m.end), xl0 = beatToX(m.loopStart), xl1 = beatToX(m.loopEnd);
+    if (px >= xs - 2 && px <= xs + 9) return MarkerDrag::Start;
+    if (! m.looping && px >= xe - 9 && px <= xe + 2) return MarkerDrag::End;
+    if (! m.looping) return MarkerDrag::None;
+    if (std::fabs(px - xl1) <= 5) return MarkerDrag::LoopEnd;
+    if (std::fabs(px - xl0) <= 5) return MarkerDrag::LoopStart;
+    if (px > xl0 && px < xl1) return MarkerDrag::Loop;
+    return MarkerDrag::None;
+}
+
+void PianoRoll::commitMarkers()
+{
+    auto& x = ctx();
+    const auto preview = markerPreview_;
+    markerPreview_.reset();
+    markerDrag_ = MarkerDrag::None;
+    const auto* cl = x.song ? model::findClip(*x.song, editingLocation_) : nullptr;
+    if (! preview || ! cl || ! x.applyEdit || x.recording || x.recordingRequested) { repaint(); return; }
+    const auto before = model::clipMarkers(*cl, arrangementClip(), x.song->tempo);
+    if (std::fabs(before.start - preview->start) < 1e-9 && std::fabs(before.end - preview->end) < 1e-9
+        && std::fabs(before.loopStart - preview->loopStart) < 1e-9 && std::fabs(before.loopEnd - preview->loopEnd) < 1e-9)
+    { repaint(); return; }
+    auto changed = model::withMarkers(*cl, *preview, arrangementClip(), x.song->tempo);
+    if (editingLocation_.kind == model::ClipLocation::Kind::Arrangement)
+    {
+        // An unlooped Arrangement clip's length follows its markers: a longer clip overwrites what it now covers (Live).
+        int uid = -1;
+        auto command = model::placeArrangementClip(*x.song, editingLocation_.track, editingLocation_.uid, editingLocation_.track,
+                                                   std::move(changed), false, "Change Clip Markers", &uid);
+        if (command.apply) x.applyEdit(std::move(command));
+    }
+    else x.applyEdit(model::modifyClip(*x.song, editingLocation_, std::move(changed), "Change Clip Markers"));
+    repaint();
+}
+
 void PianoRoll::mouseDrag(const MouseEvent& e)
 {
     if (auditionBank_) { if (keysArea().contains(e.x, e.y)) audition(yToPitch(e.y)); else stopAudition(); return; }
+    if (markerDrag_ != MarkerDrag::None)
+    {
+        const double unit = snapUnit(e);
+        const double minimum = unit > 0.0 ? unit : 1.0 / 64.0;
+        const auto& o = markerOriginal_;
+        auto m = o;
+        const double beat = ui::snapToGrid(xToBeat(e.x), unit);
+        switch (markerDrag_)
+        {
+            case MarkerDrag::Start: m.start = std::min(beat, (o.looping ? o.loopEnd : o.end) - minimum); break;
+            case MarkerDrag::End: m.end = std::max(beat, o.start + minimum); break;
+            case MarkerDrag::LoopStart: m.loopStart = std::min(beat, o.loopEnd - minimum); break;
+            case MarkerDrag::LoopEnd: m.loopEnd = std::max(beat, o.loopStart + minimum); break;
+            case MarkerDrag::Loop:
+            {
+                const double start = ui::snapKeepingOffset(o.loopStart + xToBeat(e.x) - markerGrab_, o.loopStart, unit);
+                m.loopEnd = start + (o.loopEnd - o.loopStart);
+                m.loopStart = start;
+                break;
+            }
+            case MarkerDrag::None: break;
+        }
+        markerPreview_ = m;
+        repaint();
+        return;
+    }
     if (selectingRuler_)
     {
         const double beat = std::max(0.0, ui::snapToGrid(xToBeat(e.x), snapUnit(e)));
@@ -833,7 +984,7 @@ void PianoRoll::mouseDrag(const MouseEvent& e)
         const int dPitch = yToPitch(e.y) - grabPitch_;
         // the grabbed note defines the snapped shift for all selected notes
         const auto& ref = original_[(size_t) grabbedNote_];
-        const double target = g > 0.0 ? snapToGrid(ref.start + dBeats, g) : ref.start + dBeats;
+        const double target = ui::snapKeepingOffset(ref.start + dBeats, ref.start, g); // Live: keeps a grooved note's offset
         const double shift = std::max(-ref.start, target - ref.start);
         for (int i : selected_)
         {
@@ -859,6 +1010,7 @@ void PianoRoll::mouseDrag(const MouseEvent& e)
 
 void PianoRoll::mouseUp(const MouseEvent&)
 {
+    if (markerDrag_ != MarkerDrag::None) { commitMarkers(); return; }
     if (selectingRuler_) { selectingRuler_ = false; repaint(); return; }
     if (auditionBank_) { stopAudition(); repaint(); return; }
     if (resizeLane_)
@@ -937,12 +1089,12 @@ bool PianoRoll::mouseWheel(const MouseEvent& e)
     else if (e.shift)
     {
         const float delta = std::fabs(e.wheelDeltaX) > std::fabs(e.wheelDeltaY) ? e.wheelDeltaX : e.wheelDeltaY;
-        view.scrollBeats = std::max(0.0, view.scrollBeats - delta * kWheelPixels / view.pixelsPerBeat);
+        view.scrollBeats = std::max(minScroll(), view.scrollBeats - delta * kWheelPixels / view.pixelsPerBeat);
     }
     else
     {
         // plain wheel / two-finger scroll: smooth in pixels, so small trackpad deltas never round away
-        view.scrollBeats = std::max(0.0, view.scrollBeats - e.wheelDeltaX * kWheelPixels / view.pixelsPerBeat);
+        view.scrollBeats = std::max(minScroll(), view.scrollBeats - e.wheelDeltaX * kWheelPixels / view.pixelsPerBeat);
         view.topPitch += e.wheelDeltaY * kWheelPixels / view.rowHeight;
     }
     clampVertical();

@@ -13,10 +13,12 @@
 // scrolls the view. Right-click opens the grid menu; Cmd+1..5 are Narrow/Widen/Triplet/Snap/Fixed grid, + and - zoom.
 // Click Vel/Prob beside the note lane to switch between velocity and probability.
 
+#include "core/ClipGeometry.h"
 #include "ui/UiContext.h"
 #include "ui/MidiClipEdits.h"
 #include "ui/Widget.h"
 
+#include <optional>
 #include <set>
 
 namespace sonora::ui
@@ -53,6 +55,12 @@ public:
     enum class HeaderControl { Fold, Scale, Highlight };
     Rect headerControlBounds(HeaderControl) const;
     Rect rulerBounds() const { return rulerArea(); }
+    // UI-71: the strip under the ruler's numbers with the start / end flags and the loop brace.
+    Rect markerStripBounds() const { return markerStrip(); }
+    // The clip's markers as the editor shows them (the dragged state during a marker drag).
+    model::ClipMarkers markers() const;
+    float beatToXPublic(double beat) const { return beatToX(beat); }
+    double xToBeatPublic(float x) const { return xToBeat(x); }
     Rect noteAreaBounds() const { return notesArea(); }
     const std::set<int>& selectedNotes() const { return selected_; }
     // Where the selected clip is playing, in its content beats (the notes' time base); -1 when it is not playing.
@@ -67,6 +75,18 @@ private:
     Rect rulerArea() const;
     Rect notesArea() const;
     Rect velocityArea() const;
+    Rect markerStrip() const;
+    bool arrangementClip() const;  // the clip lives in the Arrangement (or a take lane), not in a Session slot
+    double beatUnit() const;       // length of the clip signature's beat in quarter notes
+    double minScroll() const;      // leftmost content beat the view may scroll to
+    void fitClip();                // Live's zoom when a clip opens: its whole region
+    enum class MarkerDrag { None, Start, End, LoopStart, LoopEnd, Loop };
+    MarkerDrag markerAt(float x) const;
+    MarkerDrag markerDrag_ = MarkerDrag::None;
+    std::optional<model::ClipMarkers> markerPreview_;
+    model::ClipMarkers markerOriginal_;
+    double markerGrab_ = 0;
+    void commitMarkers();
     void audition(int pitch);
     void stopAudition();
     std::shared_ptr<engine::ControlBank> auditionBank_;

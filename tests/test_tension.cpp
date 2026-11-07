@@ -140,7 +140,7 @@ TEST_CASE("Tension: a StringStudio element imports into the native device")
     CHECK(warnings.empty());
     auto processor = devices::createNative(device);
     REQUIRE(processor != nullptr);
-    CHECK(processor->name() == "Tension");
+    CHECK(processor->name() == "Sonora Tension");
     CHECK(processor->isInstrument());
     CHECK_NEAR(processor->getParameter(T::ExcType), 1.0, 1e-6);
     CHECK_NEAR(processor->getParameter(T::StringDecay), 0.25, 1e-6);
@@ -233,4 +233,19 @@ TEST_CASE("Tension: polyphony limit and mono priority")
     juce::MidiBuffer none;
     for (int i = 0; i < 40; ++i) { buffer.clear(); t->process(buffer, none); }
     CHECK(t->activeVoices() <= 2);
+}
+
+TEST_CASE("device names: the reference's default preset names show with Sonora's prefix; real preset names stay")
+{
+    std::vector<std::string> warnings;
+    auto named = [&](const char* tag, const char* userName) {
+        juce::XmlElement x(tag); x.setAttribute("Id", 1);
+        x.createNewChildElement("UserName")->setAttribute("Value", userName);
+        return sonora::io::readDeviceXml(x, warnings).displayName;
+    };
+    CHECK(named("StringStudio", "Tension") == "Sonora Tension");
+    CHECK(named("StringStudio", "") == "Sonora Tension");
+    CHECK(named("InstrumentVector", "Wavetable") == "Sonora Wavetable");
+    CHECK(named("InstrumentVector", "Deep Wave") == "Deep Wave");
+    CHECK(named("Eq8", "EQ Eight") == "EQ Eight"); // reference devices without the prefix keep their names
 }

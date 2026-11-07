@@ -1,4 +1,5 @@
 #include "core/ClipOperations.h"
+#include "core/ClipGeometry.h"
 #include "core/TimeUtils.h"
 #include <algorithm>
 #include <cmath>
@@ -49,7 +50,7 @@ EditCommand replaceArrangementRange(const Song& song, int index, double start, d
         if (clip.currentEnd <= start || clip.currentStart >= end) { after.push_back(clip); continue; }
         if (clip.currentStart < start)
         {
-            auto head = withEnd(clip, start); head.currentEnd = start; after.push_back(std::move(head));
+            auto head = clip; head.currentEnd = start; normaliseUnloopedMarkers(head, song.tempo); after.push_back(std::move(head));
         }
         if (clip.currentEnd > end)
         {

@@ -1123,7 +1123,14 @@ void patchTrackMixerAndDevices(XmlElement* x, const model::Track& t)
         if (t.deactivated) sonora->setAttribute("Deactivated", "true");
     }
     if (auto* oldFreeze = child(x, "SonoraFreeze")) x->removeChildElement(oldFreeze, true);
-    if (t.frozen)
+    // The reference's freeze stays as the file has it (renders in FreezeSequencer); any other state reads as unfrozen
+    // there (Sonora's freeze lives in <SonoraFreeze>, the reference keeps playing the original track).
+    if (auto* liveFreeze = child(x, "Freeze"))
+    {
+        const bool keep = t.frozen && t.frozenInFile;
+        if (liveFreeze->getStringAttribute("Value") != (keep ? "true" : "false")) liveFreeze->setAttribute("Value", keep ? "true" : "false");
+    }
+    if (t.frozen && ! t.frozenInFile)
     {
         auto* freeze = x->createNewChildElement("SonoraFreeze");
         freeze->setAttribute("Version", 1);

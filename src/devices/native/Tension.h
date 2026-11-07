@@ -59,7 +59,7 @@ public:
     static constexpr int kFilterTypes = 10, kLfoShapes = 5, kSyncRates = 24, kPolyphonies = 10;
 
     Tension();
-    std::string name() const override { return "Tension"; }
+    std::string name() const override { return "Sonora Tension"; }
     bool isInstrument() const override { return true; }
     void prepare(double sampleRate, int maxBlockSize) override;
     void reset() override;

@@ -567,6 +567,8 @@ TEST_CASE("duplicate region: multiple automation lanes retain source and destina
 
 namespace
 {
+// UI-71: an unlooped clip keeps its start marker in LoopStart (StartRelative 0), as the reference stores it.
+double startMarker(const Clip& clip) { return clip.loop.loopStart + clip.loop.startRelative; }
 Clip regionTestClip(int uid, double start, double end, Clip::Kind kind = Clip::Kind::Midi)
 {
     Clip clip; clip.uid = uid; clip.xmlId = uid; clip.name = std::to_string(uid); clip.kind = kind;
@@ -591,14 +593,14 @@ TEST_CASE("move region: multiple clips and mixed channels keep spacing gaps and 
     const auto& clips = song.tracks[0].arrangementClips;
     REQUIRE(clips.size() == 5);
     CHECK_NEAR(clips[0].currentStart, 0, 1e-9); CHECK_NEAR(clips[0].currentEnd, 2, 1e-9);
-    CHECK_NEAR(clips[1].currentStart, 7, 1e-9); CHECK_NEAR(clips[1].loop.startRelative, 1, 1e-9);
+    CHECK_NEAR(clips[1].currentStart, 7, 1e-9); CHECK_NEAR(startMarker(clips[1]), 1, 1e-9);
     CHECK_NEAR(clips[2].currentStart, 12, 1e-9); CHECK_NEAR(clips[2].currentEnd, 13, 1e-9);
-    CHECK_NEAR(clips[2].loop.startRelative, 2, 1e-9);
+    CHECK_NEAR(startMarker(clips[2]), 2, 1e-9);
     CHECK_NEAR(clips[3].currentStart, 14, 1e-9); CHECK_NEAR(clips[3].currentEnd, 15, 1e-9); CHECK(clips[3].uid == 702);
     CHECK_NEAR(clips[4].currentStart, 16, 1e-9); CHECK_NEAR(clips[4].currentEnd, 17, 1e-9);
     const auto& wave = song.tracks[1].arrangementClips;
     REQUIRE(wave.size() == 3); CHECK_NEAR(wave[2].currentStart, 12, 1e-9); CHECK_NEAR(wave[2].currentEnd, 17, 1e-9);
-    CHECK_NEAR(wave[2].loop.startRelative, 2.5, 1e-9); CHECK_NEAR(wave[1].loop.startRelative, 5, 1e-9);
+    CHECK_NEAR(startMarker(wave[2]), 2.5, 1e-9); CHECK_NEAR(startMarker(wave[1]), 5, 1e-9);
     CHECK(song.tracks[2].arrangementClips[0].uid == 705); CHECK_NEAR(song.tracks[2].arrangementClips[0].currentStart, 0, 1e-9);
     CHECK(history.undoLabel() == "Move Region"); REQUIRE(history.undo(song)); CHECK(! history.canUndo());
     REQUIRE(song.tracks[0].arrangementClips.size() == 3); CHECK(song.tracks[0].arrangementClips[1].uid == 702);
@@ -615,7 +617,7 @@ TEST_CASE("move region: overlapping destination replaces gaps without erasing it
     CHECK_NEAR(clips[0].currentStart, 3, 1e-9); CHECK(clips[0].uid == 710);
     CHECK_NEAR(clips[1].currentStart, 5, 1e-9); CHECK(clips[1].uid == 711);
     CHECK_NEAR(clips[2].currentStart, 6, 1e-9); CHECK_NEAR(clips[2].currentEnd, 8, 1e-9);
-    CHECK_NEAR(clips[2].loop.startRelative, 1, 1e-9);
+    CHECK_NEAR(startMarker(clips[2]), 1, 1e-9);
     REQUIRE(history.undo(song));
     history.perform(song, transferArrangementRegion(song, 0, 0, 3, 7, 0));
     REQUIRE(song.tracks[0].arrangementClips.size() == 3);

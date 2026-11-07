@@ -157,6 +157,12 @@ EditCommand transferArrangementRegion(const Song&, int firstTrack, int lastTrack
 EditCommand deleteArrangementRegion(const Song&, int firstTrack, int lastTrack, Beats start, Beats end);
 // Copies a clip to another track (or the same one) at `at`; the original stays. Both must be arrangement tracks.
 EditCommand copyClipToTrack(const Song& song, int fromTrack, int uid, int toTrack, Beats at);
+// UI-71: puts `placed` (the dragged, resized or copied version of Arrangement clip `uid` on `fromTrack`) on `toTrack` like Live:
+// whatever it covers there is overwritten (clips crossing its edges are truncated or split, clips inside it removed). `copy`
+// keeps the source clip. A moved clip keeps its uid on its own track; copies and clips moved to another track get a new
+// one, written to `placedUid`. Empty when the source is missing or the destination is frozen.
+EditCommand placeArrangementClip(const Song& song, int fromTrack, int uid, int toTrack, Clip placed, bool copy, std::string label,
+                                 int* placedUid = nullptr);
 // Moves a clip to another track at `at` (delete + insert as one undo step).
 EditCommand moveClipToTrack(const Song& song, int fromTrack, int uid, int toTrack, Beats at);
 // An empty MIDI clip of `length` beats at `start`. The writer needs an existing MIDI clip to copy the file
@@ -279,8 +285,9 @@ EditCommand setPunch(const Song& song, bool in, bool out);
 // ---- clip geometry helpers (used by the arrangement UI)
 // Moves the clip start to `newStart` keeping its length.
 Clip movedClip(Clip c, Beats newStart);
-// Trims/extends the right edge.
-Clip withEnd(Clip c, Beats newEnd);
+// Trims/extends the right edge. An unlooped clip's end marker follows it (UI-71; `tempo` converts beats to seconds for
+// unwarped audio, whose markers are left alone when it is 0).
+Clip withEnd(Clip c, Beats newEnd, double tempo = 0.0);
 // Trims/extends the left edge; the content stays where it is on the timeline
 // (startRelative absorbs the change; `tempo` converts beats to seconds for unwarped audio).
 Clip withStart(Clip c, Beats newStart, double tempo);

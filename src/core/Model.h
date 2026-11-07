@@ -294,6 +294,19 @@ struct SamplePart
     FileRef sample;
     double sampleRate = 0.0;
     int64_t lengthSamples = 0;
+    // Simpler slicing (DEV-4c): <SlicingStyle> 0 Transient, 1 Beat, 2 Region, 3 Manual; <SlicingThreshold> (the
+    // Sensitivity, 0..100); <SlicingBeatGrid> (the Division enum); <SlicingRegions> (the slice count). Slice points are
+    // seconds from the file start: <SlicePoints> (transients the reference found, with their NormalizedEnergy) and
+    // <ManualSlicePoints>.
+    int slicingStyle = 0;
+    double slicingThreshold = 100.0;
+    int slicingBeatGrid = 4;
+    int slicingRegions = 8;
+    std::vector<double> slicePoints, sliceEnergies, manualSlicePoints;
+    // <SampleWarpProperties>: read so the beat grid of an unwarped sample is known (Simpler warping itself is DEV-4b).
+    bool warped = false;
+    int warpMode = 0;
+    double secondsPerBeat = 0.0; // from the first and last warp markers; 0 = unknown
 };
 
 // Sidechain input of a native dynamics device (<SideChain>). Where the detector listens.
@@ -474,6 +487,9 @@ struct Track
     bool hidden = false;
     bool deactivated = false;
     bool frozen = false;
+    // The file's own <Freeze Value="true"/> (the reference's freeze, renders in DeviceChain/FreezeSequencer) holds the
+    // frozen audio. Saving keeps that freeze as it is; Sonora's own freezes use <SonoraFreeze> instead.
+    bool frozenInFile = false;
     std::vector<Clip> frozenArrangement;
     std::vector<ClipSlot> frozenSlots;
 };

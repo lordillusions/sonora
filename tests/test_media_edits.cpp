@@ -267,7 +267,7 @@ TEST_CASE("media edits: split at cursor and selection edges preserves source clo
     const auto ids = std::pair{parts[1].uid, parts[2].uid};
     const auto& audioParts = rig.song->tracks[2].arrangementClips;
     REQUIRE(audioParts.size() == 3);
-    CHECK_NEAR(audioParts[1].loop.startRelative, audioBefore.loop.startRelative + 2 * 60 / rig.song->tempo, 1e-9);
+    CHECK_NEAR((audioParts[1].loop.loopStart + audioParts[1].loop.startRelative), (audioBefore.loop.loopStart + audioBefore.loop.startRelative) + 2 * 60 / rig.song->tempo, 1e-9);
     const auto saved = rig.folder.getChildFile("Split.als"); REQUIRE(io::saveAls(*rig.song, saved).ok);
     auto reload = io::loadAls(saved); REQUIRE(reload); REQUIRE(reload.song->tracks[0].arrangementClips.size() == 3);
     CHECK_NEAR(reload.song->tracks[0].arrangementClips[1].loop.startRelative, 2.5, 1e-9);
@@ -303,4 +303,63 @@ TEST_CASE("media edits: bounce span and rendered audio retain nonzero Arrangemen
     model::insertClip(3, rig.audio(12, 1), "Earlier member").apply(*rig.song);
     const auto group = model::arrangementClipSpan(*rig.song, {2, 3}); REQUIRE(group);
     CHECK_NEAR(group->first, 12, 0); CHECK_NEAR(group->second, 18, 0.01);
+}
+
+namespace
+{
+juce::XmlElement* firstTrackOf(juce::XmlElement& root)
+{
+    auto* tracks = root.getChildByName("LiveSet")->getChildByName("Tracks");
+    for (auto* track : tracks->getChildIterator())
+        if (track->hasTagName("MidiTrack") || track->hasTagName("AudioTrack")) return track;
+    return nullptr;
+}
+}
+
+TEST_CASE("media edits: the reference's own freeze (Freeze + FreezeSequencer) plays its renders, survives save and unfreezes")
+{
+    MediaRig rig;
+    // A Sonora freeze written once gives an authored AudioClip; moved into FreezeSequencer it is the reference's layout.
+    const auto clip = rig.audio(4, 1);
+    auto& source = rig.song->tracks[0]; source.frozen = true; source.frozenArrangement = {clip};
+    const auto sonoraFrozen = rig.folder.getChildFile("SonoraFrozen.als"); REQUIRE(io::saveAls(*rig.song, sonoraFrozen).ok);
+    std::string error; auto dom = io::readAlsDom(sonoraFrozen, error); REQUIRE(dom);
+    auto* track = firstTrackOf(*dom); REQUIRE(track);
+    auto* sonora = track->getChildByName("SonoraFreeze"); REQUIRE(sonora);
+    auto* render = sonora->getChildByName("Render"); REQUIRE(render);
+    auto* audio = new juce::XmlElement(*render->getChildByName("AudioClip"));
+    track->removeChildElement(sonora, true);
+    auto* freezeFlag = track->getChildByName("Freeze"); REQUIRE(freezeFlag); freezeFlag->setAttribute("Value", "true");
+    auto* sequencer = track->getChildByName("DeviceChain")->getChildByName("FreezeSequencer"); REQUIRE(sequencer);
+    auto* sample = sequencer->getChildByName("Sample"); if (! sample) sample = sequencer->createNewChildElement("Sample");
+    auto* arranger = sample->getChildByName("ArrangerAutomation"); if (! arranger) arranger = sample->createNewChildElement("ArrangerAutomation");
+    auto* events = arranger->getChildByName("Events"); if (! events) events = arranger->createNewChildElement("Events");
+    events->addChildElement(audio);
+    const auto liveFrozen = rig.folder.getChildFile("LiveFrozen.als"); REQUIRE(io::writeAlsDom(*dom, liveFrozen, error));
+
+    auto loaded = io::loadAls(liveFrozen); REQUIRE(loaded);
+    const auto& frozen = loaded.song->tracks[0];
+    CHECK(frozen.frozen); CHECK(frozen.frozenInFile);
+    REQUIRE(frozen.frozenArrangement.size() == 1);
+    CHECK_NEAR(frozen.frozenArrangement[0].currentStart, 4.0, 1e-9);
+    const auto playback = model::frozenPlaybackTrack(frozen);
+    CHECK(playback.devices.empty()); CHECK(playback.arrangementClips.size() == 1);
+
+    // Saved unchanged: the reference's freeze stays as it was, no Sonora extension is added.
+    const auto resaved = rig.folder.getChildFile("Resaved.als"); REQUIRE(io::saveAls(*loaded.song, resaved).ok);
+    auto again = io::readAlsDom(resaved, error); REQUIRE(again);
+    CHECK(firstTrackOf(*again)->getChildByName("Freeze")->getStringAttribute("Value") == "true");
+    CHECK(firstTrackOf(*again)->getChildByName("SonoraFreeze") == nullptr);
+    auto reloaded = io::loadAls(resaved); REQUIRE(reloaded);
+    CHECK(reloaded.song->tracks[0].frozen); CHECK(reloaded.song->tracks[0].frozenArrangement.size() == 1);
+
+    // Unfrozen (as the Unfreeze Track command does): the flag goes off, the stale renders no longer play.
+    auto thawed = reloaded.song->tracks[0]; thawed.frozen = false; thawed.frozenInFile = false;
+    thawed.frozenArrangement.clear(); thawed.frozenSlots.clear();
+    model::replaceTrack(*reloaded.song, 0, thawed, "Unfreeze Track").apply(*reloaded.song);
+    const auto unfrozen = rig.folder.getChildFile("Unfrozen.als"); REQUIRE(io::saveAls(*reloaded.song, unfrozen).ok);
+    auto plain = io::loadAls(unfrozen); REQUIRE(plain);
+    CHECK(! plain.song->tracks[0].frozen);
+    auto plainDom = io::readAlsDom(unfrozen, error); REQUIRE(plainDom);
+    CHECK(firstTrackOf(*plainDom)->getChildByName("Freeze")->getStringAttribute("Value") == "false");
 }

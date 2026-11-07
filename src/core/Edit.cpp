@@ -1,4 +1,5 @@
 #include "core/Edit.h"
+#include "core/ClipGeometry.h"
 #include "core/DeviceCatalog.h"
 #include "core/TimeUtils.h"
 
@@ -277,6 +278,7 @@ EditCommand splitArrangementClips(const Song& song, int firstTrack, int lastTrac
                 fragment.currentEnd = boundaries[part + 1];
                 const double units = clip.kind == Clip::Kind::Audio && ! clip.warped ? 60 / std::max(20.0, song.tempo) : 1;
                 fragment.loop.startRelative += (boundaries[part] - clip.currentStart) * units;
+                normaliseUnloopedMarkers(fragment, song.tempo);
                 if (part > 0) fragment.fadeIn = 0;
                 if (part + 2 < boundaries.size()) fragment.fadeOut = 0;
                 if (part == 0) edits.push_back(modifyClip(song, track, clip.uid, std::move(fragment), "Split Clip"));
@@ -333,11 +335,11 @@ EditCommand duplicateClip(const Song& song, int track, int uid, Beats at)
 {
     const int i = arrangementClipIndex(song, track, uid);
     Clip copy = i >= 0 ? song.tracks[(size_t) track].arrangementClips[(size_t) i] : Clip{};
-    const Beats length = copy.currentEnd - copy.currentStart;
     const Beats start = at >= 0.0 ? at : copy.currentEnd;
     copy = movedClip(copy, start);
+    // UI-71 (Live): the copy goes right after the clip and replaces whatever it covers there.
+    if (auto placed = placeArrangementClip(song, track, uid, track, copy, true, "Duplicate Clip"); placed.apply) return placed;
     markAsCopy(copy, song, track);
-    (void) length;
     return insertClip(track, std::move(copy), "Duplicate Clip");
 }
 
@@ -367,15 +369,17 @@ EditCommand duplicateArrangementRegion(const Song& song, int firstTrack, int las
                 if (left)
                 {
                     auto head = clip; head.currentEnd = end;
+                    normaliseUnloopedMarkers(head, song.tempo);
                     parts.push_back(modifyClip(song, track, clip.uid, std::move(head), "Trim Region"));
                 }
                 if (right)
                 {
-                    auto tail = withStart(clip, destinationEnd, song.tempo);
-                    // withStart clamps to the editor minimum; range edits retain even tiny fragments.
+                    // Not withStart: it clamps to the editor minimum, and range edits retain even tiny fragments.
+                    auto tail = clip;
                     tail.loop.startRelative = clip.loop.startRelative + (destinationEnd - clip.currentStart)
                         * (clip.kind == Clip::Kind::Audio && ! clip.warped ? 60.0 / std::max(20.0, song.tempo) : 1.0);
                     tail.currentStart = tail.time = destinationEnd;
+                    normaliseUnloopedMarkers(tail, song.tempo);
                     if (left)
                     {
                         markAsCopy(tail, song, track);
@@ -393,6 +397,7 @@ EditCommand duplicateArrangementRegion(const Song& song, int firstTrack, int las
                     * (clip.kind == Clip::Kind::Audio && ! clip.warped ? 60.0 / std::max(20.0, song.tempo) : 1.0);
                 copy.currentStart = copy.time = from + length;
                 copy.currentEnd = to + length;
+                normaliseUnloopedMarkers(copy, song.tempo);
                 markAsCopy(copy, song, track);
                 parts.push_back(insertClip(track, std::move(copy), "Duplicate Region"));
             }
@@ -498,6 +503,7 @@ Clip regionSection(Clip clip, double start, double end, double tempo)
         * (clip.kind == Clip::Kind::Audio && ! clip.warped ? 60.0 / std::max(20.0, tempo) : 1.0);
     clip.currentStart = clip.time = from;
     clip.currentEnd = std::min(end, clip.currentEnd);
+    normaliseUnloopedMarkers(clip, tempo);
     return clip;
 }
 
@@ -640,6 +646,43 @@ EditCommand deleteArrangementRegion(const Song& song, int first, int last, Beats
     for (const auto& [index, state] : *states) command.tracks.push_back(index);
     command.apply = [states](Song& s) { for (const auto& [index, state] : *states) s.tracks[(size_t) index].arrangementClips = state.after; };
     command.revert = [states](Song& s) { for (const auto& [index, state] : *states) s.tracks[(size_t) index].arrangementClips = state.before; };
+    return command;
+}
+
+EditCommand placeArrangementClip(const Song& song, int fromTrack, int uid, int toTrack, Clip placed, bool copy, std::string label,
+                                 int* placedUid)
+{
+    const int index = arrangementClipIndex(song, fromTrack, uid);
+    if (index < 0 || toTrack < 0 || toTrack >= (int) song.tracks.size() || ! std::isfinite(placed.currentStart)
+        || ! std::isfinite(placed.currentEnd) || placed.currentEnd <= placed.currentStart || song.tracks[(size_t) toTrack].frozen)
+        return {};
+    struct State { std::vector<Clip> before, after; };
+    auto states = std::make_shared<std::map<int, State>>();
+    for (int t : {fromTrack, toTrack})
+        if (! states->count(t)) states->emplace(t, State{song.tracks[(size_t) t].arrangementClips, song.tracks[(size_t) t].arrangementClips});
+    if (! copy)
+        std::erase_if(states->at(fromTrack).after, [uid](const Clip& c) { return c.uid == uid; });
+    // Live: a clip put on top of others replaces the part of them it covers (crossing clips are truncated or split).
+    eraseRegionClips(states->at(toTrack).after, song, toTrack, placed.currentStart, placed.currentEnd);
+    placed.time = placed.currentStart;
+    if (copy || toTrack != fromTrack)
+    {
+        markAsCopy(placed, song, fromTrack);
+        placed.uid = allocateClipUid();
+    }
+    else placed.uid = uid;
+    assignNoteKeys(placed.notes);
+    if (placedUid) *placedUid = placed.uid;
+    states->at(toTrack).after.push_back(std::move(placed));
+    EditCommand command;
+    command.label = std::move(label);
+    for (auto& [t, state] : *states)
+    {
+        command.tracks.push_back(t);
+        std::stable_sort(state.after.begin(), state.after.end(), [](const auto& a, const auto& b) { return a.currentStart < b.currentStart; });
+    }
+    command.apply = [states](Song& s) { for (const auto& [t, state] : *states) s.tracks[(size_t) t].arrangementClips = state.after; };
+    command.revert = [states](Song& s) { for (const auto& [t, state] : *states) s.tracks[(size_t) t].arrangementClips = state.before; };
     return command;
 }
 
@@ -1635,9 +1678,10 @@ Clip movedClip(Clip c, Beats newStart)
     return c;
 }
 
-Clip withEnd(Clip c, Beats newEnd)
+Clip withEnd(Clip c, Beats newEnd, double tempo)
 {
     c.currentEnd = std::max(c.currentStart + 0.0625, newEnd);
+    normaliseUnloopedMarkers(c, tempo); // UI-71: an unlooped clip's end marker follows its right edge
     return c;
 }
 
@@ -1650,6 +1694,14 @@ Clip withStart(Clip c, Beats newStart, double tempo)
     c.loop.startRelative += unwarpedAudio ? delta * 60.0 / std::max(20.0, tempo) : delta;
     c.currentStart = newStart;
     c.time = newStart;
+    // UI-71: a looped clip's start marker stays inside the brace (playback is the same: the loop wraps there anyway).
+    if (c.loop.enabled && c.loop.loopEnd > c.loop.loopStart && c.loop.loopStart + c.loop.startRelative >= c.loop.loopEnd - 1e-9)
+    {
+        const double length = c.loop.loopEnd - c.loop.loopStart;
+        c.loop.startRelative = std::fmod(c.loop.startRelative, length);
+        if (c.loop.startRelative > length - 1e-9) c.loop.startRelative = 0.0;
+    }
+    normaliseUnloopedMarkers(c, tempo);
     return c;
 }
 

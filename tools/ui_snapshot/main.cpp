@@ -3,7 +3,7 @@
 //
 //   ui_snapshot out.png [set.als] [--session] [--set-view] [--track N] [--size 1440x900] [--scale 2] [--bench N [--gpu]]
 //                       [--theme "/path/Live Theme.ask"] [--no-browser] [--no-detail]
-//                       [--prefs plugins|midi|display|audio|keys|updates] [--zoom 1.25] [--midimap|--keymap] [--clip TRACK] [--scene N] [--count-in N]
+//                       [--prefs plugins|midi|display|audio|keys|updates] [--zoom 1.25] [--midimap|--keymap] [--clip TRACK] [--clip-index N] [--scene N] [--count-in N]
 //                       [--floating-wavetables] [--wavetable-window] [--waveform-zoom FACTOR]
 //                       [--wavetable-browser] [--wavetable-preset NAME] [--wavetable-search TEXT]
 //                       [--collab share|share-wifi|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N] [--all-automation]
@@ -177,6 +177,7 @@ int main(int argc, char** argv)
     int midiTool = -1;
     int clipTrack = -1;
     int clipScene = -1, takeLane = -1;
+    int clipIndex = 0; // --clip-index: which Arrangement clip of the --clip track (UI-71)
     double playAt = -1;
     float pianoRows = 0; // piano roll row height (vertical zoom), 0 = default
     std::string browserFolder;
@@ -332,6 +333,8 @@ int main(int argc, char** argv)
         }
         else if (a == "--scene")
             clipScene = std::stoi(next());
+        else if (a == "--clip-index") // with --clip: the Nth Arrangement clip of that track instead of the first
+            clipIndex = std::max(0, std::stoi(next()));
         else if (a == "--play-at")
             playAt = std::stod(next());
         else if (a == "--piano-rows")
@@ -756,7 +759,7 @@ int main(int argc, char** argv)
             if ((size_t) clipScene < track.slots.size() && track.slots[(size_t) clipScene].clip)
                 clip = &*track.slots[(size_t) clipScene].clip;
         }
-        else if (! track.arrangementClips.empty()) clip = &track.arrangementClips[0];
+        else if (! track.arrangementClips.empty()) clip = &track.arrangementClips[std::min((size_t) clipIndex, track.arrangementClips.size() - 1)];
         if (clip)
         {
             ctx.selectedTrack = ctx.selectedClipTrack = clipTrack;

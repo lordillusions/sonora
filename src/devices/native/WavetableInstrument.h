@@ -64,7 +64,7 @@ public:
     static const char* targetId(int target); // XML TargetId
 
     WavetableInstrument();
-    std::string name() const override { return "Wavetable"; }
+    std::string name() const override { return "Sonora Wavetable"; }
     bool isInstrument() const override { return true; }
     void prepare(double sampleRate, int maxBlockSize) override;
     void reset() override;

@@ -47,6 +47,9 @@ void recordCircle(SkCanvas& c, const Rect& r, SkColor color);
 // TRK-5: two chain links marking a linked (alias) clip, centred in `r`.
 void linkGlyph(SkCanvas& c, const Rect& r, SkColor color);
 
+// A frozen track's clip (the reference's freeze): the theme's FreezeColor washed over `r` with thin diagonal stripes.
+void frozenOverlay(SkCanvas& c, const Rect& r, SkColor freezeColor);
+
 // Picks black or white text for a coloured background (clip names on clip colours).
 SkColor contrastText(SkColor background);
 SkColor withAlpha(SkColor c, uint8_t a);

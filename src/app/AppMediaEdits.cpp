@@ -141,7 +141,7 @@ void AppController::renderTrack(int index, bool freeze, bool toNewTrack)
     const auto& source = song_->tracks[(size_t) index];
     if (freeze && source.frozen)
     {
-        auto restored = source; restored.frozen = false; restored.frozenArrangement.clear(); restored.frozenSlots.clear();
+        auto restored = source; restored.frozen = false; restored.frozenInFile = false; restored.frozenArrangement.clear(); restored.frozenSlots.clear();
         applyEdit(model::replaceTrack(*song_, index, std::move(restored), "Unfreeze Track")); return;
     }
     if (freeze && source.kind == model::TrackKind::Group) return;
@@ -237,7 +237,7 @@ void AppController::renderTrack(int index, bool freeze, bool toNewTrack)
         { result.error = "This track has no clips to render"; folder.deleteRecursively(); return result; }
         if (freeze)
         {
-            auto frozen = original; frozen.frozen = true;
+            auto frozen = original; frozen.frozen = true; frozen.frozenInFile = false;
             frozen.frozenArrangement = std::move(arrangement); frozen.frozenSlots = std::move(slots);
             result.edit = model::replaceTrack(song, index, std::move(frozen), label);
         }

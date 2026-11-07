@@ -26,7 +26,7 @@ struct DevicePreset
     std::string name;       // file name without extension (what the reference lists)
     std::string folder;     // the first folder below the device folder ("Bass"); empty for a preset directly in it
     std::string deviceTag;  // catalog element tag ("InstrumentVector", "StringStudio")
-    std::string deviceName; // catalog display name ("Wavetable", "Tension")
+    std::string deviceName; // catalog display name ("Sonora Wavetable", "Sonora Tension")
     std::string library;    // PresetLibrary::name
 };
 

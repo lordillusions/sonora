@@ -872,7 +872,7 @@ public:
             c.drawCircle(42, 9, 6.5f, ring);
         }
         const auto name = deviceFace_ && deviceFace_->kind() == DeviceFace::Kind::Simpler && ! model_.sampleParts.empty()
-            && (model_.displayName == "Simpler" || model_.displayName.empty()) ? model_.sampleParts[0].name : model_.displayName;
+            && (model_.displayName == "Sonora Simpler" || model_.displayName == "Simpler" || model_.displayName.empty()) ? model_.sampleParts[0].name : model_.displayName;
         paint::text(c, name, sampleTabs_.empty() ? nameRect : Rect{28, 0, width() - kTitleIcons - 184, kTitle}, proc_ ? t.color("ControlForeground") : t.color("TextDisabled"),
                     t.metrics.fontSize, Align::Left, true);
         if (showsTitleIcons())

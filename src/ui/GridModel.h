@@ -41,10 +41,11 @@ std::string gridLabel(double gridBeats, double beatsPerBar);
 void narrowGrid(GridSettings& settings);
 void widenGrid(GridSettings& settings);
 
-// The grid to snap to given the settings and the modifier override; 0 means free (no snapping).
+// The grid to snap to given the settings and the modifier override; 0 means free (no snapping). Live: holding the
+// modifier (Cmd on macOS) bypasses snapping, and with Snap to Grid off the same modifier snaps temporarily (UI-71).
 inline double snapSize(const GridSettings& settings, double pixelsPerBeat, double beatsPerBar, bool overrideSnap)
 {
-    return settings.snap && ! overrideSnap ? gridBeats(settings, pixelsPerBeat, beatsPerBar) : 0.0;
+    return settings.snap != overrideSnap ? gridBeats(settings, pixelsPerBeat, beatsPerBar) : 0.0;
 }
 
 // ---- ruler
@@ -63,8 +64,9 @@ std::string rulerText(double beat, double beatsPerBar, double beatUnit);
 
 // Marks to draw for the visible range: labelled marks at the finest level whose text fits, unlabelled ticks at finer
 // levels while they stay at least `minTickPixels` apart.
+// `allowNegative`: the clip editor's ruler also reads positions before 1.1.1 (bar 0, -1 ...; UI-71); the Arrangement's starts at 1.
 std::vector<RulerMark> rulerMarks(double firstBeat, double lastBeat, double pixelsPerBeat, double beatsPerBar, double beatUnit,
-                                  float charWidth = 6.0f, float minTickPixels = 9.0f);
+                                  float charWidth = 6.0f, float minTickPixels = 9.0f, bool allowNegative = false);
 
 // Vertical grid lines for the lanes / note area: the grid size (and coarser multiples) with a strength of
 // 2 bar line, 1 beat line, 0 sub-beat line. `grid` is the effective grid in beats.
@@ -74,6 +76,17 @@ struct GridLine
     int strength = 0;
 };
 std::vector<GridLine> gridLines(double firstBeat, double lastBeat, double pixelsPerBeat, double beatsPerBar, double beatUnit,
-                                double grid);
+                                double grid, bool allowNegative = false);
+
+// Live's note snapping (Editing MIDI > Grid Snapping): "Notes will also snap to an offset, which is based on the original
+// placement of the note relative to the grid": the nearer of the grid line and the original position moved by whole grid
+// steps, so an off-grid (grooved) note keeps its offset unless it is dragged onto a grid line. `grid` 0 = free.
+inline double snapKeepingOffset(double position, double original, double grid)
+{
+    if (grid <= 0.0) return position;
+    const double onGrid = std::round(position / grid) * grid;
+    const double offset = original + std::round((position - original) / grid) * grid;
+    return std::fabs(offset - position) < std::fabs(onGrid - position) - 1e-12 ? offset : onGrid;
+}
 
 } // namespace sonora::ui

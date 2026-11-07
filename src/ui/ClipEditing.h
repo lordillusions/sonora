@@ -2,6 +2,7 @@
 // Pure helpers for editing clips with the mouse (arrangement view, UI-3): grid, snapping and the
 // geometry of move / resize / trim drags. No drawing and no state, so it is unit tested.
 
+#include "core/ClipGeometry.h"
 #include "core/Edit.h"
 #include "ui/AudioClipEdits.h"
 
@@ -9,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace sonora::ui
 {
@@ -56,11 +58,15 @@ inline DragMode hitZone(float xInClip, float clipWidthPx)
     return DragMode::Move;
 }
 
-// The clip as it looks while dragged by `deltaBeats` from its original state. With `snap` the
-// moving edge lands on the grid (Move snaps the start, keeping the length; with `alignEnd` it snaps the end instead).
+// The clip as it looks while dragged by `deltaBeats` from its original state (docs/CLIP_EDITING.md). With `snap` the
+// moving edge lands on the grid or on one of the magnetic `targets` (other clips' edges, locators), whichever is nearer:
+// Move snaps the start, keeping the length (with `alignEnd` the end); the edges resize like Live (core/ClipGeometry: an
+// unlooped clip's end marker follows, an unlooped audio clip stops at its sample's end, a looped clip repeats) and never get
+// shorter than one grid step.
 inline model::Clip dragClip(const model::Clip& original, DragMode mode, double deltaBeats, double grid, bool snap, double tempo,
-                            bool alignEnd = false)
+                            bool alignEnd = false, const std::vector<double>& targets = {})
 {
+    const double minLength = snap && grid > 0.0 ? grid : 1.0 / 64.0;
     switch (mode)
     {
         case DragMode::FadeInCurve:
@@ -90,19 +96,16 @@ inline model::Clip dragClip(const model::Clip& original, DragMode mode, double d
         }
         case DragMode::Move:
         {
-            double start = original.currentStart + deltaBeats;
-            if (snap && alignEnd)
-                start = std::max(0.0, snapToGrid(original.currentEnd + deltaBeats, grid) - (original.currentEnd - original.currentStart));
-            else if (snap)
-                start = snapToGrid(start, grid);
+            const double length = original.currentEnd - original.currentStart;
+            const double start = model::snapClipStart(original.currentStart + deltaBeats, length, snap ? grid : 0.0, targets, alignEnd);
             return model::movedClip(original, start);
         }
         case DragMode::ResizeEnd:
         {
             double end = original.currentEnd + deltaBeats;
             if (snap)
-                end = snapToGrid(end, grid);
-            return model::withEnd(original, end);
+                end = model::snapWithTargets(end, grid, targets);
+            return model::resizedEnd(original, end, tempo, minLength);
         }
         case DragMode::FadeIn:
         case DragMode::FadeOut:
@@ -124,8 +127,8 @@ inline model::Clip dragClip(const model::Clip& original, DragMode mode, double d
         {
             double start = original.currentStart + deltaBeats;
             if (snap)
-                start = snapToGrid(start, grid);
-            return model::withStart(original, start, tempo);
+                start = model::snapWithTargets(start, grid, targets);
+            return model::trimmedStart(original, start, tempo, minLength);
         }
     }
     return original;

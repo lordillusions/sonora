@@ -210,7 +210,7 @@ void setWavetableSpriteName(model::Device& device, int index, const std::string&
 
 void prepareWavetableInstrument(WavetableInstrument& synth, const model::Device& device, std::vector<std::string>& warnings)
 {
-    const auto label = device.displayName.empty() ? std::string("Wavetable") : device.displayName;
+    const auto label = device.displayName.empty() ? std::string("Sonora Wavetable") : device.displayName;
     for (int osc = 0; osc < 2; ++osc)
     {
         const auto ref = readWavetableSpriteRef(device, osc);
