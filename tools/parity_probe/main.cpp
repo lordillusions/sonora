@@ -16,7 +16,7 @@
 //
 // Suite format (one case per line, '#' comments):
 //   case <name> [sample=<saw|ramp|noiseburst>] [notes=<melody|single|velocities|keys|legato|chords>]
-//     device <template.adv relative to the library, or absolute> [<path>=<value> ...] [part:<path>=<value> ...]
+//     device <template.adv relative to the library, or absolute; ${ENV} expands> [<path>=<value> ...] [part:<path>=<value> ...]
 //     device ...
 //   presets <folder relative to the library> [max=<n>] [source=<case name>]
 //       one case per factory preset in the folder, each placed after the device chain of `source`.
@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -208,8 +209,27 @@ std::vector<std::string> tokens(const std::string& line)
     return out;
 }
 
-juce::File libraryFile(const juce::File& library, const std::string& path)
+// `${NAME}` in a device path is replaced by the environment variable NAME (generated templates that live outside the
+// repository, e.g. ${SONORA_SAMPLER_FULL} = the SamplerFull.adv written by tools/parity_probe/make_sampler_full.py).
+std::string expandEnvironment(const std::string& path)
 {
+    std::string out;
+    for (size_t i = 0; i < path.size(); ++i)
+    {
+        const auto close = path[i] == '$' && i + 1 < path.size() && path[i + 1] == '{' ? path.find('}', i) : std::string::npos;
+        if (close == std::string::npos) { out += path[i]; continue; }
+        const auto name = path.substr(i + 2, close - i - 2);
+        const char* value = std::getenv(name.c_str());
+        if (value == nullptr) std::fprintf(stderr, "warning: ${%s} is not set\n", name.c_str());
+        out += value != nullptr ? value : "";
+        i = close;
+    }
+    return out;
+}
+
+juce::File libraryFile(const juce::File& library, const std::string& rawPath)
+{
+    const auto path = expandEnvironment(rawPath);
     return juce::File::isAbsolutePath(path) ? juce::File(path) : library.getChildFile(path);
 }
 

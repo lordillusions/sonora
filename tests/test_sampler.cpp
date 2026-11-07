@@ -223,10 +223,14 @@ TEST_CASE("sampler: envelope levels (Initial / Peak / Sustain), Time < Key / Tim
     auto [a, ar] = render(*lin, 2, noteAt(60, 100));
     CHECK_NEAR(a[220], 0.5 * 0.5 * 0.5, 0.01);
     CHECK_NEAR(a[600], 0.25, 0.01); // Peak, then decays slowly towards Sustain 1
-    // Time law (TODO(DEV-14b): unverified): +100 % = 4x, Time < Key -21 % one octave up = 2^-0.21, Time < Vel 100 % = 1/4.
-    CHECK_NEAR(P::timeScale(100, 0, 60, 0, 0), 4.0, 1e-9);
-    CHECK_NEAR(P::timeScale(0, -21, 72, 0, 0), std::exp2(-0.21), 1e-9);
-    CHECK_NEAR(P::timeScale(0, 0, 60, 100, 1.0f), 0.25, 1e-9);
+    // Time laws (measured SamplerLaws time-50 / time-minus50 / time-key / time-vel attack slopes): Time +-50 % = x 2^+-1.5;
+    // Time < Key 100 %: x 2^(-6 (note - 70) / 127) (C1 3.04x, C5 0.63x); Time < Vel 100 %: x 2^(-8 (velocity - 70) / 127).
+    CHECK_NEAR(P::timeScale(50, 0, 70, 0, 70.0f / 127), 2.8284, 1e-3);
+    CHECK_NEAR(P::timeScale(-50, 0, 70, 0, 70.0f / 127), 0.3536, 1e-3);
+    CHECK_NEAR(P::timeScale(0, 100, 36, 0, 70.0f / 127), 3.042, 0.01);
+    CHECK_NEAR(P::timeScale(0, 100, 84, 0, 70.0f / 127), 0.632, 0.005);
+    CHECK_NEAR(P::timeScale(0, 0, 70, 100, 1.0f / 127), 20.33, 0.1);
+    CHECK_NEAR(P::timeScale(0, 0, 70, 100, 1.0f), 0.0827, 0.001);
     // Trigger: note-off during the decay is ignored, the release follows the decay.
     auto trigger = makeSampler({zoneOf(partOf(44100), sampleOf(44100, [](int) { return 0.5f; }))});
     trigger->setParameter(S::AmpLoopMode, 4); trigger->setParameter(S::Decay, 50.0f); trigger->setParameter(S::Sustain, 1.0f);
@@ -338,9 +342,10 @@ TEST_CASE("sampler: LFO 2 to Volume (tremolo), stereo Phase, Mod Wheel to Filter
     auto [l, r] = render(*s, 20, noteAt(60, 100));
     float lo = 1, hi = 0;
     for (size_t i = 2000; i < 9000; ++i) { lo = std::min(lo, l[i]); hi = std::max(hi, l[i]); }
-    CHECK_NEAR(hi, 0.5 * 1.5, 0.02);
+    // Volume takes the LFO as 0..1: gain 1 + 0.5 (u - 1) swings 0.5 .. 1 (measured lfo2-vol / lfo2-phase180).
+    CHECK_NEAR(hi, 0.5 * 1.0, 0.02);
     CHECK_NEAR(lo, 0.5 * 0.5, 0.02);
-    CHECK_NEAR(l[3000] + r[3000], 1.0, 0.02); // opposite phases around 0.5
+    CHECK_NEAR(l[3000] + r[3000], 0.75, 0.02); // opposite phases around 0.375
     // Mod Wheel (MidiCtrl.2) -> Filter Freq -100 %: closes a 2 kHz low-pass on a 2.2 kHz tone.
     auto tone = sampleOf(44100 * 2, [](int i) { return (float) std::sin(2 * juce::MathConstants<double>::pi * i * 2205.0 / kRate); });
     auto f = makeSampler({zoneOf(partOf(44100 * 2), tone)});
@@ -358,18 +363,33 @@ TEST_CASE("sampler: LFO 2 to Volume (tremolo), stereo Phase, Mod Wheel to Filter
     };
     CHECK(level(0) > 0.8f);
     CHECK(level(127) < 0.05f);
-    // Velocity (VelDst) -> Volume 100 %: velocity 127 doubles, velocity 1 keeps about the base level.
-    auto v = makeSampler({zoneOf(partOf(44100), flat)});
-    v->setParameter(P::VelMod + P::ModDst0, (float) P::DstVolume); v->setParameter(P::VelMod + P::ModAmount0, 100);
-    auto [vl, vr] = render(*v, 2, noteAt(60, 127));
-    CHECK_NEAR(vl[300], 1.0, 0.01);
+    // Velocity (VelDst) -> Volume 100 %: gain (velocity - 0.5) / 126.5 (measured vel-vol-100: velocity 1 -48.1 dB,
+    // 64 -6.0 dB, 127 0 dB); 50 % gives 1 + 0.5 (u - 1) (vel-vol-50).
+    const auto velocityGain = [&](int velocity, float amount) {
+        auto v = makeSampler({zoneOf(partOf(44100), flat)});
+        v->setParameter(P::VelMod + P::ModDst0, (float) P::DstVolume); v->setParameter(P::VelMod + P::ModAmount0, amount);
+        auto [vl, vr] = render(*v, 2, noteAt(60, velocity));
+        return vl[300] / 0.5f;
+    };
+    CHECK_NEAR(velocityGain(127, 100), 1.0, 0.002);
+    CHECK_NEAR(20 * std::log10(velocityGain(64, 100)), -6.0, 0.05);
+    CHECK_NEAR(20 * std::log10(velocityGain(1, 100)), -48.1, 0.1);
+    CHECK_NEAR(20 * std::log10(velocityGain(1, 50)), -5.97, 0.05);
 }
 
 TEST_CASE("sampler: modulation oscillator AM / FM, Shaper curves, Spread, all extremes stay finite")
 {
-    CHECK_NEAR(P::shape(0, 0.5f, 0), std::tanh(0.5), 1e-6);
-    CHECK_NEAR(P::shape(1, 2.0f, 0), 1.0, 1e-6);
-    CHECK_NEAR(P::shape(3, 0.5f, 0), std::round(0.5 * 7.5) / 7.5, 1e-6);
+    // Shaper (measured transfer curves of a -6 dBFS sine, units of its 0.5 peak): Soft is the identity at Amount 0;
+    // at 50 a gain of 2 into a rational knee 2 - 1 / v; at 100 a gain of 5 into a tanh knee towards 2.02.
+    CHECK_NEAR(P::shape(0, 0.4f, 0), 0.4, 1e-6);
+    CHECK_NEAR(P::shape(0, 0.25f, 50), 0.5, 1e-6);       // linear part (2 x)
+    CHECK_NEAR(P::shape(0, 0.5f, 50), 0.5 * 1.5, 1e-6);  // knee: 2 - 1 / 2
+    CHECK_NEAR(P::shape(0, -0.5f, 50), -0.75, 1e-6);
+    CHECK_NEAR(P::shape(0, 0.5f, 100), 0.5 * 2.02, 0.01); // the measured ceiling
+    CHECK_NEAR(P::shape(2, 0.5f, 50), 0.5 * 1.377 * std::sin(2.047), 1e-5); // Sine folds past its peak (1.37 at 0.77)
+    CHECK_NEAR(P::shape(1, 0.5f, 50), 0.5 * 1.529, 0.01); // Hard keeps rising after its knee
+    CHECK_NEAR(P::shape(3, 0.25f, 50), 0.5 * 1.008, 0.01);// 4 Bit: 16 steps of 0.168
+    CHECK_NEAR(P::shape(3, 0.5f, 50), 0.5 * 1.008, 0.01); // folded back at half slope above 1.344
     CHECK_NEAR(P::oscRatio(3, 0), 3.0, 1e-9);
     CHECK_NEAR(P::oscRatio(-2, 0), 0.125, 1e-9); // the manual's 0.125 .. 48
     CHECK_NEAR(P::oscRatio(1, 500), 1.5, 1e-9);
@@ -386,8 +406,10 @@ TEST_CASE("sampler: modulation oscillator AM / FM, Shaper curves, Spread, all ex
     auto [a, ar] = render(*am, 12, noteAt(60, 100));
     float hi = 0, lo = 1;
     for (size_t i = 100; i < 5000; ++i) { hi = std::max(hi, a[i]); lo = std::min(lo, a[i]); }
-    CHECK(hi > 0.95f);
-    CHECK(lo < 0.05f);
+    // AM (measured o-am-v05 / v1): gain (1 - level) + level x osc, the oscillator starting at its half cycle: full level is
+    // a ring modulator (the carrier's own frequency vanishes, a negative DC at ratio 1).
+    CHECK(hi > 0.45f);
+    CHECK(lo < -0.45f);
     // Every section on at extreme settings: finite output.
     auto tone = sampleOf(44100, [](int i) { return (float) std::sin(i * 0.05); });
     auto all = makeSampler({zoneOf(partOf(44100), tone)});
@@ -551,4 +573,178 @@ TEST_CASE("sampler: a new device has the reference's default Sampler values (Def
         }
     }
     CHECK(compared > 80);
+}
+
+TEST_CASE("sampler: matrix laws measured on the reference (pan, pitch, FM phase modulation, Spin, glide modes, legacy filter)")
+{
+    auto flat = sampleOf(44100 * 2, [](int) { return 0.5f; });
+    const auto renderWith = [&](std::vector<std::pair<int, float>> settings, std::function<void(int, juce::MidiBuffer&)> events, int blocks,
+                                std::shared_ptr<engine::SampleSlot> slot = nullptr) {
+        auto s = makeSampler({zoneOf(partOf(44100 * 2), slot ? slot : flat)});
+        for (auto [index, value] : settings) s->setParameter(index, value);
+        return render(*s, blocks, events);
+    };
+    // Key -> Pan 100 %: pan (note - 64) / 63.5, equal power (measured key-pan: C1 -0.441, C5 +0.315).
+    {
+        auto [l, r] = renderWith({{P::KeyMod + P::ModDst0, (float) P::DstPan}, {P::KeyMod + P::ModAmount0, 100}}, noteAt(36, 100), 2);
+        const double pan = 4.0 / juce::MathConstants<double>::pi * std::atan2((double) r[500], (double) l[500]) - 1.0;
+        CHECK_NEAR(pan, (36 - 64) / 63.5, 0.002);
+    }
+    // Aux -> Pan 100 %: the envelope's 0..1 as 2u - 1, so an envelope at 0 pans hard left (aux-pan).
+    {
+        auto [l, r] = renderWith({{P::AuxOn, 1}, {P::AuxEnv + P::EnvPeak, 0}, {P::AuxEnv + P::EnvSustain, 0},
+                                  {P::AuxMod + P::ModDst0, (float) P::DstPan}, {P::AuxMod + P::ModAmount0, 100}}, noteAt(60, 100), 2);
+        CHECK(l[500] > 0.7f);
+        CHECK(std::abs(r[500]) < 1e-4f);
+    }
+    // Aux -> Pitch 50 %: +12 semitones at the envelope's peak (24 st at 100 %, aux-pitch / lfo2-pitch).
+    {
+        auto ramp = sampleOf(44100 * 2, [](int i) { return (float) i / 88200.0f; });
+        auto [l, r] = renderWith({{P::AuxOn, 1}, {P::AuxEnv + P::EnvDecay, 60000}, {P::AuxEnv + P::EnvSustain, 1},
+                                  {P::AuxMod + P::ModDst0, (float) P::DstPitch}, {P::AuxMod + P::ModAmount0, 50}}, noteAt(60, 100), 4, ramp);
+        CHECK_NEAR((l[1100] - l[100]) * 88200.0f / 1000.0f, 2.0, 0.01); // the ramp is read at twice the speed
+    }
+    // FM = phase modulation, index 38.15 x level (o-fm-v05: Volume 0.5 at ratio 1 -> sin(t - 19.08 sin t)): carrier and
+    // third harmonic at the Bessel-predicted levels.
+    {
+        auto sine = sampleOf(44100 * 2, [](int i) { return (float) std::sin(2 * juce::MathConstants<double>::pi * i * 261.6256 / kRate); });
+        auto [l, r] = renderWith({{S::Interpolation, 3}, {P::OscOn, 1}, {P::OscVolume, 0.5f}, {P::OscCoarse, 1}, {P::OscEnv + P::EnvInitial, 1},
+                                  {P::OscEnv + P::EnvAttack, 0}}, noteAt(60, 100), 30, sine);
+        const auto amplitudeAt = [&](double hz) {
+            double re = 0, im = 0, sum = 0;
+            for (int i = 0; i < 8820; ++i)
+            {
+                const double w = 0.5 - 0.5 * std::cos(2 * juce::MathConstants<double>::pi * i / 8820), t = (4410 + i) / kRate;
+                re += w * l[(size_t) (4410 + i)] * std::cos(2 * juce::MathConstants<double>::pi * hz * t);
+                im += w * l[(size_t) (4410 + i)] * std::sin(2 * juce::MathConstants<double>::pi * hz * t);
+                sum += w;
+            }
+            return 2 * std::sqrt(re * re + im * im) / sum;
+        };
+        // Expected: the harmonics of sin(t - 19.08 sin t) by a DFT of one period.
+        const auto expected = [](int harmonic) {
+            double re = 0, im = 0;
+            for (int i = 0; i < 4096; ++i)
+            {
+                const double t = 2 * juce::MathConstants<double>::pi * i / 4096, y = std::sin(t - 19.075 * std::sin(t));
+                re += y * std::cos(harmonic * t); im += y * std::sin(harmonic * t);
+            }
+            return 2 * std::sqrt(re * re + im * im) / 4096;
+        };
+        const double h1 = expected(1), h3 = expected(3);
+        CHECK_NEAR(20 * std::log10(amplitudeAt(261.6256)), 20 * std::log10(h1), 0.6);
+        CHECK_NEAR(20 * std::log10(amplitudeAt(3 * 261.6256)), 20 * std::log10(h3), 0.6);
+    }
+    // LFO 2 Spin 0.5: the right channel runs at 1.5 x (lfo2-spin, 2 Hz -> 3 Hz).
+    {
+        auto [l, r] = renderWith({{P::Lfo2 + P::LfoOnField, 1}, {P::Lfo2 + P::LfoFrequency, 2}, {P::Lfo2 + P::LfoStereoMode, 1},
+                                  {P::Lfo2 + P::LfoSpin, 0.5f}, {P::Lfo2 + P::LfoFieldCount + P::ModDst0, (float) P::DstVolume},
+                                  {P::Lfo2 + P::LfoFieldCount + P::ModAmount0, 100}}, noteAt(60, 100), 90);
+        const auto peaks = [](const std::vector<float>& x) { int n = 0; for (size_t i = 1; i < 44100; ++i) n += x[i - 1] < 0.25f && x[i] >= 0.25f ? 1 : 0; return n; };
+        CHECK(peaks(l) == 2);
+        CHECK(peaks(r) == 3);
+    }
+    // Glide 2 (s-portamento): a legato note takes over the held voice; it keeps the sample position (no restart).
+    {
+        auto ramp = sampleOf(44100 * 2, [](int i) { return (float) i / 88200.0f; });
+        auto [l, r] = renderWith({{S::GlideMode, 2}, {S::GlideTime, 1}}, [](int block, juce::MidiBuffer& m) {
+            if (block == 0) m.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 100), 0);
+            if (block == 10) m.addEvent(juce::MidiMessage::noteOn(1, 72, (juce::uint8) 100), 0);
+        }, 12, ramp);
+        CHECK(l[10 * 512 + 50] > 0.05f); // still about 5120 frames in, not back at the start
+    }
+    // Spread: each channel plays to its own end (spread-50: the detuned-down left channel ends later).
+    {
+        auto [l, r] = renderWith({{S::Spread, 100}}, noteAt(60, 100, 200), 180);
+        const auto lastNonZero = [](const std::vector<float>& x) { size_t n = 0; for (size_t i = 0; i < x.size(); ++i) if (std::abs(x[i]) > 1e-6f) n = i; return n; };
+        CHECK(lastNonZero(l) > lastNonZero(r));
+    }
+    // A filter converted from a legacy type above LP24 plays 6.02 dB quieter (13 factory presets).
+    {
+        auto [a, x] = renderWith({{S::FilterOn, 1}, {P::FilterLegacyType, 0}}, noteAt(60, 100), 2);
+        auto [b, y] = renderWith({{S::FilterOn, 1}, {P::FilterLegacyType, 2}}, noteAt(60, 100), 2);
+        CHECK_NEAR(b[500] / a[500], 0.5, 1e-4);
+        auto [c, z] = renderWith({{S::FilterOn, 1}, {P::FilterLegacyType, 5}}, noteAt(60, 100), 2); // legacy-type5: unchanged
+        CHECK_NEAR(c[500] / a[500], 1.0, 1e-4);
+    }
+}
+
+TEST_CASE("sampler: amount destinations scale their control (SamplerLaws2: pitchenv-dst, vel-lfo2amt, aux-shaper, vol-neg, osc-vel-50)")
+{
+    auto flat = sampleOf(44100 * 2, [](int) { return 0.5f; });
+    const auto renderWith = [&](std::vector<std::pair<int, float>> settings, std::function<void(int, juce::MidiBuffer&)> events, int blocks,
+                                std::shared_ptr<engine::SampleSlot> slot = nullptr) {
+        auto s = makeSampler({zoneOf(partOf(44100 * 2), slot ? slot : flat)});
+        for (auto [index, value] : settings) s->setParameter(index, value);
+        return render(*s, blocks, events);
+    };
+    // Velocity -> LFO 2 Amt A 100 %: the LFO's Volume route scales by u, no tremolo at velocity 1, full at 127.
+    const auto depth = [&](int velocity) {
+        auto [l, r] = renderWith({{P::Lfo2 + P::LfoOnField, 1}, {P::Lfo2 + P::LfoFrequency, 2},
+                                  {P::Lfo2 + P::LfoFieldCount + P::ModDst0, (float) P::DstVolume}, {P::Lfo2 + P::LfoFieldCount + P::ModAmount0, 50},
+                                  {P::VelMod + P::ModDst0, (float) P::DstLfo2A}, {P::VelMod + P::ModAmount0, 100}}, noteAt(60, velocity), 50);
+        float lo = 1;
+        for (size_t i = 2000; i < 22050; ++i) lo = std::min(lo, l[i] / 0.5f);
+        return 1.0f - lo;
+    };
+    CHECK(depth(1) < 0.01f);
+    CHECK_NEAR(depth(64), 0.5 * (63.5 / 126.5), 0.02);
+    CHECK_NEAR(depth(127), 0.5, 0.02);
+    // Aux -> Shaper Amt 100 % with the Shaper's Amount at 0: no shaping at all (aux-shaper, lfo2-shaper).
+    {
+        auto sine = sampleOf(44100 * 2, [](int i) { return 0.5f * (float) std::sin(i * 0.05); });
+        auto [l, r] = renderWith({{P::ShaperOn, 1}, {P::ShaperAmount, 0}, {P::AuxOn, 1}, {P::AuxMod + P::ModDst0, (float) P::DstShaper},
+                                  {P::AuxMod + P::ModAmount0, 100}}, noteAt(60, 100), 2, sine);
+        float peak = 0;
+        for (size_t i = 200; i < 1000; ++i) peak = std::max(peak, std::abs(l[i]));
+        CHECK_NEAR(peak, 0.5, 0.01);
+    }
+    // Velocity -> Volume -50 %: gain 1 - 0.5 u (vol-neg).
+    {
+        auto [l, r] = renderWith({{P::VelMod + P::ModDst0, (float) P::DstVolume}, {P::VelMod + P::ModAmount0, -50}}, noteAt(60, 127), 2);
+        CHECK_NEAR(l[500] / 0.5f, 0.5, 0.002);
+    }
+    // Time < Key / Time < Vel are linear in their amount (time-key-50 / time-vel-50).
+    CHECK_NEAR(P::timeScale(0, 50, 36, 0, 70.0f / 127), std::sqrt(P::timeScale(0, 100, 36, 0, 70.0f / 127)), 1e-9);
+    CHECK_NEAR(P::timeScale(0, 0, 70, 50, 1.0f), std::sqrt(P::timeScale(0, 0, 70, 100, 1.0f)), 1e-9);
+    // Shaper at 100 (SamplerLaws2): Sine 2.021 sin(3.886 u) peaks at 2.02; 4 Bit full scale 2.02, steps of 0.2525.
+    CHECK_NEAR(P::shape(2, 0.5f * 0.4042f, 100), 0.5 * 2.021, 0.002);
+    CHECK_NEAR(P::shape(3, 0.5f * 0.4f, 100), 0.5 * 2.02, 0.01);
+    CHECK_NEAR(P::shape(1, 0.5f, 100), 0.5 * (1.544 * std::tanh(18.81) + 0.552 * std::tanh(3.368)), 1e-3);
+}
+
+TEST_CASE("sampler: filter destinations measured with the filter on (SamplerLaws3: vel-filter, aux-res, aux-drive, shaper 25 / 75)")
+{
+    // A 2.2 kHz tone through a 24 dB low-pass at 500 Hz: the level tells the cutoff.
+    auto tone = sampleOf(44100 * 2, [](int i) { return (float) std::sin(2 * juce::MathConstants<double>::pi * i * 2205.0 / kRate); });
+    const auto level = [&](std::vector<std::pair<int, float>> settings, int velocity) {
+        auto s = makeSampler({zoneOf(partOf(44100 * 2), tone)});
+        for (auto [index, value] : std::initializer_list<std::pair<int, float>>{
+                 {S::FilterOn, 1}, {S::FilterFreq, 500}, {S::FilterRes, 0}, {S::FilterKeyTrack, 0}, {S::FilterEnvOn, 0}})
+            s->setParameter(index, value);
+        for (auto [index, value] : settings) s->setParameter(index, value);
+        auto [l, r] = render(*s, 12, noteAt(60, velocity));
+        float peak = 0;
+        for (size_t i = 3000; i < 6000; ++i) peak = std::max(peak, std::abs(l[i]));
+        return 20 * std::log10(std::max(peak, 1e-9f));
+    };
+    // Velocity's own value is centred: at velocity 64 the cutoff does not move, +-50 % mirror each other (vel-filter / -neg).
+    const std::vector<std::pair<int, float>> up{{P::VelMod + P::ModDst0, (float) P::DstFilterFreq}, {P::VelMod + P::ModAmount0, 50}};
+    const std::vector<std::pair<int, float>> down{{P::VelMod + P::ModDst0, (float) P::DstFilterFreq}, {P::VelMod + P::ModAmount0, -50}};
+    CHECK_NEAR(level(up, 64), level({}, 64), 0.4); // u(64) = 0.502: +0.15 st
+    CHECK_NEAR(level(up, 32), level(down, 96), 0.8); // u(32) = 0.249, u(96) = 0.755
+    // 100 % = 72 semitones: velocity 127 at +50 % opens by 36 st = the same as setting the cutoff 3 octaves higher.
+    CHECK_NEAR(level(up, 127), level({{S::FilterFreq, 500 * 8}}, 127), 0.3);
+    // Res adds 0.65 x the modulation (aux-res): Velocity 127 -> Res 100 % equals Res 0.65.
+    CHECK_NEAR(level({{P::VelMod + P::ModDst0, (float) P::DstFilterRes}, {P::VelMod + P::ModAmount0, 100}}, 127),
+               level({{S::FilterRes, 0.65f}}, 127), 0.1);
+    // Drive scales its amount: with Drive 0 an Aux -> Drive route does nothing (aux-drive).
+    CHECK_NEAR(level({{S::FilterCircuit, 1}, {P::AuxOn, 1}, {P::AuxMod + P::ModDst0, (float) P::DstFilterDrive}, {P::AuxMod + P::ModAmount0, 100}}, 100),
+               level({{S::FilterCircuit, 1}}, 100), 0.01);
+    // Shaper curves at 25 / 75 (SamplerLaws3): Sine 1.4297 sin(1.0698 u) at 25, 1.6425 sin(2.970 u) at 75; 4 Bit at 25 has
+    // gain 1.25 and 16 steps of 1.26 / 8.
+    CHECK_NEAR(P::shape(2, 0.5f, 25), 0.5 * 1.4297 * std::sin(1.0698), 1e-4);
+    CHECK_NEAR(P::shape(2, 0.25f, 75), 0.5 * 1.6425 * std::sin(2.970 * 0.5), 1e-4);
+    CHECK_NEAR(P::shape(3, 0.5f, 25), 0.5 * std::round(1.25 / (1.26 / 8)) * (1.26 / 8), 1e-4);
+    CHECK_NEAR(P::shape(1, 0.5f, 75), 0.5 * (1.2413 * std::tanh(13.92) + 0.6256 * std::tanh(1.4975)), 1e-3);
 }

@@ -8,6 +8,7 @@
 // with its own looping envelope), envelope Initial / Peak / End levels, Time < Vel, the global Time / Time < Key,
 // the Shaper, the Aux envelope, LFO 2 / 3 (stereo Phase / Spin) and the modulation matrix (Aux, LFO 2, LFO 3, Key,
 // Velocity, Off Velocity, Mod Wheel, Foot, Pitch Bend, Note PB, Slide, Pressure -> 31 destinations), per-note MPE.
+// The Sampler-only laws were measured on the reference's own renders (docs/PARITY.md "Sampler", 2026-11-07).
 //
 // Parameters: indices 0 .. Simpler::NumParams - 1 are Simpler's (same XML paths, so a face can index both devices with
 // Simpler::Param), then the Sampler-only ones below. Every id is the parameter's XML path below <MultiSampler>; plain
@@ -150,6 +151,12 @@ private:
         float gainL = 1, gainR = 1;
         double rootSemis = 0;                  // pitch offset of this zone (key tracking, root, detune)
         double rate = 1;                       // source rate / output rate
+        double fmFrames = 0;                   // source frames per radian of the root key's period (FM phase law)
+        bool channelDone[2] = {false, false};  // a channel that ran past the end (Spread: the other one may go on)
+    };
+    struct Mods
+    {
+        float dst[2][DstCount] = {}; // [channel][destination], amounts summed (source x amount / 100)
     };
     struct Voice
     {
@@ -176,10 +183,7 @@ private:
         SvfCoeffs coeffs[2][2];         // [channel][stage]
         SvfState f[2][2];
         int filterCountdown = 0, filterStageCount = 1;
-    };
-    struct Mods
-    {
-        float dst[2][DstCount] = {}; // [channel][destination], amounts summed (source x amount / 100)
+        Mods mods; // the last sample's modulation (LFO amount destinations follow it across blocks)
     };
 
     void noteOn(int note, float velocity, int channel);
@@ -194,7 +198,7 @@ private:
     static float stepEnv(Env& e, bool released, const EnvShape& shape);
     static void triggerEnv(Env& e, const EnvShape& shape, double floor);
     void computeMods(const Voice& v, Mods& m, const float lfo1, const float* lfo2, const float* lfo3) const;
-    float readLayer(const Layer& layer, int channel, double step) const;
+    float readLayer(const Layer& layer, int channel, double step, double offset) const;
     bool advanceLayer(Layer& layer, int channel, double step) const;
     double snap(const engine::SampleData& sample, double frame, double low, double high) const;
     void stepRoundRobin();

@@ -32,6 +32,13 @@ const std::vector<std::string> kLfoShapes{"Sine", "Square", "Triangle", "Saw Dow
 constexpr dsp::Lfo::Shape kShapes[] = {dsp::Lfo::Shape::Sine, dsp::Lfo::Shape::Square, dsp::Lfo::Shape::Triangle,
                                        dsp::Lfo::Shape::SawDown, dsp::Lfo::Shape::SawUp, dsp::Lfo::Shape::Random};
 constexpr int kOscTableSize = 2048;
+// Matrix Pitch / Pitch Sample / Pitch Osc range at 100 % (measured: aux-pitch, lfo2-pitch).
+constexpr double kPitchRange = 24.0;
+// FM phase-modulation index per unit of oscillator level, radians (measured o-fm-v01 / v05 / v1: 3.85 / 19.08 / 38.14).
+constexpr double kFmIndex = 38.15;
+// Matrix Filter Freq range at 100 % (measured vel-filter: velocity 1 at 50 % -> -35.6 st) and Res scale (aux-res).
+constexpr double kFilterRange = 72.0;
+constexpr float kResRange = 0.65f;
 // Round robin Reset Interval (RoundRobinResetPeriod) in quarter notes; 0 = never. TODO(DEV-14b): law unverified (the
 // enum's entries are assumed: 1/16, 1/8, 1/4, 1/2, 1, 2, 4 bars).
 constexpr double kResetQuarters[] = {0, 0.25, 0.5, 1, 2, 4, 8, 16};
@@ -61,6 +68,13 @@ const std::array<std::array<float, kOscTableSize + 1>, 21>& oscTables()
             t[10][(size_t) i] = (float) (1.0 - 2.0 * phase);                               // Saw D: the naive (digital) saw
             t[18][(size_t) i] = phase < 0.5 ? 1.0f : -1.0f;                               // Square D
             t[19][(size_t) i] = (float) (phase < 0.25 ? 4 * phase : phase < 0.75 ? 2 - 4 * phase : 4 * phase - 4); // Triangle
+        }
+        // Every wave peaks at 1 (measured: FM with Square 8 / Saw 4 fits the peak-normalised additive waves, not 4/pi x).
+        for (auto& wave : t)
+        {
+            float peak = 0;
+            for (float v : wave) peak = std::max(peak, std::abs(v));
+            if (peak > 0) for (float& v : wave) v /= peak;
         }
         return t;
     }();
@@ -231,8 +245,8 @@ const char* Sampler::destinationName(int destination) { return kDestinations[std
 
 float Sampler::zoneFade(int x, int low, int high, int fadeLow, int fadeHigh, bool constantPower)
 {
-    // Measured from the factory zones' layout (adjacent zones overlap by their fade lengths): a fade over n keys ramps
-    // 1 / (n + 1) .. n / (n + 1), so two adjacent linear fades sum to 1. TODO(DEV-14b): law unverified against audio.
+    // A fade over n keys ramps 1 / (n + 1) .. n / (n + 1), so two adjacent linear fades sum to 1 (measured:
+    // zone-keyfade / zone-velfade and their Pow versions match the reference).
     if (x < low || x > high) return 0.0f;
     fadeLow = std::clamp(fadeLow, low, high);
     fadeHigh = std::clamp(fadeHigh, fadeLow, high);
@@ -244,10 +258,12 @@ float Sampler::zoneFade(int x, int low, int high, int fadeLow, int fadeHigh, boo
 
 double Sampler::timeScale(double envTime, double timeKey, int note, double timeVel, float velocity)
 {
-    // TODO(DEV-14b): law unverified. Time +-100 % scales every envelope by 4x / 0.25x; Time < Key scales by
-    // 2^(amount x octaves from C3) (negative values shorten high notes, as the factory keys presets use it); Time < Vel
-    // shortens the times by up to 4x at full velocity.
-    return std::exp2(2.0 * envTime / 100.0) * std::exp2(timeKey / 100.0 * (note - 60) / 12.0) * std::exp2(-2.0 * timeVel / 100.0 * velocity);
+    // Measured (SamplerLaws time-50 / time-minus50 / time-key / time-vel, attack slopes within 0.5 %): Time +-50 % scales
+    // the times by 2^(+-1.5) (8^(Time / 100)); Time < Key 100 % by 2^(-6 (note - 70) / 127) and Time < Vel 100 % by
+    // 2^(-8 (velocity - 70) / 127), both centred on note / velocity 70 like the Simpler's key and velocity laws.
+    const double vel127 = (double) velocity * 127.0;
+    return std::exp2(3.0 * envTime / 100.0) * std::exp2(-timeKey / 100.0 * 6.0 * (note - 70) / 127.0)
+         * std::exp2(-timeVel / 100.0 * 8.0 * (vel127 - 70.0) / 127.0);
 }
 
 double Sampler::oscRatio(double coarse, double fine)
@@ -279,16 +295,56 @@ float Sampler::oscWave(int type, double phase, unsigned& noise)
 
 float Sampler::shape(int type, float x, float amount)
 {
-    // TODO(DEV-14b): law unverified. Amount 0 .. 100 drives 0 .. +24 dB into the curve.
-    const float g = std::pow(10.0f, std::clamp(amount, 0.0f, 100.0f) * 0.24f / 20.0f);
-    const float u = x * g;
-    switch (type)
+    // Measured transfer curves (SamplerLaws, SamplerLaws2, SamplerLaws3: a -6 dBFS C3 sine, each output sample against the
+    // Amount 0 one, which is the identity). Units of that input peak, 0.5 of the zone's output before the device Volume
+    // (`u`): a zone Volume of 0.125 or a device Volume of 0 dB change nothing (sh-soft-50-quiet / -vol0).
+    // Soft: gain 1 + (Amount / 50)^2 (1 / 1.25 / 2 / 5 at 0 / 25 / 50 / 100) into a knee at 1: rational towards 2
+    // (2 - 1 / v) up to 50, a tanh knee from 1.17 towards 2.02 at 100, blended between.
+    // Hard: a tanh(b u) + c tanh(d u); Sine: C sin(k u); 4 Bit: gain g, folded back at slope r above F, 16 steps of F / 8.
+    // Each fitted at Amount 25 / 50 / 75 / 100 (RMS <= 0.012; the Sine 1e-5 .. 0.012) and blended between neighbours;
+    // below 25 the 25 curve is driven by Soft's gain law relative to 25. TODO(DEV-14b): law unverified below 25 and for
+    // inputs above the probes' -6 dBFS (Infected Bass: Hard 17 on a hot sample is 2.3 dB quiet).
+    struct Point { float hard[4], sine[2], bits[3]; };
+    static constexpr Point points[4] = {
+        {{0.3746f, 7.830f, 1.8097f, 0.5298f}, {1.4297f, 1.0698f}, {1.25f, 1.26f, 0.10f}},  // 25
+        {{0.807f, 10.79f, 1.003f, 0.904f}, {1.377f, 2.047f}, {1.98f, 1.33f, 0.42f}},      // 50
+        {{1.2413f, 13.92f, 0.6256f, 1.4975f}, {1.6425f, 2.970f}, {3.30f, 1.66f, 0.85f}}, // 75
+        {{1.544f, 18.81f, 0.552f, 3.368f}, {2.021f, 3.886f}, {5.00f, 2.02f, 1.00f}},     // 100
+    };
+    const float a = std::clamp(amount, 0.0f, 100.0f);
+    const float sign = x < 0 ? -1.0f : 1.0f;
+    const float u = std::abs(x) * 2.0f; // units of the measured input peak (0.5)
+    const auto curveAt = [type](const Point& p, float w) {
+        switch (type)
+        {
+            case 1: return p.hard[0] * std::tanh(p.hard[1] * w) + p.hard[2] * std::tanh(p.hard[3] * w);
+            case 2: return p.sine[0] * std::sin(p.sine[1] * w);
+            default:
+            {
+                const float fullScale = p.bits[1], step = fullScale / 8.0f;
+                float v = w * p.bits[0];
+                if (v > fullScale) v = std::max(-fullScale, fullScale - (v - fullScale) * p.bits[2]);
+                return std::round(v / step) * step;
+            }
+        }
+    };
+    float y = 0;
+    if (type == 0) // Soft
     {
-        case 1: return std::clamp(u, -1.0f, 1.0f);
-        case 2: return std::sin(u * juce::MathConstants<float>::halfPi);
-        case 3: return std::round(std::clamp(u, -1.0f, 1.0f) * 7.5f) / 7.5f;
-        default: return std::tanh(u);
+        const float v = u * (1.0f + (a / 50.0f) * (a / 50.0f));
+        const float rational = v <= 1.0f ? v : 2.0f - 1.0f / v;
+        const float tanhKnee = v <= 1.17f ? v : 1.17f + 0.85f * std::tanh((v - 1.17f) / 0.85f);
+        y = rational + (tanhKnee - rational) * std::clamp((a - 50.0f) / 50.0f, 0.0f, 1.0f);
     }
+    else if (a < 25.0f) // below 25: the 25 curve driven by Soft's gain law relative to 25
+        y = curveAt(points[0], u * (1.0f + (a / 50.0f) * (a / 50.0f)) / 1.25f);
+    else
+    {
+        const int i = std::min(2, (int) ((a - 25.0f) / 25.0f));
+        const float t = (a - 25.0f - 25.0f * (float) i) / 25.0f;
+        y = curveAt(points[i], u) + (curveAt(points[i + 1], u) - curveAt(points[i], u)) * t;
+    }
+    return sign * y * 0.5f;
 }
 
 double Sampler::lfoBeatQuarters(int index)
@@ -525,7 +581,7 @@ float Sampler::stepEnv(Env& e, bool released, const EnvShape& shape)
 Sampler::EnvShape Sampler::shapeOf(int block, bool volumeEnvelope, double scale, float velocity, bool scaleAttack) const
 {
     const float ms = (float) (sampleRate_ * 0.001);
-    const double velScale = timeScale(0, 0, 60, value(block + EnvTimeVel), velocity);
+    const double velScale = timeScale(0, 0, 70, value(block + EnvTimeVel), velocity);
     const auto time = [&](int field, bool scaled) { return std::max(1.0f, value(block + field) * ms * (float) (scaled ? scale * velScale : velScale)); };
     const auto level = [&](int field) { const float l = value(block + field); return volumeEnvelope && l <= kSilentLevel ? 0.0f : l; };
     EnvShape s;
@@ -549,7 +605,7 @@ Sampler::EnvShape Sampler::ampShape(double scale, float velocity, bool scaleAtta
 {
     // The volume envelope's times / slopes / loop are Simpler parameters; its levels and Time < Vel are Sampler ones.
     const float ms = (float) (sampleRate_ * 0.001);
-    const double velScale = timeScale(0, 0, 60, value(AmpTimeVel), velocity);
+    const double velScale = timeScale(0, 0, 70, value(AmpTimeVel), velocity);
     const auto time = [&](int index, bool scaled) { return std::max(1.0f, value(index) * ms * (float) (scaled ? scale * velScale : velScale)); };
     const auto level = [&](int index) { const float l = value(index); return l <= kSilentLevel ? 0.0f : l; };
     EnvShape s;
@@ -633,10 +689,32 @@ void Sampler::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi)
 
 void Sampler::noteOn(int note, float velocity, int channel)
 {
+    // Glide modes (measured glide-1 / s-portamento): 1 plays every note on its own voice (the previous one keeps sounding
+    // until its note-off) and glides legato notes from the previous pitch; 2 makes a legato note take over the held voice
+    // (no restart of the sample: it runs out at the new speed) and glides every note from the previous pitch.
     const int glide = std::clamp((int) std::lround(value(S::GlideMode)), 0, 2);
-    const int limit = glide == 1 ? 1 : S::voiceCount((int) std::lround(value(S::Voices)));
-    bool legato = false;
-    for (const auto& other : voices_) legato |= other.active && other.keyDown && ! other.released;
+    const int limit = S::voiceCount((int) std::lround(value(S::Voices)));
+    Voice* held = nullptr;
+    for (auto& other : voices_)
+        if (other.active && other.keyDown && ! other.released && (held == nullptr || other.age > held->age)) held = &other;
+    const bool legato = held != nullptr;
+    if (glide == 2 && legato && held->note != note)
+    {
+        const double current = held->note + held->glideSemis;
+        held->note = note;
+        held->channel = channel;
+        held->age = ++counter_;
+        for (int l = 0; l < held->layerCount; ++l)
+        {
+            auto& layer = held->layers[(size_t) l];
+            if (layer.zone != nullptr)
+                layer.rootSemis = (note - layer.zone->part.rootKey) * layer.zone->part.tuneScale / 100.0 + layer.zone->part.detuneCents / 100.0;
+        }
+        held->glideSemis = current - note;
+        held->glideStep = -held->glideSemis / std::max(1.0, (double) value(S::GlideTime) * 0.001 * sampleRate_);
+        lastNote_ = note;
+        return;
+    }
     if (value(S::Retrigger) > 0.5f)
         for (auto& v : voices_) if (v.active && v.note == note) v.active = false;
     for (int i = limit; i < kMaxVoices; ++i) voices_[(size_t) i].active = false;
@@ -711,6 +789,7 @@ void Sampler::startLayer(Voice& v, Layer& layer, const Zone& zone, float gain)
     // Key tracking: Tune Scale 0 % plays every key at the root pitch.
     layer.rootSemis = (v.note - part.rootKey) * part.tuneScale / 100.0 + part.detuneCents / 100.0;
     layer.rate = sample.sampleRate / sampleRate_;
+    layer.fmFrames = sample.sampleRate / (2.0 * kPi * 440.0 * std::exp2((part.rootKey - 69) / 12.0));
     const float pan = std::clamp((float) part.pan, -1.0f, 1.0f);
     const float angle = (pan + 1.0f) * 0.25f * juce::MathConstants<float>::pi;
     layer.gainL = gain * (float) part.volume * std::sqrt(2.0f) * std::cos(angle);
@@ -754,6 +833,7 @@ void Sampler::startVoice(Voice& v, int note, float velocity, int channel, int fr
     v.velocity = velocity;
     v.age = ++counter_;
     v.layerCount = count;
+    v.oscPhase = 0.5; // the oscillator starts at its half cycle: AM at ratio 1 gives a negative DC (o-am-v05 / v1)
     for (int i = 0; i < count; ++i)
     {
         auto& layer = v.layers[(size_t) i];
@@ -784,12 +864,12 @@ void Sampler::startVoice(Voice& v, int note, float velocity, int channel, int fr
 
     // Envelopes with the global Time / Time < Key and the Time destination at note-on.
     const bool scaleAttack = value(EnvTimeAttack) > 0.5f;
-    v.timeScale = timeScale(value(EnvTime), value(EnvTimeKey), note, 0, 0) * std::exp2(2.0 * start.dst[0][DstTime]);
+    v.timeScale = timeScale(value(EnvTime), value(EnvTimeKey), note, 0, 70.0f / 127.0f) * std::exp2(3.0 * start.dst[0][DstTime]);
     v.ampShape = ampShape(v.timeScale, velocity, scaleAttack);
     // Filter / pitch envelopes: Simpler's time parameters plus the Sampler's levels and loop.
     const auto simplerShape = [&](int attack, int decay, int sustain, int release, int aSlope, int dSlope, int rSlope, int levels, int loop, int timeVel) {
         const float ms = (float) (sampleRate_ * 0.001);
-        const double velScale = timeScale(0, 0, 60, value(timeVel), velocity);
+        const double velScale = timeScale(0, 0, 70, value(timeVel), velocity);
         EnvShape s;
         s.attack = std::max(1.0f, value(attack) * ms * (float) ((scaleAttack ? v.timeScale : 1.0) * velScale));
         s.decay = std::max(1.0f, value(decay) * ms * (float) (v.timeScale * velScale));
@@ -846,8 +926,8 @@ void Sampler::startVoice(Voice& v, int note, float velocity, int channel, int fr
     // Velocity / key -> cutoff (Simpler, measured).
     v.filterKeySemis = value(S::FilterKeyTrack) * (float) (note - 60) + value(S::FilterVelMod) * ((float) vel127 - 70.0f);
 
-    // Glide (linear in semitones over Time; Simpler, measured): Glide is mono and legato only; Portamento glides every
-    // new note from the last one, polyphonically (manual). TODO(DEV-14b): Portamento law unverified.
+    // Glide (linear in semitones over Time, measured glide-1 / s-portamento): mode 1 glides legato notes from the previous
+    // pitch, mode 2 glides every new note from it (legato notes are taken over in noteOn()).
     const int glide = std::clamp((int) std::lround(value(S::GlideMode)), 0, 2);
     if (fromNote >= 0 && fromNote != note && (glide == 2 || (glide == 1 && legato)))
     {
@@ -861,45 +941,78 @@ void Sampler::startVoice(Voice& v, int note, float velocity, int channel, int fr
 void Sampler::computeMods(const Voice& v, Mods& m, const float lfo1, const float* lfo2, const float* lfo3) const
 {
     // LFO 2 / 3's A / B amounts are destinations too: they follow the previous sample's modulation.
+    const auto factor = [](float sum) { return std::clamp(1.0f + sum, 0.0f, 1.0f); };
     float scale[2][4];
     for (int c = 0; c < 2; ++c)
     {
-        scale[c][0] = 1.0f + m.dst[c][DstLfo2A]; scale[c][1] = 1.0f + m.dst[c][DstLfo2B];
-        scale[c][2] = 1.0f + m.dst[c][DstLfo3A]; scale[c][3] = 1.0f + m.dst[c][DstLfo3B];
+        scale[c][0] = factor(m.dst[c][DstLfo2A]); scale[c][1] = factor(m.dst[c][DstLfo2B]);
+        scale[c][2] = factor(m.dst[c][DstLfo3A]); scale[c][3] = factor(m.dst[c][DstLfo3B]);
     }
     for (auto& channel : m.dst) std::fill(std::begin(channel), std::end(channel), 0.0f);
-    const auto route = [&](int base, float left, float right, int scaled = -1) {
+    const auto scales = [](int destination) {
+        switch (destination)
+        {
+            case DstVolume: case DstPitchEnv: case DstShaper: case DstLfo2A: case DstLfo2B: case DstLfo3A: case DstLfo3B:
+            // TODO(DEV-14b): law unverified for these (assumed to scale like the measured amount destinations above).
+            case DstOscVolume: case DstFilterEnv: case DstFilterDrive: case DstLfo1Vol: case DstLfo1Pan: case DstLfo1Filter: case DstLfo1Pitch:
+                return true;
+            default: return false;
+        }
+    };
+    // Each source has a 0..1 form `u` and its own value (LFOs and bends -1..1, the rest 0..1). Measured (SamplerLaws,
+    // SamplerLaws2): Volume and the other amount destinations (scales()) take u and scale their amount by
+    // 1 + amount (u - 1), or 1 + amount u for negative amounts (vel-vol-50 / -100, vol-neg, key-vol, lfo2-vol, aux-vol,
+    // pitchenv-dst, vel-lfo2amt, aux-shaper: no effect at Shaper Amount 0); Pan takes 2u - 1 (key-pan, aux-pan: an
+    // envelope at 0 pans hard left); Pitch takes the source's own value (aux-pitch, lfo2-pitch, key-pitch).
+    const auto route = [&](int base, float uLeft, float uRight, float left, float right, int scaled = -1) {
         for (int c = 0; c < 2; ++c)
         {
             const int destination = (int) std::lround(value(base + 2 * c));
             if (destination <= 0 || destination >= DstCount) continue;
             const float amount = value(base + 2 * c + 1) / 100.0f;
-            m.dst[0][destination] += left * amount * (scaled < 0 ? 1.0f : scale[0][scaled + c]);
-            m.dst[1][destination] += right * amount * (scaled < 0 ? 1.0f : scale[1][scaled + c]);
+            for (int side = 0; side < 2; ++side)
+            {
+                const float u = side == 0 ? uLeft : uRight, own = side == 0 ? left : right;
+                const float k = amount * (scaled < 0 ? 1.0f : scale[side][scaled + c]);
+                // Negative Volume amounts: TODO(DEV-14b): law unverified (assumed to attenuate as the source rises).
+                m.dst[side][destination] += scales(destination) ? (k >= 0 ? k * (u - 1.0f) : k * u)
+                                          : destination == DstPan ? k * (2.0f * u - 1.0f) : k * own;
+            }
         }
     };
-    // Sources (TODO(DEV-14b): law unverified): Key (note - 60) / 64, Velocity / Off Velocity 0..1, Pressure / Mod
-    // Wheel / Foot / Slide 0..1, Pitch Bend / Note PB -1..1, Aux envelope level, LFO 2 / 3 -1..1 per channel.
-    const float key = (float) (v.note - 60) / 64.0f;
-    route(KeyMod, key, key);
-    route(VelMod, v.velocity, v.velocity);
-    if (v.released) route(RelVelMod, v.releaseVelocity, v.releaseVelocity);
+    const auto unipolar = [&](int base, float u) { route(base, u, u, u, u); };
+    // Key: u = (note - 0.5) / 127 (key-vol), so its own value 2u - 1 = (note - 64) / 63.5 (key-pan, exact). Velocity:
+    // u = (velocity - 0.5) / 126.5 (vel-vol-100: velocity 1 -> -48.1 dB, 64 -> -6.0 dB).
+    // TODO(DEV-14b): law unverified for Key -> pitch / filter (assumed to use the centred value).
+    const float keyU = ((float) v.note - 0.5f) / 127.0f;
+    route(KeyMod, keyU, keyU, 2.0f * keyU - 1.0f, 2.0f * keyU - 1.0f);
+    const float velU = std::clamp((v.velocity * 127.0f - 0.5f) / 126.5f, 0.0f, 1.0f);
+    // Velocity's own value is centred, 2u - 1 (vel-filter +-50: 0 st at velocity 64, mirrored for -50).
+    route(VelMod, velU, velU, 2.0f * velU - 1.0f, 2.0f * velU - 1.0f);
+    if (v.released) unipolar(RelVelMod, std::clamp((v.releaseVelocity * 127.0f - 0.5f) / 126.5f, 0.0f, 1.0f));
     const size_t ch = (size_t) std::clamp(v.channel, 1, 16) - 1;
     const bool member = v.channel > 1;
     const float pressure = std::max({pressure_, v.pressure, member ? channelPressure_[ch] : 0.0f});
     const float notePb = member ? channelBend_[ch] : 0.0f;
     const float slide = member ? channelSlide_[ch] : slide_;
     const float midi[MidiRows] = {pressure, bend_, modWheel_, foot_, slide, notePb};
-    for (int row = 0; row < MidiRows; ++row) route(MidiMod + row * ModFieldCount, midi[row], midi[row]);
-    if (v.aux.active && value(AuxOn) > 0.5f) route(AuxMod, v.aux.level, v.aux.level);
-    if (lfo2 != nullptr && value(Lfo2 + LfoOnField) > 0.5f) route(Lfo2 + LfoFieldCount, lfo2[0], lfo2[1], 0);
-    if (lfo3 != nullptr && value(Lfo3 + LfoOnField) > 0.5f) route(Lfo3 + LfoFieldCount, lfo3[0], lfo3[1], 2);
+    for (int row = 0; row < MidiRows; ++row)
+    {
+        const bool bipolar = row == RowPitchBend || row == RowNotePb;
+        const float u = bipolar ? 0.5f * (midi[row] + 1.0f) : midi[row];
+        route(MidiMod + row * ModFieldCount, u, u, midi[row], midi[row]);
+    }
+    if (v.aux.active && value(AuxOn) > 0.5f) unipolar(AuxMod, v.aux.level);
+    if (lfo2 != nullptr && value(Lfo2 + LfoOnField) > 0.5f)
+        route(Lfo2 + LfoFieldCount, 0.5f * (lfo2[0] + 1.0f), 0.5f * (lfo2[1] + 1.0f), lfo2[0], lfo2[1], 0);
+    if (lfo3 != nullptr && value(Lfo3 + LfoOnField) > 0.5f)
+        route(Lfo3 + LfoFieldCount, 0.5f * (lfo3[0] + 1.0f), 0.5f * (lfo3[1] + 1.0f), lfo3[0], lfo3[1], 2);
     (void) lfo1;
 }
 
 // ---------------------------------------------------------------- playback
 
-float Sampler::readLayer(const Layer& layer, int channel, double step) const
+float Sampler::readLayer(const Layer& layer, int channel, double step, double offset) const
 {
     const auto& audio = layer.sample->audio;
     const float* d = audio.getReadPointer(channel > 0 && audio.getNumChannels() > 1 ? 1 : 0);
@@ -915,7 +1028,7 @@ float Sampler::readLayer(const Layer& layer, int channel, double step) const
         return d[std::clamp(i, 0, len - 1)] * (1 - t) + d[std::clamp(i + 1, 0, len - 1)] * t;
     };
     const double pos = layer.pos[channel];
-    float x = read(pos);
+    float x = read(pos + offset);
     // Forward loop crossfades: the end of the loop fades into the audio before its start (constant power by default).
     const bool sustainLooping = layer.loopMode == 1 && (! layer.releasing || layer.relMode == 3) && layer.direction[channel] > 0;
     const bool releaseLooping = layer.releasing && layer.relMode == 1 && layer.inRelease && layer.direction[channel] > 0;
@@ -928,7 +1041,7 @@ float Sampler::readLayer(const Layer& layer, int channel, double step) const
         const bool constPower = value(S::ConstPowerFade) > 0.5f;
         const float in = constPower ? (float) std::sin(t * kPi * 0.5) : (float) t;
         const float out = constPower ? (float) std::cos(t * kPi * 0.5) : 1.0f - (float) t;
-        x = x * out + read(pos - loopLength) * in;
+        x = x * out + read(pos - loopLength + offset) * in;
     }
     return x;
 }
@@ -986,8 +1099,9 @@ void Sampler::render(juce::AudioBuffer<float>& audio, int from, int to)
     const double r1 = (value(S::LfoSync) > 0.5f ? host_.tempo / 60.0 / lfoBeatQuarters((int) std::lround(value(S::LfoBeat))) : value(S::LfoRate)) / sampleRate_;
     const double r2 = freeRate(Lfo2 + LfoRateType, Lfo2 + LfoBeatRate, Lfo2 + LfoFrequency) / sampleRate_;
     const double r3 = freeRate(Lfo3 + LfoRateType, Lfo3 + LfoBeatRate, Lfo3 + LfoFrequency) / sampleRate_;
-    const double spin2 = value(Lfo2 + LfoStereoMode) > 0.5f ? 1.0 + 0.5 * value(Lfo2 + LfoSpin) : 1.0;
-    const double spin3 = value(Lfo3 + LfoStereoMode) > 0.5f ? 1.0 + 0.5 * value(Lfo3 + LfoSpin) : 1.0;
+    // Spin: the right channel's rate x (1 + Spin) (measured lfo2-spin: 0.5 -> 3 Hz against 2 Hz).
+    const double spin2 = value(Lfo2 + LfoStereoMode) > 0.5f ? 1.0 + value(Lfo2 + LfoSpin) : 1.0;
+    const double spin3 = value(Lfo3 + LfoStereoMode) > 0.5f ? 1.0 + value(Lfo3 + LfoSpin) : 1.0;
     for (int i = from; i < to; ++i)
     {
         freeLfo1_.next(r1, dsp::Lfo::Shape::Sine);
@@ -1013,8 +1127,16 @@ void Sampler::renderVoice(Voice& v, float* outL, float* outR, int from, int to)
     const int oscType = std::clamp((int) std::lround(value(OscType)), 0, 20);
     const double oscRatioValue = oscRatio(value(OscCoarse), value(OscFine));
     const double oscFixedHz = value(OscFixed) > 0.5f ? value(OscFixedFreq) * oscFixedMultiplier((int) std::lround(value(OscFixedMul))) : 0.0;
-    const float oscVelScale = 1.0f - value(OscVolVel) * (1.0f - v.velocity);
+    // Vol < Vel (measured o-fm-vel / osc-vel-50): level x (1 - k + k velocity / 127)^2, e.g. at 50 % the FM index at velocity
+    // 1 / 64 / 127 is 0.253 / 0.565 / 1 of the full one.
+    const float oscVelLinear = 1.0f - value(OscVolVel) + value(OscVolVel) * v.velocity;
+    const float oscVelScale = oscVelLinear * oscVelLinear;
     const int circuit = filterOn ? filterCircuit() : 0;
+    // A filter whose LegacyType is 2, 3 or 4 plays 6.02 dB quieter, flat across the spectrum (measured: legacy-type2 on the
+    // default Sampler, 13 factory presets with 2 / 3 / 4; legacy-type0, legacy-type5 and LegacyType 1 are unchanged).
+    // TODO(DEV-14b): law unverified for LegacyType 6 .. 8 (no probe; assumed unchanged).
+    const long legacyType = std::lround(value(FilterLegacyType));
+    const float legacyGain = filterOn && legacyType >= 2 && legacyType <= 4 ? 0.5f : 1.0f;
     const double transpose = value(S::Transpose) + value(S::Detune) / 100.0;
     const double spreadCents = value(S::Spread) / 10.0; // Simpler, measured: L down, R up by Spread / 10 cents
     const float pitchEnvAmount = value(S::PitchEnvAmount);
@@ -1026,14 +1148,17 @@ void Sampler::renderVoice(Voice& v, float* outL, float* outR, int from, int to)
     const double rate1 = (value(S::LfoSync) > 0.5f ? host_.tempo / 60.0 / lfoBeatQuarters((int) std::lround(value(S::LfoBeat))) : value(S::LfoRate)) * v.lfo1Scale;
     const double rate2 = lfoRate(Lfo2 + LfoRateType, Lfo2 + LfoBeatRate, Lfo2 + LfoFrequency) * v.lfo2Scale;
     const double rate3 = lfoRate(Lfo3 + LfoRateType, Lfo3 + LfoBeatRate, Lfo3 + LfoFrequency) * v.lfo3Scale;
-    const double spin2 = value(Lfo2 + LfoStereoMode) > 0.5f ? 1.0 + 0.5 * value(Lfo2 + LfoSpin) : 1.0;
-    const double spin3 = value(Lfo3 + LfoStereoMode) > 0.5f ? 1.0 + 0.5 * value(Lfo3 + LfoSpin) : 1.0;
+    // Spin: the right channel's rate x (1 + Spin) (measured lfo2-spin: 0.5 -> 3 Hz against 2 Hz).
+    const double spin2 = value(Lfo2 + LfoStereoMode) > 0.5f ? 1.0 + value(Lfo2 + LfoSpin) : 1.0;
+    const double spin3 = value(Lfo3 + LfoStereoMode) > 0.5f ? 1.0 + value(Lfo3 + LfoSpin) : 1.0;
     const auto shapeOfLfo = [&](int index) { return kShapes[std::clamp((int) std::lround(value(index)), 0, 5)]; };
     const auto shape1 = shapeOfLfo(S::LfoShape), shape2 = shapeOfLfo(Lfo2 + LfoType), shape3 = shapeOfLfo(Lfo3 + LfoType);
     const double attack1 = std::max(1.0, value(S::LfoAttack) * sampleRate_ * 0.001);
     const double attack2 = std::max(1.0, value(Lfo2 + LfoAttackField) * sampleRate_ * 0.001);
     const double attack3 = std::max(1.0, value(Lfo3 + LfoAttackField) * sampleRate_ * 0.001);
-    Mods m;
+    Mods& m = v.mods;
+    // Amount destinations (Volume, Pitch Env, Shaper Amt, LFO amounts...) scale their control by 1 + the summed modulation.
+    const auto amountFactor = [](float sum) { return std::clamp(1.0f + sum, 0.0f, 1.0f); };
 
     // One LFO output: Simpler's measured S&H (two steps per cycle) and 0.6 ms two-stage smoothing, faded in over Attack.
     const auto runLfo = [&](dsp::Lfo& lfo, dsp::Lfo::Shape shape, double increment, float (&smooth)[2], double attack, bool simplerRandom) {
@@ -1056,25 +1181,25 @@ void Sampler::renderVoice(Voice& v, float* outL, float* outR, int from, int to)
         if (lfo1On) lfo1 = runLfo(v.lfo1, shape1, rate1 * std::exp2(4.0 * m.dst[0][DstLfo1Rate]) / sampleRate_, v.lfoSmooth[0][0], attack1, true);
         for (int c = 0; c < 2; ++c)
         {
-            if (lfo2On) lfo2[c] = runLfo(v.lfo2[c], shape2, rate2 * (c == 1 ? spin2 : 1.0) * std::exp2(4.0 * m.dst[c][DstLfo2Rate]) / sampleRate_, v.lfoSmooth[1][c], attack2, false);
-            if (lfo3On) lfo3[c] = runLfo(v.lfo3[c], shape3, rate3 * (c == 1 ? spin3 : 1.0) * std::exp2(4.0 * m.dst[c][DstLfo3Rate]) / sampleRate_, v.lfoSmooth[2][c], attack3, false);
+            if (lfo2On) lfo2[c] = runLfo(v.lfo2[c], shape2, rate2 * (c == 1 ? spin2 : 1.0) * std::exp2(4.0 * m.dst[c][DstLfo2Rate]) / sampleRate_, v.lfoSmooth[1][c], attack2, true);
+            if (lfo3On) lfo3[c] = runLfo(v.lfo3[c], shape3, rate3 * (c == 1 ? spin3 : 1.0) * std::exp2(4.0 * m.dst[c][DstLfo3Rate]) / sampleRate_, v.lfoSmooth[2][c], attack3, true);
         }
         v.lfoAge += 1.0;
         computeMods(v, m, lfo1, lfo2, lfo3);
 
         // Pitch (semitones) per channel.
         const float pitchEnv = pitchEnvOn ? stepEnv(v.pitch, v.released, v.pitchShape) : 0.0f;
-        const float lfo1PitchAmount = std::clamp(value(S::LfoPitch) + m.dst[0][DstLfo1Pitch], 0.0f, 1.0f);
+        const float lfo1PitchAmount = value(S::LfoPitch) * amountFactor(m.dst[0][DstLfo1Pitch]);
         const double common = transpose + v.glideSemis + bendSemis_ + (v.channel > 1 ? channelBend_[ch] * mpeRange : 0.0)
-                            + pitchEnv * (pitchEnvAmount + 48.0f * m.dst[0][DstPitchEnv])
+                            + pitchEnv * pitchEnvAmount * amountFactor(m.dst[0][DstPitchEnv])
                             + lfo1 * 12.0f * std::log2(1.0f + 0.5f * lfo1PitchAmount);
         // Modulation oscillator (follows the played pitch and the pitch envelope, manual).
         float oscOut = 0, oscLevel = 0;
         if (oscOn)
         {
             const float oscEnv = stepEnv(v.osc, v.released, v.oscShape);
-            oscLevel = std::clamp(value(OscVolume) * oscVelScale + m.dst[0][DstOscVolume], 0.0f, 1.0f) * oscEnv;
-            const double oscSemis = v.note + common + 12.0 * (m.dst[0][DstPitch] + m.dst[0][DstPitchOsc]) - 69.0;
+            oscLevel = value(OscVolume) * oscVelScale * amountFactor(m.dst[0][DstOscVolume]) * oscEnv;
+            const double oscSemis = v.note + common + kPitchRange * (m.dst[0][DstPitch] + m.dst[0][DstPitchOsc]) - 69.0;
             const double hz = oscFixedHz > 0 ? oscFixedHz : 440.0 * std::exp2(oscSemis / 12.0) * oscRatioValue;
             v.oscPhase += hz / sampleRate_;
             v.oscPhase -= std::floor(v.oscPhase);
@@ -1083,12 +1208,14 @@ void Sampler::renderVoice(Voice& v, float* outL, float* outR, int from, int to)
         double step[2];
         for (int c = 0; c < 2; ++c)
         {
-            // Matrix Pitch / Pitch Sample: +-12 semitones at 100 %. TODO(DEV-14b): law unverified.
-            const double semis = common + 12.0 * (m.dst[c][DstPitch] + m.dst[c][DstPitchSample]) + (c == 0 ? -spreadCents : spreadCents) / 100.0;
+            // Matrix Pitch / Pitch Sample: 24 semitones at 100 % (measured: aux-pitch, lfo2-pitch).
+            const double semis = common + kPitchRange * (m.dst[c][DstPitch] + m.dst[c][DstPitchSample]) + (c == 0 ? -spreadCents : spreadCents) / 100.0;
             step[c] = std::exp2(semis / 12.0);
-            // FM: the oscillator swings the playback rate by +-Volume (linear FM). TODO(DEV-14b): law unverified.
-            if (oscOn && ! am) step[c] *= std::max(0.0, 1.0 + (double) (oscOut * oscLevel));
         }
+        // FM is phase modulation of the sample (measured on a C3 sine with the oscillator at ratio 0.5 / 1 / 2, Volume
+        // 0.1 / 0.5 / 1: the spectra are sin(phase - I osc) with I = 38.15 x level radians of the root key's period; the
+        // sign shows at ratio 2, the oscillator's start phase in AM).
+        const double fmRadians = oscOn && ! am ? -kFmIndex * oscOut * oscLevel : 0.0;
 
         // Layers.
         float x[2] = {0, 0};
@@ -1101,16 +1228,22 @@ void Sampler::renderVoice(Voice& v, float* outL, float* outR, int from, int to)
             const double tune = std::exp2(layer.rootSemis / 12.0) * layer.rate
                               * (layer.inRelease ? std::exp2(layer.zone->part.releaseDetune / 1200.0)
                                  : layer.inLoop ? std::exp2(layer.zone->part.loopDetune / 1200.0) : 1.0);
-            for (int c = 0; c < 2; ++c) x[c] += readLayer(layer, c, step[c] * tune) * (c == 0 ? layer.gainL : layer.gainR);
-            bool alive = true;
-            for (int c = 0; c < 2; ++c) alive = advanceLayer(layer, c, step[c] * tune) && alive;
-            if (! alive) layer.done = true;
+            for (int c = 0; c < 2; ++c)
+            {
+                if (layer.channelDone[c]) continue;
+                x[c] += readLayer(layer, c, step[c] * tune, fmRadians * layer.fmFrames) * (c == 0 ? layer.gainL : layer.gainR);
+                if (! advanceLayer(layer, c, step[c] * tune)) layer.channelDone[c] = true;
+            }
+            // Spread detunes the channels: each one plays to its own end (measured spread-50).
+            if (layer.channelDone[0] && layer.channelDone[1]) layer.done = true;
             else ++playing;
         }
         if (playing == 0) { v.active = false; return; }
 
         // Shaper (pre or post filter) and the filter, per channel.
-        const float shaperAmount = value(ShaperAmount) + 100.0f * m.dst[0][DstShaper];
+        const float shaperAmount = value(ShaperAmount) * amountFactor(m.dst[0][DstShaper]);
+        // Structure: false = shaper -> filter, true = filter -> shaper (manual). TODO(DEV-14b): law unverified (the probes
+        // ran with the filter off, where both orders are bit-identical in the reference).
         if (shaperOn && ! shaperPost) for (float& s : x) s = shape(shaperType, s, shaperAmount);
         if (filterOn)
         {
@@ -1127,14 +1260,17 @@ void Sampler::renderVoice(Voice& v, float* outL, float* outR, int from, int to)
                         v.coeffs[1][0] = v.coeffs[0][0]; v.coeffs[1][1] = v.coeffs[0][1];
                         break;
                     }
-                    // Matrix: Filter Freq +-60 st, Res / Q +-1, Morph +-1, Env +-72 st at 100 %. TODO(DEV-14b): law unverified.
-                    const double lfoFilter = std::clamp(value(S::FilterLfoMod) + 24.0f * m.dst[c][DstLfo1Filter], 0.0f, 24.0f);
-                    double semis = v.filterKeySemis + lfoFilter * lfo1 + 60.0 * m.dst[c][DstFilterFreq];
-                    if (filterEnvOn) semis += (value(S::FilterEnvAmount) + 72.0 * m.dst[c][DstFilterEnv]) * filterEnv;
+                    // Matrix (measured SamplerLaws3, LP 500 Hz on a saw): Filter Freq +-72 st at 100 % (vel-filter +-50,
+                    // aux-filter 50 / 100, lfo2-filter); Res adds 0.65 x the modulation (aux-res, aux-res-50: the reference's
+                    // increments are 0.62 .. 0.77 of Sonora's linear one); Env and Drive scale their amount (aux-fenv /
+                    // aux-drive do nothing at Amount / Drive 0). Morph adds 1 x: TODO(DEV-14b): law unverified.
+                    const double lfoFilter = value(S::FilterLfoMod) * amountFactor(m.dst[c][DstLfo1Filter]);
+                    double semis = v.filterKeySemis + lfoFilter * lfo1 + kFilterRange * m.dst[c][DstFilterFreq];
+                    if (filterEnvOn) semis += value(S::FilterEnvAmount) * amountFactor(m.dst[c][DstFilterEnv]) * filterEnv;
                     SimplerFilterSettings settings;
                     settings.type = std::clamp((int) std::lround(value(S::FilterType)), 0, 4);
                     settings.circuit = circuit;
-                    settings.res = value(S::FilterRes) + m.dst[c][DstFilterRes] + m.dst[c][DstFilterQ];
+                    settings.res = value(S::FilterRes) + kResRange * (m.dst[c][DstFilterRes] + m.dst[c][DstFilterQ]);
                     settings.morph = value(S::FilterMorph) + m.dst[c][DstFilterMorph];
                     settings.steep = value(S::FilterSlope) >= 0.5f;
                     BiquadCoeffs stages[2];
@@ -1146,7 +1282,7 @@ void Sampler::renderVoice(Voice& v, float* outL, float* outR, int from, int to)
             {
                 float s = x[c];
                 if (circuit != 0)
-                    s = S::saturate(s * dsp::dbToGain(std::clamp(value(S::FilterDrive) + 24.0f * m.dst[c][DstFilterDrive], 0.0f, 24.0f)), circuit);
+                    s = S::saturate(s * dsp::dbToGain(value(S::FilterDrive) * amountFactor(m.dst[c][DstFilterDrive])), circuit);
                 s = v.f[c][0].process(v.coeffs[c][0], s);
                 if (v.filterStageCount > 1) s = v.f[c][1].process(v.coeffs[c][1], s);
                 x[c] = s;
@@ -1155,13 +1291,13 @@ void Sampler::renderVoice(Voice& v, float* outL, float* outR, int from, int to)
         if (shaperOn && shaperPost) for (float& s : x) s = shape(shaperType, s, shaperAmount);
 
         // Gain: envelope, level, LFO 1 volume (Simpler's law), matrix Volume (x (1 + amount), 0 .. 2), AM.
-        const float lfo1Volume = std::clamp(value(S::LfoVolume) + m.dst[0][DstLfo1Vol], 0.0f, 1.0f);
-        const float lfo1Pan = std::clamp(value(S::LfoPan) + m.dst[0][DstLfo1Pan], 0.0f, 1.0f);
-        const float g = env * v.levelGain * (lfo1On ? 1 - lfo1Volume * (1 - lfo1) * 0.5f : 1.0f) * (oscOn && am ? 1.0f + oscOut * oscLevel : 1.0f);
+        const float lfo1Volume = value(S::LfoVolume) * amountFactor(m.dst[0][DstLfo1Vol]);
+        const float lfo1Pan = value(S::LfoPan) * amountFactor(m.dst[0][DstLfo1Pan]);
+        const float g = env * v.levelGain * (lfo1On ? 1 - lfo1Volume * (1 - lfo1) * 0.5f : 1.0f) * (oscOn && am ? 1.0f - oscLevel + oscLevel * oscOut : 1.0f) * legacyGain;
         const float pan = std::clamp(v.panBase + (m.dst[0][DstPan] + m.dst[1][DstPan]) * 0.5f + (lfo1On ? lfo1 * lfo1Pan : 0.0f), -1.0f, 1.0f);
         const float angle = (pan + 1.0f) * 0.25f * juce::MathConstants<float>::pi;
-        outL[i] += x[0] * g * std::clamp(1.0f + m.dst[0][DstVolume], 0.0f, 2.0f) * std::sqrt(2.0f) * std::cos(angle);
-        outR[i] += x[1] * g * std::clamp(1.0f + m.dst[1][DstVolume], 0.0f, 2.0f) * std::sqrt(2.0f) * std::sin(angle);
+        outL[i] += x[0] * g * amountFactor(m.dst[0][DstVolume]) * std::sqrt(2.0f) * std::cos(angle);
+        outR[i] += x[1] * g * amountFactor(m.dst[1][DstVolume]) * std::sqrt(2.0f) * std::sin(angle);
 
         if (v.glideStep != 0.0)
         {

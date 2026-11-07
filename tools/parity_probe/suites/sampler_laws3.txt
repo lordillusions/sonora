@@ -1,0 +1,54 @@
+# DEV-14b Sampler laws, part 3 (cases asked for by the first fit).
+# Device template: ${SONORA_SAMPLER_FULL} = SamplerFull.adv, the reference's default Sampler with every optional slot filled
+# from factory presets and switched off (the Filter too), written by tools/parity_probe/make_sampler_full.py from the local
+# reference installation (never committed):
+#   python3 tools/parity_probe/make_sampler_full.py /tmp/SamplerFull.adv
+#   SONORA_SAMPLER_FULL=/tmp/SamplerFull.adv build/tools/parity_probe make <dir> tools/parity_probe/suites/<this file>
+case key-pitch sample=sine notes=keys
+  device "${SONORA_SAMPLER_FULL}" KeyDst/ModConnections.0/Connection=6 KeyDst/ModConnections.0/Amount=50
+case vel-res sample=saw notes=vsweep
+  device "${SONORA_SAMPLER_FULL}" VelDst/ModConnections.0/Connection=14 VelDst/ModConnections.0/Amount=100 Filter/Slot/Value/SimplerFilter/Freq=500
+case lfo2-shaper sample=sine notes=single
+  device "${SONORA_SAMPLER_FULL}" Shaper/IsOn=true Shaper/Slot/Value/SimplerShaper/Type=0 Shaper/Slot/Value/SimplerShaper/Amount=0 Shaper/Slot/Value/SimplerShaper/Structure=false AuxLfos.0/IsOn=true AuxLfos.0/Slot/Value/SimplerAuxLfo/Type=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/Frequency=2 AuxLfos.0/Slot/Value/SimplerAuxLfo/RateType=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/Attack=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/Retrigger=true AuxLfos.0/Slot/Value/SimplerAuxLfo/Offset=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/FrequencyKeyScale=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/StereoMode=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/Phase=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/ModDst/ModConnections.1/Connection=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/ModDst/ModConnections.0/Connection=11 AuxLfos.0/Slot/Value/SimplerAuxLfo/ModDst/ModConnections.0/Amount=50
+case vel-lfo2amt sample=sine notes=velocities
+  device "${SONORA_SAMPLER_FULL}" AuxLfos.0/IsOn=true AuxLfos.0/Slot/Value/SimplerAuxLfo/Type=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/Frequency=2 AuxLfos.0/Slot/Value/SimplerAuxLfo/RateType=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/Attack=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/Retrigger=true AuxLfos.0/Slot/Value/SimplerAuxLfo/Offset=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/FrequencyKeyScale=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/StereoMode=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/Phase=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/ModDst/ModConnections.1/Connection=0 AuxLfos.0/Slot/Value/SimplerAuxLfo/ModDst/ModConnections.0/Connection=18 AuxLfos.0/Slot/Value/SimplerAuxLfo/ModDst/ModConnections.0/Amount=50 VelDst/ModConnections.0/Connection=27 VelDst/ModConnections.0/Amount=100
+case vol-neg sample=sine notes=vsweep
+  device "${SONORA_SAMPLER_FULL}" VelDst/ModConnections.0/Connection=18 VelDst/ModConnections.0/Amount=-50
+case sh-hard-100 sample=sine notes=single
+  device "${SONORA_SAMPLER_FULL}" Shaper/IsOn=true Shaper/Slot/Value/SimplerShaper/Type=1 Shaper/Slot/Value/SimplerShaper/Amount=100 Shaper/Slot/Value/SimplerShaper/Structure=false
+case sh-sine-100 sample=sine notes=single
+  device "${SONORA_SAMPLER_FULL}" Shaper/IsOn=true Shaper/Slot/Value/SimplerShaper/Type=2 Shaper/Slot/Value/SimplerShaper/Amount=100 Shaper/Slot/Value/SimplerShaper/Structure=false
+case sh-4bit-100 sample=sine notes=single
+  device "${SONORA_SAMPLER_FULL}" Shaper/IsOn=true Shaper/Slot/Value/SimplerShaper/Type=3 Shaper/Slot/Value/SimplerShaper/Amount=100 Shaper/Slot/Value/SimplerShaper/Structure=false
+case sh-soft-25 sample=sine notes=single
+  device "${SONORA_SAMPLER_FULL}" Shaper/IsOn=true Shaper/Slot/Value/SimplerShaper/Type=0 Shaper/Slot/Value/SimplerShaper/Amount=25 Shaper/Slot/Value/SimplerShaper/Structure=false
+case sh-soft-50-quiet sample=sine notes=single
+  device "${SONORA_SAMPLER_FULL}" Shaper/IsOn=true Shaper/Slot/Value/SimplerShaper/Type=0 Shaper/Slot/Value/SimplerShaper/Amount=50 Shaper/Slot/Value/SimplerShaper/Structure=false part:Volume=0.125
+case sh-soft-50-vol0 sample=sine notes=single
+  device "${SONORA_SAMPLER_FULL}" Shaper/IsOn=true Shaper/Slot/Value/SimplerShaper/Type=0 Shaper/Slot/Value/SimplerShaper/Amount=50 Shaper/Slot/Value/SimplerShaper/Structure=false VolumeAndPan/Volume=1
+case sh-post-filter sample=saw notes=single
+  device "${SONORA_SAMPLER_FULL}" Shaper/IsOn=true Shaper/Slot/Value/SimplerShaper/Type=1 Shaper/Slot/Value/SimplerShaper/Amount=100 Shaper/Slot/Value/SimplerShaper/Structure=true Filter/IsOn=true Filter/Slot/Value/SimplerFilter/Freq=500
+case sh-pre-filter sample=saw notes=single
+  device "${SONORA_SAMPLER_FULL}" Shaper/IsOn=true Shaper/Slot/Value/SimplerShaper/Type=1 Shaper/Slot/Value/SimplerShaper/Amount=100 Shaper/Slot/Value/SimplerShaper/Structure=false Filter/IsOn=true Filter/Slot/Value/SimplerFilter/Freq=500
+case legacy-type0 notes=melody
+  device Defaults/Instruments/Sampler.adv Filter/Slot/Value/SimplerFilter/LegacyType=0
+case legacy-type2 notes=melody
+  device Defaults/Instruments/Sampler.adv Filter/Slot/Value/SimplerFilter/LegacyType=2
+case legacy-type5 notes=melody
+  device Defaults/Instruments/Sampler.adv Filter/Slot/Value/SimplerFilter/LegacyType=5
+case voices2-chord notes=chords
+  device "${SONORA_SAMPLER_FULL}" Globals/NumVoices=1
+case voices3-chord notes=chords
+  device "${SONORA_SAMPLER_FULL}" Globals/NumVoices=2
+case osc-vel-50 sample=sine notes=velocities
+  device "${SONORA_SAMPLER_FULL}" Player/SubOsc/IsOn=true Player/SubOsc/Slot/Value/SimplerSubOsc/Mode=0 Player/SubOsc/Slot/Value/SimplerSubOsc/Type=0 Player/SubOsc/Slot/Value/SimplerSubOsc/Volume=0.5 Player/SubOsc/Slot/Value/SimplerSubOsc/TuneCoarse=1 Player/SubOsc/Slot/Value/SimplerSubOsc/Envelope/AttackTime=0 Player/SubOsc/Slot/Value/SimplerSubOsc/Envelope/AttackLevel=1 Player/SubOsc/Slot/Value/SimplerSubOsc/Envelope/DecayLevel=1 Player/SubOsc/Slot/Value/SimplerSubOsc/Envelope/SustainLevel=1 Player/SubOsc/Slot/Value/SimplerSubOsc/Envelope/LoopMode=0 Player/SubOsc/Slot/Value/SimplerSubOsc/Envelope/TimeVelScale=0 Player/SubOsc/Slot/Value/SimplerSubOsc/IsFixedFreq=false Player/SubOsc/Slot/Value/SimplerSubOsc/TuneFine=0 Player/SubOsc/Slot/Value/SimplerSubOsc/VolumeVelScale=0.5
+case time-key-50 sample=sine notes=keys
+  device "${SONORA_SAMPLER_FULL}" Globals/EnvScale/EnvTimeKeyScale=50 VolumeAndPan/Envelope/AttackTime=200 VolumeAndPan/Envelope/DecayTime=300 VolumeAndPan/Envelope/SustainLevel=0.25
+case time-vel-50 sample=sine notes=velocities
+  device "${SONORA_SAMPLER_FULL}" VolumeAndPan/Envelope/TimeVelScale=50 VolumeAndPan/Envelope/AttackTime=300 VolumeAndPan/Envelope/DecayTime=300 VolumeAndPan/Envelope/SustainLevel=0.25
+case pitchenv-dst sample=sine notes=single
+  device "${SONORA_SAMPLER_FULL}" Pitch/Envelope/IsOn=true Pitch/Envelope/Slot/Value/SimplerPitchEnvelope/Amount=12 Pitch/Envelope/Slot/Value/SimplerPitchEnvelope/AttackTime=0 Pitch/Envelope/Slot/Value/SimplerPitchEnvelope/AttackLevel=0 Pitch/Envelope/Slot/Value/SimplerPitchEnvelope/DecayLevel=1 Pitch/Envelope/Slot/Value/SimplerPitchEnvelope/DecayTime=300 Pitch/Envelope/Slot/Value/SimplerPitchEnvelope/SustainLevel=0 Pitch/Envelope/Slot/Value/SimplerPitchEnvelope/LoopMode=0 Pitch/Envelope/Slot/Value/SimplerPitchEnvelope/TimeVelScale=0 AuxEnv/IsOn=true AuxEnv/Slot/Value/SimplerAuxEnvelope/AttackTime=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/AttackLevel=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/DecayLevel=1 AuxEnv/Slot/Value/SimplerAuxEnvelope/DecayTime=500 AuxEnv/Slot/Value/SimplerAuxEnvelope/SustainLevel=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/ReleaseTime=50 AuxEnv/Slot/Value/SimplerAuxEnvelope/LoopMode=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/TimeVelScale=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/ModDst/ModConnections.1/Connection=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/ModDst/ModConnections.0/Connection=9 AuxEnv/Slot/Value/SimplerAuxEnvelope/ModDst/ModConnections.0/Amount=100
+case aux-shaper sample=sine notes=single
+  device "${SONORA_SAMPLER_FULL}" Shaper/IsOn=true Shaper/Slot/Value/SimplerShaper/Type=0 Shaper/Slot/Value/SimplerShaper/Amount=0 Shaper/Slot/Value/SimplerShaper/Structure=false AuxEnv/IsOn=true AuxEnv/Slot/Value/SimplerAuxEnvelope/AttackTime=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/AttackLevel=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/DecayLevel=1 AuxEnv/Slot/Value/SimplerAuxEnvelope/DecayTime=500 AuxEnv/Slot/Value/SimplerAuxEnvelope/SustainLevel=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/ReleaseTime=50 AuxEnv/Slot/Value/SimplerAuxEnvelope/LoopMode=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/TimeVelScale=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/ModDst/ModConnections.1/Connection=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/ModDst/ModConnections.0/Connection=11 AuxEnv/Slot/Value/SimplerAuxEnvelope/ModDst/ModConnections.0/Amount=100
+case aux-res sample=saw notes=single
+  device "${SONORA_SAMPLER_FULL}" AuxEnv/IsOn=true AuxEnv/Slot/Value/SimplerAuxEnvelope/AttackTime=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/AttackLevel=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/DecayLevel=1 AuxEnv/Slot/Value/SimplerAuxEnvelope/DecayTime=500 AuxEnv/Slot/Value/SimplerAuxEnvelope/SustainLevel=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/ReleaseTime=50 AuxEnv/Slot/Value/SimplerAuxEnvelope/LoopMode=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/TimeVelScale=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/ModDst/ModConnections.1/Connection=0 AuxEnv/Slot/Value/SimplerAuxEnvelope/ModDst/ModConnections.0/Connection=14 AuxEnv/Slot/Value/SimplerAuxEnvelope/ModDst/ModConnections.0/Amount=100 Filter/Slot/Value/SimplerFilter/Freq=500

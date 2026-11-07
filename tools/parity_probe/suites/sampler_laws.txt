@@ -1,6 +1,6 @@
 # DEV-14b Sonora Sampler (MultiSampler). Device XML: the reference's default Sampler (Filter on, other sections empty)
 # with our saw sample, one variable per case, then every factory Sampler preset with its own library samples.
-# No reference stems exist yet: `render` proves every case plays (docs/SAMPLER.md); `compare` once the owner exports them.
+# Reference stems were exported on 2026-11-07 (docs/PARITY.md "Sampler"); `compare` measures against them.
 case s-default notes=melody
   device Defaults/Instruments/Sampler.adv
 case s-velocities notes=velocities
