@@ -10,6 +10,7 @@ tagged CI release builds and signs every update and writes the three feeds).
 | macOS arm64 | `Sonora-Prism-VST3-<v>.pkg` | `Sonora Prism.vst3` in `/Library/Audio/Plug-Ins/VST3` (all users) or `~/Library/Audio/Plug-Ins/VST3` ("Install for me only") | `packaging/macos/make_vst3_pkg.sh` (PLG-11c) |
 | macOS arm64 | `Sonora-Curve-LFO-VST3-<v>.pkg` | `Sonora Curve LFO.vst3` (drawn-curve modulation effect), same folders | `packaging/macos/make_vst3_pkg.sh` (PLG-12b) |
 | macOS arm64 | `Sonora-Hush-VST3-<v>.pkg` | `Sonora Hush.vst3` (resonance suppressor effect), same folders | `packaging/macos/make_vst3_pkg.sh` (PLG-14) |
+| macOS arm64 | `Sonora-Kickstract-VST3-<v>.pkg` | `Sonora Kickstract.vst3` (kick extractor effect), same folders | `packaging/macos/make_vst3_pkg.sh` (PLG-17) |
 | Windows x64 | `Sonora-<v>-windows-x64-setup.exe` | `Program Files\Sonora` (or per user), Start menu entry, `.als` "Open with" entry | `packaging/windows/sonora.iss` (Inno Setup 6) |
 | Linux x64 | `Sonora-<v>-x86_64.AppImage` | nothing: one self-contained file (`chmod +x`, run) | `packaging/linux/make_packages.sh` |
 | Linux x64 | `sonora_<v>_amd64.deb` | `/opt/sonora`, `/usr/bin/sonora`, desktop entry, icon, `.als` MIME type | `packaging/linux/make_packages.sh` |

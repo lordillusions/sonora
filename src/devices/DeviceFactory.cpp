@@ -35,6 +35,7 @@
 #include "devices/native/LfoShaper.h"
 #include "devices/native/CurveLfo.h"
 #include "devices/native/HushSession.h"
+#include "devices/native/Kickstract.h"
 #include "devices/native/MidiVelocity.h"
 #include "devices/native/MidiNoteEffects.h"
 #include "devices/native/Arpeggiator.h"
@@ -192,7 +193,7 @@ std::unique_ptr<DeviceProcessor> createSonoraStandIn(const model::Device& d, Bui
 {
     using plugins::SonoraPlugin;
     const auto which = plugins::sonoraPluginFor(*d.plugin, d.kind);
-    if (which != SonoraPlugin::Prism && which != SonoraPlugin::CurveLfo && which != SonoraPlugin::Hush) return nullptr;
+    if (which == SonoraPlugin::None) return nullptr;
     const auto body = plugins::juceVst3StateBody(d.plugin->state);
     std::string error;
     std::unique_ptr<DeviceProcessor> dev;
@@ -212,6 +213,13 @@ std::unique_ptr<DeviceProcessor> createSonoraStandIn(const model::Device& d, Bui
         if (! body.empty() && ! plugins::decodeCurveLfoState(body.data(), body.size(), *lfo, error))
             note(ctx, d.plugin->name + ": the saved curves could not be read (" + error + "), using the defaults");
         dev = std::move(lfo);
+    }
+    else if (which == SonoraPlugin::Kickstract) // PLG-17
+    {
+        auto kick = std::make_unique<Kickstract>();
+        if (! body.empty() && ! plugins::decodeKickstractState(body.data(), body.size(), *kick, error))
+            note(ctx, d.plugin->name + ": the saved settings could not be read (" + error + "), using the defaults");
+        dev = std::move(kick);
     }
     else // COL-4e: the VST3's state body is the built-in device's session state
     {
@@ -367,6 +375,8 @@ std::unique_ptr<DeviceProcessor> createNative(const model::Device& d, std::vecto
         }
         dev = std::move(hush);
     }
+    else if (d.type == "SonoraKickstract") // PLG-17
+        dev = std::make_unique<Kickstract>();
     else if (d.type == "SonoraVelocity")
         dev = std::make_unique<MidiVelocity>();
 
@@ -395,10 +405,11 @@ namespace
 std::vector<uint8_t> sonoraVst3State(const model::Device& d)
 {
     if (d.type == "SonoraWavetable") return plugins::encodePrismPreset(d);
-    if (d.type != "SonoraCurveLfo" && d.type != "SonoraHush") return {};
+    if (d.type != "SonoraCurveLfo" && d.type != "SonoraHush" && d.type != "SonoraKickstract") return {};
     const auto dev = createNative(d);
     if (const auto* lfo = dynamic_cast<const CurveLfo*>(dev.get())) return plugins::encodeCurveLfoState(*lfo);
     if (auto* hush = dynamic_cast<HushDevice*>(dev.get())) return hush->session().encodeState();
+    if (const auto* kick = dynamic_cast<const Kickstract*>(dev.get())) return plugins::encodeKickstractState(*kick);
     return {};
 }
 } // namespace

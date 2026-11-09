@@ -51,6 +51,7 @@ constexpr std::array kCatalog{
     CatalogEntry{"SonoraLfo", "Sonora LFO", R::AudioEffect, true},
     CatalogEntry{"SonoraCurveLfo", "Sonora Curve LFO", R::AudioEffect, true},
     CatalogEntry{"SonoraHush", "Sonora Hush", R::AudioEffect, true},
+    CatalogEntry{"SonoraKickstract", "Sonora Kickstract", R::AudioEffect, true},
     CatalogEntry{"SonoraVelocity", "Sonora Velocity", R::MidiEffect, true},
     CatalogEntry{"InstrumentGroupDevice", "Sonora Instrument Rack", R::Instrument, true},
     CatalogEntry{"DrumGroupDevice", "Sonora Drum Rack", R::Instrument, true},
@@ -149,7 +150,9 @@ std::string_view deviceCategory(const CatalogEntry& entry)
     if (entry.role == DeviceRole::Instrument)
         return tag == "OriginalSimpler" || tag == "MultiSampler" || tag == "SonoraImpulse" ? "Sampling" : "Synthesis";
     if (entry.role == DeviceRole::MidiEffect) return "Note & Velocity";
-    if (tag == "Eq8" || tag == "FilterEQ3" || tag == "ChannelEq" || tag == "AutoFilter" || tag == "AutoFilter2") return "EQ & Filters";
+    if (tag == "Eq8" || tag == "FilterEQ3" || tag == "ChannelEq" || tag == "AutoFilter" || tag == "AutoFilter2"
+        || tag == "SonoraKickstract")
+        return "EQ & Filters";
     if (tag == "Reverb" || tag == "Delay" || tag == "SonoraEcho") return "Delay & Reverb";
     if (tag == "Compressor2" || tag == "GlueCompressor" || tag == "Limiter" || tag == "MultibandDynamics" || tag == "Gate"
         || tag == "SonoraHush")

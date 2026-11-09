@@ -1,6 +1,7 @@
 #include "plugins/SonoraPluginState.h"
 
 #include "devices/native/CurveLfo.h"
+#include "devices/native/Kickstract.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -35,6 +36,7 @@ SonoraPlugin sonoraPluginFor(const model::PluginInfo& info, model::DeviceKind ki
         case fourCC("SnWt"): return SonoraPlugin::Prism; // the "Sonora Wavetable" build before UI-49
         case fourCC("SnCl"): return SonoraPlugin::CurveLfo;
         case fourCC("SnHs"): return SonoraPlugin::Hush;
+        case fourCC("SnKk"): return SonoraPlugin::Kickstract;
         default: return SonoraPlugin::None;
     }
 }
@@ -108,6 +110,46 @@ bool decodeCurveLfoState(const void* data, size_t size, devices::CurveLfo& lfo, 
         }
         lfo.setGraph(g, graph);
         lfo.setParameter(L::warpParam(g), values[(size_t) L::warpParam(g)]);
+    }
+    return true;
+}
+
+std::vector<uint8_t> encodeKickstractState(const devices::Kickstract& device)
+{
+    juce::XmlElement root("SonoraKickstract");
+    root.setAttribute(kVersion, kStateVersion);
+    const auto& infos = device.parameters();
+    for (size_t i = 0; i < infos.size(); ++i)
+    {
+        auto* param = root.createNewChildElement(kParamTag);
+        param->setAttribute(kId, juce::String::fromUTF8(infos[i].id.c_str()));
+        param->setAttribute(kValue, (double) device.getParameter((int) i));
+    }
+    juce::MemoryBlock block;
+    juce::AudioProcessor::copyXmlToBinary(root, block);
+    const auto* bytes = static_cast<const uint8_t*>(block.getData());
+    return {bytes, bytes + block.getSize()};
+}
+
+bool decodeKickstractState(const void* data, size_t size, devices::Kickstract& device, std::string& error)
+{
+    if (data == nullptr || size == 0) { error = "empty state"; return false; }
+    const auto root = juce::AudioProcessor::getXmlFromBinary(data, (int) size);
+    if (root == nullptr || ! root->hasTagName("SonoraKickstract")) { error = "not a Sonora Kickstract state"; return false; }
+    if (root->getIntAttribute(kVersion) > kStateVersion)
+    {
+        error = "saved by a newer Sonora Kickstract (state version " + root->getStringAttribute(kVersion).toStdString() + ")";
+        return false;
+    }
+    const auto& infos = device.parameters();
+    std::unordered_map<std::string, size_t> byId;
+    for (size_t i = 0; i < infos.size(); ++i) byId.emplace(infos[i].id, i);
+    for (const auto* param : root->getChildWithTagNameIterator(kParamTag))
+    {
+        const auto found = byId.find(param->getStringAttribute(kId).toStdString());
+        if (found == byId.end()) continue; // a newer version's control: skipped
+        const double value = param->getDoubleAttribute(kValue, infos[found->second].defaultValue);
+        if (std::isfinite(value)) device.setParameter((int) found->second, (float) value);
     }
     return true;
 }

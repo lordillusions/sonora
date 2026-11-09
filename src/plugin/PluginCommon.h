@@ -39,13 +39,14 @@ inline juce::String hostParameterName(const devices::ParameterInfo& info)
 }
 
 // A host parameter over one device control. The value lives in the running device (atomics), so host automation, the
-// editor and MIDI learn all write the same place. `integral`: whole numbers only (counts, CC numbers).
+// editor and MIDI learn all write the same place. `integral`: whole numbers only (counts, CC numbers). `logarithmic`: the
+// host's 0..1 range follows a log scale (frequencies and times; min must be > 0).
 class DeviceParameter final : public juce::AudioProcessorParameterWithID
 {
 public:
-    DeviceParameter(ParameterOwner& owner, int index, const devices::ParameterInfo& info, bool integral)
+    DeviceParameter(ParameterOwner& owner, int index, const devices::ParameterInfo& info, bool integral, bool logarithmic = false)
         : AudioProcessorParameterWithID(juce::ParameterID(juce::String::fromUTF8(info.id.c_str()), 1), hostParameterName(info)),
-          owner_(owner), index_(index), info_(info), integral_(integral)
+          owner_(owner), index_(index), info_(info), integral_(integral), log_(logarithmic && info.minValue > 0)
     {
         for (const auto& choice : info.choices) choices_.add(juce::String::fromUTF8(choice.c_str()));
     }
@@ -86,11 +87,14 @@ public:
 private:
     float normalise(float value) const
     {
+        if (log_)
+            return juce::jlimit(0.0f, 1.0f, std::log(std::max(value, info_.minValue) / info_.minValue) / std::log(info_.maxValue / info_.minValue));
         const float span = info_.maxValue - info_.minValue;
         return span > 0 ? juce::jlimit(0.0f, 1.0f, (value - info_.minValue) / span) : 0.0f;
     }
     float plain(float normalised) const
     {
+        if (log_) return info_.minValue * std::pow(info_.maxValue / info_.minValue, juce::jlimit(0.0f, 1.0f, normalised));
         float value = info_.minValue + juce::jlimit(0.0f, 1.0f, normalised) * (info_.maxValue - info_.minValue);
         if (isDiscrete()) value = std::round(value);
         return value;
@@ -99,7 +103,7 @@ private:
     ParameterOwner& owner_;
     const int index_;
     const devices::ParameterInfo info_;
-    const bool integral_;
+    const bool integral_, log_;
     juce::StringArray choices_;
 };
 

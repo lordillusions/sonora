@@ -27,6 +27,7 @@
 #include "devices/native/WavetableSynth.h"
 #include "devices/native/Delay.h"
 #include "ui/views/CurveLfoEditor.h"
+#include "ui/views/KickstractFace.h"
 #include "ui/views/HushFace.h"
 #include "devices/native/HushSession.h"
 #include "ui/views/WavetableEditor.h"
@@ -252,6 +253,11 @@ public:
         if (auto* lfo = dynamic_cast<devices::CurveLfo*>(proc_))
         {
             curveLfo_ = add<CurveLfoEditor>(lfo, [this](Widget* widget, int parameter) { tag(widget, parameter); });
+            return;
+        }
+        if (auto* kick = dynamic_cast<devices::Kickstract*>(proc_)) // PLG-17
+        {
+            kickstract_ = add<KickstractFace>(kick, [this](Widget* widget, int parameter) { tag(widget, parameter); });
             return;
         }
         if (auto* hush = dynamic_cast<devices::HushDevice*>(proc_))
@@ -662,6 +668,7 @@ public:
         if (effectPanel_ && ! expandedControls_) return effectPanel_->preferredWidth() + 8;
         if (lfoCurve_) return 730;
         if (curveLfo_) return CurveLfoEditor::kPreferredWidth + 12;
+        if (kickstract_) return KickstractFace::kPreferredWidth + 12;
         if (hush_) return (std::max(40.0f, (height() > kTitle ? height() - kTitle : ReferenceFace::kDefaultBody) - 12)) * HushFace::kWidth / HushFace::kHeight + 12;
         if (wavetableFloating_) return 150;
         if (wavetable_) return WavetableEditor::kPreferredWidth + 12;
@@ -705,6 +712,7 @@ public:
             return;
         }
         if (curveLfo_) { curveLfo_->setBounds(r); return; }
+        if (kickstract_) { kickstract_->setBounds(r); return; }
         if (hush_)
         {
             hushWindow_->setBounds({width() - kTitleIcons - 21, 1, 17, 16});
@@ -938,6 +946,7 @@ private:
     std::vector<TextButton*> sampleTabs_;
     LfoCurveEditor* lfoCurve_ = nullptr;
     CurveLfoEditor* curveLfo_ = nullptr;
+    KickstractFace* kickstract_ = nullptr;
     HushFace* hush_ = nullptr;
     IconButton* hushWindow_ = nullptr;
     WavetableEditor* wavetable_ = nullptr;

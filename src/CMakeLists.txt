@@ -133,6 +133,7 @@ add_library(sonora_engine STATIC
     devices/native/Hush.cpp
     devices/native/HushCurve.cpp
     devices/native/HushSession.cpp
+    devices/native/Kickstract.cpp
     devices/native/Compressor.cpp
     devices/native/Limiter.cpp
     devices/native/Bands.cpp
@@ -266,6 +267,7 @@ add_library(sonora_ui STATIC
     ui/views/ResynthEditor.cpp
     ui/views/CurveLfoEditor.cpp
     ui/views/HushFace.cpp
+    ui/views/KickstractFace.cpp
     ui/views/WavetableEditor.cpp
     ui/views/WavetableWindowView.cpp
     ui/views/WavetablePresetBrowser.cpp
@@ -355,7 +357,8 @@ endfunction()
 option(SONORA_BUILD_PRISM_VST3 "Build Sonora Prism as a VST3 instrument" ${APPLE})
 option(SONORA_BUILD_CURVE_LFO_VST3 "Build Sonora Curve LFO as a VST3 effect" ${APPLE})
 option(SONORA_BUILD_HUSH_VST3 "Build Sonora Hush (resonance suppressor) as a VST3 effect" ${APPLE})
-if (APPLE AND (SONORA_BUILD_PRISM_VST3 OR SONORA_BUILD_CURVE_LFO_VST3 OR SONORA_BUILD_HUSH_VST3))
+option(SONORA_BUILD_KICKSTRACT_VST3 "Build Sonora Kickstract (kick extractor) as a VST3 effect" ${APPLE})
+if (APPLE AND (SONORA_BUILD_PRISM_VST3 OR SONORA_BUILD_CURVE_LFO_VST3 OR SONORA_BUILD_HUSH_VST3 OR SONORA_BUILD_KICKSTRACT_VST3))
     set_property(SOURCE gfx/MetalLayerView.mm APPEND PROPERTY COMPILE_OPTIONS -fobjc-arc) # not JUCE's own .mm files
 endif()
 if (SONORA_BUILD_PRISM_VST3)
@@ -391,6 +394,17 @@ if (SONORA_BUILD_HUSH_VST3)
         NEEDS_MIDI_INPUT FALSE
         VST3_CATEGORIES Fx Dynamics EQ
         SOURCES plugin/HushPlugin.cpp plugin/HushPluginEditor.cpp)
+endif()
+if (SONORA_BUILD_KICKSTRACT_VST3) # PLG-17
+    sonora_add_native_vst3(SonoraKickstract
+        METAL_VIEW SonoraKickstractMetalView
+        PRODUCT_NAME "Sonora Kickstract"
+        BUNDLE_ID "org.sonora.kickstract"
+        PLUGIN_CODE SnKk
+        IS_SYNTH FALSE
+        NEEDS_MIDI_INPUT FALSE
+        VST3_CATEGORIES Fx Filter Dynamics
+        SOURCES plugin/KickstractPlugin.cpp plugin/KickstractPluginEditor.cpp)
 endif()
 
 # ------------------------------------------------------------------ app
