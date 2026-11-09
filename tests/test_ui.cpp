@@ -1,6 +1,7 @@
 #include "TestFramework.h"
 
 #include "engine/EngineGraph.h"
+#include "ui/views/AutomationEditor.h"
 #include "engine/ClipLauncher.h"
 #include "engine/PeakCache.h"
 #include "engine/SampleCache.h"
@@ -495,11 +496,12 @@ TEST_CASE("automation UI: toggle, select, move, add, delete and undo through rea
         e.x = x; e.y = y0 + y; e.clicks = clicks;
         return e;
     };
-    // Volume range 0..1.995262: value 1 lands halfway down the lane.
-    root.dispatchMouseDown(mouse(160, 35));
-    root.dispatchMouseUp(mouse(160, 35));
+    // Volume on the fader's curve (UI-75, as the reference draws it): 0 dB sits at 0.893 of the 60 px plot (5..65).
+    const float zeroDb = 65.0f - 0.893f * 60.0f;
+    root.dispatchMouseDown(mouse(160, zeroDb));
+    root.dispatchMouseUp(mouse(160, zeroDb));
     CHECK(! history.canUndo());
-    root.dispatchMouseDown(mouse(160, 35));
+    root.dispatchMouseDown(mouse(160, zeroDb));
     root.dispatchMouseDrag(mouse(200, 50));
     root.dispatchMouseUp(mouse(200, 50));
     REQUIRE(history.canUndo());
@@ -523,6 +525,42 @@ TEST_CASE("automation UI: toggle, select, move, add, delete and undo through rea
     CHECK_NEAR(song.tracks[0].automation[0].points[1].value, 1, 1e-9);
     root.dispatchKey(a);
     CHECK(! ctx.automationVisible);
+}
+
+TEST_CASE("automation UI: Volume and Sends on the fader law, a dashed line before any automation (UI-75)")
+{
+    auto loaded = io::loadAls(juce::File(SONORA_TEST_FIXTURES).getChildFile("minimal_set.xml"));
+    REQUIRE(loaded);
+    auto& song = *loaded.song;
+    ui::UiContext ctx;
+    ctx.song = &song;
+    const auto targets = ui::AutomationEditor::targets(ctx, 0);
+    bool volume = false;
+    for (const auto& target : targets)
+        if (target.name == "Track Volume")
+        {
+            volume = true;
+            CHECK(target.law == model::AutomationLaw::Fader);
+            CHECK_NEAR(target.position(1.0), 0.893, 1e-3); // 0 dB, where the reference's lane puts it
+            CHECK_NEAR(target.valueAt(target.position(0.25)), 0.25, 1e-4);
+        }
+        else if (target.name == "Track Panning")
+            CHECK(target.law == model::AutomationLaw::Linear);
+    CHECK(volume);
+    // A lane on a target without automation: the dashed line at the current value (rendered for a look).
+    song.tracks[0].automation.clear();
+    ctx.ioVisible = false;
+    ctx.browserVisible = ctx.detailVisible = false;
+    ctx.pixelsPerBeat = 40;
+    ui::MainLayout root(ctx);
+    root.setBounds({0, 0, 1200, 500});
+    root.layout();
+    ui::KeyEvent a;
+    a.textChar = 'a';
+    REQUIRE(root.dispatchKey(a));
+    root.layout();
+    const auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory);
+    CHECK(gfx::renderToPng(root, 1200, 500, 1, dir.getChildFile("sonora_automation_dashed.png").getFullPathName().toStdString()));
 }
 
 TEST_CASE("browser: filtering keeps file identities, folder navigation, preview and keyboard focus")

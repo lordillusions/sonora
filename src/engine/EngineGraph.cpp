@@ -159,7 +159,8 @@ std::vector<ClipEnvelopeBinding> clipEnvelopeBindings(const model::Clip& c, bool
         ClipEnvelopeBinding b;
         b.session = session;
         b.clipIndex = index;
-        b.target = {it->second.kind, it->second.index, it->second.device, AutomationLane(env), it->second.deviceSlot,
+        b.target = {it->second.kind, it->second.index, it->second.device,
+                    automationLaneFor(env, it->second.kind, it->second.device, it->second.index), it->second.deviceSlot,
                     it->second.device != nullptr && it->second.device->isHostedPlugin()};
         b.baseValue = it->second.baseValue;
         out.push_back(std::move(b));
@@ -189,7 +190,8 @@ void bindAutomation(TrackNode& n, const model::Track& t, std::vector<std::string
         }
         if (it->second.kind == AutomationBinding::Kind::Tempo && isStaticTempoEnvelope(env))
             continue; // Song::tempo already holds it; binding it would undo every tempo change
-        n.automation.push_back({it->second.kind, it->second.index, it->second.device, AutomationLane(env), it->second.deviceSlot,
+        n.automation.push_back({it->second.kind, it->second.index, it->second.device,
+                    automationLaneFor(env, it->second.kind, it->second.device, it->second.index), it->second.deviceSlot,
                                 it->second.device != nullptr && it->second.device->isHostedPlugin()});
     }
     if (unbound > 0)
@@ -347,6 +349,31 @@ void initControls(TrackControls& c, const model::Track& t)
 }
 } // namespace
 
+namespace
+{
+bool soloed(const ControlBank& controls, const TrackNode& node)
+{
+    return controls[(size_t) node.controlIndex].solo.load(std::memory_order_relaxed);
+}
+
+// With something soloed: neither this node, nor a parent group, nor (a group) one of its members is soloed.
+bool leftOutBySolo(const EngineGraph& graph, const ControlBank& controls, const TrackNode& node)
+{
+    if (soloed(controls, node)) return false;
+    for (int p = node.outputNode; p >= 0; p = graph.nodes[(size_t) p].outputNode)
+        if (soloed(controls, graph.nodes[(size_t) p])) return false;
+    if (node.kind != model::TrackKind::Group) return true;
+    const int self = (int) (&node - graph.nodes.data());
+    for (const auto& other : graph.nodes)
+    {
+        if (other.deactivated || ! soloed(controls, other)) continue;
+        for (int p = other.outputNode; p >= 0; p = graph.nodes[(size_t) p].outputNode)
+            if (p == self) return false; // carries a soloed member
+    }
+    return true;
+}
+} // namespace
+
 bool isTrackAudible(const EngineGraph& graph, const ControlBank& controls, const TrackNode& node, bool anySolo)
 {
     if (node.deactivated)
@@ -356,13 +383,15 @@ bool isTrackAudible(const EngineGraph& graph, const ControlBank& controls, const
         return true; // its own solo wins over a switched-off activator
     if (! c.active.load(std::memory_order_relaxed))
         return false;
-    if (! anySolo || node.kind == model::TrackKind::Group)
-        return true;
+    return ! anySolo || ! leftOutBySolo(graph, controls, node);
+}
 
-    bool soloed = false;
-    for (int p = node.outputNode; ! soloed && p >= 0; p = graph.nodes[(size_t) p].outputNode)
-        soloed = controls[(size_t) graph.nodes[(size_t) p].controlIndex].solo.load(std::memory_order_relaxed);
-    return soloed;
+bool feedsParentWhileSilenced(const EngineGraph& graph, const ControlBank& controls, const TrackNode& node, bool anySolo)
+{
+    if (! anySolo || node.deactivated || node.outputNode < 0) return false;
+    if (! controls[(size_t) node.controlIndex].active.load(std::memory_order_relaxed)) return false; // switched off: silent
+    const auto& parent = graph.nodes[(size_t) node.outputNode];
+    return leftOutBySolo(graph, controls, node) && leftOutBySolo(graph, controls, parent);
 }
 
 std::unique_ptr<ClipSet> buildClipSet(const model::Track& t, const TrackNode& node, const model::Song& song,
@@ -387,7 +416,8 @@ std::unique_ptr<ClipSet> buildClipSet(const model::Track& t, const TrackNode& no
         if (! env.points.empty())
             if (const auto it = targets.find(env.targetId);
                 it != targets.end() && ! (it->second.kind == AutomationBinding::Kind::Tempo && isStaticTempoEnvelope(env)))
-                set->automation.push_back({it->second.kind, it->second.index, it->second.device, AutomationLane(env), it->second.deviceSlot,
+                set->automation.push_back({it->second.kind, it->second.index, it->second.device,
+                    automationLaneFor(env, it->second.kind, it->second.device, it->second.index), it->second.deviceSlot,
                                            it->second.device != nullptr && it->second.device->isHostedPlugin()});
     for (size_t i = 0; i < t.slots.size(); ++i)
     {

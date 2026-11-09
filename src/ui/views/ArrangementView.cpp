@@ -1612,7 +1612,7 @@ void ArrangementView::zoomAllTrackHeights(double factor)
     if (anchor != nullptr) zoomTrackHeight(factor, anchor->y + anchor->h * 0.5f, true);
 }
 
-void ArrangementView::zoomTrackHeight(double factor, float anchorY, bool allTracks)
+void ArrangementView::zoomTrackHeight(double factor, float anchorY, bool allTracks, bool pointer)
 {
     auto& x = ctx();
     const auto* anchor = laneAt(anchorY);
@@ -1621,11 +1621,15 @@ void ArrangementView::zoomTrackHeight(double factor, float anchorY, bool allTrac
     const float fraction = std::clamp((anchorY - anchor->y) / anchor->h, 0.0f, 1.0f);
     if (x.laneHeights.size() < (size_t) x.numControlTracks()) x.laneHeights.resize((size_t) x.numControlTracks(), 0);
     const auto range = x.arrangementSelection;
+    const auto inSelection = [&](int track) {
+        return range.active ? track >= range.firstTrack && track <= range.lastTrack
+                            : x.sessionTrackSelection ? x.isTrackSelected(track) : track == anchorTrack;
+    };
+    const bool pointerOnly = pointer && ! inSelection(anchorTrack); // the hovered track, not a selection elsewhere
     for (const auto& lane : lanes_)
     {
         if (lane.takeLaneId >= 0) continue;
-        const bool selected = allTracks ? true : range.active ? lane.controlIndex >= range.firstTrack && lane.controlIndex <= range.lastTrack
-                                           : x.sessionTrackSelection ? x.isTrackSelected(lane.controlIndex) : lane.controlIndex == anchorTrack;
+        const bool selected = allTracks ? true : pointerOnly ? lane.controlIndex == anchorTrack : inSelection(lane.controlIndex);
         if (! selected) continue;
         const float automation = x.automationHeight(lane.controlIndex);
         x.laneHeights[(size_t) lane.controlIndex] = std::clamp((float) ((lane.h - automation) * factor), 18.0f, 420.0f);
@@ -2794,9 +2798,12 @@ bool ArrangementView::mouseWheel(const MouseEvent& e)
         zoomAt(std::min(e.x, timelineArea().w), wheelZoomFactor(delta));
         return true;
     }
-    if (e.alt && ! e.cmd && timelineArea().contains(e.x, e.y) && std::abs(e.wheelDeltaY) > 1e-8f)
-    { zoomTrackHeight(wheelZoomFactor(e.wheelDeltaY), e.y, e.shift); return true; }
-    if (e.alt && e.shift && ! e.cmd && timelineArea().contains(e.x, e.y) && std::abs(e.wheelDeltaX) > 1e-8f)
+    // Alt + wheel over a track (its lane or its header): that track's height, selected or not (UI-74).
+    const auto tracksArea = timelineArea();
+    const bool overTracks = e.y >= tracksArea.y && e.y < tracksArea.y + tracksArea.h;
+    if (e.alt && ! e.cmd && overTracks && std::abs(e.wheelDeltaY) > 1e-8f)
+    { zoomTrackHeight(wheelZoomFactor(e.wheelDeltaY), e.y, e.shift, true); return true; }
+    if (e.alt && e.shift && ! e.cmd && overTracks && std::abs(e.wheelDeltaX) > 1e-8f)
     { zoomTrackHeight(wheelZoomFactor(e.wheelDeltaX), e.y, true); return true; } // the system turns Shift + wheel horizontal
     // Shift + wheel scrolls horizontally; the wheel scrolls the tracks.
     const bool horizontal = e.shift;

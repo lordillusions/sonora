@@ -9,6 +9,7 @@
 
 #include "devices/NativeDevice.h"
 #include "devices/native/Biquad.h"
+#include "dsp/AudioDisplayTap.h"
 #include "dsp/Dsp.h"
 #include "dsp/ModLfo.h"
 
@@ -92,6 +93,8 @@ public:
         beats_.store(info.beats, std::memory_order_relaxed);
         playing_.store(info.playing, std::memory_order_relaxed);
     }
+    // The output, for the face's spectrum (the reference shows the output's spectrum behind the curve since 12.2).
+    dsp::AudioDisplayTap& displayTap() { return displayTap_; }
     // Damping of the resonant stage for resonance r (measured law, shared with Simpler's Clean circuit).
     static float damping(float r) { return std::max((1.0f - r) / (1.0f + 3.0f * r), 0.0144f); }
 
@@ -109,6 +112,7 @@ private:
     dsp::ModLfo lfo_;
     float env_ = 0.0f, lfoValue_ = 0.0f;
     int updateCounter_ = 0;
+    dsp::AudioDisplayTap displayTap_;
 };
 
 } // namespace sonora::devices

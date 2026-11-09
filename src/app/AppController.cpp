@@ -149,6 +149,7 @@ AppController::AppController() : engine_(host_, midi_)
     ui_.openWavetableWindow = [this](const ui::UiContext::WavetableKey& key) { openWavetableWindow(key); };
     ui_.closeWavetableWindow = [this](const ui::UiContext::WavetableKey& key) { closeWavetableWindow(key); };
     ui_.openHushWindow = [this](const ui::UiContext::WavetableKey& key) { openHushWindow(key); };
+    ui_.openKickstractTimeline = [this](const ui::UiContext::WavetableKey& key) { openKickstractTimeline(key); };
     auto launchQuant = [this] {
         return song_ ? engine::quantisationBeats(song_->globalQuantisation, song_->timeSigNumerator, song_->timeSigDenominator) : 0.0;
     };

@@ -1,4 +1,5 @@
 #pragma once
+#include "core/AutomationLaw.h"
 
 #include "core/Model.h"
 #include "midi/ControlTarget.h"
@@ -28,9 +29,15 @@ public:
         std::string name, eventType = "FloatEvent";
         double min = 0, max = 1, base = 0;
         bool stepped = false;
+        double position(double value) const { return model::automationPosition(law, value, min, max); }
+        double valueAt(double position) const { return model::automationValue(law, position, min, max); }
         std::string group;
         // UI-65: a hosted plugin's parameter. Not listed by the set yet when id < -1: the first edit gives it a target.
         int pluginDevice = -1, hostId = -1, parameterIndex = -1;
+        // UI-75: the control's override key (engine::automationOverrideKey; -1 none) and, for a native device parameter,
+        // its device slot (parameterIndex then indexes the processor's parameters).
+        int overrideKey = -1, nativeDevice = -1;
+        model::AutomationLaw law = model::AutomationLaw::Linear; // UI-75: where a value sits on the lane
     };
     // Everything the lanes of `track` can show, in chooser order: mixer, song tempo, then each device (every parameter of a
     // loaded plugin), then lanes of the set that no control owns.
@@ -60,6 +67,7 @@ private:
     Rect plot() const;
     float beatX(double beat) const;
     float valueY(double value, const Target& target) const;
+    double currentValue(const Target& target) const; // the control's value now (UI-75)
     void commit();
     void paintCell(const MouseEvent& e);
     Rect chooserBounds(bool device) const;

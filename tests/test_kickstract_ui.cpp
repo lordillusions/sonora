@@ -8,6 +8,7 @@
 #include "plugin/KickstractPlugin.h"
 #include "plugin/KickstractPluginEditor.h"
 #include "ui/views/KickstractFace.h"
+#include "ui/views/KickstractTimeline.h"
 #include "ui/views/MainLayout.h"
 #include "ui/widgets/Buttons.h"
 
@@ -157,6 +158,70 @@ TEST_CASE("kickstract plugin: host parameters, latency, state, window with real 
     REQUIRE(press("S", 1));
     CHECK(p.device().getParameter(K::bandParam(K::Mid, K::BandSolo)) > 0.5f);
     REQUIRE(press("S", 1));
+
+    // PLG-17e: the Timeline button opens the timeline window; it scrolls live, Freeze holds the picture.
+    auto* timelineButton = face.timelineButton();
+    REQUIRE(timelineButton != nullptr);
+    CHECK(timelineButton->visible);
+    {
+        const auto e = at(*timelineButton, timelineButton->width() / 2, timelineButton->height() / 2);
+        view.dispatchMouseDown(e);
+        view.dispatchMouseUp(e);
+    }
+    auto* timeline = window->timeline();
+    REQUIRE(timeline != nullptr);
+    auto* timelineRoot = dynamic_cast<ui::RootWidget*>(timeline->parent());
+    REQUIRE(timelineRoot != nullptr);
+    timelineRoot->setBounds({0, 0, ui::KickstractTimeline::kPreferredWidth, ui::KickstractTimeline::kPreferredHeight});
+    timelineRoot->layout();
+    play(view, mix(4), [&](juce::AudioBuffer<float>& block) {
+        p.processBlock(block, midi);
+        timelineRoot->tickTree();
+    });
+    CHECK(timeline->bins() > 600);
+    CHECK(! timeline->frozen());
+    timeline->setSpanSeconds(2.0);
+    CHECK(timeline->hitsShown() >= 3);
+    // Freeze with the button (real dispatch); more audio does not move the picture.
+    std::vector<ui::TextButton*> timelineButtons;
+    collect(*timeline, timelineButtons);
+    ui::TextButton* freeze = nullptr;
+    for (auto* b : timelineButtons) if (b->label() == "Freeze") freeze = b;
+    REQUIRE(freeze != nullptr);
+    {
+        const auto e = at(*freeze, freeze->width() / 2, freeze->height() / 2);
+        timelineRoot->dispatchMouseDown(e);
+        timelineRoot->dispatchMouseUp(e);
+    }
+    CHECK(timeline->frozen());
+    const int frozenBins = timeline->bins();
+    const auto lastBefore = p.device().timelineWritten();
+    play(view, mix(1), [&](juce::AudioBuffer<float>& block) {
+        p.processBlock(block, midi);
+        timelineRoot->tickTree();
+    });
+    CHECK(p.device().timelineWritten() > lastBefore); // the device kept running
+    CHECK(timeline->bins() == frozenBins);
+    CHECK(timeline->offsetBins() == 0);
+    // Drag right: back in time. The wheel zooms around the pointer.
+    const auto lane = timeline->laneArea(1);
+    timelineRoot->dispatchMouseDown(at(*timeline, lane.x + lane.w * 0.5f, lane.centreY()));
+    timelineRoot->dispatchMouseDrag(at(*timeline, lane.x + lane.w * 0.75f, lane.centreY()));
+    timelineRoot->dispatchMouseUp(at(*timeline, lane.x + lane.w * 0.75f, lane.centreY()));
+    CHECK(timeline->offsetBins() > 150);
+    const double span = timeline->spanSeconds();
+    auto wheel = at(*timeline, lane.x + lane.w * 0.5f, lane.centreY());
+    wheel.wheelDeltaY = 0.5f;
+    timelineRoot->dispatchMouseWheel(wheel);
+    CHECK(timeline->spanSeconds() < span * 0.7);
+    timeline->setSpanSeconds(2.0);
+    timeline->setFrozen(false);
+    timeline->setFrozen(true); // newest 2 s, frozen, for the picture
+    const auto timelinePng = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_kickstract_timeline.png");
+    CHECK(gfx::renderToPng(*timelineRoot, (int) ui::KickstractTimeline::kPreferredWidth, (int) ui::KickstractTimeline::kPreferredHeight,
+                           2.0f, timelinePng.getFullPathName().toStdString()));
+    window->closeTimeline();
+    CHECK(window->timeline() == nullptr);
 
     play(view, mix(2), [&](juce::AudioBuffer<float>& block) { p.processBlock(block, midi); });
     const auto png = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_kickstract_plugin.png");

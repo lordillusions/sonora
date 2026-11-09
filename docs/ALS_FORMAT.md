@@ -425,6 +425,12 @@ remain opaque and preserved; the curve law is independently implemented and not 
 A frozen track retains all original clips, devices and automation. Optional `SonoraFreeze Version="1"` contains
 `Render Scene="-1"` for Arrangement and numbered Session renders, each holding an authored AudioClip with standard
 SampleRef/FileRef/warp/loop/envelope data. Readers without this extension still see the original editable track.
+Since ALS-16b (0.1.27) the same renders are also written the reference's way, so it opens the track frozen: `Freeze=true`,
+`PostProcessFreezeClips=2` (2 on every track the reference froze in ~400 real-world sets, 0 elsewhere; with 0 it ignores the
+flag), Session renders in `DeviceChain/FreezeSequencer/ClipSlotList` (one `ClipSlot` per scene on MIDI/audio tracks — never
+touch Main's `FreezeSequencer/AudioSequencer` or a return's empty list: "Unknown class 'ClipSlotList'"), Arrangement renders
+in `FreezeSequencer/Sample/ArrangerAutomation/Events`. The reference drops `<SonoraFreeze>` when it saves; the FreezeSequencer
+then carries the freeze back to Sonora (`frozenInFile`).
 Sonora substitutes cached audio/no devices in the engine, retains live mixer/send automation, and falls back to the
 original when a cache file cannot be found. Save As/Collect include cached sample references. Unfreeze removes the
 extension; history retains generated files for subsequent redo. Bounce may replace MidiTrack/GroupTrack by AudioTrack

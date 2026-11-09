@@ -242,6 +242,10 @@ private:
     void closeHushWindows();
     void syncHushWindows();
     void renameHushWindows(model::TrackId track, int oldId, int newId);
+    void openKickstractTimeline(const ui::UiContext::WavetableKey&); // PLG-17e (AppKickstractWindow.cpp)
+    void closeKickstractTimelines();
+    void syncKickstractTimelines();
+    void renameKickstractTimelines(model::TrackId track, int oldId, int newId);
     void openInsertedWavetable(model::TrackId track, int deviceId, int childIdFrom);
     std::map<model::TrackId, std::vector<int>> deviceIdsBeforeEdit_; // ui::DeviceIdsByTrack
     void refreshPluginNames();
@@ -359,6 +363,7 @@ private:
     juce::OwnedArray<juce::DocumentWindow> pluginWindows_;
     juce::OwnedArray<juce::DocumentWindow> wavetableWindows_; // UI-27, survive device edits (unlike pluginWindows_)
     juce::OwnedArray<juce::DocumentWindow> hushWindows_;      // PLG-14g, like wavetableWindows_
+    juce::OwnedArray<juce::DocumentWindow> kickstractTimelines_; // PLG-17e, like hushWindows_
     juce::ThreadPool pool_{juce::ThreadPoolOptions{}.withNumberOfThreads(2)};
     std::unique_ptr<juce::PropertiesFile> settings_;
     std::atomic<bool> scanning_{false};

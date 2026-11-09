@@ -1,9 +1,11 @@
 #include "TestFramework.h"
+#include "core/AutomationLaw.h"
 #include "core/Edit.h"
 
 #include "engine/AudioEngine.h"
 #include "engine/AudioFileFormats.h"
 #include "devices/RackProcessor.h"
+#include "devices/native/AutoFilter.h"
 #include "devices/native/Utility.h"
 #include "engine/AudioClipPlayer.h"
 #include "engine/ClipPlayers.h"
@@ -56,6 +58,15 @@ std::vector<Ev> collect(const juce::MidiBuffer& b)
     return out;
 }
 } // namespace
+
+// UI-75: volume lanes ramp on the fader's curve (as the reference draws and plays them): the value a fraction `f` of the
+// way from gain `a` to gain `b`.
+static double faderRamp(double a, double b, double f)
+{
+    using namespace sonora::model;
+    const double pa = automationPosition(AutomationLaw::Fader, a, 0, 1), pb = automationPosition(AutomationLaw::Fader, b, 0, 1);
+    return automationValue(AutomationLaw::Fader, pa + (pb - pa) * f, 0, 1);
+}
 
 TEST_CASE("midi clip: note on/off land on the right samples")
 {
@@ -459,7 +470,7 @@ TEST_CASE("automation: fixture envelopes bind to mixer and device targets")
     CHECK(! eq->isBypassed());
 
     engine::applyAutomation(node.automation, ctl, 6.0);
-    CHECK_NEAR(ctl.volume.load(), 0.75, 1e-6);
+    CHECK_NEAR(ctl.volume.load(), faderRamp(1.0, 0.5, 0.5), 1e-5); // 1.0 at 4, 0.5 at 8, on the fader's curve
     CHECK(eq->isBypassed()); // BoolEvent false at beat 2
 
     engine::applyAutomation(node.automation, ctl, 20.0);
@@ -496,7 +507,7 @@ TEST_CASE("automation: audio callback applies it while playing, not while stoppe
     engine.transport().setPosition(6.0);
     engine.transport().play();
     engine.renderBlock(out, 2, 256);
-    CHECK_NEAR((*controls)[0].volume.load(), 0.75, 1e-3);
+    CHECK_NEAR((*controls)[0].volume.load(), faderRamp(1.0, 0.5, 0.5), 1e-3);
 }
 
 TEST_CASE("pan law: centre is unity, far channel attenuates linearly, clamps")
@@ -553,7 +564,31 @@ TEST_CASE("solo: nested groups, parent groups stay audible, soloing a group play
     CHECK(audible(3, true));
     CHECK(! audible(1, true));
 
+    // UI-73: solo C (outside both groups): G1 and G2 are left out; their members feed them so the group meters show
+    // their level (grey), and the outermost left-out group is what goes silent.
     ctl[2].solo.store(false);
+    ctl[4].solo.store(true);
+    auto feeds = [&](size_t i) { return engine::feedsParentWhileSilenced(*g.graph, ctl, g.graph->nodes[i], true); };
+    CHECK(audible(4, true));
+    CHECK(! audible(0, true));
+    CHECK(! audible(2, true)); // groups no longer pass by default: no sends from a left-out group
+    CHECK(! audible(1, true));
+    CHECK(feeds(1));  // A into G1
+    CHECK(feeds(3));  // B into G2
+    CHECK(feeds(2));  // G2 into G1
+    CHECK(! feeds(0)); // G1 goes to main: silent
+    CHECK(! feeds(4));
+    ctl[3].solo.store(true); // and B too: G2 and G1 carry a soloed member and play; A stays out, silently
+    CHECK(audible(2, true));
+    CHECK(audible(0, true));
+    CHECK(! audible(1, true));
+    CHECK(! feeds(1)); // its parent G1 is heard: A must not reach it
+    ctl[3].solo.store(false);
+    ctl[1].active.store(false); // a switched-off member never feeds its group
+    CHECK(! feeds(1));
+    ctl[1].active.store(true);
+    ctl[4].solo.store(false);
+
     ctl[1].active.store(false); // deactivated track is silent even without solo
     CHECK(! audible(1, false));
 }
@@ -1639,10 +1674,11 @@ TEST_CASE("clip envelopes: follow their lane while the clip plays and restore th
     eng.transport().play();
     runBeats(2.0);                         // before the clip: the mixer value from the file
     CHECK_NEAR(ctl.volume.load(), 0.8, 1e-6);
+    const double top = sonora::model::faderGainToPosition(1.0f); // the ramp runs on the fader's positions (UI-75)
     runBeats(3.0);                         // beat ~5: a quarter into the envelope
-    CHECK_NEAR(ctl.volume.load(), 0.25, 0.03);
+    CHECK_NEAR(sonora::model::faderGainToPosition(ctl.volume.load()), 0.25 * top, 0.03);
     runBeats(2.0);                         // beat ~7: three quarters
-    CHECK_NEAR(ctl.volume.load(), 0.75, 0.03);
+    CHECK_NEAR(sonora::model::faderGainToPosition(ctl.volume.load()), 0.75 * top, 0.03);
     runBeats(2.0);                         // beat ~9: the clip is over, volume returns
     CHECK_NEAR(ctl.volume.load(), 0.8, 1e-6);
 }
@@ -2997,7 +3033,7 @@ TEST_CASE("automation override: a control moved by hand while its lane plays is 
     engine.transport().setPosition(6.0);
     engine.transport().play();
     engine.renderBlock(out, 2, 256);
-    CHECK_NEAR((*controls)[0].volume.load(), 0.75, 1e-3); // the lane drives the volume (1.0 at beat 4, 0.5 at 8)
+    CHECK_NEAR((*controls)[0].volume.load(), faderRamp(1.0, 0.5, 0.5), 1e-3); // the lane drives the volume (1.0 at beat 4, 0.5 at 8)
     engine.renderBlock(out, 2, 256);
     CHECK(! engine::automationOverridden(*graph));
 
@@ -3029,7 +3065,7 @@ TEST_CASE("automation override: a control moved by hand while its lane plays is 
     engine.transport().setPosition(6.0);
     engine.transport().play();
     engine.renderBlock(out, 2, 256);
-    CHECK_NEAR((*controls)[0].volume.load(), 0.75, 1e-3);
+    CHECK_NEAR((*controls)[0].volume.load(), faderRamp(1.0, 0.5, 0.5), 1e-3);
     CHECK(! engine::automationOverridden(*graph));
 }
 
@@ -3373,4 +3409,82 @@ TEST_CASE("solo: a soloed track plays even with its activator off; muted tracks 
     const auto [outPeak, outMeter] = render(true, false, true); // left out by another solo
     CHECK(outMeter > 0.001f);
     (void) outPeak; // the soloed return carries the track's send, so the Main output is not checked here
+}
+
+TEST_CASE("automation laws: lanes ramp on the control's position like the reference (UI-75)")
+{
+    using sonora::model::AutomationLaw;
+    model::AutomationEnvelope env;
+    env.points = {{0.0, 100.0}, {4.0, 10000.0}};
+    devices::AutoFilter2 filter;
+    int frequency = -1;
+    for (size_t i = 0; i < filter.parameters().size(); ++i)
+        if (filter.parameters()[i].unit == "Hz" && filter.parameters()[i].minValue >= 20) frequency = (int) i;
+    REQUIRE(frequency >= 0);
+    // A frequency halfway through a ramp from 100 Hz to 10 kHz is 1 kHz (log scale), not 5050 Hz.
+    const auto lane = engine::automationLaneFor(env, engine::AutomationBinding::Kind::DeviceParam, &filter, frequency);
+    CHECK_NEAR(lane.valueAt(2.0), 1000.0, 1.0);
+    CHECK_NEAR(lane.valueAt(0.0), 100.0, 1e-9);
+    CHECK_NEAR(lane.valueAt(4.0), 10000.0, 1e-6);
+    // Volume: on the fader's curve; the end points stay exact.
+    env.points = {{0.0, 1.0}, {4.0, 0.0}};
+    const auto volume = engine::automationLaneFor(env, engine::AutomationBinding::Kind::Volume, nullptr, 0);
+    CHECK_NEAR(volume.valueAt(0.0), 1.0, 1e-5);
+    CHECK_NEAR(model::faderGainToPosition((float) volume.valueAt(2.0)), 0.5 * model::faderGainToPosition(1.0f), 1e-4);
+    CHECK(volume.valueAt(4.0) < 1e-4);
+    // Pan and plug-in parameters stay linear.
+    env.points = {{0.0, -1.0}, {4.0, 1.0}};
+    CHECK_NEAR(engine::automationLaneFor(env, engine::AutomationBinding::Kind::Pan, nullptr, 0).valueAt(1.0), -0.5, 1e-9);
+    CHECK(sonora::model::automationLawFor("Hz", 20, 20000, false) == AutomationLaw::Log);
+    CHECK(sonora::model::automationLawFor("Hz", 0, 20000, false) == AutomationLaw::Linear);
+    CHECK(sonora::model::automationLawFor("dB", -12, 12, false) == AutomationLaw::Linear);
+    CHECK(sonora::model::automationLawFor("ms", 1, 500, true) == AutomationLaw::Linear); // stepped
+}
+
+TEST_CASE("solo: a group left out by another solo keeps a moving meter and stays silent (UI-73)")
+{
+    juce::ScopedJuceInitialiser_GUI juce;
+    plugins::PluginHost host;
+    midi::MidiManager midi;
+    auto r = io::loadAls(juce::File(SONORA_TEST_FIXTURES).getChildFile("minimal_set.xml"));
+    REQUIRE(r);
+    auto song = *r.song;
+    song.tracks[0].automation.clear();
+    for (auto& send : song.tracks[0].mixer.sends) send = 0; // only the group path carries the track
+    model::Track group;
+    group.kind = model::TrackKind::Group;
+    group.id = 9001;
+    group.name = "Group";
+    song.tracks[0].groupId = group.id;
+    model::Track other;
+    other.kind = model::TrackKind::Audio;
+    other.id = 9002;
+    other.name = "Other";
+    song.tracks.insert(song.tracks.begin(), group);
+    song.tracks.push_back(other);
+    engine::AudioEngine engine(host, midi);
+    engine.loadSong(song);
+    auto controls = engine.controls();
+    const auto indexOf = [&](int id) {
+        for (size_t i = 0; i < song.tracks.size(); ++i) if (song.tracks[i].id == id) return i;
+        return (size_t) 0;
+    };
+    const size_t groupIndex = indexOf(9001), memberIndex = indexOf(song.tracks[1].id), otherIndex = indexOf(9002);
+    REQUIRE(song.tracks[memberIndex].groupId == 9001);
+    (*controls)[otherIndex].solo.store(true); // the empty track's solo leaves the group and its member out
+    engine.transport().setPosition(0.0);
+    engine.transport().play();
+    std::vector<float> l(512), rr(512);
+    float* out[2] = {l.data(), rr.data()};
+    float peak = 0, groupMeter = 0, memberMeter = 0;
+    for (int block = 0; block < 400; ++block)
+    {
+        engine.renderBlock(out, 2, 512);
+        for (int i = 0; i < 512; ++i) peak = std::max({peak, std::abs(l[(size_t) i]), std::abs(rr[(size_t) i])});
+        groupMeter = std::max({groupMeter, (*controls)[groupIndex].peakL.load(), (*controls)[groupIndex].peakR.load()});
+        memberMeter = std::max({memberMeter, (*controls)[memberIndex].peakL.load(), (*controls)[memberIndex].peakR.load()});
+    }
+    CHECK(memberMeter > 0.001f);
+    CHECK(groupMeter > 0.001f); // was 0: the member's signal never reached the group
+    CHECK(peak == 0.0f);         // and nothing reaches Main
 }

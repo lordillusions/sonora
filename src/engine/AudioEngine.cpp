@@ -988,7 +988,7 @@ void AudioEngine::renderBlock(float* const* outputs, int numOutputs, int numSamp
             else
                 node.outDelay.pushSilence(numSamples);
         }
-        else if (audible && node.outputEnabled)
+        else if ((audible || feedsParentWhileSilenced(*g, ctl, node, anySolo)) && node.outputEnabled)
             node.outDelay.addDelayed(node.buffer, target, numSamples, 1.0f);
         else
             node.outDelay.pushSilence(numSamples);

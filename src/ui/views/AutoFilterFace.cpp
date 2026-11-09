@@ -7,6 +7,7 @@
 #include "ui/views/ReferenceFace.h"
 
 #include "devices/native/AutoFilter.h"
+#include "dsp/DeviceSpectrum.h"
 #include "dsp/Dsp.h"
 #include "ui/Controls.h"
 #include "ui/widgets/Buttons.h"
@@ -409,6 +410,22 @@ private:
         const auto r = graphBounds();
         c.save();
         c.clipRect(r.sk());
+        // The output's spectrum behind the curve, -90..0 dBFS over the graph's height (as EQ Eight and Channel EQ).
+        SkPathBuilder spectrum;
+        spectrum.moveTo(r.x, r.bottom());
+        const auto& values = spectrum_.curve();
+        for (size_t i = 0; i < values.size(); ++i)
+        {
+            const float level = std::clamp((values[i] - dsp::SpectrumAnalyzer::kFloorDb) / -dsp::SpectrumAnalyzer::kFloorDb, 0.0f, 1.0f);
+            const float hz = dsp::SpectrumAnalyzer::curveFrequency((int) i);
+            spectrum.lineTo(at(kKiloX + kDecade * std::log10(hz / 1000.0f), 0, 0, 0).x, r.bottom() - r.h * level);
+        }
+        spectrum.lineTo(r.right(), r.bottom());
+        spectrum.close();
+        SkPaint shade;
+        shade.setAntiAlias(true);
+        shade.setColor(paint::withAlpha(scale, 70));
+        c.drawPath(spectrum.detach(), shade);
         SkPathBuilder curve;
         for (int i = 0; i <= (int) r.w; ++i)
         {
@@ -430,7 +447,26 @@ private:
         c.restore();
     }
 
+public:
+    void tick() override
+    {
+        ReferenceFace::tick();
+        // Only while on screen (a folded or scrolled-away device stops asking the audio thread for data).
+        auto clip = boundsInRoot().sk();
+        for (auto* widget = this->parent(); widget != nullptr; widget = widget->parent())
+            if (! widget->visible || ! clip.intersect(widget->boundsInRoot().sk())) { lastTick_ = 0; return; }
+        const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        if (lastTick_ > 0 && now - lastTick_ < 0.030) return;
+        const bool changed = spectrum_.update(filter_->displayTap(), lastTick_ > 0 ? now - lastTick_ : 1.0, true);
+        lastTick_ = now;
+        if (changed) repaint();
+    }
+    const dsp::DeviceSpectrum& spectrum() const { return spectrum_; }
+
+private:
     A* filter_;
+    dsp::DeviceSpectrum spectrum_;
+    double lastTick_ = 0;
     Section section_ = Section::Lfo;
     std::vector<Widget*> lfoWidgets_, envelopeWidgets_;
     bool dragging_ = false;

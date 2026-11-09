@@ -9,7 +9,7 @@
 #include <memory>
 
 namespace sonora::gfx { class SkiaCanvasComponent; }
-namespace sonora::ui { class KickstractFace; }
+namespace sonora::ui { class KickstractFace; class KickstractTimeline; }
 
 namespace sonora::plugin
 {
@@ -39,12 +39,19 @@ public:
     ~KickstractPluginEditor() override;
     void resized() override;
     KickstractView& view() { return view_; }
+    // PLG-17e: the timeline (Input / Kick / Removed over time, Freeze) in its own window; null while closed.
+    void openTimeline();
+    void closeTimeline();
+    ui::KickstractTimeline* timeline() const;
 
 private:
+    class TimelineWindow;
     ui::UiContext& connect();
 
+    KickstractPlugin& plugin_;
     ui::UiContext context_;
     KickstractView view_;
     std::unique_ptr<gfx::SkiaCanvasComponent> canvas_;
+    std::unique_ptr<TimelineWindow> timeline_;
 };
 } // namespace sonora::plugin

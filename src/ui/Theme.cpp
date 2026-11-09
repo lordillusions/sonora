@@ -86,6 +86,7 @@ Theme::Theme()
         {"GridLabel", 0x1e222d},
         {"WaveformColor", 0x070b14},
         {"AutomationColor", 0xea3c3c},
+        {"AutomationDisabled", 0x595959}, // UI-75: overridden automation (the reference's Default Light Cool High)
         {"Poti", 0x090c16},
         {"PotiNeedle", 0x090c16},
         {"DeactivatedPoti", 0x575b67},

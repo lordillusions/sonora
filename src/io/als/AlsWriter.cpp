@@ -1085,6 +1085,72 @@ void patchRoutingTarget(XmlElement* routing, const std::string& target)
         if (group || target == "AudioOut/Main" || target == "MidiOut/None") lower->setAttribute("Value", "");
 }
 
+// The FreezeSequencer's ClipSlotList with one slot per scene (empty slots added like the reference writes them).
+std::vector<XmlElement*> matchFreezeSlots(XmlElement& sequencer, size_t scenes)
+{
+    auto* list = child(&sequencer, "ClipSlotList");
+    if (! list) list = sequencer.createNewChildElement("ClipSlotList");
+    std::vector<XmlElement*> slots;
+    for (auto* slot : list->getChildWithTagNameIterator("ClipSlot")) slots.push_back(slot);
+    while (slots.size() > scenes)
+    {
+        list->removeChildElement(slots.back(), true);
+        slots.pop_back();
+    }
+    while (slots.size() < scenes)
+    {
+        auto* slot = list->createNewChildElement("ClipSlot");
+        slot->setAttribute("Id", (int) slots.size());
+        slot->createNewChildElement("LomId")->setAttribute("Value", 0);
+        slot->createNewChildElement("ClipSlot")->createNewChildElement("Value");
+        slot->createNewChildElement("HasStop")->setAttribute("Value", "true");
+        slots.push_back(slot);
+    }
+    return slots;
+}
+
+// ALS-16b: a Sonora freeze into the reference's FreezeSequencer: Session renders in the scene's slot, Arrangement renders
+// under Sample/ArrangerAutomation/Events. False when a render has no clip XML (the track then stays unfrozen there).
+bool writeFreezeSequencer(XmlElement& sequencer, const model::Track& t)
+{
+    std::vector<std::unique_ptr<XmlElement>> arrangement;
+    for (const auto& clip : t.frozenArrangement)
+    {
+        auto audio = juce::XmlDocument::parse(juce::String(audioClipTemplate(clip)));
+        if (! audio) return false;
+        patchClip(audio.get(), clip);
+        audio->setAttribute("Id", (int) arrangement.size());
+        arrangement.push_back(std::move(audio));
+    }
+    const auto slots = matchFreezeSlots(sequencer, t.slots.size());
+    for (size_t i = 0; i < slots.size(); ++i)
+    {
+        auto* value = at(slots[i], "ClipSlot/Value");
+        if (! value) continue;
+        value->deleteAllChildElements();
+        if (i < t.frozenSlots.size() && t.frozenSlots[i].clip)
+            if (auto audio = juce::XmlDocument::parse(juce::String(audioClipTemplate(*t.frozenSlots[i].clip))))
+            {
+                patchClip(audio.get(), *t.frozenSlots[i].clip);
+                audio->setAttribute("Id", (int) i);
+                value->addChildElement(audio.release());
+            }
+    }
+    auto* sample = child(&sequencer, "Sample");
+    if (! sample) sample = sequencer.createNewChildElement("Sample");
+    auto* automation = child(sample, "ArrangerAutomation");
+    if (! automation) automation = sample->createNewChildElement("ArrangerAutomation");
+    auto* events = child(automation, "Events");
+    if (! events)
+    {
+        events = new XmlElement("Events");
+        automation->insertChildElement(events, 0); // before AutomationTransformViewState, as the reference orders them
+    }
+    events->deleteAllChildElements();
+    for (auto& audio : arrangement) events->addChildElement(audio.release());
+    return true;
+}
+
 void patchTrackMixerAndDevices(XmlElement* x, const model::Track& t)
 {
     if (auto* color = child(x, "Color"); color && color->getIntAttribute("Value") != t.colorIndex)
@@ -1123,13 +1189,24 @@ void patchTrackMixerAndDevices(XmlElement* x, const model::Track& t)
         if (t.deactivated) sonora->setAttribute("Deactivated", "true");
     }
     if (auto* oldFreeze = child(x, "SonoraFreeze")) x->removeChildElement(oldFreeze, true);
-    // The reference's freeze stays as the file has it (renders in FreezeSequencer); any other state reads as unfrozen
-    // there (Sonora's freeze lives in <SonoraFreeze>, the reference keeps playing the original track).
-    if (auto* liveFreeze = child(x, "Freeze"))
+    // ALS-16b: a freeze made in Sonora is written the reference's way too (Freeze = true, the renders in FreezeSequencer),
+    // so the reference opens the track frozen; the reference's own freeze stays as the file has it. The FreezeSequencer's
+    // slot list always matches the scenes (the reference refuses a "Slot count mismatch").
+    bool frozenForReference = t.frozen && t.frozenInFile;
+    // Only MIDI and audio tracks: Main keeps FreezeSequencer/AudioSequencer, returns an empty sequencer (ALS_FORMAT).
+    if (auto* sequencer = x->hasTagName("MidiTrack") || x->hasTagName("AudioTrack") ? at(x, "DeviceChain/FreezeSequencer") : nullptr;
+        sequencer != nullptr && child(sequencer, "ClipSlotList") != nullptr)
     {
-        const bool keep = t.frozen && t.frozenInFile;
-        if (liveFreeze->getStringAttribute("Value") != (keep ? "true" : "false")) liveFreeze->setAttribute("Value", keep ? "true" : "false");
+        if (t.frozen && ! t.frozenInFile) frozenForReference = writeFreezeSequencer(*sequencer, t);
+        else matchFreezeSlots(*sequencer, t.slots.size());
     }
+    if (auto* liveFreeze = child(x, "Freeze"))
+        if (liveFreeze->getStringAttribute("Value") != (frozenForReference ? "true" : "false"))
+            liveFreeze->setAttribute("Value", frozenForReference ? "true" : "false");
+    // Every track the reference froze in ~400 real-world sets has PostProcessFreezeClips 2 (0 on the others); with 0 the
+    // reference ignores Freeze = true and plays the original track.
+    if (t.frozen && ! t.frozenInFile && frozenForReference)
+        if (auto* post = child(x, "PostProcessFreezeClips")) post->setAttribute("Value", 2);
     if (t.frozen && ! t.frozenInFile)
     {
         auto* freeze = x->createNewChildElement("SonoraFreeze");

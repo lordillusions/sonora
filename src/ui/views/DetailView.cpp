@@ -258,6 +258,11 @@ public:
         if (auto* kick = dynamic_cast<devices::Kickstract*>(proc_)) // PLG-17
         {
             kickstract_ = add<KickstractFace>(kick, [this](Widget* widget, int parameter) { tag(widget, parameter); });
+            kickstract_->onOpenTimeline = [this] { // the context is read on click: this panel is not attached yet
+                    auto& x = ctx();
+                    if (const auto key = x.wavetableKey(trackIndex_, deviceIndex_, chain_, child_); key && x.openKickstractTimeline)
+                        x.openKickstractTimeline(*key);
+                };
             return;
         }
         if (auto* hush = dynamic_cast<devices::HushDevice*>(proc_))

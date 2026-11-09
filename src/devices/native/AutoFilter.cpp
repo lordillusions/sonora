@@ -158,11 +158,13 @@ void AutoFilter2::prepare(double sampleRate, int)
     sampleRate_ = sampleRate;
     for (auto& c : comb_)
         c.prepare((int) (0.06 * sampleRate) + 8);
+    displayTap_.prepare(sampleRate);
     reset();
 }
 
 void AutoFilter2::reset()
 {
+    displayTap_.reset();
     for (auto& ch : state_)
         for (auto& kind : ch)
             for (auto& st : kind)
@@ -279,6 +281,7 @@ void AutoFilter2::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
             d[c][i] = x + (y - x) * wet;
         }
     }
+    displayTap_.push(d[0], audio.getNumChannels() > 1 ? d[1] : d[0], n);
 }
 
 } // namespace sonora::devices

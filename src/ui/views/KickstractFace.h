@@ -47,6 +47,9 @@ public:
     int handleAt(float x, float y) const;
     float xForMs(float ms) const; // kick display time axis
     const devices::Kickstract::KickShape& kick() const { return kick_; }
+    // PLG-17e: opens the timeline window (Input / Kick / Removed over time). The button shows only when this is set.
+    std::function<void()> onOpenTimeline;
+    TextButton* timelineButton() const { return timeline_; }
 
 private:
     struct Column { float x = 0, w = 0; };
@@ -68,6 +71,7 @@ private:
     Knob* bandKnobs_[devices::Kickstract::kBands][3]{};
     TextButton *bandOn_[devices::Kickstract::kBands]{}, *bandSolo_[devices::Kickstract::kBands]{};
     TextButton* listen_[3]{};
+    TextButton* timeline_ = nullptr;
 
     dsp::DeviceSpectrum inSpectrum_, outSpectrum_;
     devices::Kickstract::KickShape kick_;

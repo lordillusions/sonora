@@ -319,22 +319,25 @@ juce::XmlElement* firstTrackOf(juce::XmlElement& root)
 TEST_CASE("media edits: the reference's own freeze (Freeze + FreezeSequencer) plays its renders, survives save and unfreezes")
 {
     MediaRig rig;
-    // A Sonora freeze written once gives an authored AudioClip; moved into FreezeSequencer it is the reference's layout.
+    // ALS-16b: a Sonora freeze is written the reference's way (Freeze = true, the render in FreezeSequencer), plus the
+    // Sonora extension. The reference drops unknown elements when it saves: without <SonoraFreeze> it still reads frozen.
     const auto clip = rig.audio(4, 1);
     auto& source = rig.song->tracks[0]; source.frozen = true; source.frozenArrangement = {clip};
     const auto sonoraFrozen = rig.folder.getChildFile("SonoraFrozen.als"); REQUIRE(io::saveAls(*rig.song, sonoraFrozen).ok);
     std::string error; auto dom = io::readAlsDom(sonoraFrozen, error); REQUIRE(dom);
     auto* track = firstTrackOf(*dom); REQUIRE(track);
-    auto* sonora = track->getChildByName("SonoraFreeze"); REQUIRE(sonora);
-    auto* render = sonora->getChildByName("Render"); REQUIRE(render);
-    auto* audio = new juce::XmlElement(*render->getChildByName("AudioClip"));
-    track->removeChildElement(sonora, true);
-    auto* freezeFlag = track->getChildByName("Freeze"); REQUIRE(freezeFlag); freezeFlag->setAttribute("Value", "true");
+    CHECK(track->getChildByName("Freeze")->getStringAttribute("Value") == "true");
+    if (auto* post = track->getChildByName("PostProcessFreezeClips")) CHECK(post->getIntAttribute("Value") == 2);
     auto* sequencer = track->getChildByName("DeviceChain")->getChildByName("FreezeSequencer"); REQUIRE(sequencer);
-    auto* sample = sequencer->getChildByName("Sample"); if (! sample) sample = sequencer->createNewChildElement("Sample");
-    auto* arranger = sample->getChildByName("ArrangerAutomation"); if (! arranger) arranger = sample->createNewChildElement("ArrangerAutomation");
-    auto* events = arranger->getChildByName("Events"); if (! events) events = arranger->createNewChildElement("Events");
-    events->addChildElement(audio);
+    auto* events = sequencer->getChildByName("Sample")->getChildByName("ArrangerAutomation")->getChildByName("Events");
+    REQUIRE(events); CHECK(events->getNumChildElements() == 1);
+    REQUIRE(events->getChildByName("AudioClip") != nullptr);
+    CHECK(events->getChildByName("AudioClip")->getChildByName("SampleRef") != nullptr);
+    int slots = 0;
+    for (auto* slot : sequencer->getChildByName("ClipSlotList")->getChildWithTagNameIterator("ClipSlot")) { (void) slot; ++slots; }
+    CHECK(slots == (int) rig.song->tracks[0].slots.size()); // one per scene
+    auto* sonora = track->getChildByName("SonoraFreeze"); REQUIRE(sonora);
+    track->removeChildElement(sonora, true);
     const auto liveFrozen = rig.folder.getChildFile("LiveFrozen.als"); REQUIRE(io::writeAlsDom(*dom, liveFrozen, error));
 
     auto loaded = io::loadAls(liveFrozen); REQUIRE(loaded);
@@ -362,4 +365,47 @@ TEST_CASE("media edits: the reference's own freeze (Freeze + FreezeSequencer) pl
     CHECK(! plain.song->tracks[0].frozen);
     auto plainDom = io::readAlsDom(unfrozen, error); REQUIRE(plainDom);
     CHECK(firstTrackOf(*plainDom)->getChildByName("Freeze")->getStringAttribute("Value") == "false");
+}
+
+TEST_CASE("media edits: a Sonora freeze review set for the reference (ALS-16b; written when SONORA_FREEZE_PROBE is set)")
+{
+    const char* out = std::getenv("SONORA_FREEZE_PROBE");
+    if (out == nullptr) return; // a disposable set for opening in the reference by hand: `open -b com.ableton.live ...`
+    juce::ScopedJuceInitialiser_GUI gui;
+    const juce::File folder(out);
+    folder.deleteRecursively();
+    REQUIRE(folder.createDirectory());
+    io::NewSetOptions options; options.midiTracks = 1; options.audioTracks = 1; options.returnTracks = 0;
+    auto root = io::createNewSetDom(options); std::string error;
+    const auto set = folder.getChildFile("Freeze Probe.als");
+    REQUIRE(io::writeAlsDom(*root, set, error));
+    auto loaded = io::loadAls(set); REQUIRE(loaded); auto& song = *loaded.song;
+    juce::AudioBuffer<float> buffer(2, 4 * 44100);
+    for (int i = 0; i < buffer.getNumSamples(); ++i)
+        for (int ch = 0; ch < 2; ++ch) buffer.setSample(ch, i, (float) (0.3 * std::sin(2 * std::numbers::pi * 110 * i / 44100)));
+    const auto freezeDir = folder.getChildFile("Samples/Processed/Freeze/probe");
+    REQUIRE(freezeDir.createDirectory());
+    const auto arrangement = freezeDir.getChildFile("Arrangement.wav"), scene = freezeDir.getChildFile("Scene 1.wav");
+    REQUIRE(engine::writeCroppedWav(buffer, 44100, 0, buffer.getNumSamples(), arrangement).empty());
+    REQUIRE(engine::writeCroppedWav(buffer, 44100, 0, buffer.getNumSamples(), scene).empty());
+    size_t audioTrack = 0;
+    for (size_t i = 0; i < song.tracks.size(); ++i) if (song.tracks[i].kind == model::TrackKind::Audio) audioTrack = i;
+    auto& track = song.tracks[audioTrack];
+    REQUIRE(! track.slots.empty());
+    auto render = io::makeSampleClip(song, {arrangement.getFullPathName().toStdString(), 44100, buffer.getNumSamples()}, 8, 0);
+    // The original material the freeze rendered: an Arrangement clip and a Session clip (the reference draws them frozen).
+    const auto original = folder.getChildFile("Samples/Original.wav");
+    REQUIRE(original.getParentDirectory().createDirectory());
+    REQUIRE(engine::writeCroppedWav(buffer, 44100, 0, buffer.getNumSamples(), original).empty());
+    auto source = io::makeSampleClip(song, {original.getFullPathName().toStdString(), 44100, buffer.getNumSamples()}, 8, 0);
+    source.sourceXml = std::make_shared<const std::string>(io::audioClipTemplate(source));
+    model::insertClip((int) audioTrack, source, "Audio").apply(song);
+    track.slots[0].clip = source;
+    track.frozen = true;
+    track.frozenArrangement = {render};
+    track.frozenSlots.resize(track.slots.size());
+    track.frozenSlots[0].clip = io::makeSampleClip(song, {scene.getFullPathName().toStdString(), 44100, buffer.getNumSamples()}, 8, 0);
+    REQUIRE(io::saveAls(song, set).ok);
+    auto reloaded = io::loadAls(set); REQUIRE(reloaded);
+    CHECK(reloaded.song->tracks[audioTrack].frozen);
 }

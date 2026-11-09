@@ -87,16 +87,19 @@ void AppController::openHushWindow(const ui::UiContext::WavetableKey& key)
 void AppController::closeHushWindows()
 {
     hushWindows_.clear();
+    closeKickstractTimelines(); // same lifetime (PLG-17e)
 }
 
 void AppController::syncHushWindows()
 {
     for (auto* window : hushWindows_)
         if (window->isVisible()) static_cast<HushWindow*>(window)->sync();
+    syncKickstractTimelines();
 }
 
 void AppController::renameHushWindows(model::TrackId track, int oldId, int newId)
 {
+    renameKickstractTimelines(track, oldId, newId);
     for (auto* window : hushWindows_)
         if (auto* w = static_cast<HushWindow*>(window); w->key().trackId == track && w->key().deviceId == oldId)
         {

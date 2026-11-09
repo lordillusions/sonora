@@ -1,4 +1,5 @@
 #include "TestFramework.h"
+#include "devices/native/AutoFilter.h"
 #include "devices/native/EqEight.h"
 #include "dsp/DeviceSpectrum.h"
 
@@ -132,4 +133,43 @@ TEST_CASE("EQ display: observing the device leaves its processed audio unchanged
             display.update(observed.displayTap(), 1.0 / 30);
         }
     }
+}
+
+TEST_CASE("Auto Filter display: the output spectrum shows what the filter lets through")
+{
+    using A = devices::AutoFilter2;
+    A filter; filter.prepare(48000, 4096);
+    filter.setParameter(A::FilterType, 0); // low-pass
+    filter.setParameter(A::Frequency, 500);
+    filter.setParameter(A::Resonance, 0);
+    filter.setParameter(A::LfoAmount, 0);
+    filter.setParameter(A::EnvAmount, 0);
+    dsp::DeviceSpectrum display; display.update(filter.displayTap(), 1.0 / 30);
+    juce::AudioBuffer<float> audio(2, 4096); juce::MidiBuffer midi;
+    auto at = [&](double hz) {
+        float best = -200;
+        for (int i = 0; i < (int) display.curve().size(); ++i)
+            if (std::abs(std::log2(dsp::SpectrumAnalyzer::curveFrequency(i) / hz)) < 0.1) best = std::max(best, display.curve()[(size_t) i]);
+        return best;
+    };
+    for (int frame = 0; frame < 20; ++frame)
+    {
+        for (int i = 0; i < audio.getNumSamples(); ++i)
+        {
+            const float v = 0.3f * (float) std::sin(6.283185307179586 * 200 * i / 48000.0)
+                            + 0.3f * (float) std::sin(6.283185307179586 * 5000 * i / 48000.0);
+            audio.setSample(0, i, v); audio.setSample(1, i, v);
+        }
+        filter.process(audio, midi);
+        display.update(filter.displayTap(), 1.0 / 30);
+    }
+    CHECK(at(200) > -25);
+    CHECK(at(5000) < at(200) - 30); // 24 dB/oct over ~3.3 octaves
+    filter.setBypassed(true);
+    for (int frame = 0; frame < 100; ++frame)
+    {
+        filter.process(audio, midi);
+        display.update(filter.displayTap(), 1.0 / 30);
+    }
+    CHECK(at(200) < -80); // decays while bypassed
 }

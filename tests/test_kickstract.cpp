@@ -244,6 +244,39 @@ TEST_CASE("kickstract: the last kick is captured for the face")
     CHECK(! k.takeKick(shape, shape.serial)); // nothing new since
 }
 
+TEST_CASE("kickstract: the timeline keeps input, kick and removed with a mark per hit")
+{
+    const auto mix = makeMix(4); // 4 kicks every 500 ms, then 250 ms of hats and pad
+    auto kOwner = prepared();
+    auto& k = *kOwner;
+    k.setParameter(K::Punch, 0.0f);
+    CHECK(k.timelineWritten() == 0u);
+    run(k, mix.all);
+    const auto written = k.timelineWritten();
+    const auto expected = (uint64_t) (mix.all.getNumSamples() / std::lround(K::kTimelineBinSeconds * kRate));
+    CHECK(written == expected);
+    int hits = 0;
+    float kickPeak = 0, removedInGaps = 0, inputInGaps = 0;
+    for (uint64_t i = 0; i < written; ++i)
+    {
+        const auto bin = k.timelineBin(i);
+        hits += bin.hit ? 1 : 0;
+        kickPeak = std::max(kickPeak, bin.max[K::LaneKick]);
+        // 400-490 ms after each hit (the bins hold the delayed, aligned signals): the kick is gone, Removed holds the rest.
+        const double t = std::fmod((double) i * K::kTimelineBinSeconds - K::kLookaheadSeconds, 0.5);
+        if (t > 0.40 && t < 0.49 && (double) i * K::kTimelineBinSeconds < 2.0)
+        {
+            removedInGaps = std::max(removedInGaps, bin.max[K::LaneRemoved]);
+            inputInGaps = std::max(inputInGaps, bin.max[K::LaneInput]);
+            CHECK(std::abs(bin.max[K::LaneKick]) < 1e-3f);
+        }
+    }
+    CHECK(hits == 4);
+    CHECK(kickPeak > 0.5f);
+    CHECK(removedInGaps > 0.1f);
+    CHECK_NEAR(removedInGaps, inputInGaps, 0.08f);
+}
+
 TEST_CASE("kickstract: punch and drive stay finite and bounded")
 {
     const auto mix = makeMix(4);

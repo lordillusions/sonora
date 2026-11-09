@@ -107,7 +107,9 @@ private:
     bool inBeatRuler(float x, float y) const;
     void zoomToWholeArrangement();
     double arrangementEndBeat() const;
-    void zoomTrackHeight(double factor, float anchorY, bool allTracks = false); // allTracks: every lane, not the selection
+    // allTracks: every lane, not the selection. pointer (Alt + wheel, UI-74): the track under the pointer, selected or
+    // not; the whole selection only when that track is part of it.
+    void zoomTrackHeight(double factor, float anchorY, bool allTracks = false, bool pointer = false);
     void scrub(const MouseEvent& e, bool start);
     void showContextMenu(const MouseEvent& e);
     void insertMidiClip(int track, double beat);

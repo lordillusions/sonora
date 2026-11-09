@@ -115,6 +115,9 @@ KickstractFace::KickstractFace(devices::Kickstract* processor, std::function<voi
         if (tag_) tag_(b, K::Listen);
         listen_[i] = b;
     }
+    timeline_ = add<TextButton>("Timeline", TextButton::Style::Plain);
+    timeline_->tooltip = "Open the timeline: input, kick and what was removed, live; Freeze to study it";
+    timeline_->onClick = [this] { if (onOpenTimeline) onOpenTimeline(); };
 }
 
 void KickstractFace::setParameter(int parameter, float value)
@@ -192,6 +195,8 @@ void KickstractFace::layout()
     place(output_, finish_.x + 2, finish_.w - 4, 2, finishRow);
     const float listenY = std::min(h - 18, kTitle + 3 * finishRow + 4), third = (finish_.w - 4) / 3.0f;
     for (int i = 0; i < 3; ++i) listen_[i]->setBounds({finish_.x + 2 + (float) i * third, listenY, third - 2, 16});
+    timeline_->visible = static_cast<bool>(onOpenTimeline);
+    timeline_->setBounds({kickColumn_.x + kickColumn_.w - 64, 0, 64, kTitle - 2});
 }
 
 Rect KickstractFace::spectrumArea() const { return {spectrum_.x, kTitle, spectrum_.w, std::max(20.0f, height() - kTitle - 2)}; }
@@ -369,7 +374,8 @@ void KickstractFace::paintColumnTitles(SkCanvas& c, const Theme& t)
     paint::text(c, "SPECTRUM", {spectrum_.x + 2, 0, spectrum_.w, kTitle - 2}, fg, size, Align::Left, true);
     paint::text(c, "drag the lines to move the bands", {spectrum_.x, 0, spectrum_.w - 2, kTitle - 2}, dim, size - 1, Align::Right);
     paint::text(c, "LAST KICK", {kickColumn_.x + 2, 0, kickColumn_.w, kTitle - 2}, fg, size, Align::Left, true);
-    paint::text(c, "drag the dots: Length / Fade", {kickColumn_.x, 0, kickColumn_.w - 2, kTitle - 2}, dim, size - 1, Align::Right);
+    paint::text(c, "drag the dots: Length / Fade", {kickColumn_.x, 0, kickColumn_.w - (timeline_->visible ? 70.0f : 2.0f), kTitle - 2},
+                dim, size - 1, Align::Right);
     paint::text(c, "FINISH", {finish_.x + 2, 0, finish_.w, kTitle - 2}, fg, size, Align::Left, true);
     // Band strips: a coloured bar under each band's On button, lit by its gate.
     for (int b = 0; b < K::kBands; ++b)

@@ -13,6 +13,7 @@
 // value the lane wrote last and keeps its hands off it. Hosted plugin parameters are not read back; their edits in the
 // plugin's own window are reported instead (DeviceProcessor::takeHandEdit, UI-65).
 
+#include "core/AutomationLaw.h"
 #include "core/Model.h"
 
 #include <vector>
@@ -31,7 +32,9 @@ class AutomationLane
 {
 public:
     AutomationLane() = default;
-    explicit AutomationLane(const model::AutomationEnvelope& env);
+    // law/min/max (UI-75): breakpoints interpolate in the control's position space (model/AutomationLaw.h).
+    explicit AutomationLane(const model::AutomationEnvelope& env, model::AutomationLaw law = model::AutomationLaw::Linear,
+                            double min = 0.0, double max = 1.0);
 
     bool empty() const { return points_.empty(); }
 
@@ -43,6 +46,8 @@ public:
 private:
     std::vector<model::AutomationPoint> points_;
     bool stepped_ = false;
+    model::AutomationLaw law_ = model::AutomationLaw::Linear;
+    double min_ = 0.0, max_ = 1.0;
 };
 
 struct AutomationBinding
@@ -65,6 +70,11 @@ struct AutomationBinding
     int deviceSlot = 0;        // position of the device in the track's model chain (override key)
     bool hostedPlugin = false; // plugin parameters cannot be read back reliably
 };
+
+// The lane for `env` driving `kind` (UI-75): volume and sends on the fader law, native Hz / ms parameters on a log
+// scale, everything else linear.
+AutomationLane automationLaneFor(const model::AutomationEnvelope& env, AutomationBinding::Kind kind,
+                                 const devices::DeviceProcessor* device, int index);
 
 // Index of what a binding drives in TrackControls' override tables; -1 for things that cannot be overridden (tempo).
 int automationOverrideKey(AutomationBinding::Kind kind, int index, int deviceSlot);

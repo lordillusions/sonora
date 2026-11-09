@@ -105,6 +105,7 @@ void Kickstract::prepare(double sampleRate, int)
     onsetEnv_.assign((size_t) lookahead_, 0.0f);
     inputTap.prepare(sampleRate_);
     outputTap.prepare(sampleRate_);
+    timelineBinSamples_ = std::max(1, (int) std::lround(kTimelineBinSeconds * sampleRate_));
     reset();
 }
 
@@ -171,6 +172,7 @@ void Kickstract::trigger(int newestPos)
 
 void Kickstract::openGates()
 {
+    timelineHit_ = true;
     if (getParameter(Chop) > 0.5f)
         for (auto& g : gates_)
         {
@@ -235,6 +237,41 @@ float Kickstract::gateStep(Gate& g, int band)
         }
     }
     return g.level;
+}
+
+void Kickstract::timelineSample(float in, float kick, float removed)
+{
+    const float v[kTimelineLanes] = {in, kick, removed};
+    for (int l = 0; l < kTimelineLanes; ++l)
+    {
+        timelineMin_[l] = timelineCounter_ == 0 ? v[l] : std::min(timelineMin_[l], v[l]);
+        timelineMax_[l] = timelineCounter_ == 0 ? v[l] : std::max(timelineMax_[l], v[l]);
+    }
+    if (++timelineCounter_ < timelineBinSamples_) return;
+    const auto written = timelineWritten_.load(std::memory_order_relaxed);
+    const auto at = (size_t) (written % (uint64_t) kTimelineBins);
+    for (size_t l = 0; l < (size_t) kTimelineLanes; ++l)
+    {
+        timeline_.min[l][at].store(timelineMin_[l], std::memory_order_relaxed);
+        timeline_.max[l][at].store(timelineMax_[l], std::memory_order_relaxed);
+    }
+    timeline_.hit[at].store(timelineHit_, std::memory_order_relaxed);
+    timelineWritten_.store(written + 1, std::memory_order_release);
+    timelineCounter_ = 0;
+    timelineHit_ = false;
+}
+
+Kickstract::TimelineBin Kickstract::timelineBin(uint64_t index) const
+{
+    TimelineBin bin;
+    const auto at = (size_t) (index % (uint64_t) kTimelineBins);
+    for (size_t l = 0; l < (size_t) kTimelineLanes; ++l)
+    {
+        bin.min[l] = timeline_.min[l][at].load(std::memory_order_relaxed);
+        bin.max[l] = timeline_.max[l][at].load(std::memory_order_relaxed);
+    }
+    bin.hit = timeline_.hit[at].load(std::memory_order_relaxed);
+    return bin;
 }
 
 void Kickstract::captureSample(float outL, float outR, float in, const float (&bands)[kBands])
@@ -403,6 +440,7 @@ void Kickstract::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
         for (int ch = 0; ch < 2; ++ch)
             out[ch] = (listen == ListenKick ? kick[ch] : listen == ListenRemoved ? removed[ch] : x[ch]) * outGain;
         captureSample(kick[0] * outGain, kick[1] * outGain, 0.5f * (x[0] + x[1]), bandMono);
+        timelineSample(0.5f * (x[0] + x[1]), 0.5f * (kick[0] + kick[1]) * outGain, 0.5f * (removed[0] + removed[1]) * outGain);
         left[i] = out[0];
         if (right) right[i] = out[1];
         if (i == 0 || i == n - 1)

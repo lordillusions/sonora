@@ -481,6 +481,7 @@ struct UiContext
     std::function<void(const WavetableKey&)> openWavetableWindow;  // shows or raises the floating editor
     std::function<void(const WavetableKey&)> closeWavetableWindow; // asynchronous: may be called from inside that window
     std::function<void(const WavetableKey&)> openHushWindow; // PLG-14g: the built-in Sonora Hush face in its own window
+    std::function<void(const WavetableKey&)> openKickstractTimeline; // PLG-17e: a Kickstract's timeline in its own window
     bool isWavetableFloating(const WavetableKey& key) const
     {
         const auto found = wavetableFloating.find(key);

@@ -38,6 +38,13 @@ grey, result in each band's colour; drag the split lines, double-click resets; b
 LAST KICK (the captured hit: input in grey, each band after its gate, the result's waveform, each band's gate envelope;
 drag the dots to set Length and Fade) | LOW / MID / HIGH strips | FINISH (Punch, Drive, Output, Listen).
 
+TIMELINE window (PLG-17e, `src/ui/views/KickstractTimeline.cpp`): the face's Timeline button opens it (the app: its own
+window, `app/AppKickstractWindow.cpp`; the VST3: a window owned by the editor). Three lanes scroll live: Input (delayed, so it
+lines up with the result), Kick and Removed, with an orange line wherever the gates opened. The device keeps the last 10.24 s
+as 2.5 ms min/max bins (`Kickstract::timelineBin`, lock-free atomics written by the audio thread). Freeze (button, F,
+double-click, or grabbing the picture) stops the scrolling while the sound keeps playing: drag to move back in time, the wheel
+zooms around the pointer, 2 / 5 / 10 s buttons, Now jumps back to the newest moment; the pointer shows its time.
+
 Kickstract is Sonora's own device: there is no reference device face to match (AGENTS rule 7 does not apply).
 
 ## Verification

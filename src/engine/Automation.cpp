@@ -10,7 +10,8 @@
 namespace sonora::engine
 {
 
-AutomationLane::AutomationLane(const model::AutomationEnvelope& env) : points_(env.points), stepped_(env.stepped)
+AutomationLane::AutomationLane(const model::AutomationEnvelope& env, model::AutomationLaw law, double min, double max)
+    : points_(env.points), stepped_(env.stepped), law_(law), min_(min), max_(max)
 {
     std::stable_sort(points_.begin(), points_.end(),
                      [](const model::AutomationPoint& a, const model::AutomationPoint& b) { return a.time < b.time; });
@@ -32,7 +33,26 @@ double AutomationLane::valueAt(model::Beats beat) const
         return prev.value;
 
     const double span = next->time - prev.time; // > 0: prev.time <= beat < next->time
-    return prev.value + (next->value - prev.value) * model::segmentShape(prev, (beat - prev.time) / span); // ENG-11b curves
+    const double shape = model::segmentShape(prev, (beat - prev.time) / span); // ENG-11b curves
+    if (law_ == model::AutomationLaw::Linear)
+        return prev.value + (next->value - prev.value) * shape;
+    const double a = model::automationPosition(law_, prev.value, min_, max_), b = model::automationPosition(law_, next->value, min_, max_);
+    return model::automationValue(law_, a + (b - a) * shape, min_, max_);
+}
+
+AutomationLane automationLaneFor(const model::AutomationEnvelope& env, AutomationBinding::Kind kind,
+                                 const devices::DeviceProcessor* device, int index)
+{
+    using K = AutomationBinding::Kind;
+    if (kind == K::Volume || kind == K::Send) return AutomationLane(env, model::AutomationLaw::Fader);
+    if (kind == K::DeviceParam && device != nullptr && ! device->isHostedPlugin() && index >= 0
+        && (size_t) index < device->parameters().size())
+    {
+        const auto& info = device->parameters()[(size_t) index];
+        const auto law = model::automationLawFor(info.unit, info.minValue, info.maxValue, info.isToggle || ! info.choices.empty() || env.stepped);
+        return AutomationLane(env, law, info.minValue, info.maxValue);
+    }
+    return AutomationLane(env);
 }
 
 void applyBindingValue(const AutomationBinding& b, TrackControls& controls, double v)

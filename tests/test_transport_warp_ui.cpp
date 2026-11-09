@@ -82,6 +82,33 @@ TEST_CASE("arrangement zoom: Option scroll and keys resize selected lanes while 
     e.x = origin.right() - 90; e.y = origin.bottom() - 8; e.alt = false; e.wheelDeltaY = 0.1f;
     root.dispatchMouseWheel(e); CHECK(rig.ctx.waveformZoomEnabled); CHECK(rig.ctx.waveformZoom > 1);
 }
+TEST_CASE("arrangement zoom: Option scroll resizes the track under the pointer even when another is selected (UI-74)")
+{
+    WarpRig rig; ui::MainLayout root(rig.ctx); root.setBounds({0, 0, 1300, 800}); root.layout();
+    auto* view = find<ui::ArrangementView>(root); REQUIRE(view); const auto origin = view->boundsInRoot();
+    REQUIRE(view->lanes().size() >= 3);
+    // Track 1 selected by its header (the selected-tracks mode Alt +/- acts on).
+    rig.ctx.selectTrack(0, false, false);
+    rig.ctx.sessionTrackSelection = true;
+    REQUIRE(rig.ctx.isTrackSelected(0)); REQUIRE(! rig.ctx.isTrackSelected(2));
+    const auto lanes = view->lanes();
+    const float firstBefore = lanes[0].h, thirdBefore = lanes[2].h;
+    for (float x : {origin.x + 100, origin.right() - 60}) // over the lane, then over the track header
+    {
+        const auto lane = view->lanes()[2];
+        ui::MouseEvent e; e.x = x; e.y = origin.y + lane.y + lane.h * 0.5f; e.alt = true; e.wheelDeltaY = 0.1f;
+        root.dispatchMouseWheel(e);
+    }
+    root.layout();
+    CHECK(view->lanes()[2].h > thirdBefore + 10);
+    CHECK_NEAR(view->lanes()[0].h, firstBefore, 0.5f); // the selected track keeps its height
+    // Over the selected track: the selection resizes (as before).
+    const auto lane = view->lanes()[0];
+    ui::MouseEvent e; e.x = origin.x + 100; e.y = origin.y + lane.y + lane.h * 0.5f; e.alt = true; e.wheelDeltaY = 0.1f;
+    root.dispatchMouseWheel(e);
+    root.layout();
+    CHECK(view->lanes()[0].h > firstBefore + 5);
+}
 TEST_CASE("warp BPM editing: text and wheel use tenths and save the detected tempo across toggles")
 {
     WarpRig rig; model::Clip clip; clip.kind = model::Clip::Kind::Audio; clip.currentStart = 8; clip.currentEnd = 12;

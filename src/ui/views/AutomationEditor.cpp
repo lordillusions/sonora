@@ -13,6 +13,9 @@
 #include "core/DeviceCatalog.h"
 #include "ui/views/ClipEnvelopeEditor.h"
 
+#include "include/core/SkPaint.h"
+#include "include/effects/SkDashPathEffect.h"
+
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <algorithm>
@@ -45,21 +48,31 @@ std::vector<AutomationEditor::Target> AutomationEditor::targets(const UiContext&
     const bool audio = ! model::isMidiOnly(*track);
     if (audio)
     {
-        add(mx.volumeTargetId, "Mixer / Track Volume", 0, 1.995262, mx.volume);
-        add(mx.panTargetId, "Mixer / Track Panning", -1, 1, mx.pan);
+        if (auto* volume = add(mx.volumeTargetId, "Mixer / Track Volume", 0, 1.995262, mx.volume))
+        {
+            volume->law = model::AutomationLaw::Fader;
+            volume->overrideKey = engine::automationOverrideKey(engine::AutomationBinding::Kind::Volume, 0, 0);
+        }
+        if (auto* pan = add(mx.panTargetId, "Mixer / Track Panning", -1, 1, mx.pan))
+            pan->overrideKey = engine::automationOverrideKey(engine::AutomationBinding::Kind::Pan, 0, 0);
     }
     add(mx.speakerTargetId, "Mixer / Track Activator", 0, 1, mx.speakerOn ? 1 : 0, "BoolEvent");
     add(mx.tempoTargetId, "Song / Tempo", 20, 999, ctx.song->tempo);
     for (size_t i = 0; audio && i < mx.sendTargetIds.size(); ++i)
-        add(mx.sendTargetIds[i], "Mixer / Send " + std::string(1, (char) ('A' + (int) i)), 0, 1,
-            i < mx.sends.size() ? mx.sends[i] : 0);
+        if (auto* send = add(mx.sendTargetIds[i], "Mixer / Send " + std::string(1, (char) ('A' + (int) i)), 0, 1,
+                             i < mx.sends.size() ? mx.sends[i] : 0))
+        {
+            send->law = model::AutomationLaw::Fader;
+            send->overrideKey = engine::automationOverrideKey(engine::AutomationBinding::Kind::Send, (int) i, 0);
+        }
     std::set<int> laneTargets;
     for (const auto& env : track->automation) laneTargets.insert(env.targetId);
     for (size_t i = 0; i < track->devices.size(); ++i)
     {
         const auto& dev = track->devices[i];
         const std::string prefix = std::to_string(i + 1) + " " + (dev.displayName.empty() ? dev.type : dev.displayName) + " / ";
-        add(dev.enabledTargetId, prefix + "On", 0, 1, dev.enabled ? 1 : 0, "BoolEvent");
+        if (auto* on = add(dev.enabledTargetId, prefix + "On", 0, 1, dev.enabled ? 1 : 0, "BoolEvent"))
+            on->overrideKey = engine::automationOverrideKey(engine::AutomationBinding::Kind::DeviceOn, 0, (int) i);
         const devices::DeviceProcessor* proc = nullptr;
         if (ctx.graph && (size_t) trackIndex < ctx.graph->nodes.size())
         {
@@ -92,6 +105,7 @@ std::vector<AutomationEditor::Target> AutomationEditor::targets(const UiContext&
                     target->pluginDevice = (int) i;
                     target->hostId = hostId;
                     target->parameterIndex = index;
+                    target->overrideKey = engine::automationOverrideKey(engine::AutomationBinding::Kind::DeviceParam, index, (int) i);
                     if (id < -1) target->base = proc->getParameter(index); // what the plugin holds now
                 }
             }
@@ -100,8 +114,15 @@ std::vector<AutomationEditor::Target> AutomationEditor::targets(const UiContext&
             for (const auto& p : dev.parameters)
                 for (const auto& info : proc->parameters())
                     if (p.path == info.id)
-                        add(p.automationTargetId, prefix + info.name, info.minValue, info.maxValue, p.value,
-                            info.isToggle ? "BoolEvent" : info.choices.empty() ? "FloatEvent" : "EnumEvent");
+                        if (auto* target = add(p.automationTargetId, prefix + info.name, info.minValue, info.maxValue, p.value,
+                                               info.isToggle ? "BoolEvent" : info.choices.empty() ? "FloatEvent" : "EnumEvent"))
+                        {
+                            const int index = (int) (&info - proc->parameters().data());
+                            target->law = model::automationLawFor(info.unit, info.minValue, info.maxValue, target->stepped);
+                            target->nativeDevice = (int) i;
+                            target->parameterIndex = index;
+                            target->overrideKey = engine::automationOverrideKey(engine::AutomationBinding::Kind::DeviceParam, index, (int) i);
+                        }
         // Listed plugin parameters the instance did not match (not loaded, or a renamed id): only real entries, or the
         // empty slots (ParameterId -1) that still hold a lane.
         for (const auto& p : dev.pluginParams)
@@ -353,7 +374,30 @@ float AutomationEditor::beatX(double beat) const
 float AutomationEditor::valueY(double value, const Target& target) const
 {
     const auto r = plot();
-    return r.bottom() - (float) std::clamp((value - target.min) / std::max(1e-9, target.max - target.min), 0.0, 1.0) * r.h;
+    return r.bottom() - (float) target.position(value) * r.h;
+}
+
+double AutomationEditor::currentValue(const Target& target) const
+{
+    const auto& x = ctx();
+    if (x.controls && (size_t) track_ < x.controls->size())
+    {
+        const auto& controls = (*x.controls)[(size_t) track_];
+        using K = engine::AutomationBinding::Kind;
+        if (target.overrideKey == engine::automationOverrideKey(K::Volume, 0, 0)) return controls.volume.load();
+        if (target.overrideKey == engine::automationOverrideKey(K::Pan, 0, 0)) return controls.pan.load();
+        for (size_t i = 0; i < controls.sends.size(); ++i)
+            if (target.overrideKey == engine::automationOverrideKey(K::Send, (int) i, 0)) return controls.sends[i].load();
+    }
+    const int device = target.nativeDevice >= 0 ? target.nativeDevice : target.pluginDevice;
+    if (device >= 0 && target.parameterIndex >= 0 && x.graph && (size_t) track_ < x.graph->nodes.size())
+    {
+        const auto& processors = x.graph->nodes[(size_t) track_].processorForModelDevice;
+        if ((size_t) device < processors.size() && processors[(size_t) device] != nullptr
+            && (size_t) target.parameterIndex < processors[(size_t) device]->parameters().size())
+            return processors[(size_t) device]->getParameter(target.parameterIndex);
+    }
+    return target.base;
 }
 
 void AutomationEditor::paint(SkCanvas& c, const Theme& t)
@@ -370,7 +414,7 @@ void AutomationEditor::paint(SkCanvas& c, const Theme& t)
     if (it == ts.end()) it = ts.begin();
     const auto& target = *it;
     const auto env = dragging_ || drawing_ ? preview_ : envelope(target);
-    const engine::AutomationLane lane(env);
+    const engine::AutomationLane lane(env, target.law, target.min, target.max);
     const auto r = plot();
     c.save();
     c.clipRect(Rect{0, 0, r.w, height()}.sk());
@@ -382,42 +426,61 @@ void AutomationEditor::paint(SkCanvas& c, const Theme& t)
     for (const auto& line : ui::gridLines(first, last, ctx().pixelsPerBeat, bar, unit, grid))
         paint::line(c, beatX(line.beat), 0, beatX(line.beat), height(),
                     paint::withAlpha(t.color("GridLineBase"), line.strength == 2 ? (uint8_t) 255 : line.strength == 1 ? (uint8_t) 120 : (uint8_t) (60 * fade)));
-    const auto ink = t.color("AutomationColor");
-    // Curved segments (ENG-11b) are drawn as short chords of the lane's own curve.
-    const bool curved = ! env.stepped && std::any_of(env.points.begin(), env.points.end(), [](const auto& p) { return p.curved(); });
-    auto segment = [&](double t0, double v0, double t1, double v1) {
-        const int steps = curved ? std::clamp((int) ((t1 - t0) * ctx().pixelsPerBeat / 3.0), 1, 64) : 1;
-        for (int k = 1; k <= steps; ++k)
-        {
-            const double time = k == steps ? t1 : t0 + (t1 - t0) * k / steps, v = k == steps ? v1 : lane.valueAt(time);
-            paint::line(c, beatX(t0), valueY(v0, target), beatX(time), valueY(v, target), ink);
-            t0 = time; v0 = v;
-        }
-    };
-    double prevBeat = first, prevValue = lane.valueAt(first);
-    for (const auto& p : env.points)
+    // UI-75: as in the reference, a lane whose control is held by hand (Re-Enable Automation lit) is drawn grey, and a
+    // control with no automation yet shows its current value as a dashed line (the first click on it adds a breakpoint).
+    const bool overridden = target.overrideKey >= 0 && ctx().controls && (size_t) track_ < ctx().controls->size()
+                            && engine::isAutomationOverridden((*ctx().controls)[(size_t) track_], target.overrideKey);
+    const auto ink = overridden ? t.color("AutomationDisabled") : t.color("AutomationColor");
+    if (! dragging_ && ! drawing_ && ! isAutomated(ctx(), track_, target.id))
     {
-        if (p.time < first || p.time > last) continue;
-        if (env.stepped)
-        {
-            paint::line(c, beatX(prevBeat), valueY(prevValue, target), beatX(p.time), valueY(prevValue, target), ink);
-            paint::line(c, beatX(p.time), valueY(prevValue, target), beatX(p.time), valueY(p.value, target), ink);
-        }
-        else
-            segment(prevBeat, prevValue, p.time, p.value);
-        prevBeat = p.time;
-        prevValue = p.value;
+        const float y = valueY(currentValue(target), target);
+        SkPaint pen;
+        pen.setAntiAlias(true);
+        pen.setStyle(SkPaint::kStroke_Style);
+        pen.setStrokeWidth(1.0f);
+        pen.setColor(ink);
+        const SkScalar dashes[]{4, 3};
+        pen.setPathEffect(SkDashPathEffect::Make(dashes, 0));
+        c.drawLine(0, y, r.w, y, pen);
     }
-    if (env.stepped)
-        paint::line(c, beatX(prevBeat), valueY(prevValue, target), r.w, valueY(lane.valueAt(last), target), ink);
     else
-        segment(prevBeat, prevValue, last, lane.valueAt(last));
-    for (size_t i = 0; i < env.points.size(); ++i)
     {
-        const auto& p = env.points[i];
-        if (p.time < first || p.time > last) continue;
-        paint::fill(c, {beatX(p.time) - 3, valueY(p.value, target) - 3, 6, 6},
-                    (int) i == selectedPoint_ && ctx().selectedAutomationTrack == track_ ? t.color("SelectionBackground") : ink);
+        // Curved segments (ENG-11b) are drawn as short chords of the lane's own curve.
+        const bool curved = ! env.stepped && std::any_of(env.points.begin(), env.points.end(), [](const auto& p) { return p.curved(); });
+        auto segment = [&](double t0, double v0, double t1, double v1) {
+            const int steps = curved ? std::clamp((int) ((t1 - t0) * ctx().pixelsPerBeat / 3.0), 1, 64) : 1;
+            for (int k = 1; k <= steps; ++k)
+            {
+                const double time = k == steps ? t1 : t0 + (t1 - t0) * k / steps, v = k == steps ? v1 : lane.valueAt(time);
+                paint::line(c, beatX(t0), valueY(v0, target), beatX(time), valueY(v, target), ink);
+                t0 = time; v0 = v;
+            }
+        };
+        double prevBeat = first, prevValue = lane.valueAt(first);
+        for (const auto& p : env.points)
+        {
+            if (p.time < first || p.time > last) continue;
+            if (env.stepped)
+            {
+                paint::line(c, beatX(prevBeat), valueY(prevValue, target), beatX(p.time), valueY(prevValue, target), ink);
+                paint::line(c, beatX(p.time), valueY(prevValue, target), beatX(p.time), valueY(p.value, target), ink);
+            }
+            else
+                segment(prevBeat, prevValue, p.time, p.value);
+            prevBeat = p.time;
+            prevValue = p.value;
+        }
+        if (env.stepped)
+            paint::line(c, beatX(prevBeat), valueY(prevValue, target), r.w, valueY(lane.valueAt(last), target), ink);
+        else
+            segment(prevBeat, prevValue, last, lane.valueAt(last));
+        for (size_t i = 0; i < env.points.size(); ++i)
+        {
+            const auto& p = env.points[i];
+            if (p.time < first || p.time > last) continue;
+            paint::fill(c, {beatX(p.time) - 3, valueY(p.value, target) - 3, 6, 6},
+                        (int) i == selectedPoint_ && ctx().selectedAutomationTrack == track_ ? t.color("SelectionBackground") : ink);
+        }
     }
     c.restore();
 
@@ -595,7 +658,7 @@ void AutomationEditor::mouseDown(const MouseEvent& e)
         const double grid = ui::snapSize(ctx().arrangementGrid, ctx().pixelsPerBeat, ctx().song ? ctx().song->timeSigNumerator * 4.0 / ctx().song->timeSigDenominator : 4.0, e.alt || e.cmd);
         const double beat = std::max(0.0, snapToGrid(ctx().scrollBeats + e.x / ctx().pixelsPerBeat, grid));
         const auto r = plot();
-        double value = it->min + std::clamp((r.bottom() - e.y) / r.h, 0.0f, 1.0f) * (it->max - it->min);
+        double value = it->valueAt(std::clamp((r.bottom() - e.y) / r.h, 0.0f, 1.0f));
         if (it->stepped) value = std::round(value);
         preview_.points.push_back({beat, value});
         std::stable_sort(preview_.points.begin(), preview_.points.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
@@ -613,7 +676,7 @@ void AutomationEditor::paintCell(const MouseEvent& e)
     const double g = ui::gridBeats(ctx().arrangementGrid, ctx().pixelsPerBeat, bar);
     const double cell = std::max(0.0, std::floor((ctx().scrollBeats + e.x / ctx().pixelsPerBeat) / g + 1e-9) * g);
     const auto r = plot();
-    double value = dragTarget_.min + std::clamp((r.bottom() - e.y) / r.h, 0.0f, 1.0f) * (dragTarget_.max - dragTarget_.min);
+    double value = dragTarget_.valueAt(std::clamp((r.bottom() - e.y) / r.h, 0.0f, 1.0f));
     if (dragTarget_.stepped) value = std::round(value);
     const double from = lastCell_ < 0 ? cell : lastCell_;
     const int steps = std::max(1, (int) std::lround(std::fabs(cell - from) / g));
@@ -642,7 +705,7 @@ void AutomationEditor::mouseDrag(const MouseEvent& e)
     // Keep identities stable during a drag; points can meet to create jumps but cannot cross.
     if (selectedPoint_ > 0) beat = std::max(beat, preview_.points[(size_t) selectedPoint_ - 1].time);
     if ((size_t) selectedPoint_ + 1 < preview_.points.size()) beat = std::min(beat, preview_.points[(size_t) selectedPoint_ + 1].time);
-    double value = dragTarget_.min + std::clamp((r.bottom() - e.y) / r.h, 0.0f, 1.0f) * (dragTarget_.max - dragTarget_.min);
+    double value = dragTarget_.valueAt(std::clamp((r.bottom() - e.y) / r.h, 0.0f, 1.0f));
     if (dragTarget_.stepped) value = std::round(value);
     changed_ |= std::abs(beat - p.time) > 1e-12 || std::abs(value - p.value) > 1e-12;
     p = {beat, value};

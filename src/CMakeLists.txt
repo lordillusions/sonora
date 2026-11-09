@@ -268,6 +268,7 @@ add_library(sonora_ui STATIC
     ui/views/CurveLfoEditor.cpp
     ui/views/HushFace.cpp
     ui/views/KickstractFace.cpp
+    ui/views/KickstractTimeline.cpp
     ui/views/WavetableEditor.cpp
     ui/views/WavetableWindowView.cpp
     ui/views/WavetablePresetBrowser.cpp
@@ -502,6 +503,7 @@ target_sources(Sonora PRIVATE
     app/AppResynth.cpp
     app/AppNativeSwap.cpp
     app/AppHushWindow.cpp
+    app/AppKickstractWindow.cpp
     app/AppSamplePacks.cpp
     app/AppDevicePresets.cpp
     app/AppStems.cpp

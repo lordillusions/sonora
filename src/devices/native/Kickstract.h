@@ -75,6 +75,19 @@ public:
     // Copies the last complete capture; false when nothing new since `serial`.
     bool takeKick(KickShape& out, uint32_t serial) const;
 
+    // ---- timeline (PLG-17e): the last ~10 s of Input (delayed, aligned with the result), Kick and Removed as min/max
+    // bins, plus where the gates opened. The audio thread writes bin `written() % kTimelineBins` and then bumps the count.
+    static constexpr int kTimelineBins = 4096;
+    static constexpr double kTimelineBinSeconds = 0.0025; // 4096 x 2.5 ms = 10.24 s
+    enum TimelineLane { LaneInput, LaneKick, LaneRemoved, kTimelineLanes };
+    struct TimelineBin
+    {
+        float min[kTimelineLanes]{}, max[kTimelineLanes]{};
+        bool hit = false;
+    };
+    uint64_t timelineWritten() const { return timelineWritten_.load(std::memory_order_acquire); }
+    TimelineBin timelineBin(uint64_t index) const;
+
 private:
     // Topology-preserving state-variable filter (Butterworth Q) giving low and high outputs of one stage.
     struct Svf
@@ -118,6 +131,7 @@ private:
     void openGates();
     float gateStep(Gate&, int band);
     void captureSample(float outL, float outR, float in, const float (&bands)[kBands]);
+    void timelineSample(float in, float kick, float removed);
 
     double sampleRate_ = 44100.0;
     int lookahead_ = 0, delayPos_ = 0;
@@ -137,6 +151,16 @@ private:
     std::atomic<float> detectorPeak_{0};
     std::atomic<uint32_t> triggers_{0};
     Capture captures_[2];
+    struct TimelineStore
+    {
+        std::array<std::array<std::atomic<float>, kTimelineBins>, kTimelineLanes> min{}, max{};
+        std::array<std::atomic<bool>, kTimelineBins> hit{};
+    };
+    TimelineStore timeline_;
+    std::atomic<uint64_t> timelineWritten_{0};
+    int timelineBinSamples_ = 110, timelineCounter_ = 0;
+    float timelineMin_[kTimelineLanes]{}, timelineMax_[kTimelineLanes]{};
+    bool timelineHit_ = false;
     std::atomic<int> published_{-1};
     std::atomic<uint32_t> captureSerial_{0};
     int writing_ = 0, captureBin_ = -1, binSamples_ = 1, binCounter_ = 0;

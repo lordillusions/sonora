@@ -593,6 +593,23 @@ TEST_CASE("device faces: Auto Filter display drags frequency and resonance; the 
     filter->setParameter(A::LfoTimeMode, 1); face->layout();
     CHECK(shown(A::LfoTime)); CHECK(shown(A::LfoFrequency) == nullptr);
     click(root, localEvent(shown(A::SoftClip)->boundsInRoot())); CHECK(filter->getParameter(A::SoftClip) > 0.5f);
+    filter->setParameter(A::SoftClip, 0);
+
+    // The output spectrum behind the curve: noise through a low-pass at 1 kHz fills the display left of the cutoff.
+    filter->prepare(48000, 512);
+    root.setBounds({0, 0, 900, 360}); root.layout();
+    juce::AudioBuffer<float> audio(2, 512); juce::MidiBuffer midi; juce::Random random(7);
+    for (int block = 0; block < 60; ++block)
+    {
+        for (int i = 0; i < 512; ++i) { const float v = random.nextFloat() * 0.6f - 0.3f; audio.setSample(0, i, v); audio.setSample(1, i, v); }
+        filter->process(audio, midi);
+        if (block % 6 == 0) { juce::Thread::sleep(32); root.tickTree(); }
+    }
+    auto* afFace = dynamic_cast<ui::ReferenceFace*>(face);
+    REQUIRE(afFace != nullptr);
+    const auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_tests");
+    dir.createDirectory();
+    CHECK(gfx::renderToPng(root, 900, 360, 2, dir.getChildFile("autofilter_spectrum.png").getFullPathName().toStdString()));
 }
 
 TEST_CASE("device faces: the browser's Auto Filter is the 12.4 device; saving one raises a Live 12 header to 12.4 (UI-43b)")
