@@ -3,8 +3,10 @@
 // AppController fills it for the real app; tools/ui_snapshot fills only what it has.
 // All pointers may be null (headless snapshot) — views must cope with that.
 
+#include "core/AutomationEdits.h"
 #include "core/Edit.h"
 #include "core/Model.h"
+#include "core/SampleReplace.h"
 #include "core/Scales.h"
 #include "engine/PeakCache.h"
 #include "devices/native/WavetableEffects.h"
@@ -409,6 +411,27 @@ struct UiContext
         return std::any_of(busyTasks.begin(), busyTasks.end(), [](const BusyTask& task) { return ! task.background; });
     }
     double cpuUsage = 0.0;
+    // UI-82: the CPU meter details (click the CPU box in the control bar). AppController fills it from
+    // engine::AudioEngine::loadStats() and the per-track TrackControls::cpuMicros (ENG-14e).
+    struct CpuView
+    {
+        float current = 0, average = 0, peak = 0; // render time of a block / its buffer time
+        uint32_t overruns = 0;                    // blocks over their buffer time since the last reset
+        int deviceDropouts = -1;                  // the audio driver's own count since the reset (-1: not reported)
+        double sampleRate = 0, inputLatencyMs = 0, outputLatencyMs = 0;
+        int bufferSize = 0;
+        float bufferMicros = 0;
+        int threads = 1, helpers = 0;             // threads on the last block; helper threads running
+        bool multiCore = true, parallel = false, workgroup = false;
+        bool overloaded = false;                  // an overrun in the last two seconds: the CPU box turns red
+        struct Track { int index = 0; std::string name; int colorIndex = 0; float micros = 0; };
+        std::vector<Track> tracks;                // tracks, returns and Main by cost, highest first
+    };
+    CpuView cpu;
+    bool cpuPanelOpen = false;
+    Rect cpuAnchor; // the CPU box in root coordinates (the panel opens under it)
+    std::function<void()> resetCpuStats;
+    std::function<void(bool)> setMultiCore;
     int midiActivityFrames = 0;
     std::vector<std::string> projectFiles; // .als found in the user's folders (browser "Places")
     std::vector<std::string> pluginNames;  // scanned plugins (browser "Plug-ins")
@@ -531,6 +554,29 @@ struct UiContext
     bool browserSearchLoading = false;
     std::function<void(const std::string&)> openBrowserFolder, expandBrowserFolder, indexBrowserFolder, previewSample;
     std::function<void()> addBrowserFolder;
+    // LIB-3: a file the browser shows on its next tick: it opens the file's folder (whichever Place holds it, or the folder
+    // itself) and selects and scrolls to the file's row. Set through ui::showInBrowser (ui/SampleFiles.h).
+    std::string browserReveal;
+    // LIB-4 Show Similar Files: the browser's "Similar to" list, filled by the app from a worker (engine/SoundSimilarity).
+    struct SimilarSamples
+    {
+        bool active = false, running = false;
+        std::string reference;                // the file the results sound like
+        model::ClipLocation clip{};           // the clip the search came from (uid -1: a browser row): Enter/Swap replace its file
+        int done = 0, total = 0;              // progress while running
+        std::vector<std::pair<std::string, float>> results; // path, distance; nearest first
+        std::string message;                  // why nothing was found
+        uint64_t revision = 0;                // advance after any change
+    };
+    SimilarSamples similarSamples;
+    std::function<void(const std::string& path, const model::ClipLocation& clip)> findSimilarSamples;
+    std::function<void()> cancelSimilarSamples; // also leaves the list
+    // LIB-5: replacing a clip's sample. The scope is remembered (This Clip / All Clips on This Track / All Clips in the Set).
+    model::SampleScope sampleReplaceScope = model::SampleScope::Clip;
+    std::function<void(const model::ClipLocation&, const std::string& path)> replaceClipSample; // decodes on a worker
+    std::function<void(const model::ClipLocation&)> chooseClipSample;                       // "Replace Sample..." file chooser
+    // The next (+1) / previous (-1) file of the similar list (searched first when needed) replaces the clip's file.
+    std::function<void(const model::ClipLocation&, int direction)> swapSimilarSample;
     // ---- LIB-1 sample packs (docs/SAMPLE_PACKS.md): the Browser's Packs list, filled by app/AppSamplePacks.cpp.
     struct SamplePack
     {
@@ -597,6 +643,35 @@ struct UiContext
     bool arrangementOverdub = false; // MIDI Arrangement Overdub: Arrangement MIDI takes merge into the clips they overlap
     bool automationArm = true;       // moves of mixer / device controls are recorded as automation while recording to the Arrangement
     bool drawMode = false;           // Draw Mode (B): click-drag paints notes, envelope steps and automation
+    // UI-77 Automation Write mode (the control bar's pencil-on-breakpoint button, Option+Cmd+A): every control that can be
+    // automated is tinted orange; touching one shows its lane (Live's click on a control in Automation Mode), and moving it
+    // writes automation: while the transport plays the move is recorded over time (no Record needed), while stopped it
+    // sets a breakpoint at the play position.
+    bool automationWriteMode = false;
+    std::function<void(bool)> setAutomationWriteMode; // the app starts/stops the write capture
+    // A control was pressed (down) or released in Automation Write mode (RootWidget calls it).
+    std::function<void(const midi::ControlTarget&, bool down)> automationWriteTouch;
+    // UI-76: what goes with an Arrangement clip that is moved, copied or duplicated (Options > Clip Automation):
+    // 0 ask when the clip's time range holds automation, 1 always move it with the clip (the reference's default),
+    // 2 never (the reference's Lock Envelopes).
+    int clipAutomationPolicy = 0;
+    std::function<void(int)> setClipAutomationPolicy; // persists the choice
+    // A modal question with buttons (the app's prompt window); `done` gets the button index. Unset (tests, tools): the
+    // caller uses its default answer.
+    std::function<void(const std::string& title, const std::string& message, std::vector<std::string> buttons, int defaultButton,
+                       int cancelButton, std::function<void(int)> done)> askChoice;
+    // UI-76: the automation lane selection (Shift-click / time selection in a lane) and the automation clipboard.
+    struct AutomationSelection
+    {
+        int track = -1, target = -1;
+        bool range = false;
+        double start = 0, end = 0;
+        std::vector<double> points; // breakpoint times
+    };
+    AutomationSelection automationSelection;
+    model::EnvelopeClip automationClipboard;
+    // Re-enables one overridden control (its lane takes it back), as the control's context menu does in the reference.
+    std::function<void(int track, int overrideKey)> reEnableControl;
     bool computerKeyboard = false;   // the letter keys play the armed MIDI tracks (A W S E D F T G Y H U J K), Z/X octave, C/V velocity
     int computerKeyboardOctave = 3;  // octave of the key "A" (Live names MIDI note 60 "C3")
     int computerKeyboardVelocity = 100;

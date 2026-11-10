@@ -495,11 +495,14 @@ model::Device nativeDeviceModel(const std::string& type)
     return d;
 }
 
-void captureDeviceState(model::Device& d, DeviceProcessor* processor)
+void captureDeviceState(model::Device& d, DeviceProcessor* processor, const PluginCaptureFilter* capturePlugin)
 {
     if (! processor) return;
     d.enabled = ! processor->isBypassed();
-    if (auto* plugin = dynamic_cast<plugins::PluginDevice*>(processor)) plugin->captureState(d);
+    if (auto* plugin = dynamic_cast<plugins::PluginDevice*>(processor))
+    {
+        if (capturePlugin == nullptr || (*capturePlugin)(*plugin)) plugin->captureState(d);
+    }
     else if (d.plugin) return; // a placeholder or built-in stand-in (COL-4c): the plug-in's saved state stays as it was
     if (const auto* synth = dynamic_cast<WavetableSynth*>(processor); synth && synth->hasEffectsConfiguration())
     {
@@ -554,7 +557,8 @@ void captureDeviceState(model::Device& d, DeviceProcessor* processor)
             }
             auto& children = d.chains[ci].devices;
             const auto& processors = rack->chains()[ci].processorForModelDevice;
-            for (size_t pi = 0; pi < children.size() && pi < processors.size(); ++pi) captureDeviceState(children[pi], processors[pi]);
+            for (size_t pi = 0; pi < children.size() && pi < processors.size(); ++pi)
+                captureDeviceState(children[pi], processors[pi], capturePlugin);
         }
 }
 

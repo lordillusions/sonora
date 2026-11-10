@@ -541,6 +541,10 @@ struct Song
     bool pointeeIdsAllocated = false;
     int nextDeviceId = 0; // insertion ids stay unique even when a saved device is undone
     std::string sourcePath; // absolute path of the .als
+    // PRJ-4: a recovered set is read from its recovery copy but belongs at sourcePath. The writer patches this file
+    // instead (it holds the XML the model was read from); empty = sourcePath. The first save clears it.
+    std::string patchSourcePath;
+    const std::string& patchSource() const { return patchSourcePath.empty() ? sourcePath : patchSourcePath; }
     std::string creator;    // e.g. "Ableton Live 12.1.5"
     std::string schemaVersion;
 

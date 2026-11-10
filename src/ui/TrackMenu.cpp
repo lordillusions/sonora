@@ -1,4 +1,6 @@
 #include "ui/TrackMenu.h"
+#include "ui/ClipAutomation.h"
+#include "ui/SampleFiles.h"
 #include "ui/views/AutomationEditor.h"
 #include "ui/UiContext.h"
 #include "ui/Widget.h"
@@ -377,7 +379,7 @@ std::vector<MenuAction> clipContextActions(UiContext& ctx, model::ClipLocation l
     auto valid = [&ctx, song, location] { return ctx.song == song && song && model::findClip(*song, location); };
     std::vector<MenuAction> result{
         {"Cut", {}, false, "⌘X"}, {"Copy", {}, false, "⌘C"}, {"Paste", {}, false, "⌘V"},
-        {"Duplicate", [&ctx, valid, location] { if (valid() && ctx.applyEdit) ctx.applyEdit(model::duplicateClip(*ctx.song, location)); }, editable, "⌘D"},
+        {"Duplicate", [&ctx, valid, location] { if (valid() && ctx.applyEdit) duplicateClipWithAutomation(ctx, location); }, editable, "⌘D"},
         {"Duplicate as Linked", [&ctx, valid, location] { // TRK-5
             if (valid() && ctx.applyEdit) ctx.applyEdit(model::duplicateClipLinked(*ctx.song, location.track, location.uid));
         }, editable && location.kind == model::ClipLocation::Kind::Arrangement && clip->kind == model::Clip::Kind::Midi},
@@ -420,6 +422,9 @@ std::vector<MenuAction> clipContextActions(UiContext& ctx, model::ClipLocation l
     }, editable && static_cast<bool>(ctx.renderTrack)});
     if (clip && clip->kind == model::Clip::Kind::Audio)
     {
+        result.push_back({"", {}, false});
+        // LIB-3 / LIB-5: the clip's sample file.
+        for (auto& action : sampleFileActions(ctx, location)) result.push_back(std::move(action));
         result.push_back({"", {}, false});
         if (location.kind == model::ClipLocation::Kind::Arrangement)
             result.push_back({"Strip Silence", [&ctx, valid, location] {
@@ -559,6 +564,8 @@ void showClipContextMenu(UiContext& ctx, model::ClipLocation location)
     juce::PopupMenu menu;
     appendActions(menu, clipContextActions(ctx, location));
     const auto* song = ctx.song;
+    if (const auto* clip = song ? model::findClip(*song, location) : nullptr; clip && clip->kind == model::Clip::Kind::Audio)
+        addSampleScopeMenu(menu, ctx, location); // LIB-5: which clips Replace Sample / swaps / drops change
     if (const auto* clip = song ? model::findClip(*song, location) : nullptr)
         menu.addSubMenu("Colors", colorsMenu(clip->colorIndex, [&ctx, song, location](int color) {
             if (ctx.song != song || ! ctx.applyEdit) return;

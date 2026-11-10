@@ -6,6 +6,7 @@
 #include "core/Model.h"
 #include "devices/DeviceProcessor.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -13,6 +14,7 @@
 namespace sonora::plugins
 {
 class PluginHost;
+class PluginDevice;
 }
 namespace sonora::engine
 {
@@ -29,7 +31,9 @@ model::Device nativeDeviceModel(const std::string& type);
 // Installed automatically wherever this file is linked; tools that only load and save call it to make sure.
 void installSonoraVst3StateEncoder();
 // Message thread, with the audio callback excluded by the caller. Recurses through rack identities.
-void captureDeviceState(model::Device& device, DeviceProcessor* processor);
+// `capturePlugin` (PRJ-4 autosave, audio running): hosted plug-ins whose state it declines keep the model's copy.
+using PluginCaptureFilter = std::function<bool(plugins::PluginDevice&)>;
+void captureDeviceState(model::Device& device, DeviceProcessor* processor, const PluginCaptureFilter* capturePlugin = nullptr);
 
 struct BuildContext
 {

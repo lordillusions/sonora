@@ -51,12 +51,23 @@ public:
 
     bool hasEditor() const override;
     juce::AudioPluginInstance& instance() { return *instance_; }
-    bool captureState(model::Device& device) const; // message thread, with audio callback suspended
+    // Message thread. Save suspends the audio callback around it; the autosave (PRJ-4) does not, which the plug-in
+    // formats allow (VST3 and AU state is read on the UI thread while processing runs; JUCE takes no process lock).
+    bool captureState(model::Device& device) const;
+    // PRJ-4: moves whenever the plug-in reports a parameter edit or any other change of its state (any thread). A copy of
+    // its state taken when this read N is still current while it reads N.
+    uint64_t stateSerial() const
+    {
+        return handTotal_.load(std::memory_order_acquire) + stateChanges_.load(std::memory_order_acquire);
+    }
 
 private:
     // UI-65: edits the plugin reports from its own window (performEdit and gestures); any thread.
     void audioProcessorParameterChanged(juce::AudioProcessor*, int index, float value) override;
-    void audioProcessorChanged(juce::AudioProcessor*, const ChangeDetails&) override {}
+    void audioProcessorChanged(juce::AudioProcessor*, const ChangeDetails&) override
+    {
+        stateChanges_.fetch_add(1, std::memory_order_release);
+    }
     void audioProcessorParameterChangeGestureBegin(juce::AudioProcessor*, int index) override;
     void audioProcessorParameterChangeGestureEnd(juce::AudioProcessor*, int index) override;
 
@@ -91,6 +102,7 @@ private:
     std::vector<int> hostIds_;       // per parameter: the plugin's own id, INT_MIN when it is not automatable
     std::vector<std::string> names_; // full names
     std::atomic<uint32_t> handTotal_{0};
+    std::atomic<uint64_t> stateChanges_{0};
 };
 
 } // namespace sonora::plugins

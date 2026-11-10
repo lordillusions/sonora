@@ -8,6 +8,7 @@
 
 #include <set>
 #include <cstring>
+#include <optional>
 
 #include "engine/ClipLauncher.h"
 #include "engine/ControlRouter.h"
@@ -16,6 +17,8 @@
 #include "engine/AudioFileFormats.h"
 #include "io/als/AlsNewSet.h"
 #include "ui/AudioClipEdits.h"
+#include "ui/ClipAutomation.h"
+#include "ui/views/AutomationEditor.h"
 #include "io/als/AlsWriter.h"
 #include "io/midi/MidiFileExport.h"
 #include "io/als/AlsTemplates.h"
@@ -298,25 +301,8 @@ AppController::AppController() : engine_(host_, midi_)
     ui_.renameSelection = [this] { renameSelection(); };
     ui_.duplicateSelectedTracks = [this] {
         if (! song_ || ui_.recording || ui_.recordingRequested || editingDevices_ || syncingModel_ || exporting_) return;
-        syncModelFromEngine();
-        auto prepared = io::prepareTrackDuplication(*song_, ui_.selectedTrackIndices());
-        if (! prepared.error.empty()) { ui_.statusText = prepared.error; return; }
-        if (prepared.tracks.empty()) return;
-        std::set<model::TrackId> ids;
-        for (const auto& track : prepared.tracks) ids.insert(track.id);
-        std::set<model::TrackId> tops;
-        for (const auto& track : prepared.tracks) if (! ids.count(track.groupId)) tops.insert(track.id);
-        auto result = applyEdit(model::insertTracks(std::move(prepared.tracks), prepared.pointeeEnd, "Duplicate Tracks", prepared.before));
-        if (! result.ok) return;
-        ui_.trackSelection.clear();
-        for (int index = 0; index < ui_.numTracks(); ++index)
-            if (tops.count(song_->tracks[(size_t) index].id)) ui_.trackSelection.insert(index);
-        ui_.selectedTrack = ui_.trackSelection.empty() ? 0 : *ui_.trackSelection.begin();
-        ui_.trackSelectionAnchor = ui_.selectedTrack;
-        ui_.sessionTrackSelection = true;
-        ui_.selectedClipTrack = ui_.selectedClipUid = ui_.selectedClipScene = ui_.selectedTakeLane = -1;
-        ui_.detailTab = ui::DetailTab::Devices;
-        if (ui_.modelChanged) ui_.modelChanged();
+        // UI-76: asks whether the copies keep the automation when the selection has any.
+        ui::duplicateTracksAsking(ui_, [this](bool withAutomation) { duplicateSelectedTracks(withAutomation); });
     };
     ui_.deleteSelectedTracks = [this] {
         if (! song_ || ui_.recording || ui_.recordingRequested || editingDevices_ || syncingModel_ || exporting_) return;
@@ -376,6 +362,30 @@ AppController::AppController() : engine_(host_, midi_)
     ui_.cropClip = [this](const model::ClipLocation& location) { cropClipSample(location); };
     ui_.automationOverridden = [this] { auto* g = engine_.latestGraph(); return g != nullptr && engine::automationOverridden(*g); };
     ui_.reEnableAutomation = [this] { if (auto* g = engine_.latestGraph()) engine::reEnableAutomation(*g); };
+    ui_.reEnableControl = [this](int track, int key) { if (auto* g = engine_.latestGraph()) engine::reEnableAutomation(*g, track, key); };
+    ui_.askChoice = [](const std::string& title, const std::string& message, std::vector<std::string> buttons, int defaultButton,
+                       int cancelButton, std::function<void(int)> done) {
+        // UI-76: the app's prompt; the default button is the primary one, Cancel sits on the left.
+        PromptOptions options;
+        options.state.title = title;
+        options.state.message = message;
+        for (size_t i = 0; i < buttons.size(); ++i)
+            options.state.buttons.push_back({buttons[i], (int) i == defaultButton, (int) i == cancelButton && buttons.size() > 2});
+        options.defaultButton = defaultButton;
+        options.cancelButton = cancelButton;
+        options.shortcuts.assign(buttons.size(), 0);
+        if (const auto answer = juce::SystemStats::getEnvironmentVariable("SONORA_ASK_AUTOTEST", {}); answer.isNotEmpty())
+        {
+            // Headless checks: answer with the button of this index right away.
+            const int index = answer.getIntValue();
+            logf("ask: autotest answers %d to \"%s\"", index, title.c_str());
+            juce::MessageManager::callAsync([done, index] { done(index); });
+            return;
+        }
+        if (! PromptWindow::show(std::move(options), std::move(done))) logf("ask: another prompt is open; \"%s\" not shown", title.c_str());
+    };
+    ui_.setAutomationWriteMode = [this](bool on) { setAutomationWriteMode(on); };
+    ui_.automationWriteTouch = [this](const midi::ControlTarget& control, bool down) { automationWriteTouch(control, down); };
     ui_.captureMidi = [this] { captureMidi(); };
     ui_.captureMidiAvailable = [this] { return capture_.available(); };
     ui_.captureAudio = [this] { captureAudio(); };
@@ -403,6 +413,7 @@ AppController::AppController() : engine_(host_, midi_)
 
     // Restore settings
     std::unique_ptr<juce::XmlElement> audioState = settings().getXmlValue("audioDevice");
+    engine_.setMultiCore(settings().getBoolValue("multiCoreProcessing", true)); // ENG-14e, before the device starts
     const auto error = engine_.initialiseAudio(audioState.get());
     logf("audio: %s", error.isEmpty() ? engine_.deviceManager().getCurrentAudioDeviceType().toRawUTF8() : error.toRawUTF8());
     ui_.statusText = error.isEmpty() ? "Audio: " + engine_.deviceManager().getCurrentAudioDeviceType().toStdString()
@@ -460,6 +471,7 @@ AppController::AppController() : engine_(host_, midi_)
     findProjectsInBackground();
     scanDevicePresets();
     initialiseCollab();
+    startRecovery();
     startTimerHz(10);
 }
 
@@ -481,6 +493,9 @@ AppController::~AppController()
     automationPoller_.stopTimer();
     saveSettings();
     midi_.saveSettings(midiSettingsFile());
+    // PRJ-4: a clean quit (the user saved or chose not to): this run's recovery copies go.
+    autosavePool_.removeAllJobs(true, 10000);
+    recovery_.finish();
     pool_.removeAllJobs(true, 5000);
     closePluginWindows();
     closeWavetableWindows();
@@ -581,11 +596,59 @@ void AppController::clearRecentSets(bool unavailableOnly)
 void AppController::timerCallback()
 {
     finishRecording();
+    autosaveTick();
     if (ui_.recordingRequested && ! inputPermissionPending_) ensureAudioInputs();
     ui_.cpuUsage = engine_.cpuUsage();
+    updateCpuView();
     if (auto controls = engine_.controls()) for (size_t i = 0; i < controls->size(); ++i)
         if ((*controls)[i].midiControllerOverflow.exchange(false, std::memory_order_relaxed))
             ui_.statusText = "MIDI preview/controller playback exceeded its buffer; voices, pedals and pitch bend were reset";
+}
+
+// UI-82: what the CPU meter details show (ENG-14e load figures, the driver's own dropouts, per-track cost).
+void AppController::updateCpuView()
+{
+    const auto stats = engine_.loadStats();
+    auto& v = ui_.cpu;
+    const bool wasOverloaded = v.overloaded;
+    v.current = stats.current; v.average = stats.average; v.peak = stats.peak;
+    if (stats.overruns > lastOverruns_) overloadUntilMs_ = juce::Time::getMillisecondCounterHiRes() + 2000.0;
+    lastOverruns_ = stats.overruns;
+    v.overruns = stats.overruns;
+    v.overloaded = juce::Time::getMillisecondCounterHiRes() < overloadUntilMs_;
+    v.bufferMicros = stats.bufferMicros;
+    v.threads = stats.threads; v.helpers = stats.workers;
+    v.multiCore = stats.multiCore; v.parallel = stats.parallel; v.workgroup = stats.workgroup;
+    v.deviceDropouts = -1;
+    if (auto* device = engine_.deviceManager().getCurrentAudioDevice())
+    {
+        v.sampleRate = device->getCurrentSampleRate();
+        v.bufferSize = device->getCurrentBufferSizeSamples();
+        if (v.sampleRate > 0)
+        {
+            v.inputLatencyMs = device->getInputLatencyInSamples() * 1000.0 / v.sampleRate;
+            v.outputLatencyMs = device->getOutputLatencyInSamples() * 1000.0 / v.sampleRate;
+        }
+        if (const int xruns = device->getXRunCount(); xruns >= 0)
+        {
+            if (xruns < xrunBase_) xrunBase_ = 0; // the device restarted
+            v.deviceDropouts = xruns - xrunBase_;
+        }
+    }
+    else
+    {
+        v.sampleRate = engine_.sampleRate();
+        v.bufferSize = engine_.blockSize();
+    }
+    v.tracks.clear();
+    if (ui_.cpuPanelOpen && song_)
+        if (const auto controls = engine_.controls())
+            for (size_t i = 0; i < controls->size(); ++i)
+                if (const auto* track = model::trackAt(*song_, (int) i))
+                    v.tracks.push_back({(int) i, track->kind == model::TrackKind::Main ? std::string("Main") : track->name,
+                                        track->colorIndex, (*controls)[i].cpuMicros.load(std::memory_order_relaxed)});
+    std::stable_sort(v.tracks.begin(), v.tracks.end(), [](const auto& a, const auto& b) { return a.micros > b.micros; });
+    if ((ui_.cpuPanelOpen || v.overloaded != wasOverloaded) && ui_.requestRepaint) ui_.requestRepaint();
 }
 
 // ------------------------------------------------------------------------- files
@@ -688,7 +751,11 @@ void AppController::openFileNow(const juce::File& file)
         ui_.statusText = "Stop recording before opening another set";
         return;
     }
-    const auto name = file.getFileName().toStdString();
+    openDocument(file.getFileName().toStdString(), [file] { return io::loadAls(file); });
+}
+
+void AppController::openDocument(std::string name, std::function<io::AlsLoadResult()> loader)
+{
     const int generation = ++openGeneration_; // a newer open abandons this one
     const int busy = ui_.beginBusy("Opening " + name + "...");
     ui_.statusText = "Loading " + name + "...";
@@ -696,9 +763,9 @@ void AppController::openFileNow(const juce::File& file)
         ui_.requestRepaint();
 
     std::weak_ptr<bool> alive = alive_;
-    pool_.addJob([this, file, alive, generation, busy, name] {
-        auto result = io::loadAls(file);
-        juce::MessageManager::callAsync([this, alive, r = std::make_shared<io::AlsLoadResult>(std::move(result)), file, generation, busy, name]() mutable {
+    pool_.addJob([this, load = std::move(loader), alive, generation, busy, name] {
+        auto result = load();
+        juce::MessageManager::callAsync([this, alive, r = std::make_shared<io::AlsLoadResult>(std::move(result)), generation, busy, name]() mutable {
             if (alive.expired())
                 return;
             if (generation != openGeneration_ || ! *r)
@@ -809,6 +876,12 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     history_.clear();
     history_.markSaved();
     ui_.documentDirty = false;
+    if (! song_->patchSourcePath.empty())
+    {
+        // PRJ-4: a recovered set is not saved at its own path yet.
+        history_.markExternalChange();
+        ui_.documentDirty = true;
+    }
     ui_.selectedClipTrack = ui_.selectedClipUid = ui_.selectedClipScene = ui_.selectedTakeLane = -1;
     ui_.unfoldedTakeTracks.clear();
     ui_.drumPadBanks.clear();
@@ -851,8 +924,11 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
          song_->returns.size(), ui_.buildLog.size(), (int) ms);
     for (const auto& line : ui_.buildLog)
         logf("  note: %s", line.c_str());
+    recoveryDocumentInstalled();
     ensureAudioInputs();
     offerNativeReplacements();
+    runAutosaveAutotest();
+    runPlayAutotest();
     runDeviceDragAutotest();
     runSampleDropAutotest();
     runPresetAutotest();
@@ -864,6 +940,8 @@ void AppController::wirePreferences()
     ui_.countInBars = settings().getIntValue("countInBars", 0);
     if (ui_.countInBars != 1 && ui_.countInBars != 2 && ui_.countInBars != 4) ui_.countInBars = 0;
     ui_.setCountInBars = [this](int bars) { settings().setValue("countInBars", bars); settings().saveIfNeeded(); };
+    ui_.clipAutomationPolicy = std::clamp(settings().getIntValue("clipAutomationPolicy", 0), 0, 2); // UI-76
+    ui_.setClipAutomationPolicy = [this](int policy) { settings().setValue("clipAutomationPolicy", policy); settings().saveIfNeeded(); };
     ui_.uiZoom = (float) settings().getDoubleValue("uiZoom", 1.0);
     ui_.setUiZoom = [this](float z) {
         ui_.uiZoom = std::clamp(z, 0.8f, 2.0f);
@@ -883,6 +961,7 @@ void AppController::wirePreferences()
                                                                  .getChildFile("Ableton/User Library").getFullPathName()).toStdString();
     ui_.packsPath = settings().getValue("packsPath", "/Users/Shared/Ableton/Factory Packs").toStdString();
     setUpSamplePacks();
+    setUpSampleFiles();
     ui_.temporaryProjectPath = untitledRoot().getFullPathName().toStdString();
     ui_.settingsPath = settings().getFile().getParentDirectory().getFullPathName().toStdString();
     ui_.pluginCachePath = plugins::PluginHost::cacheFile().getFullPathName().toStdString();
@@ -920,6 +999,20 @@ void AppController::wirePreferences()
             }
         }
         return state;
+    };
+    ui_.resetCpuStats = [this] {
+        engine_.resetLoadStats();
+        lastOverruns_ = 0;
+        overloadUntilMs_ = 0;
+        if (auto* device = engine_.deviceManager().getCurrentAudioDevice()) xrunBase_ = std::max(0, device->getXRunCount());
+        if (ui_.requestRepaint) ui_.requestRepaint();
+    };
+    ui_.setMultiCore = [this](bool on) { // ENG-14e: Settings > Audio > Multi-Core Processing, and the CPU details
+        engine_.setMultiCore(on);
+        settings().setValue("multiCoreProcessing", on);
+        settings().saveIfNeeded();
+        ui_.statusText = on ? "Multi-core processing on" : "Multi-core processing off: every track renders on the audio thread";
+        updateCpuView();
     };
     ui_.setAudioSetting = [this](ui::UiContext::AudioSetting field, const std::string& value) {
         if (ui_.recording || ui_.recordingRequested || exporting_ || editingDevices_ || syncingModel_)
@@ -1263,8 +1356,62 @@ void AppController::rebuildEngine()
 
 // Capture MIDI: the latest passage played on the armed MIDI tracks (selected MIDI track when none is armed) becomes a clip in
 // the first empty Session slot of each, or in the Arrangement at the play position when the track has no empty slot.
+// Track > Duplicate (Cmd+D on headers). UI-76: `withAutomation` false gives the copies no track automation (clip envelopes stay).
+void AppController::duplicateSelectedTracks(bool withAutomation)
+{
+    if (! song_ || ui_.recording || ui_.recordingRequested || editingDevices_ || syncingModel_ || exporting_) return;
+    syncModelFromEngine();
+    auto prepared = io::prepareTrackDuplication(*song_, ui_.selectedTrackIndices());
+    if (! prepared.error.empty()) { ui_.statusText = prepared.error; return; }
+    if (prepared.tracks.empty()) return;
+    if (! withAutomation)
+        for (auto& track : prepared.tracks) track.automation.clear();
+
+    std::set<model::TrackId> ids;
+    for (const auto& track : prepared.tracks) ids.insert(track.id);
+    std::set<model::TrackId> tops;
+    for (const auto& track : prepared.tracks) if (! ids.count(track.groupId)) tops.insert(track.id);
+    auto result = applyEdit(model::insertTracks(std::move(prepared.tracks), prepared.pointeeEnd, "Duplicate Tracks", prepared.before));
+    if (! result.ok) return;
+    ui_.trackSelection.clear();
+    for (int index = 0; index < ui_.numTracks(); ++index)
+        if (tops.count(song_->tracks[(size_t) index].id)) ui_.trackSelection.insert(index);
+    ui_.selectedTrack = ui_.trackSelection.empty() ? 0 : *ui_.trackSelection.begin();
+    ui_.trackSelectionAnchor = ui_.selectedTrack;
+    ui_.sessionTrackSelection = true;
+    ui_.selectedClipTrack = ui_.selectedClipUid = ui_.selectedClipScene = ui_.selectedTakeLane = -1;
+    ui_.detailTab = ui::DetailTab::Devices;
+    if (ui_.modelChanged) ui_.modelChanged();
+}
+
+void AppController::setAutomationWriteMode(bool on)
+{
+    ui_.automationWriteMode = on;
+    if (on) automationPoller_.startTimerHz(60);
+    else if (writeCapture_) finishAutomationRecording();
+    else if (! automationRecording_) automationPoller_.stopTimer();
+    ui_.statusText = on ? "Automation Write on: move an orange control to write its automation (Option+Cmd+A leaves)"
+                        : "Automation Write off";
+    if (ui_.requestRepaint) ui_.requestRepaint();
+}
+
+// UI-77: a control let go in Automation Write mode shows its lane; with the transport stopped its value becomes a breakpoint
+// at the play position (while playing, the capture above records the move).
+void AppController::automationWriteTouch(const midi::ControlTarget& control, bool down)
+{
+    // No model sync here: it locks the audio callback; the lane reads the control's value from the engine.
+    if (down || ! song_ || ! ui_.automationWriteMode || editingDevices_ || syncingModel_ || exporting_) return;
+    if (ui::AutomationEditor::touchControl(ui_, control) < 0) return;
+    if (! engine_.transport().isPlaying() && ! ui_.recording)
+        if (ui::AutomationEditor::writePoint(ui_, control, engine_.transport().positionBeats()))
+            ui_.statusText = "Wrote a breakpoint at the play position";
+    if (ui_.layoutChanged) ui_.layoutChanged();
+    if (ui_.requestRepaint) ui_.requestRepaint();
+}
+
 void AppController::startAutomationRecording()
 {
+    if (writeCapture_) finishAutomationRecording(); // a recording takes over from Automation Write mode's capture
     automationCapture_.begin();
     automationRecording_ = true;
     lastAutomationBeat_ = engine_.transport().positionBeats();
@@ -1285,12 +1432,24 @@ void AppController::beginAutomationOnlyRecording()
 
 void AppController::pollAutomation()
 {
-    if (! automationRecording_)
-        return;
     auto* graph = engine_.latestGraph();
+    // UI-77: in Automation Write mode every play pass records the controls moved by hand (no Record needed).
+    if (ui_.automationWriteMode && ! automationRecording_ && ! ui_.recording && ! ui_.recordingRequested
+        && engine_.transport().isPlaying() && song_ && graph != nullptr && ! editingDevices_ && ! syncingModel_ && ! exporting_)
+    {
+        automationCapture_.begin();
+        automationRecording_ = writeCapture_ = true;
+        lastAutomationBeat_ = engine_.transport().positionBeats();
+    }
+    if (! automationRecording_)
+    {
+        if (! ui_.automationWriteMode) automationPoller_.stopTimer();
+        return;
+    }
     if (! song_ || graph == nullptr || editingDevices_ || syncingModel_)
         return;
-    if (! ui_.recording || ui_.recordingIsSession || ! ui_.automationArm)
+    if (writeCapture_ ? (! ui_.automationWriteMode || ui_.recording || ! engine_.transport().isPlaying())
+                      : (! ui_.recording || ui_.recordingIsSession || ! ui_.automationArm))
     {
         finishAutomationRecording();
         return;
@@ -1308,6 +1467,9 @@ void AppController::finishAutomationRecording()
 {
     automationPoller_.stopTimer();
     automationRecording_ = false;
+    const bool written = std::exchange(writeCapture_, false);
+    if (ui_.automationWriteMode) automationPoller_.startTimerHz(60); // keep watching for the next play pass
+    (void) written;
     auto* graph = engine_.latestGraph();
     if (! song_ || graph == nullptr)
         return;
@@ -1469,15 +1631,26 @@ void AppController::queueDeferredSong()
 
 // The mixer and the devices are edited live (atomics in the engine); copy their current values into the model
 // so that saving writes what the user hears.
-void AppController::syncModelFromEngine()
+void AppController::syncModelFromEngine(bool autosave)
 {
     // JUCE serialises its device callbacks with this lock. Plugin getState may access processor
-    // internals; keep it on the message thread while the callback is excluded.
-    const juce::ScopedLock callbackLock(engine_.deviceManager().getAudioCallbackLock());
+    // internals; keep it on the message thread while the callback is excluded. The autosave (PRJ-4) leaves the audio
+    // running: mixer and native values are atomics, and the plug-in formats allow reading state while processing.
+    std::optional<juce::ScopedLock> callbackLock;
+    if (! autosave) callbackLock.emplace(engine_.deviceManager().getAudioCallbackLock());
     auto* graph = engine_.latestGraph();
     if (! song_ || graph == nullptr)
         return;
     const juce::ScopedValueSetter<bool> syncing(syncingModel_, true);
+    const devices::PluginCaptureFilter changedPlugins = [this](plugins::PluginDevice& plugin) {
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        ++autosavePluginsSeen_;
+        if (! pluginNeedsCapture(plugin, now)) return false;
+        autosavePlugins_[&plugin] = {plugin.stateSerial(), now}; // read before the capture: a change during it counts
+        ++autosavePluginsRead_;
+        return true;
+    };
+    const auto* filter = autosave ? &changedPlugins : nullptr;
     int index = 0;
     auto syncTrack = [&](model::Track& t) {
         if ((size_t) index >= graph->nodes.size())
@@ -1491,7 +1664,7 @@ void AppController::syncModelFromEngine()
         for (size_t s = 0; s < t.mixer.sends.size() && s < c.sends.size(); ++s)
             t.mixer.sends[s] = c.sends[s].load();
         for (size_t di = 0; di < t.devices.size() && di < node.processorForModelDevice.size(); ++di)
-            devices::captureDeviceState(t.devices[di], node.processorForModelDevice[di]);
+            devices::captureDeviceState(t.devices[di], node.processorForModelDevice[di], filter);
         ++index;
     };
     for (auto& t : song_->tracks)
@@ -1944,9 +2117,11 @@ bool AppController::writeSet(const juce::File& destination, const io::AlsSaveOpt
         const auto project = destination.getParentDirectory();
         rebaseSampleRefs(*song_, project, result);
         song_->sourcePath = destination.getFullPathName().toStdString();
+        song_->patchSourcePath.clear(); // a recovered set now lives in its own file (PRJ-4)
         io::refreshClipIdentities(*song_);
         history_.markSaved();
         ui_.documentDirty = false;
+        recoveryDocumentSaved();
         std::string text = "Saved " + destination.getFileName().toStdString() + " ("
                            + std::to_string(result.clipsAdded) + " clips added, " + std::to_string(result.clipsRemoved) + " removed)";
         if (result.samplesCopied > 0)
@@ -2849,6 +3024,42 @@ void AppController::dropTrackDevice(const ui::BrowserDrag& item, int trackIndex)
 
 // SONORA_DEVICE_DRAG_AUTOTEST="from:device:to:copy|move[,...]" (track indices, top-level device index on `from`) runs
 // each drop 4 s after the set loads, logs both chains ("[sonora] device drag:"), then saves the set in place. Use a copy.
+// SONORA_PLAY_AUTOTEST=<seconds>[,from-beat]: plays the open set on the real audio device, logs the engine's load once a
+// second (ENG-14e / UI-82 verification without driving the UI) and quits. Nothing is saved.
+void AppController::runPlayAutotest()
+{
+    const auto spec = juce::SystemStats::getEnvironmentVariable("SONORA_PLAY_AUTOTEST", {});
+    if (spec.isEmpty() || playAutotestDone_ || ! song_) return;
+    playAutotestDone_ = true;
+    const int seconds = std::clamp(spec.upToFirstOccurrenceOf(",", false, false).getIntValue(), 1, 600);
+    const double from = spec.contains(",") ? spec.fromFirstOccurrenceOf(",", false, false).getDoubleValue() : 0.0;
+    const std::weak_ptr<bool> alive = alive_;
+    juce::Timer::callAfterDelay(3000, [this, alive, seconds, from] {
+        if (alive.expired() || ! song_) return;
+        engine_.transport().setPosition(from);
+        engine_.transport().play();
+        engine_.resetLoadStats();
+        logf("play autotest: playing from beat %.1f for %d s", from, seconds);
+        auto tick = std::make_shared<std::function<void(int)>>();
+        *tick = [this, alive, seconds, tick](int second) {
+            if (alive.expired()) return;
+            const auto s = engine_.loadStats();
+            logf("play autotest: %2d s current %.1f%% average %.1f%% peak %.1f%% overruns %u threads %d/%d workgroup %s",
+                 second, s.current * 100.0f, s.average * 100.0f, s.peak * 100.0f, s.overruns, s.threads, s.workers + 1,
+                 s.workgroup ? "yes" : "no");
+            if (second >= seconds)
+            {
+                engine_.transport().stop();
+                ui_.documentDirty = false; // a verification run never asks to save
+                juce::JUCEApplicationBase::quit();
+                return;
+            }
+            juce::Timer::callAfterDelay(1000, [tick, second] { (*tick)(second + 1); });
+        };
+        juce::Timer::callAfterDelay(1000, [tick] { (*tick)(1); });
+    });
+}
+
 void AppController::runDeviceDragAutotest()
 {
     const auto spec = juce::SystemStats::getEnvironmentVariable("SONORA_DEVICE_DRAG_AUTOTEST", {});

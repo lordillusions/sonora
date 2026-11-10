@@ -2,6 +2,7 @@
 //
 //   als_dump <file.als> [--notes] [--params] [--automation]
 //   als_dump --summary <file1.als> <file2.als> ...    one line per file (bulk regression check)
+//   als_dump --autosave-cost <file.als> <scratch dir>  PRJ-4: time of the model copy and of writing a recovery copy
 //   als_dump --roundtrip <files...>                   load, save unchanged to a temp file, reload, compare (ALS-10)
 //   als_dump --resave-editor <source> <copy>           disposable loop/warp/probability interoperability probe
 //   als_dump --new-set-demo <out.als>                  same, plus authored arrangement/session MIDI clips (interop probe)
@@ -185,6 +186,33 @@ int main(int argc, char** argv)
     }
 
     const std::string first = argv[1];
+    if (first == "--autosave-cost" && argc >= 4)
+    {
+        // PRJ-4: what an autosave costs on this set: the model copy (message thread in the app) and writing the recovery
+        // copy (worker), as AppController::autosaveNow does. The set is only read; the copy goes into <scratch dir>.
+        const juce::File source(juce::String::fromUTF8(argv[2]));
+        const auto scratch = juce::File::getCurrentWorkingDirectory().getChildFile(argv[3]);
+        if (! scratch.createDirectory() || source.getParentDirectory() == scratch) { std::printf("bad scratch dir\n"); return 1; }
+        auto loaded = io::loadAls(source);
+        if (! loaded) { std::printf("FAIL load %s\n", loaded.error.c_str()); return 1; }
+        const auto target = scratch.getChildFile("Autosave.als");
+        for (int round = 0; round < 5; ++round)
+        {
+            const auto t0 = juce::Time::getMillisecondCounterHiRes();
+            auto copy = std::make_shared<model::Song>(*loaded.song);
+            const auto t1 = juce::Time::getMillisecondCounterHiRes();
+            const auto result = io::saveAls(*copy, target, io::AlsSaveOptions{});
+            const auto t2 = juce::Time::getMillisecondCounterHiRes();
+            copy.reset();
+            const auto t3 = juce::Time::getMillisecondCounterHiRes();
+            std::printf("round %d: model copy %.2f ms, write %.0f ms (%s, %s), free copy %.2f ms\n", round, t1 - t0, t2 - t1,
+                        result.ok ? "ok" : result.error.c_str(), juce::File::descriptionOfSizeInBytes(target.getSize()).toRawUTF8(), t3 - t2);
+        }
+        auto again = io::loadAls(target, source.getFullPathName().toStdString());
+        std::printf("reload as the set: %s, %zu tracks\n", again ? "ok" : again.error.c_str(), again ? again.song->tracks.size() : (size_t) 0);
+        target.deleteFile();
+        return again ? 0 : 1;
+    }
     if (first == "--new-set-demo" && argc >= 3)
     {
         // New project + authored MIDI clips, saved through the normal writer (interoperability probe).

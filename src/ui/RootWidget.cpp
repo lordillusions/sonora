@@ -72,6 +72,17 @@ void RootWidget::dispatchMouseDown(MouseEvent e)
     setKeyboardFocus(captured_);
     if (captured_ == nullptr || captured_ == this)
         return;
+    writeTouch_.reset();
+    if (ctx_.automationWriteMode && ! e.right && ctx_.automationWriteTouch)
+        for (auto* w = captured_; w != nullptr && w != this; w = w->parent())
+        {
+            const auto origin = w->boundsInRoot();
+            if (auto target = w->mappingTargetAt(e.x - origin.x, e.y - origin.y))
+            {
+                if (isAutomationWritable(*target)) writeTouch_ = target;
+                break;
+            }
+        }
     for (auto* a = captured_; a != nullptr && a != this; a = a->parent())
         a->descendantPressed(captured_);
     if (! isAlive(captured_)) { captured_ = nullptr; return; }
@@ -155,7 +166,17 @@ void RootWidget::dispatchMouseUp(MouseEvent e)
     if (captured_ != nullptr && captured_ != this)
         captured_->mouseUp(localise(e, capturedOrigin_));
     captured_ = nullptr;
+    // UI-77: the control was let go; the app shows its lane and writes the value (after the control's own mouseUp).
+    if (auto touched = std::exchange(writeTouch_, std::nullopt); touched && ctx_.automationWriteMode && ctx_.automationWriteTouch)
+        ctx_.automationWriteTouch(*touched, false);
     refreshCursor(e);
+}
+
+bool isAutomationWritable(const midi::ControlTarget& target)
+{
+    using K = midi::ControlTarget::Kind;
+    return target.kind == K::TrackVolume || target.kind == K::TrackPan || target.kind == K::TrackSend || target.kind == K::TrackActivator
+           || target.kind == K::DeviceParameter || target.kind == K::DeviceOn || target.kind == K::Tempo;
 }
 
 void RootWidget::refreshCursor(MouseEvent e)

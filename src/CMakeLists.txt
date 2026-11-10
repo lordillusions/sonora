@@ -44,8 +44,10 @@ add_library(sonora_core STATIC
     core/Model.cpp
     core/ResynthModel.cpp
     core/Edit.cpp
+    core/AutomationEdits.cpp
     core/ClipOperations.cpp
     core/ClipGeometry.cpp
+    core/SampleReplace.cpp
     core/Op.cpp
     core/OpJson.cpp
     core/ModelCodec.cpp
@@ -64,6 +66,7 @@ add_library(sonora_core STATIC
     io/als/SampleDrop.cpp
     io/als/DevicePresets.cpp
     io/midi/MidiFileExport.cpp
+    io/recovery/RecoveryStore.cpp
 )
 target_include_directories(sonora_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(sonora_core PUBLIC sonora::juce sonora_monocypher) # core/Ed25519 (COM-4l, LIB-1)
@@ -77,6 +80,8 @@ endif()
 add_library(sonora_engine STATIC
     dsp/Loudness.cpp
     dsp/Analyzers.cpp
+    dsp/SoundFeatures.cpp
+    engine/SoundSimilarity.cpp
     engine/MasterMonitor.cpp
     engine/Exporter.cpp
     engine/ClipRender.cpp
@@ -96,6 +101,8 @@ add_library(sonora_engine STATIC
     engine/ClipLauncher.cpp
     engine/ControlRouter.cpp
     engine/EngineGraph.cpp
+    engine/RenderSchedule.cpp
+    engine/EngineWorkers.cpp
     engine/PeakCache.cpp
     engine/Recorder.cpp
     engine/RecordingManager.cpp
@@ -175,7 +182,7 @@ option(SONORA_DEBUG_OPTIMIZE_AUDIO "Compile audio-thread DSP with -O2 in Debug b
 if (SONORA_DEBUG_OPTIMIZE_AUDIO)
     get_target_property(_sonoraAudioSources sonora_engine SOURCES)
     list(FILTER _sonoraAudioSources INCLUDE REGEX
-         "^(dsp/|devices/native/|devices/RackProcessor\\.cpp|engine/stretch/|engine/(AudioEngine|AudioClipPlayer|ClipPlayers|Automation|ResynthAnalysis|TempoAnalysis)\\.cpp)")
+         "^(dsp/|devices/native/|devices/RackProcessor\\.cpp|engine/stretch/|engine/(AudioEngine|EngineWorkers|AudioClipPlayer|ClipPlayers|Automation|ResynthAnalysis|TempoAnalysis)\\.cpp)")
     set_source_files_properties(${_sonoraAudioSources} PROPERTIES
         COMPILE_OPTIONS "$<$<AND:$<CONFIG:Debug>,$<CXX_COMPILER_ID:Clang,AppleClang,GNU>>:-O2>")
 endif()
@@ -234,6 +241,7 @@ add_library(sonora_ui STATIC
     gfx/Brand.cpp
     ui/Theme.cpp
     ui/BrowserTags.cpp
+    ui/SampleFiles.cpp
     ui/Widget.cpp
     ui/RootWidget.cpp
     ui/Painter.cpp
@@ -244,6 +252,7 @@ add_library(sonora_ui STATIC
     ui/widgets/Knob.cpp
     ui/widgets/Fader.cpp
     ui/views/TopBar.cpp
+    ui/views/CpuPanel.cpp
     ui/views/BrowserPanel.cpp
     ui/views/SessionView.cpp
     ui/views/InputControls.cpp
@@ -281,6 +290,7 @@ add_library(sonora_ui STATIC
     ui/InlineEdit.cpp
     ui/SetView.cpp
     ui/TrackMenu.cpp
+    ui/ClipAutomation.cpp
     ui/DeviceMenu.cpp
     ui/Shortcuts.cpp
     ui/views/ClipControls.cpp
@@ -505,8 +515,10 @@ target_sources(Sonora PRIVATE
     app/AppHushWindow.cpp
     app/AppKickstractWindow.cpp
     app/AppSamplePacks.cpp
+    app/AppSampleFiles.cpp
     app/AppDevicePresets.cpp
     app/AppStems.cpp
+    app/AppRecovery.cpp
 )
 if (SONORA_UPDATE_ALLOW_LOCAL_HTTP)
     set(_sonoraLocalTest 1)

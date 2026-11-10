@@ -258,6 +258,7 @@ readiness; denied automatic requests are not repeated until an explicit input ed
 |---|---|---|
 | Message (main) | UI, commands, graph building, plugin instantiation/editors, deleting retired graphs | allocate, lock, log |
 | Audio (CoreAudio) | `AudioEngine::audioDeviceIOCallbackWithContext` → clips → devices → mixer | **only** atomics + preallocated buffers |
+| Engine helpers (P-cores − 1, ENG-14e) | `EngineWorkers`: track / return render jobs of the block the audio thread is rendering | same rules as the audio thread |
 | MIDI input (CoreMIDI) | `MidiManager::handleIncomingMidiMessage` | push to lock-free FIFO; `callAsync` for mapped CCs |
 | Thread pool (2) | `.als` parsing, project discovery, plugin scanning, first-Warp tempo analysis | no UI access; post results with `callAsync` |
 | Collab network (libdatachannel) | WebSocket signalling, ICE/DTLS, data-channel framing | queue events under a mutex; never touch the model |
@@ -305,9 +306,25 @@ That is why `installSong` and device-edit preparation invalidate UI pointers and
    Record ranges are computed per segment before monitoring; capture consumes those same intervals after Main.
 3. Tracks in `trackOrder` (children before their group): consume clip launches, render permitted clips, build
    monitoring masks → filter/add selected MIDI or physical audio input →
-   devices → volume/pan → meter → sum into parent group or main → post-fader sends to returns.
-4. Returns → main. Main devices + volume → recording capture (Main resampling / pre-effect external input)
-   → output; metronome and browser preview are mixed afterward.
+   devices → volume/pan → meter. A group's job first adds its children's outputs, a return's job every track's send.
+4. Returns → main. Main adds the top-level tracks and the returns, then its devices + volume → recording capture (Main
+   resampling / pre-effect external input) → output; metronome and browser preview are mixed afterward.
+
+#### Multi-core rendering (ENG-14e)
+Steps 3-4 are the jobs of `EngineGraph::schedule` (`engine/RenderSchedule`, built by `EngineGraph::prepare()` on the
+message thread): one per track in `trackOrder`, one per return; Main runs on the callback thread after them. Edges: child →
+group, every track → every return, and sidechain-linked nodes in the serial order. Every bus is summed by the job that owns
+it, in the serial order (the gather), so the output is **bit-identical** for any thread count (tests/test_parallel_engine,
+`engine_probe --hash`). `EngineWorkers` runs them: the callback thread queues the ready jobs, wakes up to `schedule.width - 1` helpers
+(about one per 0.4 ms of smoothed work; semaphore), works itself, and successors are released by an atomic countdown. A
+helper that finds nothing to take spins 30 us, then parks until a job is queued or the block ends (realtime threads that
+spin through every block get throttled by macOS for whole buffers); the callback thread never parks and returns only when
+every job is done and no helper still looks at the block. Helpers are
+time-constraint threads that join the device's `os_workgroup` (`AudioIODevice::getWorkgroup()`), 8 MB stacks. A block renders
+serially when the smoothed work is under min(250 us, 10 % of the buffer), the graph has a routing loop, an overdub
+preview is live, `debugCheckDevices` is on, or multi-core is off (Settings > Audio, `SONORA_ENGINE_THREADS=1`).
+Per-node job time (`TrackControls::cpuMicros`) and the block load / overrun counters (`AudioEngine::loadStats()`) feed the
+CPU meter details (UI-82).
 5. `Transport::advanceTo(endPos)`.
 
 Clip renderers (`ClipPlayers.cpp`) are **stateless** functions of (clip, beat range) — seeking and looping

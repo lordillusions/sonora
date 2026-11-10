@@ -1,11 +1,14 @@
 set(SONORA_TEST_SOURCES
     main.cpp
     test_core.cpp
+    test_automation_edits.cpp
     test_app_data_folder.cpp
     test_als.cpp
     test_vst2_bank.cpp
     test_sample_drop.cpp
+    test_sample_files.cpp
     test_engine.cpp
+    test_parallel_engine.cpp
     test_devices.cpp
     test_simpler_parity.cpp
     test_sampler.cpp
@@ -70,6 +73,7 @@ set(SONORA_TEST_SOURCES
     test_edit.cpp
     test_clip_geometry.cpp
     test_project.cpp
+    test_recovery.cpp
     test_live_compat.cpp
     test_updates.cpp
     test_update_feed.cpp ../src/app/UpdateFeed.cpp
@@ -89,8 +93,8 @@ set(SONORA_TEST_SOURCES
 )
 if(SONORA_WITH_UI)
     list(APPEND SONORA_TEST_SOURCES test_resynth_ui.cpp test_transport_warp_ui.cpp test_sample_drop_ui.cpp)
-    list(APPEND SONORA_TEST_SOURCES test_device_faces.cpp test_wavetable_face_ui.cpp test_tension_face_ui.cpp test_sampler_face_ui.cpp test_editor_workflow_ui.cpp test_browser_tags_ui.cpp test_device_presets_ui.cpp test_sample_packs_ui.cpp test_context_track_ui.cpp test_locators_ui.cpp test_inline_rename_ui.cpp test_drag_guide_ui.cpp test_clip_editing_ui.cpp test_ruler_zoom_ui.cpp test_track_state_ui.cpp test_set_view_ui.cpp test_shortcuts_ui.cpp test_updates_ui.cpp)
-    list(APPEND SONORA_TEST_SOURCES test_ui.cpp test_clip_envelope_ui.cpp test_audio_clip.cpp test_grid.cpp test_grid_ui.cpp test_tools_ui.cpp test_automation_ui.cpp test_clip_launch_ui.cpp test_native_plugin_ui.cpp test_rack_face_ui.cpp test_curve_lfo_ui.cpp test_wavetable_ui.cpp test_wavetable_fx_ui.cpp test_wavetable_modulation_ui.cpp test_wavetable_routing_ui.cpp test_wavetable_sub_ui.cpp test_wavetable_quality_ui.cpp test_wavetable_noise_ui.cpp test_wavetable_window_ui.cpp test_wavetable_drag_modulation_ui.cpp test_wavetable_preset_browser_ui.cpp test_brand_ui.cpp)
+    list(APPEND SONORA_TEST_SOURCES test_device_faces.cpp test_wavetable_face_ui.cpp test_tension_face_ui.cpp test_sampler_face_ui.cpp test_editor_workflow_ui.cpp test_browser_tags_ui.cpp test_device_presets_ui.cpp test_sample_packs_ui.cpp test_context_track_ui.cpp test_locators_ui.cpp test_inline_rename_ui.cpp test_sample_files_ui.cpp test_drag_guide_ui.cpp test_clip_editing_ui.cpp test_ruler_zoom_ui.cpp test_track_state_ui.cpp test_set_view_ui.cpp test_shortcuts_ui.cpp test_updates_ui.cpp)
+    list(APPEND SONORA_TEST_SOURCES test_ui.cpp test_clip_envelope_ui.cpp test_audio_clip.cpp test_grid.cpp test_grid_ui.cpp test_tools_ui.cpp test_automation_ui.cpp test_automation_edit_ui.cpp test_clip_launch_ui.cpp test_native_plugin_ui.cpp test_rack_face_ui.cpp test_curve_lfo_ui.cpp test_wavetable_ui.cpp test_wavetable_fx_ui.cpp test_wavetable_modulation_ui.cpp test_wavetable_routing_ui.cpp test_wavetable_sub_ui.cpp test_wavetable_quality_ui.cpp test_wavetable_noise_ui.cpp test_wavetable_window_ui.cpp test_wavetable_drag_modulation_ui.cpp test_wavetable_preset_browser_ui.cpp test_brand_ui.cpp)
     # PLG-11: the VST3's processor and editor, built here against the app's JUCE (no plug-in wrapper needed).
     list(APPEND SONORA_TEST_SOURCES test_wavetable_plugin.cpp ../src/plugin/WavetablePlugin.cpp ../src/plugin/WavetablePluginEditor.cpp)
     # PLG-12: the Curve LFO VST3 likewise; Prism's source already defines the plug-in entry point.

@@ -5,6 +5,9 @@
 #include "ui/Controls.h"
 #include "ui/Painter.h"
 #include "ui/UiContext.h"
+#include "ui/SampleFiles.h"
+#include "ui/TrackMenu.h"
+#include "gfx/Fonts.h"
 #include "engine/ClipPlayers.h"
 #include "engine/SampleCache.h"
 #include "engine/EngineGraph.h"
@@ -216,11 +219,65 @@ void SampleView::paint(SkCanvas& canvas, const Theme& theme)
     const float bars[] = {3, 6, 8, 5, 3};
     for (int i = 0; i < 5; ++i)
         paint::fill(canvas, {icon.x + 3.5f + (float) i * 2.0f, icon.centreY() - bars[i] * 0.5f, 1.0f, bars[i]}, fg);
-    const std::string filePath = clip->sample.absolutePath;
-    const auto fileName = juce::File(juce::String::fromUTF8(filePath.c_str())).getFileName().toStdString();
+    // LIB-3: the file's name (click: show it in the browser), its format, then the folder it lives in, dimmed.
+    const auto resolved = clipSamplePath(context, context.selectedClipLocation());
+    const std::string filePath = resolved.empty() ? clip->sample.absolutePath : resolved;
+    const juce::File file(juce::String::fromUTF8(filePath.c_str()));
+    const auto fileName = file.getFileName().toStdString();
     const auto format = formatText(peaks ? peaks->source.get() : nullptr, peaks ? peaks->sampleRate : clip->sampleRate, filePath);
-    paint::text(canvas, (fileName.empty() ? clip->name : fileName) + "  " + format, {icon.right() + 6, 0, width() - 180, kHeaderHeight}, fg,
-                theme.metrics.fontSize + 0.5f, Align::Left);
+    const auto name = nameBounds();
+    const float fontSize = theme.metrics.fontSize + 0.5f;
+    const float textRight = scopeBounds(0).isEmpty() ? width() - 140 : scopeBounds(0).x - 64;
+    paint::text(canvas, fileName.empty() ? clip->name : fileName, {name.x, 0, std::min(name.w, textRight - name.x), kHeaderHeight},
+                resolved.empty() ? theme.color("ChosenAlert") : fg, fontSize, Align::Left, true);
+    float headerX = name.right() + 8;
+    const auto details = resolved.empty() ? std::string("missing") : format;
+    if (headerX < textRight)
+    {
+        paint::text(canvas, details, {headerX, 0, textRight - headerX, kHeaderHeight}, fg, theme.metrics.fontSize, Align::Left);
+        headerX += gfx::measureText(details, theme.metrics.fontSize) + 10;
+    }
+    if (headerX + 40 < textRight && ! filePath.empty())
+    {
+        auto folder = file.getParentDirectory().getFullPathName();
+        const auto home = juce::File::getSpecialLocation(juce::File::userHomeDirectory).getFullPathName();
+        if (folder.startsWith(home)) folder = "~" + folder.substring(home.length());
+        // Too long: keep the folders nearest the file (they say the most), "..." for the rest.
+        const float room = textRight - headerX;
+        while (gfx::measureText(folder.toStdString(), theme.metrics.fontSize) > room)
+        {
+            const int slash = folder.indexOfChar(2, '/'); // after a leading "~/" or ".../"
+            if (slash < 0) break;
+            folder = juce::String::fromUTF8("\xE2\x80\xA6") + folder.substring(slash);
+        }
+        paint::text(canvas, folder.toStdString(), {headerX, 0, textRight - headerX, kHeaderHeight}, theme.color("TextDisabled"), theme.metrics.fontSize,
+                    Align::Left);
+    }
+    // LIB-4/LIB-5: swap to the previous / next similar file, in the scope the switch shows.
+    if (! scopeBounds(0).isEmpty())
+    {
+        const SkColor label = theme.color("TextDisabled");
+        paint::text(canvas, "Replace in", {scopeBounds(0).x - 60, 0, 56, kHeaderHeight}, label, theme.metrics.fontSize - 0.5f, Align::Right);
+        paint::text(canvas, "Similar", {scopeBounds(2).right() + 4, 0, swapBounds(-1).x - scopeBounds(2).right() - 7, kHeaderHeight}, label,
+                    theme.metrics.fontSize - 0.5f, Align::Right);
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto box = scopeBounds(i);
+            const bool on = (int) context.sampleReplaceScope == i;
+            ctl::framed(canvas, theme, box, theme.color(on ? "ChosenDefault" : "ControlTextBack"));
+            paint::text(canvas, sampleScopeShortLabel((model::SampleScope) i), box, fg, theme.metrics.fontSize - 0.5f, Align::Centre);
+        }
+        const bool swappable = static_cast<bool>(context.swapSimilarSample) && ! resolved.empty();
+        for (const int direction : {-1, 1})
+        {
+            const auto box = swapBounds(direction);
+            ctl::framed(canvas, theme, box, theme.color("ControlTextBack"));
+            ctl::triangle(canvas, box.centreX(), box.centreY(), 7, 5, direction < 0 ? ctl::Dir::Left : ctl::Dir::Right,
+                          swappable ? fg : theme.color("TextDisabled"));
+        }
+        if (context.similarSamples.running && context.similarSamples.clip.uid == clip->uid)
+            paint::text(canvas, "...", {swapBounds(1).right() + 2, 0, 14, kHeaderHeight}, fg, theme.metrics.fontSize);
+    }
     const Rect sampleTab{width() - 132, 1, 64, kHeaderHeight - 2}, envelopeTab{width() - 66, 1, 64, kHeaderHeight - 2};
     paint::fill(canvas, sampleTab, theme.color("SurfaceHighlight"));
     paint::text(canvas, "Sample", sampleTab, fg, theme.metrics.fontSize, Align::Centre);
@@ -399,6 +456,11 @@ void SampleView::showContextMenu(const MouseEvent& event, const model::Clip& cli
         actions.push_back(std::move(action));
         menu.addItem((int) actions.size(), label, enabled);
     };
+    // LIB-3 / LIB-5: the clip's file.
+    for (auto& action : sampleFileActions(ctx(), location))
+        item(action.label.c_str(), action.enabled, std::move(action.run));
+    addSampleScopeMenu(menu, ctx(), location);
+    menu.addSeparator();
     const double duration = clip.sampleRate > 0 ? (double) clip.lengthSamples / clip.sampleRate : 0.0;
     double seconds = std::clamp(xToSeconds(event.x), 0.0, std::max(0.0, duration));
     auto peaks = ctx().peaks ? ctx().peaks(clip) : nullptr;
@@ -463,9 +525,25 @@ void SampleView::mouseDown(const MouseEvent& event)
     edge_ = 0;
     changed_ = false;
     const auto* clip = ctx().selectedClip();
-    if (clip && clip->kind == model::Clip::Kind::Audio && event.right && event.y >= kHeaderHeight && ctx().applyEdit && ctx().song)
+    if (clip && clip->kind == model::Clip::Kind::Audio && event.right && ctx().applyEdit && ctx().song)
     {
         showContextMenu(event, *clip);
+        return;
+    }
+    if (clip && clip->kind == model::Clip::Kind::Audio && event.y < kHeaderHeight && ! event.right)
+    {
+        auto& x = ctx();
+        const auto location = x.selectedClipLocation();
+        if (nameBounds().contains(event.x, event.y)) { showInBrowser(x, clipSamplePath(x, location)); return; }
+        for (const int direction : {-1, 1})
+            if (swapBounds(direction).contains(event.x, event.y))
+            {
+                if (x.swapSimilarSample && ! clipSamplePath(x, location).empty()) x.swapSimilarSample(location, direction);
+                repaint();
+                return;
+            }
+        for (int i = 0; i < 3; ++i)
+            if (scopeBounds(i).contains(event.x, event.y)) { x.sampleReplaceScope = (model::SampleScope) i; repaint(); return; }
         return;
     }
     if (! clip || ! ctx().applyEdit || ! ctx().song || event.y < startRowY()) return;
@@ -625,6 +703,57 @@ bool SampleView::mouseWheel(const MouseEvent& event)
         scrollSeconds_ = std::max(0.0, scrollSeconds_ - (event.wheelDeltaX + event.wheelDeltaY) * kWheelPixels * secondsPerPixel_);
     repaint();
     return true;
+}
+
+Rect SampleView::nameBounds() const
+{
+    const auto* clip = ctx().selectedClip();
+    if (! clip || clip->kind != model::Clip::Kind::Audio) return {};
+    const auto resolved = clipSamplePath(ctx(), ctx().selectedClipLocation());
+    const auto path = resolved.empty() ? clip->sample.absolutePath : resolved;
+    auto name = juce::File(juce::String::fromUTF8(path.c_str())).getFileName().toStdString();
+    if (name.empty()) name = clip->name;
+    const float right = scopeBounds(0).isEmpty() ? width() - 140 : scopeBounds(0).x - 64;
+    const float w = std::min(gfx::measureText(name, ctx().theme.metrics.fontSize + 0.5f, true) + 2, std::max(0.0f, right - 28));
+    return {28, 0, w, kHeaderHeight};
+}
+
+Rect SampleView::scopeBounds(int index) const
+{
+    if (width() < 560 || index < 0 || index > 2) return {};
+    return {width() - 336 + (float) index * 35, 1, 34, kHeaderHeight - 2};
+}
+
+Rect SampleView::swapBounds(int direction) const
+{
+    if (width() < 560) return {};
+    return {direction < 0 ? width() - 178 : width() - 160, 1, 17, kHeaderHeight - 2};
+}
+
+bool SampleView::browserDrop(const BrowserDrag& drag, const MouseEvent&)
+{
+    // LIB-5: a sample dropped on the editor replaces the clip's file (in the scope the header shows), like the reference.
+    if (drag.kind != BrowserDrag::Kind::Sample) return false;
+    auto& x = ctx();
+    const auto* clip = x.selectedClip();
+    if (! clip || clip->kind != model::Clip::Kind::Audio) return false;
+    return replaceClipSampleWith(x, x.selectedClipLocation(), drag.files.empty() ? drag.value : drag.files.front());
+}
+
+void SampleView::paintOverChildren(SkCanvas& canvas, const Theme& theme)
+{
+    // While a sample is dragged over the editor: a frame and what the drop will do.
+    const auto& x = ctx();
+    if (! x.browserDrag || x.browserDrag->kind != BrowserDrag::Kind::Sample) return;
+    const auto* clip = x.selectedClip();
+    if (! clip || clip->kind != model::Clip::Kind::Audio) return;
+    const auto origin = boundsInRoot();
+    if (! Rect{origin.x, origin.y, width(), height()}.contains(x.browserDragX, x.browserDragY)) return;
+    paint::stroke(canvas, localBounds().reduced(1, 1), theme.color("ChosenDefault"), 2.0f);
+    const std::string label = std::string("Replace the sample: ") + model::sampleScopeLabel(x.sampleReplaceScope);
+    const Rect box{width() * 0.5f - 130, kHeaderHeight + 6, 260, 20};
+    paint::fill(canvas, box, paint::withAlpha(theme.color("SurfaceBackground"), 230));
+    paint::text(canvas, label, box, theme.color("ControlForeground"), theme.metrics.fontSize, Align::Centre);
 }
 
 } // namespace sonora::ui

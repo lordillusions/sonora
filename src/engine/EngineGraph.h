@@ -14,6 +14,7 @@
 #include "engine/Automation.h"
 #include "engine/ClipPlayers.h"
 #include "engine/DelayLine.h"
+#include "engine/RenderSchedule.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -41,6 +42,7 @@ struct TrackControls
     std::atomic<int> previewPitch{-1}; // message-thread piano key audition, independent of arm/input/recording
     std::atomic<uint32_t> midiActivity{0}; // event generation for MIDI-only track activity indicators
     std::atomic<float> peakL{0.0f}, peakR{0.0f}; // written by audio thread
+    std::atomic<float> cpuMicros{0.0f}; // ENG-14e / UI-82: time this track takes per block (smoothed), written by audio
     // ---- session clip launching (ENG-6). Written by the message thread (ClipLauncher), consumed
     // by the audio thread at the next quantisation boundary.
     static constexpr int kNoSlot = -1;     // playingSlot: nothing playing
@@ -191,6 +193,13 @@ struct TrackNode
     std::vector<char> sendEnabled;      // per return: this track sends to it (decided at build time)
     DelayLine outDelay;                 // aligns this node's output with its siblings at the parent
     std::vector<DelayLine> sendDelays;  // per return, same for the send path
+
+    // ENG-14e: written by this node's render job, read by the jobs that gather it (after it finished).
+    bool blockEmit = false;     // adds its output to its parent / Main this block (audible or feeding a left-out group)
+    bool blockEmitStem = false; // the same for an offline stem (audible only, as before)
+    bool blockAudible = false;  // its sends play
+    int64_t blockTicks = 0;     // high-resolution ticks its job took this block
+    double cpuAverageMicros = 0; // audio thread: smoothed, published in TrackControls::cpuMicros
 };
 
 struct EngineGraph
@@ -202,6 +211,7 @@ struct EngineGraph
     std::vector<int> returnNodes;
     int mainNode = -1;
     std::shared_ptr<ControlBank> controls;
+    RenderSchedule schedule; // ENG-14e: rebuilt by prepare() (message thread)
 
     void prepare(double sampleRate, int maxBlockSize);
     // Called by prepare() after the devices are prepared (their latency is known then).

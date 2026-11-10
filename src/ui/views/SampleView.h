@@ -12,6 +12,9 @@ namespace sonora::ui
 // waveform to add a warp marker, drag it (Shift: its beat), double-click it to remove it. In the loop row, drag the
 // position marker, the loop brace's end or the brace itself (warped clips snap to 1/16 notes; Alt: no snap). Cmd+wheel zooms, wheel scrolls,
 // Follow (UiContext::sampleFollow) keeps the playhead in view.
+// LIB-3/LIB-5: the header names the sample file and its folder; clicking the name shows it in the browser. Swap arrows
+// step through files that sound similar (Show Similar Files) and a Clip / Track / Set switch says which clips a swap, a
+// drop or Replace Sample... changes. A sample dropped from the browser (or the Finder) replaces the clip's file.
 class SampleView : public Widget
 {
 public:
@@ -23,6 +26,14 @@ public:
     void mouseDrag(const MouseEvent&) override;
     void mouseUp(const MouseEvent&) override;
     bool mouseWheel(const MouseEvent& e) override;
+    bool browserDrop(const BrowserDrag&, const MouseEvent&) override;
+    void paintOverChildren(SkCanvas& c, const Theme& t) override;
+
+    // Header controls (tests click them through the root): the file name, the swap arrows, the scope switch (0 Clip,
+    // 1 Track, 2 Set). Empty when the view is too narrow for them.
+    Rect nameBounds() const;
+    Rect swapBounds(int direction) const;
+    Rect scopeBounds(int index) const;
 
     // Geometry in this view's coordinates (tests locate the rows through these).
     float startRowY() const { return kHeaderHeight + kRulerHeight; }

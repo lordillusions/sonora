@@ -185,6 +185,19 @@ void RecordingManager::beginPreviewBlock(const EngineGraph& graph)
     if (audio_) for (const auto& p : audio_->takes) p->recorder.beginPreviewBlock(graph);
 }
 
+bool RecordingManager::hasPreviewBank() const
+{
+    if (arrangement_.hasPreviewBank()) return true;
+    if (audio_) for (const auto& p : audio_->takes) if (p->recorder.hasPreviewBank()) return true;
+    return false;
+}
+
+void RecordingManager::freezePreviewBanks()
+{
+    arrangement_.freezePreviewBank(true);
+    if (audio_) for (const auto& p : audio_->takes) p->recorder.freezePreviewBank(true);
+}
+
 bool RecordingManager::hasOverdubPreview(int track, int scene, uint32_t uid)
 {
     if (audio_) for (const auto& p : audio_->takes) if (p->recorder.hasOverdubPreview(track, scene, uid)) return true;

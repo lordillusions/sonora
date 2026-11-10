@@ -4,6 +4,7 @@
 
 #include "engine/Automation.h"
 #include "engine/EngineGraph.h"
+#include "engine/Transport.h"
 #include "ui/ClipEditing.h"
 #include "ui/Painter.h"
 #include "ui/UiContext.h"
@@ -22,6 +23,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -293,7 +295,7 @@ void AutomationEditor::syncTarget(const std::vector<Target>& ts)
 void AutomationEditor::setTarget(int id)
 {
     targetId_ = id;
-    selectedPoint_ = -1;
+    if (selectionHere()) clearSelection();
     auto& lanes = ctx().automationLaneTargets[track_];
     if (lanes.size() <= (size_t) lane_) lanes.resize((size_t) lane_ + 1, -1);
     lanes[(size_t) lane_] = id;
@@ -343,13 +345,15 @@ void AutomationEditor::removeLane(bool andBelow)
         if (andBelow) lanes.resize((size_t) lane_);
         else lanes.erase(lanes.begin() + lane_);
     }
-    if (ctx().selectedAutomationTrack == track_) selectedPoint_ = -1;
+    if (ctx().selectedAutomationTrack == track_ && ctx().automationSelection.track == track_) ctx().automationSelection = {};
     if (ctx().layoutChanged) ctx().layoutChanged();
 }
 
-model::AutomationEnvelope AutomationEditor::envelope(const Target& target) const
+model::AutomationEnvelope AutomationEditor::envelope(const Target& target) const { return envelopeOf(ctx(), track_, target); }
+
+model::AutomationEnvelope AutomationEditor::envelopeOf(const UiContext& ctx, int trackIndex, const Target& target)
 {
-    const auto* track = ctx().trackAt(track_);
+    const auto* track = ctx.trackAt(trackIndex);
     if (track)
         for (const auto& env : track->automation)
             if (env.targetId == target.id) return env;
@@ -377,12 +381,13 @@ float AutomationEditor::valueY(double value, const Target& target) const
     return r.bottom() - (float) target.position(value) * r.h;
 }
 
-double AutomationEditor::currentValue(const Target& target) const
+double AutomationEditor::currentValue(const Target& target) const { return controlValue(ctx(), track_, target); }
+
+double AutomationEditor::controlValue(const UiContext& x, int trackIndex, const Target& target)
 {
-    const auto& x = ctx();
-    if (x.controls && (size_t) track_ < x.controls->size())
+    if (x.controls && (size_t) trackIndex < x.controls->size())
     {
-        const auto& controls = (*x.controls)[(size_t) track_];
+        const auto& controls = (*x.controls)[(size_t) trackIndex];
         using K = engine::AutomationBinding::Kind;
         if (target.overrideKey == engine::automationOverrideKey(K::Volume, 0, 0)) return controls.volume.load();
         if (target.overrideKey == engine::automationOverrideKey(K::Pan, 0, 0)) return controls.pan.load();
@@ -390,9 +395,9 @@ double AutomationEditor::currentValue(const Target& target) const
             if (target.overrideKey == engine::automationOverrideKey(K::Send, (int) i, 0)) return controls.sends[i].load();
     }
     const int device = target.nativeDevice >= 0 ? target.nativeDevice : target.pluginDevice;
-    if (device >= 0 && target.parameterIndex >= 0 && x.graph && (size_t) track_ < x.graph->nodes.size())
+    if (device >= 0 && target.parameterIndex >= 0 && x.graph && (size_t) trackIndex < x.graph->nodes.size())
     {
-        const auto& processors = x.graph->nodes[(size_t) track_].processorForModelDevice;
+        const auto& processors = x.graph->nodes[(size_t) trackIndex].processorForModelDevice;
         if ((size_t) device < processors.size() && processors[(size_t) device] != nullptr
             && (size_t) target.parameterIndex < processors[(size_t) device]->parameters().size())
             return processors[(size_t) device]->getParameter(target.parameterIndex);
@@ -413,7 +418,7 @@ void AutomationEditor::paint(SkCanvas& c, const Theme& t)
     auto it = std::find_if(ts.begin(), ts.end(), [&](const Target& a) { return a.id == targetId_; });
     if (it == ts.end()) it = ts.begin();
     const auto& target = *it;
-    const auto env = dragging_ || drawing_ ? preview_ : envelope(target);
+    const auto env = dragging_ || drawing_ || (gesture_ != Gesture::None && gesture_ != Gesture::Range) ? preview_ : envelope(target);
     const engine::AutomationLane lane(env, target.law, target.min, target.max);
     const auto r = plot();
     c.save();
@@ -426,12 +431,23 @@ void AutomationEditor::paint(SkCanvas& c, const Theme& t)
     for (const auto& line : ui::gridLines(first, last, ctx().pixelsPerBeat, bar, unit, grid))
         paint::line(c, beatX(line.beat), 0, beatX(line.beat), height(),
                     paint::withAlpha(t.color("GridLineBase"), line.strength == 2 ? (uint8_t) 255 : line.strength == 1 ? (uint8_t) 120 : (uint8_t) (60 * fade)));
+    // The lane's time selection (UI-76): drawn under the envelope like the Arrangement's.
+    {
+        double start = 0, end = 0;
+        if (selectionHere() && ctx().automationSelection.range && selectionRange(start, end) && end > start)
+        {
+            const Rect band{beatX(start), 0, (float) ((end - start) * ctx().pixelsPerBeat), height()};
+            paint::fill(c, band, paint::withAlpha(t.color("SelectionBackground"), 90));
+            paint::line(c, band.x, 0, band.x, height(), t.color("SelectionFrame"));
+            paint::line(c, band.right(), 0, band.right(), height(), t.color("SelectionFrame"));
+        }
+    }
     // UI-75: as in the reference, a lane whose control is held by hand (Re-Enable Automation lit) is drawn grey, and a
     // control with no automation yet shows its current value as a dashed line (the first click on it adds a breakpoint).
     const bool overridden = target.overrideKey >= 0 && ctx().controls && (size_t) track_ < ctx().controls->size()
                             && engine::isAutomationOverridden((*ctx().controls)[(size_t) track_], target.overrideKey);
     const auto ink = overridden ? t.color("AutomationDisabled") : t.color("AutomationColor");
-    if (! dragging_ && ! drawing_ && ! isAutomated(ctx(), track_, target.id))
+    if (! dragging_ && ! drawing_ && ! (moved_ && gesture_ != Gesture::None && gesture_ != Gesture::Range) && ! isAutomated(ctx(), track_, target.id))
     {
         const float y = valueY(currentValue(target), target);
         SkPaint pen;
@@ -474,13 +490,69 @@ void AutomationEditor::paint(SkCanvas& c, const Theme& t)
             paint::line(c, beatX(prevBeat), valueY(prevValue, target), r.w, valueY(lane.valueAt(last), target), ink);
         else
             segment(prevBeat, prevValue, last, lane.valueAt(last));
+        // UI-76: selected breakpoints are larger and framed; the hovered one gets a ring.
+        const bool movingPoints = gesture_ == Gesture::Points && moved_;
+        auto selected = [&](double time) {
+            if (movingPoints) return std::any_of(movedTimes_.begin(), movedTimes_.end(), [&](double m) { return std::abs(m - time) < 1e-9; });
+            return pointSelected(time);
+        };
+        const int hovered = gesture_ == Gesture::None && hoverX_ >= 0 ? pointAt(env, target, hoverX_, hoverY_) : -1;
         for (size_t i = 0; i < env.points.size(); ++i)
         {
             const auto& p = env.points[i];
             if (p.time < first || p.time > last) continue;
-            paint::fill(c, {beatX(p.time) - 3, valueY(p.value, target) - 3, 6, 6},
-                        (int) i == selectedPoint_ && ctx().selectedAutomationTrack == track_ ? t.color("SelectionBackground") : ink);
+            const float px = beatX(p.time), py = valueY(p.value, target);
+            if (selected(p.time))
+            {
+                paint::fill(c, {px - 4, py - 4, 8, 8}, t.color("SelectionFrame"));
+                paint::fill(c, {px - 2.5f, py - 2.5f, 5, 5}, t.color("SelectionBackground"));
+            }
+            else paint::fill(c, {px - 3, py - 3, 6, 6}, ink);
+            if ((int) i == hovered) paint::stroke(c, {px - 5, py - 5, 10, 10}, ink);
         }
+        // Live's preview breakpoint: hovering the line shows where a click adds one.
+        if (hovered < 0 && gesture_ == Gesture::None && hoverX_ >= 0 && ! ctx().drawMode
+            && lineDistance(env, target, hoverX_, hoverY_) <= 4.0f)
+        {
+            const double beat = snapped(beatAt(hoverX_), false);
+            SkPaint ring;
+            ring.setAntiAlias(true);
+            ring.setStyle(SkPaint::kStroke_Style);
+            ring.setStrokeWidth(1.2f);
+            ring.setColor(ink);
+            c.drawCircle(beatX(beat), valueY(model::laneValueAt(env, beat, scaleOf(target)), target), 3.5f, ring);
+        }
+        // The value under a dragged or hovered breakpoint, as the reference shows it next to the point.
+        double readTime = -1; // -2: the value under the pointer during a segment drag
+        bool segmentRead = false;
+        if (movingPoints && ! movedTimes_.empty()) readTime = movedTimes_.front();
+        else if (gesture_ == Gesture::Points && ! moved_) readTime = pressedTime_;
+        else if (hovered >= 0) readTime = env.points[(size_t) hovered].time;
+        if (gesture_ == Gesture::Points && movingPoints)
+            for (size_t k = 0; k < movingTimes_.size() && k < movedTimes_.size(); ++k)
+                if (std::abs(movingTimes_[k] - pressedTime_) < 1e-9) readTime = movedTimes_[k];
+        if ((gesture_ == Gesture::Segment || gesture_ == Gesture::Curve) && moved_) segmentRead = true;
+        if (readTime >= 0 || segmentRead)
+        {
+            const double beat = readTime >= 0 ? readTime : beatAt(downX_);
+            const double value = readTime >= 0 ? model::laneValueAt(env, beat + 1e-9, scaleOf(target)) : model::laneValueAt(env, beat, scaleOf(target));
+            const auto text = formatValue(target, readTime >= 0 ? [&] {
+                for (const auto& p : env.points) if (std::abs(p.time - readTime) < 1e-9) return p.value;
+                return value; }() : value);
+            const float px = beatX(beat), py = valueY(value, target);
+            const float w = std::max(36.0f, 6.5f * (float) text.size() + 8), h = 14;
+            Rect box{std::clamp(px + 7, 0.0f, std::max(0.0f, r.w - w)), py - h - 4 < 0 ? py + 6 : py - h - 4, w, h};
+            paint::fill(c, box, t.color("DisplayBackground"));
+            paint::stroke(c, box, t.color("ControlContrastFrame"));
+            paint::text(c, text, box, t.color("ControlForeground"), t.metrics.smallFontSize, Align::Centre);
+        }
+    }
+    if (editingValue_)
+    {
+        const double value = [&] { for (const auto& p : env.points) if (std::abs(p.time - editTime_) < 1e-9) return p.value; return target.base; }();
+        const Rect field{std::clamp(beatX(editTime_) - 35, 0.0f, std::max(0.0f, r.w - 70)), std::clamp(valueY(value, target) - 8, 0.0f, height() - 16), 70, 16};
+        valueEdit_.paint(c, field, t.color("ControlTextBack"), t.color("ControlForeground"), t.color("SelectionBackground"),
+                         t.color("SelectionForeground"), t.metrics.smallFontSize);
     }
     c.restore();
 
@@ -607,14 +679,143 @@ void AutomationEditor::showChooser(bool device)
                        [pick](int result) { if (result > 0) pick(result - 1); });
 }
 
+// ---- UI-76: editing like the reference's lanes (Live 12 manual, "Automation and Editing Envelopes"). Draw Mode off: a click
+// on the line adds a breakpoint, a click on a breakpoint deletes it, a drag moves it (with every selected one); Shift
+// constrains to one axis and fine-tunes the value; Cmd (Alt) bypasses the grid. A click near the line selects its segment
+// and a drag moves it up or down (inside a time selection: the whole selection, pinned at its edges). Option + drag bends
+// a segment, Option + double-click straightens it. A drag on the background selects a time range: Delete, Cmd+C/X/V/D,
+// Insert Shape and Simplify Envelope work on it; Cmd+A selects the lane; Cmd+Delete deletes the lane's automation.
+
+std::string AutomationEditor::formatValue(const Target& t, double value)
+{
+    const bool pan = t.group == "Mixer" && t.name == "Track Panning";
+    return model::formatLaneValue(value, scaleOf(t), pan, t.eventType == "BoolEvent", t.law == model::AutomationLaw::Log
+        ? (t.max > 1000 ? "Hz" : "ms") : "");
+}
+
+const AutomationEditor::Target* AutomationEditor::current(const std::vector<Target>& ts)
+{
+    if (ts.empty()) return nullptr;
+    syncTarget(ts);
+    const auto it = std::find_if(ts.begin(), ts.end(), [&](const Target& a) { return a.id == targetId_; });
+    return it == ts.end() ? &ts.front() : &*it;
+}
+
+double AutomationEditor::beatAt(float x) const { return ctx().scrollBeats + x / ctx().pixelsPerBeat; }
+
+double AutomationEditor::positionAt(float y) const
+{
+    const auto r = plot();
+    return std::clamp((double) (r.bottom() - y) / r.h, 0.0, 1.0);
+}
+
+double AutomationEditor::snapped(double beat, bool bypass) const
+{
+    const double bar = ctx().song ? ctx().song->timeSigNumerator * 4.0 / ctx().song->timeSigDenominator : 4.0;
+    return std::max(0.0, snapToGrid(beat, ui::snapSize(ctx().arrangementGrid, ctx().pixelsPerBeat, bar, bypass)));
+}
+
+int AutomationEditor::pointAt(const model::AutomationEnvelope& env, const Target& t, float x, float y) const
+{
+    int found = -1;
+    float best = 9.0f; // the old editor's grab radius
+    for (size_t i = 0; i < env.points.size(); ++i)
+    {
+        const auto& p = env.points[i];
+        if (p.time < 0) continue; // the pre-roll value is retained
+        const float distance = std::hypot(beatX(p.time) - x, valueY(p.value, t) - y);
+        if (distance < best) { best = distance; found = (int) i; }
+    }
+    return found;
+}
+
+float AutomationEditor::lineDistance(const model::AutomationEnvelope& env, const Target& t, float x, float y) const
+{
+    const double beat = beatAt(x);
+    float distance = std::abs(valueY(model::laneValueAt(env, beat, scaleOf(t)), t) - y);
+    // A jump (two points at one time, or a stepped lane's step) is a vertical piece of the line.
+    for (size_t i = 0; i + 1 < env.points.size(); ++i)
+    {
+        const auto& a = env.points[i];
+        const auto& b = env.points[i + 1];
+        const bool jump = std::abs(b.time - a.time) < 1e-9 || env.stepped;
+        if (! jump || b.time < 0 || std::abs(beatX(b.time) - x) > 3) continue;
+        const float y0 = valueY(env.stepped ? a.value : a.value, t), y1 = valueY(b.value, t);
+        if (y >= std::min(y0, y1) && y <= std::max(y0, y1)) distance = std::min(distance, std::abs(beatX(b.time) - x));
+    }
+    return distance;
+}
+
+bool AutomationEditor::selectionHere() const
+{
+    const auto& s = ctx().automationSelection;
+    return s.track == track_ && s.target == targetId_ && targetId_ != -1;
+}
+
+bool AutomationEditor::pointSelected(double time) const
+{
+    if (! selectionHere()) return false;
+    const auto& points = ctx().automationSelection.points;
+    return std::any_of(points.begin(), points.end(), [&](double p) { return std::abs(p - time) < 1e-9; });
+}
+
+void AutomationEditor::selectPoints(std::vector<double> times, bool range, double start, double end)
+{
+    auto& s = ctx().automationSelection;
+    s = {};
+    s.track = track_;
+    s.target = targetId_;
+    s.points = std::move(times);
+    s.range = range;
+    s.start = std::min(start, end);
+    s.end = std::max(start, end);
+    ctx().selectedAutomationTrack = track_;
+}
+
+void AutomationEditor::clearSelection()
+{
+    if (ctx().automationSelection.track == track_) ctx().automationSelection = {};
+}
+
+bool AutomationEditor::selectionRange(double& start, double& end) const
+{
+    if (! selectionHere()) return false;
+    const auto& s = ctx().automationSelection;
+    if (s.range && s.end > s.start) { start = s.start; end = s.end; return true; }
+    if (s.points.empty()) return false;
+    start = *std::min_element(s.points.begin(), s.points.end());
+    end = *std::max_element(s.points.begin(), s.points.end());
+    return true;
+}
+
+bool AutomationEditor::editLane(const std::function<void(model::AutomationEnvelope&, const Target&)>& edit, const char* label)
+{
+    if (! ctx().song || ! ctx().applyEdit || ctx().recording) return false;
+    const auto ts = targets();
+    const auto* t = current(ts);
+    if (t == nullptr) return false;
+    dragTarget_ = *t;
+    preview_ = envelope(*t);
+    const auto before = preview_.points;
+    edit(preview_, *t);
+    const bool same = before.size() == preview_.points.size()
+                      && std::equal(before.begin(), before.end(), preview_.points.begin(), [](const auto& a, const auto& b) {
+                             return std::memcmp(&a, &b, sizeof(a)) == 0;
+                         });
+    if (same) { repaint(); return false; }
+    changed_ = true;
+    (void) label;
+    commit();
+    return true;
+}
+
 void AutomationEditor::mouseDown(const MouseEvent& e)
 {
     const auto ts = targets();
-    if (ts.empty()) return;
-    syncTarget(ts);
-    auto it = std::find_if(ts.begin(), ts.end(), [&](const Target& a) { return a.id == targetId_; });
-    if (it == ts.end()) it = ts.begin();
+    const auto* it = current(ts);
+    if (it == nullptr) return;
     ctx().selectedTrack = ctx().selectedAutomationTrack = track_;
+    if (editingValue_) commitValueEdit();
     if (e.x >= plot().w)
     {
         if (chooserBounds(true).contains(e.x, e.y)) showChooser(true);
@@ -623,61 +824,368 @@ void AutomationEditor::mouseDown(const MouseEvent& e)
         else if (laneButton(false).contains(e.x, e.y)) removeLane(e.cmd);
         return;
     }
-    if (! ctx().applyEdit) return;
+    if (e.right) { showContextMenu(e.x, e.y); return; }
+    if (! ctx().applyEdit || ctx().recording) return;
     dragTarget_ = *it;
-    preview_ = envelope(*it);
-    selectedPoint_ = -1;
-    float best = 9;
-    for (size_t i = 0; i < preview_.points.size(); ++i)
-    {
-        const auto& p = preview_.points[i];
-        if (p.time < 0) continue; // the pre-roll value is retained
-        const float distance = std::hypot(beatX(p.time) - e.x, valueY(p.value, *it) - e.y);
-        if (distance < best) { best = distance; selectedPoint_ = (int) i; }
-    }
-    changed_ = false;
-    if (selectedPoint_ >= 0 && (e.right || e.clicks >= 2))
-    {
-        preview_.points.erase(preview_.points.begin() + selectedPoint_);
-        selectedPoint_ = -1;
-        changed_ = true;
-        commit();
-    }
-    else if (selectedPoint_ >= 0)
-    {
-        dragging_ = true;
-    }
-    else if (ctx().drawMode && ! e.right)
+    original_ = preview_ = envelope(*it);
+    gesture_ = Gesture::None;
+    moved_ = changed_ = false;
+    downX_ = e.x; downY_ = e.y;
+    shift_ = e.shift;
+    bypassSnap_ = e.cmd;
+    if (ctx().drawMode)
     {
         drawing_ = true;
         lastCell_ = -1;
+        bypassSnap_ = e.cmd || e.alt;
         paintCell(e);
+        return;
     }
-    else if (e.clicks >= 2 && ! e.right)
+    const int point = pointAt(preview_, *it, e.x, e.y);
+    const float distance = lineDistance(preview_, *it, e.x, e.y);
+    if (e.clicks >= 2 && point < 0)
     {
-        const double grid = ui::snapSize(ctx().arrangementGrid, ctx().pixelsPerBeat, ctx().song ? ctx().song->timeSigNumerator * 4.0 / ctx().song->timeSigDenominator : 4.0, e.alt || e.cmd);
-        const double beat = std::max(0.0, snapToGrid(ctx().scrollBeats + e.x / ctx().pixelsPerBeat, grid));
-        const auto r = plot();
-        double value = it->valueAt(std::clamp((r.bottom() - e.y) / r.h, 0.0f, 1.0f));
+        if (e.alt)
+        {
+            // Option + double-click: the segment goes back to a straight line.
+            const auto seg = model::segmentAt(preview_, beatAt(e.x));
+            if (seg.first >= 0) { model::curveSegment(preview_, seg.first, 0); changed_ = true; commit(); }
+            return;
+        }
+        // Double-click on an empty part of the lane: a breakpoint at the pointer.
+        const double beat = snapped(beatAt(e.x), e.cmd || e.alt);
+        double value = it->valueAt(positionAt(e.y));
         if (it->stepped) value = std::round(value);
         preview_.points.push_back({beat, value});
         std::stable_sort(preview_.points.begin(), preview_.points.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
-        selectedPoint_ = -1;
         changed_ = true;
         commit();
+        return;
+    }
+    if (point >= 0)
+    {
+        gesture_ = Gesture::Points;
+        const auto& p = preview_.points[(size_t) point];
+        pressedTime_ = p.time;
+        pressedPosition_ = it->position(p.value);
+        const auto& sel = ctx().automationSelection;
+        if (pointSelected(p.time) && sel.points.size() > 1) movingTimes_ = sel.points;
+        else movingTimes_ = {p.time};
+        movedTimes_ = movingTimes_;
+        dragging_ = true;
+        repaint();
+        return;
+    }
+    if (distance <= 4.0f)
+    {
+        const auto seg = model::segmentAt(preview_, beatAt(e.x));
+        if (e.alt && seg.first >= 0 && ! preview_.stepped)
+        {
+            gesture_ = Gesture::Curve;
+            curveIndex_ = seg.first;
+            curveStart_ = model::segmentCurvature(preview_.points[(size_t) seg.first]);
+            curveRising_ = it->position(preview_.points[(size_t) seg.second].value) >= it->position(preview_.points[(size_t) seg.first].value);
+            dragging_ = true;
+            return;
+        }
+        if (e.shift && seg.first >= 0)
+        {
+            std::vector<double> times;
+            for (int i : {seg.first, seg.second}) if (preview_.points[(size_t) i].time >= 0) times.push_back(preview_.points[(size_t) i].time);
+            selectPoints(std::move(times));
+            repaint();
+            return;
+        }
+        gesture_ = Gesture::LineClick;
+        return;
+    }
+    if (distance <= 12.0f) { gesture_ = Gesture::SegmentNear; return; }
+    gesture_ = Gesture::Range;
+    rangeAnchor_ = snapped(beatAt(e.x), e.cmd || e.alt);
+}
+
+// A segment drag moves the two breakpoints around the pointer up or down. Inside a time selection it moves everything
+// selected, with the lane's values pinned at the selection edges first (the reference inserts those breakpoints).
+void AutomationEditor::beginSegmentDrag(float x)
+{
+    gesture_ = Gesture::Segment;
+    dragging_ = true;
+    movesPreRoll_ = false;
+    movingTimes_.clear();
+    const auto scale = scaleOf(dragTarget_);
+    const double beat = beatAt(x);
+    double start = 0, end = 0;
+    if (selectionHere() && ctx().automationSelection.range && selectionRange(start, end) && beat >= start && beat <= end)
+    {
+        const double before = model::laneValueAt(original_, std::nextafter(start, -INFINITY), scale);
+        const double inStart = model::laneValueAt(original_, start, scale);
+        const double inEnd = model::laneValueAt(original_, std::nextafter(end, -INFINITY), scale);
+        const double after = model::laneValueAt(original_, end, scale);
+        auto& p = original_.points;
+        std::erase_if(p, [&](const auto& q) { return q.time >= 0 && (std::abs(q.time - start) < 1e-9 || std::abs(q.time - end) < 1e-9); });
+        // Outer pins keep the lane outside; the inner ones (a hair inside) move with the selection.
+        const double inner0 = start + 1e-6, inner1 = end - 1e-6;
+        p.push_back({start, before});
+        p.push_back({inner0, inStart});
+        p.push_back({inner1, inEnd});
+        p.push_back({end, after});
+        std::stable_sort(p.begin(), p.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
+        movingTimes_ = model::envelopePointTimes(original_, inner0, inner1);
+    }
+    else
+    {
+        const auto seg = model::segmentAt(original_, beat);
+        if (seg.first >= 0)
+        {
+            for (int i : {seg.first, seg.second}) movingTimes_.push_back(original_.points[(size_t) i].time);
+        }
+        else
+        {
+            // Before the first breakpoint (or a lane without any): the flat start moves with the first breakpoint.
+            std::vector<double> times;
+            for (const auto& p : original_.points) if (p.time >= 0) times.push_back(p.time);
+            if (times.empty() || beat < times.front())
+            {
+                movesPreRoll_ = true;
+                if (! times.empty()) movingTimes_.push_back(times.front());
+            }
+            else movingTimes_.push_back(times.back());
+        }
+    }
+    preview_ = original_;
+}
+
+void AutomationEditor::mouseDrag(const MouseEvent& e)
+{
+    if (drawing_) { paintCell(e); return; }
+    if (gesture_ == Gesture::None) return;
+    if (! moved_ && std::hypot(e.x - downX_, e.y - downY_) < 3.0f) return;
+    moved_ = true;
+    const auto scale = scaleOf(dragTarget_);
+    switch (gesture_)
+    {
+        case Gesture::Points:
+        {
+            double dx = e.x - downX_, dy = e.y - downY_;
+            bool horizontal = true;
+            if (shift_) { if (std::abs(dx) > std::abs(dy)) dy = 0; else { dx = 0; horizontal = false; } } // one axis, the reference's Shift
+            const double target = ! horizontal ? pressedTime_ : snapped(pressedTime_ + dx / ctx().pixelsPerBeat, bypassSnap_ || e.cmd);
+            double deltaPosition = -dy / plot().h * (shift_ ? 0.1 : 1.0); // Shift: fine values
+            deltaPosition = std::clamp(pressedPosition_ + deltaPosition, 0.0, 1.0) - pressedPosition_;
+            preview_ = original_;
+            movedTimes_ = model::moveEnvelopePoints(preview_, movingTimes_, target - pressedTime_, deltaPosition, scale);
+            changed_ = true;
+            break;
+        }
+        case Gesture::LineClick:
+        case Gesture::SegmentNear:
+            beginSegmentDrag(downX_);
+            [[fallthrough]];
+        case Gesture::Segment:
+        {
+            const double deltaPosition = -(e.y - downY_) / plot().h * (e.shift ? 0.1 : 1.0);
+            preview_ = original_;
+            model::moveEnvelopePoints(preview_, movingTimes_, 0.0, deltaPosition, scale);
+            if (movesPreRoll_)
+                for (auto& p : preview_.points)
+                    if (p.time < 0) p.value = scale.value(std::clamp(scale.position(p.value) + deltaPosition, 0.0, 1.0));
+            if (preview_.stepped) for (auto& p : preview_.points) p.value = std::round(p.value);
+            changed_ = true;
+            break;
+        }
+        case Gesture::Curve:
+        {
+            const double amount = curveStart_ + (downY_ - e.y) / 60.0 * (curveRising_ ? 1.0 : -1.0);
+            preview_ = original_;
+            model::curveSegment(preview_, curveIndex_, amount);
+            changed_ = true;
+            break;
+        }
+        case Gesture::Range:
+        {
+            const double end = snapped(beatAt(e.x), e.cmd || e.alt);
+            const double a = std::min(rangeAnchor_, end), b = std::max(rangeAnchor_, end);
+            selectPoints(model::envelopePointTimes(original_, a, b), true, a, b);
+            break;
+        }
+        case Gesture::None: break;
     }
     repaint();
 }
 
-// Draw Mode: the value under the pointer holds for one grid cell; cells crossed by a fast drag are filled in.
+int AutomationEditor::store(UiContext& ctx, int track, const Target& target, model::AutomationEnvelope env)
+{
+    if (! ctx.song || ! ctx.applyEdit) return -1;
+    int id = target.id;
+    if (target.id < -1 && target.pluginDevice >= 0)
+    {
+        // UI-65: the first breakpoint of a plugin parameter the set does not list: give it a target first.
+        int next = ctx.song->nextPointeeId;
+        model::EditCommand assign;
+        const auto ids = model::pluginParameterTargets(*ctx.song, next, track, target.pluginDevice,
+                                                       {{target.hostId, target.name, target.base}}, assign);
+        if (ids.empty() || ids.front() < 0) return -1;
+        id = env.targetId = ids.front();
+        auto edit = model::setAutomation(*ctx.song, track, env);
+        std::vector<model::EditCommand> parts;
+        if (assign.apply) parts.push_back(std::move(assign));
+        parts.push_back(std::move(edit));
+        auto& lanes = ctx.automationLaneTargets[track];
+        for (auto& lane : lanes) if (lane == target.id) lane = id;
+        ctx.applyEdit(model::compose("Edit Automation", std::move(parts)));
+    }
+    else
+        ctx.applyEdit(model::setAutomation(*ctx.song, track, std::move(env)));
+    // The lane drives the control again (the reference re-enables a parameter whose envelope is edited).
+    if (target.overrideKey >= 0 && ctx.reEnableControl) ctx.reEnableControl(track, target.overrideKey);
+    return id;
+}
+
+void AutomationEditor::commit()
+{
+    if (changed_ && ctx().song && ctx().applyEdit)
+    {
+        const int id = store(ctx(), track_, dragTarget_, preview_);
+        if (id != -1 && id != dragTarget_.id) setTarget(id);
+    }
+    changed_ = dragging_ = drawing_ = false;
+    lastCell_ = -1;
+    repaint();
+}
+
+void AutomationEditor::mouseUp(const MouseEvent& e)
+{
+    if (drawing_) { commit(); return; }
+    const auto gesture = std::exchange(gesture_, Gesture::None);
+    const bool moved = moved_;
+    moved_ = false;
+    switch (gesture)
+    {
+        case Gesture::Points:
+            if (! moved)
+            {
+                if (shift_)
+                {
+                    // Shift-click: adds the breakpoint to the selection or takes it out.
+                    auto times = selectionHere() ? ctx().automationSelection.points : std::vector<double>{};
+                    const auto found = std::find_if(times.begin(), times.end(), [&](double t) { return std::abs(t - pressedTime_) < 1e-9; });
+                    if (found != times.end()) times.erase(found); else times.push_back(pressedTime_);
+                    selectPoints(std::move(times));
+                    dragging_ = false;
+                    repaint();
+                    return;
+                }
+                // The reference: a click on a breakpoint deletes it.
+                std::erase_if(preview_.points, [&](const auto& p) { return p.time >= 0 && std::abs(p.time - pressedTime_) < 1e-9; });
+                if (selectionHere())
+                {
+                    auto& points = ctx().automationSelection.points;
+                    std::erase_if(points, [&](double t) { return std::abs(t - pressedTime_) < 1e-9; });
+                }
+                changed_ = true;
+                commit();
+                return;
+            }
+            commit();
+            if (movingTimes_.size() > 1) selectPoints(movedTimes_);
+            else clearSelection();
+            return;
+        case Gesture::LineClick:
+            if (! moved)
+            {
+                // A click on the line adds a breakpoint on it.
+                const double beat = snapped(beatAt(e.x), e.cmd || e.alt);
+                double value = model::laneValueAt(original_, beat, scaleOf(dragTarget_));
+                if (dragTarget_.stepped) value = std::round(value);
+                preview_ = original_;
+                preview_.points.push_back({beat, value});
+                std::stable_sort(preview_.points.begin(), preview_.points.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
+                changed_ = true;
+                commit();
+                return;
+            }
+            commit();
+            return;
+        case Gesture::SegmentNear:
+            if (! moved)
+            {
+                const auto seg = model::segmentAt(original_, beatAt(e.x));
+                std::vector<double> times;
+                if (seg.first >= 0)
+                    for (int i : {seg.first, seg.second}) if (original_.points[(size_t) i].time >= 0) times.push_back(original_.points[(size_t) i].time);
+                if (times.empty()) clearSelection(); else selectPoints(std::move(times));
+                repaint();
+                return;
+            }
+            commit();
+            return;
+        case Gesture::Segment:
+        case Gesture::Curve:
+            commit();
+            return;
+        case Gesture::Range:
+            if (! moved) clearSelection();
+            repaint();
+            return;
+        case Gesture::None:
+            commit();
+            return;
+    }
+}
+
+void AutomationEditor::mouseMove(const MouseEvent& e)
+{
+    const bool inPlot = e.x < plot().w;
+    const float x = inPlot ? e.x : -1, y = inPlot ? e.y : -1;
+    if (std::abs(x - hoverX_) > 0.01f || std::abs(y - hoverY_) > 0.01f) { hoverX_ = x; hoverY_ = y; repaint(); }
+}
+
+void AutomationEditor::mouseExit()
+{
+    if (hoverX_ >= 0) { hoverX_ = hoverY_ = -1; repaint(); }
+}
+
+Cursor AutomationEditor::cursorAt(float x, float y) const
+{
+    if (x >= plot().w || ctx().drawMode || ! ctx().song) return Cursor::Default;
+    const auto ts = targets();
+    if (ts.empty()) return Cursor::Default;
+    auto it = std::find_if(ts.begin(), ts.end(), [&](const Target& a) { return a.id == targetId_; });
+    if (it == ts.end()) it = ts.begin();
+    const auto env = envelope(*it);
+    if (pointAt(env, *it, x, y) >= 0) return Cursor::Move;
+    const float d = lineDistance(env, *it, x, y);
+    return d > 4.0f && d <= 12.0f ? Cursor::ResizeVertical : Cursor::Default;
+}
+
+void AutomationEditor::focusLost()
+{
+    if (editingValue_) commitValueEdit();
+}
+
+// Draw Mode: the value under the pointer holds for one grid cell; cells crossed by a fast drag are filled in. Cmd/Option
+// (or no grid) draws freehand: one breakpoint per pointer move.
 void AutomationEditor::paintCell(const MouseEvent& e)
 {
     const double bar = ctx().song ? ctx().song->timeSigNumerator * 4.0 / ctx().song->timeSigDenominator : 4.0;
-    const double g = ui::gridBeats(ctx().arrangementGrid, ctx().pixelsPerBeat, bar);
-    const double cell = std::max(0.0, std::floor((ctx().scrollBeats + e.x / ctx().pixelsPerBeat) / g + 1e-9) * g);
     const auto r = plot();
     double value = dragTarget_.valueAt(std::clamp((r.bottom() - e.y) / r.h, 0.0f, 1.0f));
     if (dragTarget_.stepped) value = std::round(value);
+    if (bypassSnap_ || ctx().arrangementGrid.snap == false)
+    {
+        const double beat = std::max(0.0, beatAt(e.x));
+        const double from = lastCell_ < 0 ? beat : lastCell_;
+        const double a = std::min(from, beat), b = std::max(from, beat);
+        std::erase_if(preview_.points, [&](const model::AutomationPoint& p) { return p.time >= 0 && p.time > a - 1e-9 && p.time < b + 1e-9; });
+        preview_.points.push_back({beat, value});
+        std::stable_sort(preview_.points.begin(), preview_.points.end(), [](const auto& x0, const auto& x1) { return x0.time < x1.time; });
+        lastCell_ = beat;
+        changed_ = true;
+        repaint();
+        return;
+    }
+    const double g = ui::gridBeats(ctx().arrangementGrid, ctx().pixelsPerBeat, bar);
+    const double cell = std::max(0.0, std::floor((ctx().scrollBeats + e.x / ctx().pixelsPerBeat) / g + 1e-9) * g);
     const double from = lastCell_ < 0 ? cell : lastCell_;
     const int steps = std::max(1, (int) std::lround(std::fabs(cell - from) / g));
     const double dir = cell >= from ? 1.0 : -1.0;
@@ -694,76 +1202,302 @@ void AutomationEditor::paintCell(const MouseEvent& e)
     repaint();
 }
 
-void AutomationEditor::mouseDrag(const MouseEvent& e)
+void AutomationEditor::beginValueEdit(double time)
 {
-    if (drawing_) { paintCell(e); return; }
-    if (! dragging_ || selectedPoint_ < 0) return;
-    auto& p = preview_.points[(size_t) selectedPoint_];
-    const auto r = plot();
-    const double grid = ui::snapSize(ctx().arrangementGrid, ctx().pixelsPerBeat, ctx().song ? ctx().song->timeSigNumerator * 4.0 / ctx().song->timeSigDenominator : 4.0, e.alt || e.cmd);
-    double beat = std::max(0.0, snapToGrid(ctx().scrollBeats + e.x / ctx().pixelsPerBeat, grid));
-    // Keep identities stable during a drag; points can meet to create jumps but cannot cross.
-    if (selectedPoint_ > 0) beat = std::max(beat, preview_.points[(size_t) selectedPoint_ - 1].time);
-    if ((size_t) selectedPoint_ + 1 < preview_.points.size()) beat = std::min(beat, preview_.points[(size_t) selectedPoint_ + 1].time);
-    double value = dragTarget_.valueAt(std::clamp((r.bottom() - e.y) / r.h, 0.0f, 1.0f));
-    if (dragTarget_.stepped) value = std::round(value);
-    changed_ |= std::abs(beat - p.time) > 1e-12 || std::abs(value - p.value) > 1e-12;
-    p = {beat, value};
+    const auto ts = targets();
+    const auto* t = current(ts);
+    if (t == nullptr) return;
+    const auto env = envelope(*t);
+    const auto found = std::find_if(env.points.begin(), env.points.end(), [&](const auto& p) { return p.time >= 0 && std::abs(p.time - time) < 1e-9; });
+    if (found == env.points.end()) return;
+    editingValue_ = true;
+    editTime_ = time;
+    valueEdit_.start(formatValue(*t, found->value));
     repaint();
 }
 
-void AutomationEditor::commit()
+void AutomationEditor::commitValueEdit()
 {
-    if (changed_ && ctx().song && ctx().applyEdit)
+    if (! editingValue_) return;
+    editingValue_ = false;
+    const auto ts = targets();
+    const auto* t = current(ts);
+    double value = 0;
+    if (t == nullptr || ! model::parseLaneValue(valueEdit_.text, scaleOf(*t), t->group == "Mixer" && t->name == "Track Panning",
+                                                t->eventType == "BoolEvent", value))
     {
-        if (dragTarget_.id < -1 && dragTarget_.pluginDevice >= 0)
-        {
-            // UI-65: the first breakpoint of a plugin parameter the set does not list: give it a target first.
-            int next = ctx().song->nextPointeeId;
-            model::EditCommand assign;
-            const auto ids = model::pluginParameterTargets(*ctx().song, next, track_, dragTarget_.pluginDevice,
-                                                           {{dragTarget_.hostId, dragTarget_.name, dragTarget_.base}}, assign);
-            if (ids.empty() || ids.front() < 0) { changed_ = dragging_ = drawing_ = false; repaint(); return; }
-            preview_.targetId = ids.front();
-            auto edit = model::setAutomation(*ctx().song, track_, preview_);
-            std::vector<model::EditCommand> parts;
-            if (assign.apply) parts.push_back(std::move(assign));
-            parts.push_back(std::move(edit));
-            setTarget(ids.front());
-            ctx().applyEdit(model::compose("Edit Automation", std::move(parts)));
-        }
-        else
-            ctx().applyEdit(model::setAutomation(*ctx().song, track_, preview_));
+        ctx().statusText = "Edit Value: type a number";
+        repaint();
+        return;
     }
-    changed_ = dragging_ = drawing_ = false;
-    lastCell_ = -1;
-    repaint();
+    if (t->stepped) value = std::round(value);
+    const double time = editTime_;
+    // With several breakpoints selected, they move by the same amount on the lane (the reference moves them relatively).
+    std::vector<double> times = pointSelected(time) ? ctx().automationSelection.points : std::vector<double>{time};
+    editLane([&](model::AutomationEnvelope& env, const Target& target) {
+        const auto scale = scaleOf(target);
+        double delta = 0;
+        for (const auto& p : env.points) if (p.time >= 0 && std::abs(p.time - time) < 1e-9) delta = scale.position(value) - scale.position(p.value);
+        if (times.size() == 1)
+        {
+            for (auto& p : env.points) if (p.time >= 0 && std::abs(p.time - time) < 1e-9) { p.value = value; break; }
+            return;
+        }
+        model::moveEnvelopePoints(env, times, 0.0, delta, scale);
+    });
 }
 
-void AutomationEditor::mouseUp(const MouseEvent&)
+bool AutomationEditor::copySelection(bool cut)
 {
-    commit();
+    double start = 0, end = 0;
+    if (! selectionRange(start, end) || end <= start) return false;
+    const auto ts = targets();
+    const auto* t = current(ts);
+    if (t == nullptr) return false;
+    ctx().automationClipboard = model::copyEnvelopeRange(envelope(*t), start, end, scaleOf(*t));
+    ctx().statusText = cut ? "Cut automation" : "Copied automation";
+    if (cut) editLane([&](model::AutomationEnvelope& env, const Target& target) { model::eraseEnvelopeRange(env, start, end, scaleOf(target)); });
+    return true;
+}
+
+bool AutomationEditor::pasteClipboard()
+{
+    const auto clip = ctx().automationClipboard;
+    if (clip.empty()) return false;
+    double start = 0, end = 0;
+    double at = selectionRange(start, end) ? start : ctx().transport ? ctx().transport->positionBeats() : 0.0;
+    at = std::max(0.0, at);
+    editLane([&](model::AutomationEnvelope& env, const Target& target) { model::pasteEnvelopeClip(env, at, clip, scaleOf(target)); });
+    selectPoints({}, true, at, at + clip.length);
+    ctx().statusText = "Pasted automation";
+    return true;
+}
+
+bool AutomationEditor::duplicateSelection()
+{
+    double start = 0, end = 0;
+    if (! selectionRange(start, end) || end <= start) return false;
+    const auto ts = targets();
+    const auto* t = current(ts);
+    if (t == nullptr) return false;
+    const auto clip = model::copyEnvelopeRange(envelope(*t), start, end, scaleOf(*t));
+    editLane([&](model::AutomationEnvelope& env, const Target& target) { model::pasteEnvelopeClip(env, end, clip, scaleOf(target)); });
+    selectPoints(model::envelopePointTimes(envelope(*t), end, end + (end - start)), true, end, end + (end - start));
+    ctx().statusText = "Duplicated automation";
+    return true;
+}
+
+bool AutomationEditor::deleteSelection()
+{
+    if (! selectionHere()) return false;
+    const auto sel = ctx().automationSelection;
+    clearSelection();
+    if (sel.range && sel.end > sel.start)
+        return editLane([&](model::AutomationEnvelope& env, const Target& target) { model::eraseEnvelopeRange(env, sel.start, sel.end, scaleOf(target)); });
+    if (sel.points.empty()) return false;
+    return editLane([&](model::AutomationEnvelope& env, const Target&) {
+        std::erase_if(env.points, [&](const auto& p) {
+            return p.time >= 0 && std::any_of(sel.points.begin(), sel.points.end(), [&](double t) { return std::abs(t - p.time) < 1e-9; });
+        });
+    });
+}
+
+std::vector<MenuAction> AutomationEditor::contextActions(float x, float y)
+{
+    std::vector<MenuAction> out;
+    const auto ts = targets();
+    const auto* t = current(ts);
+    if (t == nullptr || ! ctx().song) return out;
+    const bool editable = static_cast<bool>(ctx().applyEdit) && ! ctx().recording;
+    const auto env = envelope(*t);
+    const int point = pointAt(env, *t, x, y);
+    auto* self = this;
+    auto alive = [self] { return Widget::isAlive(self); };
+    if (point >= 0)
+    {
+        const double time = env.points[(size_t) point].time;
+        out.push_back({"Edit Value", [=] { if (alive()) self->beginValueEdit(time); }, editable});
+        out.push_back({"Delete Breakpoint", [=] {
+            if (! alive()) return;
+            self->editLane([time](model::AutomationEnvelope& e, const Target&) {
+                std::erase_if(e.points, [&](const auto& p) { return p.time >= 0 && std::abs(p.time - time) < 1e-9; });
+            });
+        }, editable});
+        out.push_back({"", {}, false});
+    }
+    double start = 0, end = 0;
+    const bool range = selectionRange(start, end) && end > start;
+    out.push_back({"Cut", [=] { if (alive()) self->copySelection(true); }, editable && range, "\xE2\x8C\x98X"});
+    out.push_back({"Copy", [=] { if (alive()) self->copySelection(false); }, range, "\xE2\x8C\x98" "C"});
+    out.push_back({"Paste", [=] { if (alive()) self->pasteClipboard(); }, editable && ! ctx().automationClipboard.empty(), "\xE2\x8C\x98V"});
+    out.push_back({"Duplicate", [=] { if (alive()) self->duplicateSelection(); }, editable && range, "\xE2\x8C\x98" "D"});
+    out.push_back({"Delete", [=] { if (alive()) self->deleteSelection(); }, editable && selectionHere(), "\xE2\x8C\xAB"});
+    out.push_back({"", {}, false});
+    const bool shapes = editable && range && ! t->stepped;
+    for (auto shape : {model::EnvelopeShape::Sine, model::EnvelopeShape::Triangle, model::EnvelopeShape::Sawtooth,
+                       model::EnvelopeShape::InverseSawtooth, model::EnvelopeShape::Square, model::EnvelopeShape::RampUp,
+                       model::EnvelopeShape::RampDown, model::EnvelopeShape::Adsr})
+        out.push_back({std::string("Insert Shape/") + model::envelopeShapeName(shape), [=] {
+            if (! alive()) return;
+            double a = 0, b = 0;
+            if (! self->selectionRange(a, b) || b <= a) return;
+            const double bar = self->ctx().song ? self->ctx().song->timeSigNumerator * 4.0 / self->ctx().song->timeSigDenominator : 4.0;
+            // One cycle per bar of the selection (at least one), across the whole lane height like the reference.
+            const int cycles = std::max(1, (int) std::lround((b - a) / bar));
+            self->editLane([=](model::AutomationEnvelope& e, const Target& target) {
+                model::insertEnvelopeShape(e, a, b, shape, cycles, 0.0, 1.0, scaleOf(target));
+            }, "Insert Shape");
+            self->selectPoints(model::envelopePointTimes(self->envelope(*self->current(self->targets())), a, b), true, a, b);
+        }, shapes});
+    out.push_back({"Simplify Envelope", [=] {
+        if (! alive()) return;
+        double a = 0, b = 0;
+        if (! self->selectionRange(a, b)) { a = 0; b = 1e12; }
+        self->editLane([=](model::AutomationEnvelope& e, const Target& target) { model::simplifyEnvelope(e, a, b, scaleOf(target)); },
+                       "Simplify Envelope");
+    }, editable && isAutomated(ctx(), track_, t->id)});
+    out.push_back({"Select All", [=] {
+        if (! alive()) return;
+        const auto all = self->envelope(*self->current(self->targets()));
+        auto times = model::envelopePointTimes(all, 0, 1e12);
+        const double last = times.empty() ? 0 : times.back();
+        self->selectPoints(std::move(times), ! all.points.empty(), 0, last);
+        self->repaint();
+    }, true, "\xE2\x8C\x98" "A"});
+    out.push_back({"", {}, false});
+    out.push_back({"Delete Automation", [=] {
+        if (! alive() || ! self->ctx().applyEdit) return;
+        if (auto edit = model::clearAutomation(*self->ctx().song, self->track_, self->targetId_); edit.apply)
+        {
+            self->clearSelection();
+            self->ctx().applyEdit(std::move(edit));
+        }
+    }, editable && isAutomated(ctx(), track_, t->id), "\xE2\x8C\x98\xE2\x8C\xAB"});
+    const bool overridden = t->overrideKey >= 0 && ctx().controls && (size_t) track_ < ctx().controls->size()
+                            && engine::isAutomationOverridden((*ctx().controls)[(size_t) track_], t->overrideKey);
+    const int key = t->overrideKey;
+    out.push_back({"Re-Enable Automation", [=] { if (alive() && self->ctx().reEnableControl) self->ctx().reEnableControl(self->track_, key); },
+                   overridden && static_cast<bool>(ctx().reEnableControl)});
+    out.push_back({"Lock Envelopes", [=] {
+        if (! alive()) return;
+        auto& c = self->ctx();
+        c.clipAutomationPolicy = c.clipAutomationPolicy == 2 ? 0 : 2;
+        if (c.setClipAutomationPolicy) c.setClipAutomationPolicy(c.clipAutomationPolicy);
+    }, true, "", ctx().clipAutomationPolicy == 2});
+    return out;
+}
+
+void AutomationEditor::showContextMenu(float x, float y)
+{
+    auto actions = contextActions(x, y);
+    if (actions.empty()) return;
+    if (ctx().showChoices)
+    {
+        // Tests (and hosts without native menus) pick by index from the flat list.
+        std::vector<std::string> labels;
+        std::vector<bool> ticks;
+        for (const auto& a : actions) { labels.push_back(a.label); ticks.push_back(a.ticked); }
+        ctx().showChoices(labels, ticks, [actions](int index) {
+            if (index >= 0 && index < (int) actions.size() && actions[(size_t) index].enabled && actions[(size_t) index].run)
+                actions[(size_t) index].run();
+        });
+        return;
+    }
+    juce::PopupMenu menu, shapes;
+    bool separator = false;
+    for (const auto& a : actions)
+    {
+        if (a.label.empty()) { separator = true; continue; }
+        juce::PopupMenu::Item item(juce::String::fromUTF8(a.label.rfind("Insert Shape/", 0) == 0 ? a.label.substr(13).c_str() : a.label.c_str()));
+        item.isEnabled = a.enabled;
+        item.isTicked = a.ticked;
+        if (! a.shortcut.empty()) item.shortcutKeyDescription = juce::String::fromUTF8(a.shortcut.c_str());
+        auto run = a.run;
+        item.action = [run] { if (run) run(); };
+        if (a.label.rfind("Insert Shape/", 0) == 0) { shapes.addItem(std::move(item)); continue; }
+        if (separator && menu.getNumItems() > 0) menu.addSeparator();
+        separator = false;
+        if (a.label == "Simplify Envelope") menu.addSubMenu("Insert Shape", shapes, shapes.containsAnyActiveItems());
+        menu.addItem(std::move(item));
+    }
+    menu.showMenuAsync(juce::PopupMenu::Options());
 }
 
 bool AutomationEditor::keyPressed(const KeyEvent& k)
 {
-    if (ctx().selectedAutomationTrack != track_ || ! ctx().song || ! ctx().applyEdit) return false;
-    if (k.keyCode != juce::KeyPress::deleteKey && k.keyCode != juce::KeyPress::backspaceKey) return false;
-    const auto ts = targets();
-    const auto it = std::find_if(ts.begin(), ts.end(), [&](const Target& a) { return a.id == targetId_; });
-    if (it != ts.end() && selectedPoint_ >= 0)
+    if (editingValue_)
     {
-        dragTarget_ = *it;
-        preview_ = envelope(*it);
-        if ((size_t) selectedPoint_ < preview_.points.size())
-        {
-            preview_.points.erase(preview_.points.begin() + selectedPoint_);
-            selectedPoint_ = -1;
-            changed_ = true;
-            commit();
-        }
+        const auto result = valueEdit_.key(k);
+        if (result == InlineTextEdit::Result::Commit) commitValueEdit();
+        else if (result == InlineTextEdit::Result::Cancel) editingValue_ = false;
+        repaint();
+        return true;
     }
-    return true; // automation focus must not delete the previously selected clip
+    if (ctx().selectedAutomationTrack != track_ || ! ctx().song) return false;
+    const auto& sel = ctx().automationSelection;
+    // Several lanes on one track: only the lane holding the selection answers (the first one when none does).
+    const bool mine = selectionHere() || (sel.track != track_ && lane_ == 0);
+    const bool del = k.keyCode == juce::KeyPress::deleteKey || k.keyCode == juce::KeyPress::backspaceKey;
+    if (! mine) return del && ! k.cmd; // a lane with the focus never lets Delete reach the selected clip
+    const char ch = (char) std::tolower((int) k.textChar);
+    if (del && k.cmd)
+    {
+        // Cmd+Delete: the lane's whole automation (the reference's shortcut for the selected control).
+        if (ctx().applyEdit && ! ctx().recording)
+            if (auto edit = model::clearAutomation(*ctx().song, track_, targetId_); edit.apply) { clearSelection(); ctx().applyEdit(std::move(edit)); }
+        return true;
+    }
+    if (del) { deleteSelection(); return true; } // automation focus must not delete the previously selected clip
+    if (k.keyCode == juce::KeyPress::escapeKey && selectionHere()) { clearSelection(); repaint(); return true; }
+    if (! k.cmd || k.alt) return false;
+    if (ch == 'a')
+    {
+        for (const auto& a : contextActions(-100, -100)) if (a.label == "Select All" && a.run) a.run();
+        return true;
+    }
+    if (ch == 'c' && ! k.shift) return copySelection(false);
+    if (ch == 'x' && ! k.shift) return copySelection(true);
+    if (ch == 'v' && ! k.shift) return pasteClipboard();
+    if (ch == 'd' && ! k.shift) return duplicateSelection();
+    return false;
+}
+
+// ---- UI-77 Automation Write mode
+int AutomationEditor::touchControl(UiContext& ctx, const midi::ControlTarget& control)
+{
+    int track = -1;
+    const int target = targetFor(ctx, control, track);
+    if (target == -1 || track < 0) return -1;
+    auto& lanes = ctx.automationLaneTargets[track];
+    // An existing lane of this control stays where it is; otherwise the first lane switches to it.
+    if (! ctx.showsAutomation(track) || std::find(lanes.begin(), lanes.end(), target) == lanes.end()) showTarget(ctx, track, target, false);
+    else { ctx.mainView = MainView::Arrangement; ctx.selectedTrack = track; }
+    return track;
+}
+
+bool AutomationEditor::writePoint(UiContext& ctx, const midi::ControlTarget& control, double beat)
+{
+    if (! ctx.song || ! ctx.applyEdit || ctx.recording) return false;
+    int track = -1;
+    const int targetId = targetFor(ctx, control, track);
+    if (targetId == -1 || track < 0) return false;
+    const auto all = targets(ctx, track);
+    const auto found = std::find_if(all.begin(), all.end(), [&](const Target& t) { return t.id == targetId; });
+    if (found == all.end()) return false;
+    double value = controlValue(ctx, track, *found);
+    if (found->stepped) value = std::round(value);
+    auto env = envelopeOf(ctx, track, *found);
+    beat = std::max(0.0, beat);
+    if (! isAutomated(ctx, track, targetId))
+    {
+        // A lane that never moved becomes flat at the new value (the point marks where it was set).
+        for (auto& p : env.points) if (p.time < 0) p.value = value;
+    }
+    std::erase_if(env.points, [&](const auto& p) { return p.time >= 0 && std::abs(p.time - beat) < 1e-9; });
+    env.points.push_back({beat, value});
+    std::stable_sort(env.points.begin(), env.points.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
+    if (store(ctx, track, *found, std::move(env)) == -1) return false;
+    return true;
 }
 
 } // namespace sonora::ui

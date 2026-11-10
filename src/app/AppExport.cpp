@@ -111,6 +111,7 @@ void AppController::beginExport(engine::ExportOptions options)
     ui_.exportState = {};
     ui_.exportOpen = true;
     engine_.transport().stop();
+    if (autosavePending()) autosaveNow("before an export"); // PRJ-4: a render is the riskiest edit
     if (! engine_.beginOffline())
     {
         ui_.exportState.phase = ui::ExportState::Phase::Failed;

@@ -172,6 +172,7 @@ void Recorder::collectPreviews()
 
 void Recorder::updatePreviewBank()
 {
+    if (previewFrozen_) return;
     if (retiredPreview_.load(std::memory_order_acquire)) return;
     if (auto* fresh = pendingPreview_.exchange(nullptr, std::memory_order_acq_rel))
     {
@@ -190,6 +191,7 @@ void Recorder::updatePreviewBank()
 
 void Recorder::beginPreviewBlock(const EngineGraph& graph)
 {
+    previewFrozen_ = false;
     updatePreviewBank();
     if (! preview_) return;
     for (size_t i = 0; i < preview_->clips.size(); ++i)

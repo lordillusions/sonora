@@ -27,6 +27,7 @@ public:
     bool mouseWheel(const MouseEvent& e) override;
     bool keyPressed(const KeyEvent& k) override;
     Rect timeSignatureBounds() const { return sigBox_; }
+    Rect cpuBounds() const { return cpuBox_; } // UI-82: the CPU details open under it
     bool wantsTextInput() const override { return editingTempo_ || editingSignature_; }
     void focusLost() override { cancelTempoEdit(); editingSignature_ = false; draggingSignature_ = false; repaint(); }
 
@@ -54,6 +55,7 @@ private:
     // Live's tools: "+", automation arm, re-enable, capture MIDI, session record | draw mode, computer keyboard, key map
     IconButton* overdub_ = nullptr;
     IconButton* automationArm_ = nullptr;
+    IconButton* automationWrite_ = nullptr; // UI-77
     IconButton* reEnable_ = nullptr;
     IconButton* capture_ = nullptr;
     IconButton* sessionRecord_ = nullptr;
@@ -79,6 +81,7 @@ private:
     bool draggedTempo_ = false;
     double lastPosition_ = -1;
     int lastCpu_ = -1;
+    bool lastCpuLit_ = false; // UI-82: details open / overload
     int lastCountInBars_ = -1;
     bool lastOverridden_ = false, lastCapture_ = false;
 };

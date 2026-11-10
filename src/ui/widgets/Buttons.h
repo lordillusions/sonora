@@ -60,6 +60,7 @@ public:
         Browser, // view toggle: two vertical bars, orange when the browser is shown
         Overdub,        // "+": MIDI Arrangement Overdub
         AutomationArm,  // two linked breakpoints
+        AutomationWrite, // UI-77: a breakpoint with a pencil; orange while Automation Write mode is on
         ReEnable,       // left arrow: Re-Enable Automation
         Capture,        // dashed square: Capture MIDI
         SessionRecord,  // open circle

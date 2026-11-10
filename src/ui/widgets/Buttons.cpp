@@ -120,7 +120,7 @@ void IconButton::paint(SkCanvas& c, const Theme& t)
     if (on)
     {
         paint::fill(c, r, icon_ == Icon::Play ? t.color("ChosenPlay") : icon_ == Icon::Record ? t.color("ChosenRecord")
-                                                                                              : t.color("ChosenDefault"));
+                          : icon_ == Icon::AutomationWrite ? t.color("AutomationWrite") : t.color("ChosenDefault"));
         fg = t.color("ControlOnForeground");
     }
     else if (! transport && ! flat)
@@ -176,6 +176,22 @@ void IconButton::paint(SkCanvas& c, const Theme& t)
             c.drawLine(r.centreX() - d + rad * 0.7f, r.centreY() + d - rad * 0.7f, r.centreX() + d - rad * 0.7f, r.centreY() - d + rad * 0.7f, p);
             c.drawCircle(r.centreX() - d, r.centreY() + d, rad, p);
             c.drawCircle(r.centreX() + d, r.centreY() - d, rad, p);
+            break;
+        }
+        case Icon::AutomationWrite:
+        {
+            // a breakpoint on a short line, and a pencil tip writing it
+            SkPaint p;
+            p.setAntiAlias(true);
+            p.setColor(fg);
+            p.setStyle(SkPaint::kStroke_Style);
+            p.setStrokeWidth(1.4f);
+            const float d = s * 0.5f;
+            c.drawLine(r.centreX() - d, r.centreY() + d * 0.55f, r.centreX() + d * 0.1f, r.centreY() + d * 0.55f, p);
+            c.drawCircle(r.centreX() - d * 0.45f, r.centreY() + d * 0.55f, s * 0.13f, p);
+            c.drawLine(r.centreX() - d * 0.05f, r.centreY() + d * 0.25f, r.centreX() + d * 0.75f, r.centreY() - d * 0.6f, p);
+            c.drawLine(r.centreX() + d * 0.25f, r.centreY() + d * 0.5f, r.centreX() + d, r.centreY() - d * 0.35f, p);
+            c.drawLine(r.centreX() - d * 0.05f, r.centreY() + d * 0.25f, r.centreX() + d * 0.25f, r.centreY() + d * 0.5f, p);
             break;
         }
         case Icon::ReEnable:

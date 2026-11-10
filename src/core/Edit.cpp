@@ -1,4 +1,5 @@
 #include "core/Edit.h"
+#include "core/AutomationEdits.h"
 #include "core/ClipGeometry.h"
 #include "core/DeviceCatalog.h"
 #include "core/TimeUtils.h"
@@ -546,7 +547,8 @@ bool canTransferArrangementRegion(const Song& song, int first, int last, Beats s
     return true;
 }
 
-EditCommand transferArrangementRegion(const Song& song, int first, int last, Beats start, Beats end, Beats at, int offset, bool copy)
+EditCommand transferArrangementRegion(const Song& song, int first, int last, Beats start, Beats end, Beats at, int offset, bool copy,
+                                      bool automation)
 {
     if (! canTransferArrangementRegion(song, first, last, start, end, at, offset)
         || (offset == 0 && std::abs(at - start) < 1e-9)) return {};
@@ -569,7 +571,7 @@ EditCommand transferArrangementRegion(const Song& song, int first, int last, Bea
     {
         auto& state = states->at(index);
         eraseRegionClips(state.after, song, index, start, end);
-        for (auto& lane : state.afterAutomation) if (authored(lane))
+        for (auto& lane : state.afterAutomation) if (automation && authored(lane))
         {
             const double held = regionValueAt(lane, start);
             replaceRegionPoints(lane, start, end, {{start, held}, {end, held}});
@@ -592,7 +594,7 @@ EditCommand transferArrangementRegion(const Song& song, int first, int last, Bea
                 if (envelope.targetId >= 0) envelope.targetId = regionTarget(source, target, envelope.targetId)->id;
             destination.after.push_back(std::move(moved));
         }
-        for (const auto& envelope : source.automation) if (authored(envelope))
+        for (const auto& envelope : source.automation) if (automation && authored(envelope))
         {
             const auto binding = *regionTarget(source, target, envelope.targetId);
             auto lane = std::find_if(destination.afterAutomation.begin(), destination.afterAutomation.end(),
@@ -621,6 +623,70 @@ EditCommand transferArrangementRegion(const Song& song, int first, int last, Bea
     command.revert = [states](Song& s) {
         for (const auto& [index, state] : *states)
         { s.tracks[(size_t) index].arrangementClips = state.before; s.tracks[(size_t) index].automation = state.beforeAutomation; }
+    };
+    return command;
+}
+
+bool trackAutomationMovesIn(const Song& song, int track, Beats start, Beats end)
+{
+    if (track < 0 || track >= (int) song.tracks.size()) return false;
+    const auto& lanes = song.tracks[(size_t) track].automation;
+    return std::any_of(lanes.begin(), lanes.end(), [&](const auto& lane) { return lane.targetId >= 0 && envelopeMovesIn(lane, start, end); });
+}
+
+EditCommand transferClipAutomation(const Song& song, int fromTrack, Beats start, Beats end, int toTrack, Beats at, bool copy, int* skipped)
+{
+    if (skipped) *skipped = 0;
+    if (fromTrack < 0 || toTrack < 0 || fromTrack >= (int) song.tracks.size() || toTrack >= (int) song.tracks.size()
+        || ! std::isfinite(start) || ! std::isfinite(end) || ! std::isfinite(at) || end <= start || at < 0) return {};
+    if (fromTrack == toTrack && std::abs(at - start) < 1e-9) return {};
+    const auto& source = song.tracks[(size_t) fromTrack];
+    const auto& target = song.tracks[(size_t) toTrack];
+    const double delta = at - start, destinationEnd = at + end - start;
+    auto sourceAfter = source.automation;
+    auto targetAfter = fromTrack == toTrack ? std::vector<AutomationEnvelope>{} : target.automation;
+    auto& destination = fromTrack == toTrack ? sourceAfter : targetAfter;
+    bool changed = false;
+    // Read every lane from the unchanged original, so a move that overlaps itself copies what was there.
+    for (size_t i = 0; i < source.automation.size(); ++i)
+    {
+        const auto& envelope = source.automation[i];
+        if (! authored(envelope) || ! envelopeMovesIn(envelope, start, end)) continue;
+        const auto binding = regionTarget(source, target, envelope.targetId);
+        if (! binding) { if (skipped) ++*skipped; continue; }
+        std::vector<AutomationPoint> points{{at, regionValueAt(envelope, start)}};
+        for (const auto& point : envelope.points)
+            if (point.time > start && point.time < end) { auto moved = point; moved.time += delta; points.push_back(moved); }
+        points.push_back({destinationEnd, regionValueAt(envelope, std::nextafter(end, -INFINITY))});
+        if (! copy)
+        {
+            auto& lane = sourceAfter[i];
+            const double held = regionValueAt(envelope, start);
+            replaceRegionPoints(lane, start, end, {{start, held}, {end, held}});
+        }
+        auto lane = std::find_if(destination.begin(), destination.end(), [&](const auto& c) { return c.targetId == binding->id; });
+        if (lane == destination.end())
+        {
+            auto added = envelope; added.targetId = binding->id; added.points = {{-63072000, binding->base}};
+            destination.push_back(std::move(added)); lane = std::prev(destination.end());
+        }
+        replaceRegionPoints(*lane, at, destinationEnd, points);
+        changed = true;
+    }
+    if (! changed) return {};
+    EditCommand command;
+    command.label = copy ? "Copy Automation" : "Move Automation";
+    command.tracks = {fromTrack};
+    if (toTrack != fromTrack) command.tracks.push_back(toTrack);
+    const auto sourceBefore = source.automation, targetBefore = target.automation;
+    const bool same = fromTrack == toTrack;
+    command.apply = [=](Song& s) {
+        s.tracks[(size_t) fromTrack].automation = sourceAfter;
+        if (! same) s.tracks[(size_t) toTrack].automation = targetAfter;
+    };
+    command.revert = [=](Song& s) {
+        s.tracks[(size_t) fromTrack].automation = sourceBefore;
+        if (! same) s.tracks[(size_t) toTrack].automation = targetBefore;
     };
     return command;
 }

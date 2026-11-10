@@ -1,6 +1,7 @@
 #include "app/MainWindow.h"
 #include "util/Log.h"
 #include "ui/TrackMenu.h"
+#include "ui/ClipAutomation.h"
 #include "ui/Locators.h"
 #include "app/WindowChrome.h"
 #include "app/AboutWindow.h"
@@ -77,7 +78,7 @@ enum MenuIds
     ContinuePlayback, ReturnToStart, SessionRecord, Metronome, BackToArrangement, FollowPlayhead,
     ToggleViews, ShowClip, ShowDevices, ToggleClipDevice, SearchBrowser,
     ToggleMixer, ToggleIo, ToggleSends, ToggleAutomation, ToggleAllAutomation, HideGroupedTracks,
-    ZoomUiIn, ZoomUiOut, ZoomUiReset, FullScreen, ComputerKeyboard, BrowserPreview, DrawMode, Overdub,
+    ZoomUiIn, ZoomUiOut, ZoomUiReset, FullScreen, ComputerKeyboard, BrowserPreview, DrawMode, Overdub, AutomationWrite, ClipAutomationAsk, ClipAutomationAlways, ClipAutomationLock,
     SmallerQuant, LargerQuant, ToggleQuant,
     FocusControlBar, FocusBrowser, FocusSession, FocusArrangement, FocusClip, FocusDevices,
     ReadManual, ImportAudio, Rename, EditInfoText, AddLocator, ContentEditor, EnvelopeEditor, ExpressionEditor, ShowGroupedTrack, TripletLaunchQuant, InvertNotes,
@@ -620,7 +621,14 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         m.addItem(DrawMode, "Draw Mode    (B)", true, ui.drawMode);
         unavailable(m, {"Step Input Mode"});
         m.addItem(HighlightScales, "Highlight Scales    (K)", true, ui.scaleHighlight);
-        unavailable(m, {"Chase MIDI Notes", "MIDI Envelope Auto-Reset", "Retune Set On Loading Tuning Systems", "Solo Switches", "Cue Switches", "Solo in Place", "Lock Envelopes"});
+        unavailable(m, {"Chase MIDI Notes", "MIDI Envelope Auto-Reset", "Retune Set On Loading Tuning Systems", "Solo Switches", "Cue Switches", "Solo in Place"});
+        // UI-76: what moves with a clip (the reference's Lock Envelopes is the third choice).
+        juce::PopupMenu clipAutomation;
+        clipAutomation.addItem(ClipAutomationAsk, "Ask When a Clip Has Automation", true, ui.clipAutomationPolicy == 0);
+        clipAutomation.addItem(ClipAutomationAlways, "Always Move With Clips", true, ui.clipAutomationPolicy == 1);
+        clipAutomation.addItem(ClipAutomationLock, "Lock Envelopes", true, ui.clipAutomationPolicy == 2);
+        m.addSubMenu("Clip Automation", clipAutomation);
+        m.addItem(AutomationWrite, "Automation Write Mode    (Opt+Cmd+A)", loaded, ui.automationWriteMode); // UI-77
         m.addItem(Overdub, "MIDI Arrangement Overdub", true, ui.arrangementOverdub);
         unavailable(m, {"Max for Live Developer Mode", "Audio Engine On"});
         m.addSeparator(); m.addItem(Preferences, "Settings...    (Cmd+,)"); m.addItem(AudioSettings, "Audio Settings...");
@@ -769,7 +777,7 @@ void MainWindow::menuItemSelected(int itemId, int)
         case Redo: app_.redo(); break;
         case DuplicateClip:
             if (key('D', true)) break; // clip, take lane, time selection, else the selected track(s) (MainLayout)
-            if (ui.selectedClipUid >= 0 && ui.song && ui.applyEdit) ui.applyEdit(model::duplicateClip(*ui.song, ui.selectedClipLocation()));
+            if (ui.selectedClipUid >= 0 && ui.song && ui.applyEdit) ui::duplicateClipWithAutomation(ui, ui.selectedClipLocation()); // UI-76
             break;
         case DeleteClip:
             if (! key(juce::KeyPress::deleteKey)) ui.deleteSelectedDevice();
@@ -890,7 +898,8 @@ void MainWindow::menuItemSelected(int itemId, int)
         case ApplyMidiTool: if (auto* panel = findWidget<ui::ClipControls>(*layout_)) panel->keyPressed({.keyCode = juce::KeyPress::returnKey, .cmd = true}); break;
         case InvertNotes: key('A', true, true); break;
         case SelectAll:
-            if (dynamic_cast<ui::PianoRoll*>(layout_->keyboardFocus())) key('A', true);
+            // UI-78: with a text field focused (browser search), Select All selects its text.
+            if (dynamic_cast<ui::PianoRoll*>(layout_->keyboardFocus()) || (layout_->keyboardFocus() && layout_->keyboardFocus()->wantsTextInput())) key('A', true);
             else if (ui.numTracks() > 0) { ui.sessionTrackSelection = true; ui.selectTrack(0, false, false); ui.selectTrack(ui.numTracks() - 1, true, false); }
             break;
         case ToggleClipActive:
@@ -985,6 +994,13 @@ void MainWindow::menuItemSelected(int itemId, int)
             break;
         case DrawMode: ui.drawMode = ! ui.drawMode; break;
         case Overdub: ui.arrangementOverdub = ! ui.arrangementOverdub; if (ui.layoutChanged) ui.layoutChanged(); break;
+        case AutomationWrite: if (ui.setAutomationWriteMode) ui.setAutomationWriteMode(! ui.automationWriteMode); break;
+        case ClipAutomationAsk: case ClipAutomationAlways: case ClipAutomationLock:
+            ui.clipAutomationPolicy = itemId == ClipAutomationAsk ? 0 : itemId == ClipAutomationAlways ? 1 : 2;
+            if (ui.setClipAutomationPolicy) ui.setClipAutomationPolicy(ui.clipAutomationPolicy);
+            ui.statusText = ui.clipAutomationPolicy == 2 ? "Lock Envelopes: automation stays put when clips move"
+                          : ui.clipAutomationPolicy == 1 ? "Automation moves with clips" : "Sonora asks before moving a clip's automation";
+            break;
         case TripletLaunchQuant:
             if (ui.song && ui.applyEdit && ui.song->globalQuantisation >= 5 && ui.song->globalQuantisation <= 12)
                 ui.applyEdit(model::setGlobalQuantisation(*ui.song, ui.song->globalQuantisation + (ui.song->globalQuantisation % 2 == 0 ? -1 : 1)));

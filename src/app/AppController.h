@@ -20,8 +20,11 @@
 #include "engine/StemSeparator.h"
 #include "engine/AutomationCapture.h"
 #include "engine/PeakCache.h"
+#include "engine/SoundSimilarity.h"
 #include "io/als/AlsReader.h"
 #include "io/als/AlsWriter.h"
+#include "io/recovery/RecoveryStore.h"
+#include "devices/DeviceFactory.h"
 #include "midi/MidiClockOut.h"
 #include "midi/MidiCapture.h"
 #include "midi/MidiManager.h"
@@ -134,6 +137,9 @@ public:
     void loadLayout();
     const juce::RecentlyOpenedFilesList& recentSets() const { return recentSets_; }
     void clearRecentSets(bool unavailableOnly = false);
+    // PRJ-4 crash recovery (AppRecovery.cpp): once the first window is up, offers the newest copy a run that did not quit
+    // cleanly left behind ("Sonora quit unexpectedly: recover <set>?"). Only the first call does anything.
+    void offerRecovery();
 
 private:
     class CollabPort;
@@ -256,6 +262,12 @@ private:
     void importOscillatorMedia(int track, int device, int oscillator, const std::string& path, int chain, int child);
     void importWavetablePreset(int track, int device, const std::string& path, int chain, int child);
     void importResynth(int track, int device, const std::string& path, int chain, int child, double limitSeconds = 0);
+    // LIB-3/4/5 (AppSampleFiles.cpp): Show Similar Files, Replace Sample, similar-sample swaps.
+    void setUpSampleFiles();
+    void findSimilarSamples(const std::string& path, const model::ClipLocation& clip, int pendingSwap = 0);
+    void swapSimilarSample(const model::ClipLocation& location, int direction);
+    void replaceClipSample(const model::ClipLocation& location, const std::string& path, model::SampleScope scope);
+    void chooseClipSample(const model::ClipLocation& location);
     // LIB-1 (AppSamplePacks.cpp): the Browser's Packs list and downloads.
     void setUpSamplePacks();
     void publishSamplePacks();
@@ -285,6 +297,11 @@ private:
     void pollAutomation();
     void finishAutomationRecording();
     void beginAutomationOnlyRecording();
+    void duplicateSelectedTracks(bool withAutomation);
+    // UI-77 Automation Write mode: a capture runs whenever the transport plays; stopped, a touched control writes one point.
+    void setAutomationWriteMode(bool on);
+    void automationWriteTouch(const midi::ControlTarget& control, bool down);
+    bool writeCapture_ = false; // the running capture belongs to Automation Write mode (not to a recording)
     engine::AutomationCapture automationCapture_;
     bool automationRecording_ = false, automationOnly_ = false; // automationOnly_: recording without any armed track
     double lastAutomationBeat_ = 0.0;
@@ -319,7 +336,9 @@ private:
     void scanDevicePresets();
     void loadDevicePreset(const ui::BrowserDrag&, int track, int replaceIndex);
     void runPresetAutotest(); // SONORA_PRESET_AUTOTEST (LIB-2 verification without driving the UI)
-    void syncModelFromEngine();
+    // `autosave` (PRJ-4): the audio keeps running, and hosted plug-ins are asked for their state only when they reported a
+    // change since the last autosave or their window is open. Save suspends the audio callback and asks every plug-in.
+    void syncModelFromEngine(bool autosave = false);
     void openBrowserFolder(const std::string& path);
     void readBrowserFolder(const std::string& path, bool root);
     void indexBrowserFolder(const std::string& path);
@@ -333,14 +352,54 @@ private:
     void ensureAudioInputs(bool record = false);
     int requiredInputChannels(bool record) const;
     bool inputPermissionPending_ = false, inputPermissionDenied_ = false;
+    // UI-82: CPU meter details. Message thread.
+    void updateCpuView();
+    uint32_t lastOverruns_ = 0;
+    double overloadUntilMs_ = 0;
+    int xrunBase_ = 0;
     void finishRecording();
     bool writeSet(const juce::File& destination, const io::AlsSaveOptions& options);
+    // ---- PRJ-4 crash recovery (AppRecovery.cpp)
+    // Autosave: a copy of the model written to <data folder>/Recovery/<this run>/ on autosavePool_, never into the
+    // user's project; polled from timerCallback, throttled by io::recovery::autosaveDue.
+    void startRecovery();
+    void autosaveTick();
+    // Copies the model now (or writes `snapshot`, a copy a render already took) unless one is being written.
+    bool autosaveNow(const char* reason, std::shared_ptr<const model::Song> snapshot = nullptr);
+    bool autosavePending() const { return ui_.documentDirty && history_.version() != autosavedVersion_; }
+    void recoveryDocumentInstalled(); // end of installSong: the previous document's copies go
+    void recoveryDocumentSaved();     // writeSet succeeded: the document's copies go
+    void openRecovered(io::recovery::Entry entry);
+    void runPlayAutotest();           // SONORA_PLAY_AUTOTEST=<seconds>[,beat]: play, log engine load, quit
+    bool playAutotestDone_ = false;
+    void runAutosaveAutotest();       // SONORA_AUTOSAVE_AUTOTEST=<bpm>: a real edit once a set is open (verification)
+    io::recovery::Store recovery_{juce::File()};
+    std::vector<io::recovery::Entry> recoveryOffers_;
+    std::unique_ptr<io::recovery::Entry> pendingRecovery_; // set while its copy is being opened
+    bool recoveryOffered_ = false, autosaveInFlight_ = false, autosaveHasCopy_ = false, autosaveAutotestDone_ = false;
+    uint64_t autosaveEpoch_ = 0;      // bumped when the document is saved or replaced: a copy still being written is dropped
+    int autosavedVersion_ = 0, autosaveSeenVersion_ = 0; // EditHistory::version() in the last copy / last seen
+    double autosaveLastChangeAt_ = 0, autosavePendingSince_ = 0, autosaveLastAt_ = -1e12, recoveryHeartbeatAt_ = 0;
+    double autosaveLastWriteMs_ = 0;
+    int autosavePluginsSeen_ = 0, autosavePluginsRead_ = 0; // hosted plug-ins in the last autosave / whose state it read
+    // Hosted plug-in state for the autosave: read only when the plug-in reported a change since its last read (or its
+    // window is open and the last read is 10 s old), and spread over the message loop, one plug-in per turn, while an
+    // autosave is pending, so the autosave itself rarely has one left to read.
+    struct PluginCapture { uint64_t serial = 0; double at = 0; };
+    std::map<const plugins::PluginDevice*, PluginCapture> autosavePlugins_; // stateSerial() and time of each one's last read
+    bool pluginNeedsCapture(plugins::PluginDevice& plugin, double now);
+    void forEachHostedPlugin(const std::function<bool(model::Device&, plugins::PluginDevice&)>& fn); // false stops
+    void refreshOnePluginState();
+    double pluginRefreshAt_ = 0;
+    int pluginsRefreshed_ = 0;      // since the last autosave
+    double pluginRefreshMaxMs_ = 0; // the slowest of those reads
     void createNewProject();
     void confirmDiscardChanges(std::function<void()> proceed);
     void saveThen(std::function<void(bool)> done);
     void saveAsDialog(bool collect, std::function<void(bool)> done);
     void updateWindowTitle();
     void openFileNow(const juce::File& file);
+    void openDocument(std::string name, std::function<io::AlsLoadResult()> load); // load runs on pool_
     static juce::File untitledRoot();
     static juce::File projectsRoot();
     int requestedRecordingTrack_ = -1, requestedRecordingScene_ = -1;
@@ -366,13 +425,20 @@ private:
     juce::OwnedArray<juce::DocumentWindow> kickstractTimelines_; // PLG-17e, like hushWindows_
     // 16 MB stacks: offline renders (bounce, freeze, export) run whole devices on these threads; the default 512 KB overflowed.
     juce::ThreadPool pool_{juce::ThreadPoolOptions{}.withNumberOfThreads(2).withThreadStackSizeBytes(16u * 1024 * 1024)};
+    // PRJ-4: autosave copies are written here, at background priority, so they never wait behind an open or a render.
+    juce::ThreadPool autosavePool_{juce::ThreadPoolOptions{}.withThreadName("Sonora autosave").withNumberOfThreads(1)
+                                       .withThreadStackSizeBytes(4u * 1024 * 1024).withDesiredThreadPriority(juce::Thread::Priority::background)};
     std::unique_ptr<juce::PropertiesFile> settings_;
     std::atomic<bool> scanning_{false};
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
     std::atomic<bool> samplePacksPublishPending_{false};
     bool samplePacksFetched_ = false, samplePacksPublished_ = false;
     std::set<std::string> samplePacksInstalled_, samplePacksFailed_;
-    std::unique_ptr<packs::PackStore> packStore_; // last: its worker stops before anything above goes away
+    std::unique_ptr<packs::PackStore> packStore_; // its worker stops before anything above goes away
+    // LIB-4: Show Similar Files decodes many files; its own thread keeps the browser's folder reads (pool_) responsive.
+    std::shared_ptr<engine::SoundFeatureCache> soundFeatures_;
+    std::shared_ptr<std::atomic<int>> similarGeneration_ = std::make_shared<std::atomic<int>>(0);
+    juce::ThreadPool similarPool_{1}; // last: its job ends first
 };
 
 } // namespace sonora::app

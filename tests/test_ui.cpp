@@ -498,22 +498,28 @@ TEST_CASE("automation UI: toggle, select, move, add, delete and undo through rea
     };
     // Volume on the fader's curve (UI-75, as the reference draws it): 0 dB sits at 0.893 of the 60 px plot (5..65).
     const float zeroDb = 65.0f - 0.893f * 60.0f;
+    // UI-76 (the reference): a click on a breakpoint deletes it.
     root.dispatchMouseDown(mouse(160, zeroDb));
     root.dispatchMouseUp(mouse(160, zeroDb));
+    REQUIRE(history.canUndo());
+    CHECK(song.tracks[0].automation[0].points.size() == 2);
+    history.undo(song);
     CHECK(! history.canUndo());
     root.dispatchMouseDown(mouse(160, zeroDb));
     root.dispatchMouseDrag(mouse(200, 50));
     root.dispatchMouseUp(mouse(200, 50));
     REQUIRE(history.canUndo());
-    CHECK_NEAR(song.tracks[0].automation[0].points[1].time, 4.75, 1e-9); // 192 px / 40 = 4.8, on the 1/16 adaptive grid
+    CHECK_NEAR(song.tracks[0].automation[0].points[1].time, 5.0, 1e-9); // UI-76: grabbed at beat 4, moved 40 px / 40 = 1 beat
     CHECK(song.tracks[0].automation[0].points[1].value < 0.6);
     // Add a point on an empty part of the lane.
     root.dispatchMouseDown(mouse(480, 20, 2));
     root.dispatchMouseUp(mouse(480, 20, 2));
     CHECK(song.tracks[0].automation[0].points.size() == 4);
-    // Select and Delete this point, then undo all edits.
-    root.dispatchMouseDown(mouse(480, 20));
-    root.dispatchMouseUp(mouse(480, 20));
+    // Shift-click selects this point (a plain click would delete it), Delete removes it; then undo all edits.
+    auto shifted = mouse(480, 20); shifted.shift = true;
+    root.dispatchMouseDown(shifted);
+    root.dispatchMouseUp(shifted);
+    CHECK(song.tracks[0].automation[0].points.size() == 4);
     ui::KeyEvent del;
     del.keyCode = juce::KeyPress::deleteKey;
     root.dispatchKey(del);

@@ -37,7 +37,7 @@ T* findWidget(ui::Widget& w)
 
 // TopBar children in creation order (see TopBar's constructor).
 enum BarChild { Play, Stop, Record, Loop, Metronome, CountIn, PunchIn, PunchOut, Browser,
-                Overdub, AutomationArm, ReEnable, Capture, SessionRecord, DrawMode, Keyboard, KeyMap };
+                Overdub, AutomationArm, AutomationWrite, ReEnable, Capture, SessionRecord, DrawMode, Keyboard, KeyMap };
 
 struct BarRig
 {
@@ -152,6 +152,15 @@ TEST_CASE("control bar tools: overdub, automation arm, draw mode, computer keybo
     CHECK(! x.automationArm);
     rig.click(AutomationArm);
     CHECK(x.automationArm);
+
+    // UI-77: Automation Write mode's button (the app hook when set, else the flag itself)
+    CHECK(! x.automationWriteMode);
+    rig.click(AutomationWrite);
+    CHECK(x.automationWriteMode);
+    bool hooked = false;
+    x.setAutomationWriteMode = [&](bool on) { hooked = true; x.automationWriteMode = on; };
+    rig.click(AutomationWrite);
+    CHECK(hooked); CHECK(! x.automationWriteMode);
 
     CHECK(! x.drawMode);
     rig.click(DrawMode);

@@ -151,7 +151,15 @@ EditCommand duplicateArrangementRegion(const Song&, int firstTrack, int lastTrac
 // envelope targets; invalid destinations return an empty command without changing any source.
 bool canTransferArrangementRegion(const Song&, int firstTrack, int lastTrack, Beats start, Beats end, Beats at, int trackOffset = 0);
 EditCommand transferArrangementRegion(const Song&, int firstTrack, int lastTrack, Beats start, Beats end,
-                                      Beats at, int trackOffset = 0, bool copy = false);
+                                      Beats at, int trackOffset = 0, bool copy = false, bool automation = true);
+// UI-76: the track automation under [start, end) of `fromTrack` goes along with a clip moved or copied to `toTrack` at `at`
+// (the reference with Lock Envelopes off). Only lanes that move inside the range; a target the destination track does not
+// have (another device chain) stays behind and is counted in `skipped`. A move holds the source's value over the range it
+// leaves. Empty when nothing would change.
+EditCommand transferClipAutomation(const Song&, int fromTrack, Beats start, Beats end, int toTrack, Beats at, bool copy,
+                                   int* skipped = nullptr);
+// Whether any automation lane of `track` has breakpoints or changes value inside [start, end).
+bool trackAutomationMovesIn(const Song&, int track, Beats start, Beats end);
 // Delete with a time selection: removes the [start, end) part of every clip on the selected tracks (whole clips inside, the
 // covered part of clips that cross an edge; time does not move). Frozen tracks are left alone; empty when nothing changes.
 EditCommand deleteArrangementRegion(const Song&, int firstTrack, int lastTrack, Beats start, Beats end);

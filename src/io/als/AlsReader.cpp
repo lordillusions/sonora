@@ -1185,6 +1185,11 @@ std::unique_ptr<juce::XmlElement> readAlsDom(const juce::File& file, std::string
 
 AlsLoadResult loadAls(const juce::File& file)
 {
+    return loadAls(file, {});
+}
+
+AlsLoadResult loadAls(const juce::File& file, const std::string& documentPath)
+{
     AlsLoadResult result;
     if (! file.existsAsFile())
     {
@@ -1224,7 +1229,12 @@ AlsLoadResult loadAls(const juce::File& file)
     }
     unwrapSonoraDevices(*root);
     repairDuplicatePointeeIds(*root);
-    return parseAls(*root, file.getFullPathName().toStdString());
+    if (documentPath.empty())
+        return parseAls(*root, file.getFullPathName().toStdString());
+    // PRJ-4: samples resolve against the set's own folder; the writer patches the copy that was read.
+    auto parsed = parseAls(*root, documentPath);
+    if (parsed.song) parsed.song->patchSourcePath = file.getFullPathName().toStdString();
+    return parsed;
 }
 
 namespace

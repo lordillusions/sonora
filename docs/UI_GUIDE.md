@@ -128,9 +128,26 @@ Open the PNG and compare with Live. Screenshots of Live are kept locally and are
 
 Press A in Arrangement to show an automation lane under each track/return/main. The right-hand header has a device chooser (Mixer, numbered devices, MIDI Ctrl or unmapped targets)
 and a separate parameter chooser. Current entries are ticked; a dot marks authored automation. Repeated device names
-carry their chain position. Native processor names/ranges are used when available; unresolved targets retain their ID. Select a point and drag time/value; Alt disables
-snap. Double-click empty space adds a point, double-click/right-click a point or Delete removes it. Each
-completed gesture is one undo step. The audio Clip tab shows a stereo source waveform with the saved warp
+carry their chain position. Native processor names/ranges are used when available; unresolved targets retain their ID.
+
+Editing a lane (UI-76, the reference's rules): click on the line to add a breakpoint (a ring previews it), click a breakpoint
+to delete it, drag it to move it (Cmd: no grid; Shift: one axis and fine values; breakpoints you drag over are removed).
+Shift-click selects breakpoints or a segment; a selection moves together. Click just beside the line to select its segment
+and drag it up or down; Option-drag bends it, Option-double-click straightens it. Drag on the background to select a time
+range: Delete clears it (the lane outside stays), Cmd+C / Cmd+X / Cmd+V / Cmd+D copy, cut, paste (at the selection or the
+play position; another parameter gets the same shape on its own range) and duplicate it, Cmd+A selects the whole lane,
+Cmd+Delete deletes the lane's automation. Right-click: Edit Value (type -6 dB, 25L, On, 2.5k...), Insert Shape (sine,
+triangle, saw, square, ramps, ADSR over the selection), Simplify Envelope, Delete Automation, Re-Enable Automation, Lock
+Envelopes. Each gesture is one undo step.
+
+Moving, Option-copying or Cmd+D-duplicating an Arrangement clip (or a time selection) whose time range holds automation asks
+whether the automation goes along (With Automation / Clip Only / Always / Cancel); Options > Clip Automation changes the
+default (Ask, Always Move With Clips, Lock Envelopes). Duplicating tracks that have automation asks whether the copies get it.
+
+**Automation Write mode** (UI-77): the control-bar button after Automation Arm, Options > Automation Write Mode or
+Option+Cmd+A (Escape leaves). Every automatable control turns orange. Let go of a control and its lane opens on its track;
+with the transport stopped its value becomes a breakpoint at the play position, while playing every move is recorded over
+time (no Record needed). `ui_snapshot --automation-write` renders the orange state. The audio Clip tab shows a stereo source waveform with the saved warp
 markers; Cmd+wheel zooms around the cursor, wheel scrolls. With Warp on, double-click the marker strip to
 add/remove a marker (at least two anchors remain), drag horizontally to change its source time, or
 Shift-drag vertically to change its beat (Alt disables beat snapping). Neighbouring anchors cannot cross.
@@ -180,6 +197,18 @@ existing destinations. Add `--punch` for beats 1→2 of our generated input. Rev
 compared with Live's mono file display.
 
 ## Browser
+
+**Search field (UI-78).** One `InlineTextEdit` (the same editor as in-place track rename): selection, Shift/Alt/Cmd arrows,
+Cmd+A/C/X/V, double-click word, triple-click all, drag to select. Cmd+F and the first click into the field select its text.
+The round x at the field's right end (visible while text, a tag filter or a similar list narrows the list) clears all of
+them; Escape clears them and leaves the field. `searchFieldBounds()` / `clearSearchBounds()` for tests.
+
+**Clip sample files (LIB-3/4/5).** Show in Browser (`UiContext::browserReveal`, `ui::showInBrowser`) opens the file's folder
+and selects its row. Show Similar Files fills `UiContext::similarSamples`; the list sits under a "Similar to: file x" chip
+(`similarChipBounds()`), each match's folder dimmed at the right; with a clip as the source, double-click / Enter puts the
+row's file into it. The audio sample editor header: bold file name (click = Show in Browser), format, dimmed folder, then
+"Replace in Clip | Track | Set" (`UiContext::sampleReplaceScope`) and "Similar < >" swap arrows; a dragged sample frames
+the editor and says what the drop will replace.
 
 **All (UI-64)** is the first Library entry: every Library category in one list, a heading per category in sidebar order
 (Sounds is left out while it has nothing to list) over that category's own groups or, for Samples, the Samples folder's

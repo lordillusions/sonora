@@ -138,6 +138,13 @@ TopBar::TopBar()
     automationArm_ = add<IconButton>(IconButton::Icon::AutomationArm);
     automationArm_->isOn = [this] { return ctx().automationArm; };
     automationArm_->onClick = [this] { ctx().automationArm = ! ctx().automationArm; if (ctx().layoutChanged) ctx().layoutChanged(); ctx().statusText = ctx().automationArm ? "Automation Arm on: moving controls while recording writes automation" : "Automation Arm off"; };
+    automationWrite_ = add<IconButton>(IconButton::Icon::AutomationWrite); // UI-77
+    automationWrite_->isOn = [this] { return ctx().automationWriteMode; };
+    automationWrite_->onClick = [this] {
+        auto& x = ctx();
+        if (x.setAutomationWriteMode) x.setAutomationWriteMode(! x.automationWriteMode); else x.automationWriteMode = ! x.automationWriteMode;
+        repaint();
+    };
     reEnable_ = add<IconButton>(IconButton::Icon::ReEnable);
     reEnable_->isOn = [this] { return ctx().automationOverridden && ctx().automationOverridden(); };
     reEnable_->isEnabled = [this] { return ctx().automationOverridden && ctx().automationOverridden(); };
@@ -285,11 +292,12 @@ void TopBar::layout()
     centre.removeFromLeft(4);
     record_->setBounds(centre.removeFromLeft(tw));
     centre.removeFromLeft(8);
-    overdub_->visible = automationArm_->visible = reEnable_->visible = ! tight;
+    overdub_->visible = automationArm_->visible = automationWrite_->visible = reEnable_->visible = ! tight;
     if (! tight)
     {
         overdub_->setBounds(centre.removeFromLeft(toolW)); centre.removeFromLeft(3);
         automationArm_->setBounds(centre.removeFromLeft(toolW)); centre.removeFromLeft(3);
+        automationWrite_->setBounds(centre.removeFromLeft(toolW)); centre.removeFromLeft(3);
         reEnable_->setBounds(centre.removeFromLeft(toolW)); centre.removeFromLeft(3);
     }
     capture_->setBounds(centre.removeFromLeft(toolW)); centre.removeFromLeft(3);
@@ -334,7 +342,9 @@ void TopBar::paint(SkCanvas& c, const Theme& t)
     displayBox(c, t, loopLenBox_, formatLength(ll, num, den));
 
     std::snprintf(buf, sizeof(buf), "%d %%", (int) std::lround(x.cpuUsage * 100.0));
-    ctl::barBox(c, t, cpuBox_, buf);
+    // UI-82: lit while its details are open, red for two seconds after a block overran its buffer time.
+    ctl::barBox(c, t, cpuBox_, buf, Align::Centre, x.cpuPanelOpen || x.cpu.overloaded,
+                x.cpu.overloaded ? t.color("ChosenAlert") : t.color("ChosenDefault"));
     ctl::barBox(c, t, midiBox_, "MIDI", Align::Centre, x.midiMapMode || x.midiActivityFrames > 0,
                 x.midiMapMode ? t.color("ChosenAlternative") : t.color("ChosenDefault"));
 }
@@ -370,8 +380,10 @@ void TopBar::tick()
     }
     const double pos = x.transport ? (x.transport->isCountingIn() ? x.transport->countInPosition() : x.transport->positionBeats()) : 0.0;
     const int cpu = (int) std::lround(x.cpuUsage * 100.0);
-    if (std::abs(pos - lastPosition_) > 0.01 || cpu != lastCpu_)
+    const bool cpuLit = x.cpuPanelOpen || x.cpu.overloaded;
+    if (std::abs(pos - lastPosition_) > 0.01 || cpu != lastCpu_ || cpuLit != lastCpuLit_)
     {
+        lastCpuLit_ = cpuLit;
         lastPosition_ = pos;
         lastCpu_ = cpu;
         repaint();
@@ -416,6 +428,16 @@ void TopBar::mouseDown(const MouseEvent& e)
         return;
     }
     editingSignature_ = false;
+    if (cpuBox_.contains(e.x, e.y)) // UI-82: the CPU meter details (closed by a click anywhere, Escape)
+    {
+        auto& x = ctx();
+        const auto origin = boundsInRoot();
+        x.cpuAnchor = cpuBox_.translated(origin.x, origin.y);
+        x.cpuPanelOpen = ! x.cpuPanelOpen;
+        if (x.modelChanged) x.modelChanged();
+        if (x.requestRepaint) x.requestRepaint();
+        return;
+    }
     if (scaleRootBox_.contains(e.x, e.y) || scaleModeBox_.contains(e.x, e.y))
     {
         const bool root = scaleRootBox_.contains(e.x, e.y);

@@ -971,9 +971,15 @@ void patchEnvelopes(XmlElement* track, const std::vector<model::AutomationEnvelo
             return e->hasTagName("BoolEvent") ? (e->getBoolAttribute("Value") ? 1.0 : 0.0) : e->getDoubleAttribute("Value");
         };
         std::stable_sort(old.begin(), old.end(), [](const auto* a, const auto* b) { return a->getDoubleAttribute("Time") < b->getDoubleAttribute("Time"); });
+        // UI-76: a curve edited on a breakpoint that kept its time and value is a change too.
+        auto curveMatches = [](const XmlElement* e, const model::AutomationPoint& p) {
+            return std::abs(e->getDoubleAttribute("CurveControl1X", 0.5) - p.x1) < 1e-9 && std::abs(e->getDoubleAttribute("CurveControl1Y", 0.5) - p.y1) < 1e-9
+                && std::abs(e->getDoubleAttribute("CurveControl2X", 0.5) - p.x2) < 1e-9 && std::abs(e->getDoubleAttribute("CurveControl2Y", 0.5) - p.y2) < 1e-9;
+        };
         bool equal = old.size() == env.points.size();
         for (size_t i = 0; equal && i < old.size(); ++i)
-            equal = std::abs(old[i]->getDoubleAttribute("Time") - env.points[i].time) < 1e-12 && std::abs(valueOf(old[i]) - env.points[i].value) < 1e-12;
+            equal = std::abs(old[i]->getDoubleAttribute("Time") - env.points[i].time) < 1e-12 && std::abs(valueOf(old[i]) - env.points[i].value) < 1e-12
+                 && (env.eventType != "FloatEvent" || curveMatches(old[i], env.points[i]));
         if (equal) continue;
         std::vector<std::unique_ptr<XmlElement>> replacements;
         for (size_t i = 0; i < env.points.size(); ++i)
@@ -987,7 +993,7 @@ void patchEnvelopes(XmlElement* track, const std::vector<model::AutomationEnvelo
             e->setAttribute("Id", (int) i);
             e->setAttribute("Time", num(p.time));
             e->setAttribute("Value", env.eventType == "BoolEvent" ? juce::String(p.value >= 0.5 ? "true" : "false") : num(p.value));
-            if (found == old.end() && env.eventType == "FloatEvent")
+            if (env.eventType == "FloatEvent" && (found == old.end() || p.curved() || e->hasAttribute("CurveControl1X")))
             {
                 e->setAttribute("CurveControl1X", num(p.x1));
                 e->setAttribute("CurveControl1Y", num(p.y1));
@@ -1818,7 +1824,7 @@ TrackDuplication prepareTrackDuplication(const model::Song& song, const std::vec
     std::vector<int> members;
     if (! model::groupableSelection(song, selection, members))
     { result.error = "Select audio, MIDI or group tracks with the same parent to duplicate"; return result; }
-    auto root = readAlsDom(juce::File(song.sourcePath), result.error);
+    auto root = readAlsDom(juce::File(song.patchSource()), result.error);
     if (! root) return result;
     auto patched = patchAlsDom(song, *root);
     if (! patched.ok) { result.error = patched.error; return result; }
@@ -1900,7 +1906,7 @@ DeviceCopy prepareDeviceCopy(const model::Song& song, int trackIndex, int device
     const auto found = track ? std::find_if(track->devices.begin(), track->devices.end(), [deviceId](const auto& d) { return d.id == deviceId; })
                              : std::vector<model::Device>::const_iterator{};
     if (! track || found == track->devices.end()) { result.error = "The device is no longer on that track"; return result; }
-    auto root = readAlsDom(juce::File(song.sourcePath), result.error);
+    auto root = readAlsDom(juce::File(song.patchSource()), result.error);
     if (! root) return result;
     if (auto patched = patchAlsDom(song, *root); ! patched.ok) { result.error = patched.error; return result; }
     XmlElement* trackX = nullptr;
@@ -1966,7 +1972,7 @@ void refreshClipIdentities(model::Song& song)
         for (const auto& clip : track.arrangementClips) needsTemplates |= ! clip.sourceXml;
         for (const auto& slot : track.slots) if (slot.clip) needsTemplates |= ! slot.clip->sourceXml;
     }
-    auto root = needsTemplates ? readAlsDom(juce::File(song.sourcePath), error) : nullptr;
+    auto root = needsTemplates ? readAlsDom(juce::File(song.patchSource()), error) : nullptr;
     auto* liveSet = root ? root->getChildByName("LiveSet") : nullptr;
     const auto index = liveSet ? indexClips(*liveSet) : ClipIndex{};
     const auto sessions = liveSet ? indexSessionClips(*liveSet) : SessionIndex{};
@@ -2243,7 +2249,9 @@ AlsSaveResult saveAls(const model::Song& song, const juce::File& destination, bo
 AlsSaveResult saveAls(const model::Song& song, const juce::File& destination, const AlsSaveOptions& options)
 {
     AlsSaveResult r;
-    const juce::File source(juce::String::fromUTF8(song.sourcePath.c_str()));
+    // The XML the model was read from (a recovered set's recovery copy, PRJ-4) and the set's own file.
+    const juce::File source(juce::String::fromUTF8(song.patchSource().c_str()));
+    const juce::File document(juce::String::fromUTF8(song.sourcePath.c_str()));
     std::string error;
     auto root = readAlsDom(source, error);
     if (root == nullptr)
@@ -2255,21 +2263,21 @@ AlsSaveResult saveAls(const model::Song& song, const juce::File& destination, co
     if (! r.ok)
         return r;
     const auto project = destination.getParentDirectory();
-    if (options.copyProjectSamples) copyProjectSamples(source.getParentDirectory(), project, r);
+    if (options.copyProjectSamples) copyProjectSamples(document.getParentDirectory(), project, r);
     if (options.portableReferences || options.copyProjectSamples || options.collectAll) relocateSamples(song, *root, destination, options.copyProjectSamples);
     if (options.collectAll) collectSamples(*root, project, options, r);
 
-    if (destination == source)
+    if (destination == document && (destination == source || document.existsAsFile()))
     {
         // Never overwrite the only copy: keep a timestamped backup next to it (like Live's Backup folder).
-        const auto backupDir = source.getParentDirectory().getChildFile("Backup");
+        const auto backupDir = document.getParentDirectory().getChildFile("Backup");
         const auto stamp = juce::Time::getCurrentTime().formatted("%Y-%m-%d %H-%M-%S");
-        const auto backup = backupDir.getNonexistentChildFile(source.getFileNameWithoutExtension() + " [" + stamp + "]",
-                                                             source.getFileExtension());
-        if (! backupDir.createDirectory() || ! source.copyFileTo(backup))
+        const auto backup = backupDir.getNonexistentChildFile(document.getFileNameWithoutExtension() + " [" + stamp + "]",
+                                                             document.getFileExtension());
+        if (! backupDir.createDirectory() || ! document.copyFileTo(backup))
         {
             r.ok = false;
-            r.error = "Could not create a backup of " + source.getFullPathName().toStdString();
+            r.error = "Could not create a backup of " + document.getFullPathName().toStdString();
             return r;
         }
     }

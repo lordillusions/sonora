@@ -87,6 +87,7 @@ Theme::Theme()
         {"WaveformColor", 0x070b14},
         {"AutomationColor", 0xea3c3c},
         {"AutomationDisabled", 0x595959}, // UI-75: overridden automation (the reference's Default Light Cool High)
+        {"AutomationWrite", 0xff8a1f},    // UI-77: Automation Write mode tint (the reference uses orange for its other map mode)
         {"Poti", 0x090c16},
         {"PotiNeedle", 0x090c16},
         {"DeactivatedPoti", 0x575b67},

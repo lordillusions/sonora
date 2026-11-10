@@ -33,6 +33,9 @@ model::Device readDeviceXml(const juce::XmlElement& device, std::vector<std::str
 
 // Loads a .als file from disk. Also accepts an uncompressed XML file (handy for tests).
 AlsLoadResult loadAls(const juce::File& file);
+// PRJ-4: reads `file` (a recovery copy) as the set at `documentPath`: Song::sourcePath is documentPath (samples resolve
+// and Save writes there), Song::patchSourcePath is `file` (the XML the writer patches until the first save).
+AlsLoadResult loadAls(const juce::File& file, const std::string& documentPath);
 
 // Parses an already-decoded <Ableton> root element.
 AlsLoadResult parseAls(const juce::XmlElement& abletonRoot, const std::string& sourcePath);

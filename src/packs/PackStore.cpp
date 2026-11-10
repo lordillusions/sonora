@@ -282,7 +282,7 @@ void PackStore::runCatalogue()
     if (! catalogue) { fail("The pack list is unreadable: " + error); return; }
     json.moveFileTo(folder.getChildFile("packs.json"));
     signature.moveFileTo(folder.getChildFile("packs.json.sig"));
-    for (const auto& warning : catalogue->warnings) DBG("[sonora] packs: skipped " << warning);
+    for ([[maybe_unused]] const auto& warning : catalogue->warnings) DBG("[sonora] packs: skipped " << warning);
     const std::lock_guard lock(mutex_);
     catalogue_ = std::move(catalogue->packs);
     state_.catalogue = CatalogueState::Ready;

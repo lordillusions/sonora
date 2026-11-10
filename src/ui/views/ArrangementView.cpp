@@ -20,6 +20,7 @@
 #include "ui/UiContext.h"
 #include "ui/Waveform.h"
 #include "ui/views/AutomationEditor.h"
+#include "ui/ClipAutomation.h"
 #include "ui/views/InputControls.h"
 #include "ui/widgets/Buttons.h"
 #include "ui/widgets/Fader.h"
@@ -2499,17 +2500,32 @@ void ArrangementView::mouseUp(const MouseEvent& e)
         if (region.moved && region.valid && region.song == x.song && region.structure == x.trackStructure()
             && ! x.recording && ! x.recordingRequested && x.applyEdit)
         {
-            auto command = model::transferArrangementRegion(*x.song, region.original.firstTrack, region.original.lastTrack,
-                region.original.start, region.original.end, region.at, region.trackOffset, region.copy);
-            if (command.apply)
-            {
-                x.applyEdit(std::move(command));
-                x.arrangementSelection = {true, region.at, region.at + region.original.end - region.original.start,
+            // UI-76: the automation under the selection goes along unless the user says otherwise (or Lock Envelopes).
+            bool automated = false;
+            for (int t = region.original.firstTrack; t <= region.original.lastTrack; ++t)
+                automated |= model::trackAutomationMovesIn(*x.song, t, region.original.start, region.original.end);
+            auto* view = this;
+            auto place = [view, region](bool withAutomation) {
+                if (! Widget::isAlive(view)) return;
+                auto& c = view->ctx();
+                if (region.song != c.song || region.structure != c.trackStructure() || c.recording || c.recordingRequested || ! c.applyEdit) return;
+                auto command = model::transferArrangementRegion(*c.song, region.original.firstTrack, region.original.lastTrack,
+                    region.original.start, region.original.end, region.at, region.trackOffset, region.copy, withAutomation);
+                if (! command.apply) return;
+                c.applyEdit(std::move(command));
+                c.arrangementSelection = {true, region.at, region.at + region.original.end - region.original.start,
                     region.original.firstTrack + region.trackOffset, region.original.lastTrack + region.trackOffset};
-                x.selectedTrack = region.grabTrack + region.trackOffset; x.trackSelection.clear();
-                x.selectedClipTrack = x.selectedClipUid = x.selectedClipScene = x.selectedTakeLane = -1;
-                x.statusText = region.copy ? "Copied selection" : "Moved selection";
-            }
+                c.selectedTrack = region.grabTrack + region.trackOffset; c.trackSelection.clear();
+                c.selectedClipTrack = c.selectedClipUid = c.selectedClipScene = c.selectedTakeLane = -1;
+                c.statusText = region.copy ? "Copied selection" : "Moved selection";
+                view->repaint();
+            };
+            // Ask once for the whole selection (the first track that has automation decides whether to ask).
+            int asked = region.original.firstTrack;
+            for (int t = region.original.firstTrack; t <= region.original.lastTrack; ++t)
+                if (model::trackAutomationMovesIn(*x.song, t, region.original.start, region.original.end)) { asked = t; break; }
+            if (automated) withClipAutomation(x, asked, region.original.start, region.original.end, region.copy, place);
+            else place(false);
         }
         repaint(); return;
     }
@@ -2529,17 +2545,32 @@ void ArrangementView::mouseUp(const MouseEvent& e)
         else
         {
             // UI-71 (Live): the moved / resized / Option-copied clip overwrites what it lands on (one undo step).
-            int placedUid = -1;
-            auto command = model::placeArrangementClip(*x.song, drag_.track, drag_.uid, drag_.targetTrack, drag_.preview, drag_.copy,
-                                                       drag_.copy ? "Copy Clip" : label, &placedUid);
-            if (command.apply)
-            {
-                x.applyEdit(std::move(command));
-                x.selectedTrack = x.selectedClipTrack = drag_.targetTrack;
-                x.selectedClipUid = placedUid;
-                x.selectedClipScene = -1;
-                if (drag_.copy) x.statusText = "Copied clip";
-            }
+            // UI-76: a moved or copied clip (not a resize) takes the track automation under it along, after asking.
+            const auto drag = drag_;
+            auto* view = this;
+            const auto* song = x.song;
+            auto place = [view, drag, song, name = std::string(label)](bool withAutomation) {
+                if (! Widget::isAlive(view)) return;
+                auto& c = view->ctx();
+                if (c.song != song || ! c.applyEdit) return;
+                int placedUid = -1;
+                auto command = model::placeArrangementClip(*c.song, drag.track, drag.uid, drag.targetTrack, drag.preview, drag.copy,
+                                                           drag.copy ? "Copy Clip" : name, &placedUid);
+                if (! command.apply) return;
+                if (withAutomation)
+                    command = withTrackAutomation(*c.song, std::move(command), drag.track, drag.original.currentStart, drag.original.currentEnd,
+                                                  drag.targetTrack, drag.preview.currentStart, drag.copy);
+                c.applyEdit(std::move(command));
+                c.selectedTrack = c.selectedClipTrack = drag.targetTrack;
+                c.selectedClipUid = placedUid;
+                c.selectedClipScene = -1;
+                if (drag.copy) c.statusText = "Copied clip";
+                view->repaint();
+            };
+            const bool moves = drag_.mode == ui::DragMode::Move
+                               && (drag_.copy || drag_.targetTrack != drag_.track || std::abs(drag_.preview.currentStart - drag_.original.currentStart) > 1e-9);
+            if (moves) withClipAutomation(x, drag_.track, drag_.original.currentStart, drag_.original.currentEnd, drag_.copy, place);
+            else place(false);
         }
     }
     drag_ = {};
@@ -2736,6 +2767,12 @@ bool ArrangementView::keyPressed(const KeyEvent& k)
     if (hasSelection && ! k.cmd && ! k.alt && ! k.ctrl && ! k.shift && (k.keyCode == juce::KeyPress::deleteKey || k.keyCode == juce::KeyPress::backspaceKey))
     {
         x.applyEdit(model::deleteClip(*x.song, x.selectedClipLocation()));
+        return true;
+    }
+    if (hasSelection && k.cmd && (k.textChar == 'd' || k.textChar == 'D') && x.selectedTakeLane < 0)
+    {
+        duplicateClipWithAutomation(x, x.selectedClipLocation()); // UI-76: asks about the automation under the clip
+        repaint();
         return true;
     }
     if (hasSelection && k.cmd && (k.textChar == 'd' || k.textChar == 'D'))

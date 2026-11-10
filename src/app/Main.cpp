@@ -54,7 +54,10 @@ public:
             return ui.song != nullptr && ! ui.waitingForBusy();
         };
         splash_->onFinished = [this] {
-            juce::MessageManager::callAsync([this] { splash_.reset(); });
+            juce::MessageManager::callAsync([this] {
+                splash_.reset();
+                if (controller_) controller_->offerRecovery(); // PRJ-4: after a run that did not quit cleanly
+            });
             if (window_) window_->toFront(true);
         };
 

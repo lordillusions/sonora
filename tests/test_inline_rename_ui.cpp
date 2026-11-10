@@ -58,10 +58,10 @@ TEST_CASE("inline rename: the field starts selected; typing replaces, arrows pla
 {
     ui::InlineTextEdit edit;
     edit.start("Bass");
-    CHECK(edit.allSelected);
+    CHECK(edit.allSelected());
     CHECK(edit.key(typed('K')) == ui::InlineTextEdit::Result::Edited);
     CHECK(edit.text == "K");
-    CHECK(! edit.allSelected);
+    CHECK(! edit.allSelected());
     edit.key(typed('e')); edit.key(typed('y'));
     edit.key(key(juce::KeyPress::leftKey));
     edit.key(typed('Z'));
@@ -72,12 +72,12 @@ TEST_CASE("inline rename: the field starts selected; typing replaces, arrows pla
     edit.key(key(juce::KeyPress::deleteKey));
     CHECK(edit.text == "ey");
     edit.key(key('A', 'a', true));
-    CHECK(edit.allSelected);
+    CHECK(edit.allSelected());
     edit.key(key(juce::KeyPress::backspaceKey));
     CHECK(edit.text.empty());
     edit.start("Caf\xC3\xA9");
     edit.key(key(juce::KeyPress::rightKey)); // collapses the selection to the end
-    CHECK(! edit.allSelected);
+    CHECK(! edit.allSelected());
     edit.key(key(juce::KeyPress::backspaceKey));
     CHECK(edit.text == "Caf"); // the whole two-byte code point
     edit.insert("a\nb");
@@ -91,7 +91,7 @@ TEST_CASE("inline rename: Return commits one undoable Rename Track, Escape keeps
     Rig rig;
     REQUIRE(ui::beginTrackRename(rig.ctx, 0));
     CHECK(rig.ctx.trackRename.edit.text == "Bass");
-    CHECK(rig.ctx.trackRename.edit.allSelected);
+    CHECK(rig.ctx.trackRename.edit.allSelected());
     const bool keyboardBefore = rig.ctx.computerKeyboard;
     rig.type("Lead m"); // 'm' would toggle the computer MIDI keyboard; here it is a letter
     CHECK(rig.ctx.computerKeyboard == keyboardBefore);

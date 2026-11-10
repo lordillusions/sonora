@@ -231,6 +231,9 @@ void PreferencesPanel::paint(SkCanvas& c, const Theme& t)
         value("Input Latency", number(state.inputLatencyMs, 2) + " ms");
         value("Output Latency", number(state.outputLatencyMs, 2) + " ms");
         value("Overall Latency", number(state.inputLatencyMs + state.outputLatencyMs, 2) + " ms");
+        section("CPU"); // ENG-14e
+        onOff("Multi-Core Processing", x.cpu.multiCore, [&x, on = x.cpu.multiCore] { if (x.setMultiCore) x.setMultiCore(! on); });
+        value("Threads", x.cpu.multiCore ? std::to_string(x.cpu.helpers + 1) + " (tracks render in parallel)" : std::string("1 (the audio thread)"));
     }
     else if (tab == Tab::Midi)
     {

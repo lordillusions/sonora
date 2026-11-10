@@ -14,6 +14,9 @@ namespace sonora::engine
 
 AudioEngine::AudioEngine(plugins::PluginHost& host, midi::MidiManager& midi) : host_(host), midi_(midi)
 {
+    ticksPerMicro_ = (double) juce::Time::getHighResolutionTicksPerSecond() / 1.0e6;
+    if (const char* threads = std::getenv("SONORA_ENGINE_THREADS")) // ENG-14e: 1 = serial (A/B), N = N threads in all
+        threadsOverride_ = std::max(0, std::atoi(threads));
     liveMidi_.ensureSize(midi::InputBlock::bufferCapacity);
     samples_.setLoaderPool(&loaderPool_);
     startTimerHz(10);
@@ -25,6 +28,7 @@ AudioEngine::~AudioEngine()
     stopTimer();
     deviceManager_.removeAudioCallback(this);
     deviceManager_.closeAudioDevice();
+    workers_.stop();
     recorder_.deviceStopped();
     delete pendingPreview_.exchange(nullptr);
     delete retiredPreview_.exchange(nullptr);
@@ -102,6 +106,7 @@ bool AudioEngine::preloadPlugin(const model::Device& device)
 
 void AudioEngine::installGraph(std::unique_ptr<EngineGraph> graph)
 {
+    startWorkers(workerConfig_.workgroup); // ENG-14e: first graph, or the block size grew
     graph->prepare(sampleRate_, blockSize_);
     controls_ = graph->controls;
     latest_ = graph.get();
@@ -193,6 +198,7 @@ std::vector<std::string> AudioEngine::updateTrackDevices(int trackIndex, const m
     node.clipsEdited = clipsChanged; // inserting an effect keeps currently sounding instrument voices
     delete node.clipSwap->retired.exchange(nullptr);
     latest_->computeDelayCompensation();
+    latest_->schedule = buildRenderSchedule(*latest_); // sidechain links of removed devices are gone
     *model::trackAt(*lastSong_, trackIndex) = *track;
     if (running) deviceManager_.addAudioCallback(this);
     if (reprepareQueued_)
@@ -280,6 +286,7 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
     std::vector<bool> active((size_t) numPhysicalInputs_);
     for (int channel = 0; channel < numPhysicalInputs_; ++channel) active[(size_t) channel] = activeInputs[channel];
     audioCapture_.prepare(active, sr);
+    startWorkers(device->getWorkgroup()); // ENG-14e: helpers join the device's realtime workgroup (no-op when unchanged)
     if (changed) queueReprepare();
 }
 
@@ -728,6 +735,319 @@ void AudioEngine::processNode(TrackNode& node, const TrackControls& ctl, int n, 
     node.lastGainR = gainR;
 }
 
+// ============================================================================ render jobs (ENG-14e)
+
+struct AudioEngine::BlockContext
+{
+    AudioEngine* engine = nullptr;
+    EngineGraph* graph = nullptr;
+    ControlBank* controls = nullptr;
+    const BlockSegment* segs = nullptr;
+    int numSegs = 0;
+    Transport::BlockStart bs{};
+    double tempo = 120.0;
+    devices::HostInfo host{};
+    bool anySolo = false, releaseAll = false, automate = false;
+    const float* const* inputs = nullptr;
+    int numInputs = 0, numSamples = 0;
+};
+
+void AudioEngine::runJob(void* context, int job)
+{
+    const auto& b = *static_cast<const BlockContext*>(context);
+    const auto& entry = b.graph->schedule.jobs[(size_t) job];
+    auto& node = b.graph->nodes[(size_t) entry.node];
+    const auto start = juce::Time::getHighResolutionTicks();
+    if (entry.isReturn) b.engine->renderReturnJob(b, job);
+    else b.engine->renderTrackJob(b, job);
+    node.blockTicks = juce::Time::getHighResolutionTicks() - start;
+}
+
+// Arrangement automation and clip envelopes of one node, evaluated once per block at the block start (ENG-11).
+void AudioEngine::automate(const BlockContext& b, TrackNode& node)
+{
+    auto& controls = (*b.controls)[(size_t) node.controlIndex];
+    // Only hand edits made while playing override a lane: after a stop (or a locate while stopped) the next start rewrites everything.
+    if (! b.bs.playing)
+        controls.automationWrote.reset();
+    if (! b.automate)
+        return;
+    if (! node.automation.empty())
+    {
+        applyAutomation(node.automation, controls, b.bs.position);
+        if (! b.bs.playing)
+            controls.automationWrote.reset();
+    }
+    if (! node.clipEnvelopes.empty() || ! node.sessionEnvelopes.empty() || ! node.takes.empty())
+        applyClipEnvelopes(node, controls, b.bs.position);
+}
+
+// `source`'s output (delay compensated) into its parent group or Main. Called by the job that owns `target`, sources in the
+// serial order, so every bus sums its inputs in the same order on any number of threads.
+void AudioEngine::emitOutput(const BlockContext& b, TrackNode& source, juce::AudioBuffer<float>& target, int nodeIndex)
+{
+    const int n = b.numSamples;
+    const int stemSlot = offlineStemSlot_ != nullptr ? (*offlineStemSlot_)[(size_t) nodeIndex] : -1;
+    if (stemSlot >= 0 && ! offlinePreMixer_)
+    {
+        auto& stem = offlineStemBuffers_[(size_t) stemSlot]; // the delayed signal is captured, then added to the parent as usual
+        stem.clear(0, n);
+        if (source.blockEmitStem)
+        {
+            source.outDelay.addDelayed(source.buffer, stem, n, 1.0f);
+            for (int ch = 0; ch < 2; ++ch)
+                target.addFrom(ch, 0, stem, ch, 0, n);
+        }
+        else
+            source.outDelay.pushSilence(n);
+    }
+    else if (source.blockEmit)
+        source.outDelay.addDelayed(source.buffer, target, n, 1.0f);
+    else
+        source.outDelay.pushSilence(n);
+}
+
+// `source`'s post-fader send `r` into that return's buffer (called by the return's job, tracks in the serial order).
+void AudioEngine::emitSend(const BlockContext& b, TrackNode& source, size_t r, juce::AudioBuffer<float>& target)
+{
+    const auto& c = (*b.controls)[(size_t) source.controlIndex];
+    if (r >= c.sends.size() || r >= source.sendDelays.size()) return;
+    const float amount = c.sends[r].load(std::memory_order_relaxed);
+    if (! source.blockAudible || amount <= 0.000317f) // Live's -inf (-70 dB)
+        source.sendDelays[r].pushSilence(b.numSamples); // keep the delay line in step
+    else
+        source.sendDelays[r].addDelayed(source.buffer, target, b.numSamples, amount);
+}
+
+void AudioEngine::renderTrackJob(const BlockContext& b, int job)
+{
+    auto& g = *b.graph;
+    auto& ctl = *b.controls;
+    const auto& entry = g.schedule.jobs[(size_t) job];
+    const int idx = entry.node;
+    auto& node = g.nodes[(size_t) idx];
+    auto& c = ctl[(size_t) node.controlIndex];
+    const auto& bs = b.bs;
+    const auto* segs = b.segs;
+    const int numSegs = b.numSegs, numSamples = b.numSamples;
+    const bool releaseAll = b.releaseAll;
+
+    for (const int child : entry.sources) // a group's children, already rendered, in the serial order
+        emitOutput(b, g.nodes[(size_t) child], node.buffer, child);
+
+    node.midiControllerOverflow = false;
+    if (bs.playing && ! node.midiWasPlaying) node.refreshMidiControllers = true;
+    node.midiWasPlaying = bs.playing;
+    automate(b, node);
+    if (node.clipsEdited)
+    {
+        const int scene = c.playingSlot.load(std::memory_order_relaxed);
+        const PreparedClip* replacement = scene >= 0 && (size_t) scene < node.sessionClips.size() && node.hasSessionClip[(size_t) scene]
+                                          ? &node.sessionClips[(size_t) scene] : nullptr;
+        if (recorder_.commitOverdub(node.controlIndex, scene, replacement, node.sessionElapsed, node.midi) && ! releaseAll)
+        {
+            node.clipsEdited = false; node.inputMonitored = false; node.refreshMidiControllers = true;
+        }
+    }
+    if (releaseAll || node.clipsEdited)
+    {
+        node.clipsEdited = false; node.refreshMidiControllers = true;
+        releaseMidiControllers(node.midi, 0);
+        for (int channel = 1; channel <= 16; ++channel) node.midi.addEvent(juce::MidiMessage::allNotesOff(channel), 0);
+        node.audioState.reset();
+    }
+    if (! recorder_.audioCapturesTrack(idx) && c.playingSlot.load(std::memory_order_relaxed) < 0 && c.queuedSlot.load(std::memory_order_relaxed) < 0) for (int i = 1; i < numSegs; ++i)
+    {
+        for (int channel = 1; channel <= 16; ++channel) node.midi.addEvent(juce::MidiMessage::allNotesOff(channel), segs[i].sampleOffset);
+        releaseMidiControllers(node.midi, segs[i].sampleOffset);
+        node.refreshMidiControllers = true;
+    }
+
+    const uint64_t route = c.inputRoute.load(std::memory_order_relaxed);
+    const auto kind = model::inputKind(route);
+    const bool recording = recorder_.audioCapturesTrack(idx);
+    if (kind == model::InputKind::Midi && node.kind == model::TrackKind::Midi)
+        inputMidiBlock_.addTo(node.inputMidi, model::inputMidiPort(route), model::inputChannel(route));
+    if (bs.playing && c.arrangementOn.load(std::memory_order_relaxed) && c.monitoring.load(std::memory_order_relaxed) != 0)
+        for (int i = 0; i < numSegs; ++i)
+            if (! renderMidiControllers(node.midiControllers, segs[i], node.midi, node.refreshMidiControllers || i > 0)) node.midiControllerOverflow = true;
+    renderTrackClips(node, c, segs, numSegs, b.tempo, bs, numSamples,
+                     recording ? recorder_.rangesForTrack(idx) : nullptr);
+    if (kind == model::InputKind::Midi && node.kind == model::TrackKind::Midi)
+    {
+        for (const auto event : node.inputMidi)
+            if (event.samplePosition >= 0 && event.samplePosition < numSamples && node.inputMonitorMask[(size_t) event.samplePosition])
+                node.midi.addEvent(event.data, event.numBytes, event.samplePosition);
+    }
+    if (node.kind == model::TrackKind::Midi)
+    {
+        const int pitch = c.previewPitch.load(std::memory_order_relaxed);
+        if (pitch != node.previewPitch || (releaseAll && pitch >= 0))
+        {
+            if (node.previewPitch >= 0) node.midi.addEvent(juce::MidiMessage::noteOff(1, node.previewPitch), 0);
+            if (pitch >= 0 && pitch <= 127) node.midi.addEvent(juce::MidiMessage::noteOn(1, pitch, (juce::uint8) 100), 0);
+            node.previewPitch = pitch;
+        }
+    }
+    if (node.midiControllerOverflow)
+    {
+        for (int channel = 1; channel <= 16; ++channel) node.midi.addEvent(juce::MidiMessage::allNotesOff(channel), numSamples - 1);
+        releaseMidiControllers(node.midi, numSamples - 1);
+        node.refreshMidiControllers = true;
+        c.midiControllerOverflow.store(true, std::memory_order_relaxed);
+    }
+    if (node.kind == model::TrackKind::Audio && b.inputs
+        && (kind == model::InputKind::AudioMono || kind == model::InputKind::AudioStereo))
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            const int channel = model::inputChannel(route) + (kind == model::InputKind::AudioMono ? 0 : ch);
+            if (channel < b.numInputs && b.inputs[channel])
+                for (int sample = 0; sample < numSamples; ++sample)
+                    if (node.inputMonitorMask[(size_t) sample]) node.buffer.addSample(ch, sample, b.inputs[channel][sample]);
+        }
+
+    feedSidechains(g, node, numSamples);
+    if (node.needTap[0])
+        copyTap(node.tap[0], node.buffer, numSamples);
+    if (! node.midi.isEmpty()) c.midiActivity.fetch_add(1, std::memory_order_relaxed);
+    processNode(node, c, numSamples, b.host); // devices, then post-FX tap, then volume / pan
+    if (node.needTap[2])
+        copyTap(node.tap[2], node.buffer, numSamples);
+    if (node.trackDelaySamples > 0)
+    {
+        juce::AudioBuffer<float> view(node.buffer.getArrayOfWritePointers(), 2, numSamples);
+        node.trackDelay.processInPlace(view, numSamples);
+    }
+
+    // The meter keeps measuring a muted track; the UI draws it grey while the mix leaves the track out (Live).
+    c.peakL.store(node.buffer.getMagnitude(0, 0, numSamples), std::memory_order_relaxed);
+    c.peakR.store(node.buffer.getMagnitude(1, 0, numSamples), std::memory_order_relaxed);
+
+    // Decided here, as the serial render did: a group's own automation (its activator) has not run yet this block.
+    node.blockAudible = isTrackAudible(g, ctl, node, b.anySolo);
+    node.blockEmitStem = node.blockAudible && node.outputEnabled;
+    node.blockEmit = (node.blockAudible || feedsParentWhileSilenced(g, ctl, node, b.anySolo)) && node.outputEnabled;
+    if (entry.lateParent >= 0) // a routing loop (always rendered serially): the group already ran, add to it as before
+        emitOutput(b, node, g.nodes[(size_t) entry.lateParent].buffer, idx);
+}
+
+void AudioEngine::renderReturnJob(const BlockContext& b, int job)
+{
+    auto& g = *b.graph;
+    const auto& entry = g.schedule.jobs[(size_t) job];
+    auto& node = g.nodes[(size_t) entry.node];
+    auto& c = (*b.controls)[(size_t) node.controlIndex];
+    for (const int source : entry.sources) // every track's send to this return, in the serial order
+        emitSend(b, g.nodes[(size_t) source], (size_t) entry.returnIndex, node.buffer);
+    automate(b, node);
+    processNode(node, c, b.numSamples, b.host);
+    c.peakL.store(node.buffer.getMagnitude(0, 0, b.numSamples), std::memory_order_relaxed);
+    c.peakR.store(node.buffer.getMagnitude(1, 0, b.numSamples), std::memory_order_relaxed);
+    const bool returnOn = c.active.load(std::memory_order_relaxed) || c.solo.load(std::memory_order_relaxed); // solo wins, as on tracks
+    node.blockAudible = node.blockEmit = node.blockEmitStem = returnOn;
+}
+
+void AudioEngine::renderMain(const BlockContext& b)
+{
+    auto& g = *b.graph;
+    auto& main = g.nodes[(size_t) g.mainNode];
+    const auto start = juce::Time::getHighResolutionTicks();
+    for (const int source : g.schedule.mainSources) // top-level tracks, then the returns: the serial order
+        emitOutput(b, g.nodes[(size_t) source], main.buffer, source);
+    for (const auto& job : g.schedule.jobs)
+        if (job.isReturn)
+            emitOutput(b, g.nodes[(size_t) job.node], main.buffer, job.node);
+    auto& mc = (*b.controls)[(size_t) main.controlIndex];
+    automate(b, main);
+    processNode(main, mc, b.numSamples, b.host);
+    mc.peakL.store(main.buffer.getMagnitude(0, 0, b.numSamples), std::memory_order_relaxed);
+    mc.peakR.store(main.buffer.getMagnitude(1, 0, b.numSamples), std::memory_order_relaxed);
+    main.blockTicks = juce::Time::getHighResolutionTicks() - start;
+}
+
+// Audio thread, end of a block: per-track cost for the CPU meter details (UI-82) and the work the next block's
+// serial/parallel choice looks at; engine load only for real-time blocks (an offline render is not paced).
+void AudioEngine::publishLoad(EngineGraph& g, int64_t blockTicks, int numSamples, int threads, bool parallel)
+{
+    const double blockMicros = 1.0e6 * numSamples / sampleRate_;
+    const double alpha = std::clamp(blockMicros / 300000.0, 0.001, 1.0); // ~0.3 s
+    auto& ctl = *g.controls;
+    double work = 0;
+    for (auto& node : g.nodes)
+    {
+        const double micros = (double) node.blockTicks / ticksPerMicro_;
+        work += micros;
+        node.cpuAverageMicros += alpha * (micros - node.cpuAverageMicros);
+        ctl[(size_t) node.controlIndex].cpuMicros.store((float) node.cpuAverageMicros, std::memory_order_relaxed);
+    }
+    // Rises at once (the next heavy block already gets the helpers), falls slowly.
+    workAverageMicros_ = work > workAverageMicros_ ? work : workAverageMicros_ + 0.02 * (work - workAverageMicros_);
+    if (offline_) return;
+
+    if (resetLoad_.exchange(false, std::memory_order_acq_rel))
+    {
+        loadPeak_.store(0, std::memory_order_relaxed);
+        overruns_.store(0, std::memory_order_relaxed);
+        loadBlocks_.store(0, std::memory_order_relaxed);
+    }
+    const auto load = (float) ((double) blockTicks / ticksPerMicro_ / blockMicros);
+    loadCurrent_.store(load, std::memory_order_relaxed);
+    if (load > loadRecent_.load(std::memory_order_relaxed)) loadRecent_.store(load, std::memory_order_relaxed);
+    const float average = loadAverage_.load(std::memory_order_relaxed);
+    loadAverage_.store(average + (float) std::clamp(blockMicros / 1.0e6, 0.001, 1.0) * (load - average), std::memory_order_relaxed);
+    if (load > loadPeak_.load(std::memory_order_relaxed)) loadPeak_.store(load, std::memory_order_relaxed);
+    if (load > 1.0f) overruns_.fetch_add(1, std::memory_order_relaxed);
+    loadBlocks_.fetch_add(1, std::memory_order_relaxed);
+    bufferMicros_.store((float) blockMicros, std::memory_order_relaxed);
+    threadsUsed_.store(threads, std::memory_order_relaxed);
+    parallelUsed_.store(parallel, std::memory_order_relaxed);
+}
+
+AudioEngine::LoadStats AudioEngine::loadStats() const
+{
+    LoadStats s;
+    const float recent = loadRecent_.exchange(0, std::memory_order_relaxed); // highest block since the last call
+    s.current = recent > 0 ? recent : loadCurrent_.load(std::memory_order_relaxed);
+    s.average = loadAverage_.load(std::memory_order_relaxed);
+    s.peak = loadPeak_.load(std::memory_order_relaxed);
+    s.overruns = overruns_.load(std::memory_order_relaxed);
+    s.blocks = loadBlocks_.load(std::memory_order_relaxed);
+    s.bufferMicros = bufferMicros_.load(std::memory_order_relaxed);
+    s.threads = threadsUsed_.load(std::memory_order_relaxed);
+    s.workers = workers_.count();
+    s.multiCore = multiCore_.load(std::memory_order_relaxed);
+    s.parallel = parallelUsed_.load(std::memory_order_relaxed);
+    s.workgroup = workers_.joinedWorkgroup();
+    return s;
+}
+
+void AudioEngine::startWorkers(const juce::AudioWorkgroup& workgroup)
+{
+    const int wanted = ! multiCore_.load() ? 0 : threadsOverride_ > 0 ? threadsOverride_ - 1 : EngineWorkers::defaultCount();
+    auto& cfg = workerConfig_;
+    if (wanted == cfg.count && juce::approximatelyEqual(cfg.sampleRate, sampleRate_) && cfg.blockSize == blockSize_
+        && workgroup == cfg.workgroup)
+        return;
+    workers_.start(wanted, sampleRate_, blockSize_, workgroup);
+    cfg.count = wanted;
+    cfg.sampleRate = sampleRate_;
+    cfg.blockSize = blockSize_;
+    cfg.workgroup = workgroup;
+}
+
+// Both only take effect at once when the helpers were already started (a graph or a device); otherwise at the first one.
+void AudioEngine::setMultiCore(bool on)
+{
+    multiCore_.store(on);
+    if (workerConfig_.count >= 0) startWorkers(workerConfig_.workgroup);
+}
+
+void AudioEngine::setEngineThreads(int threads)
+{
+    threadsOverride_ = std::max(0, threads);
+    if (workerConfig_.count >= 0) startWorkers(workerConfig_.workgroup);
+}
+
 void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputs, int numInputs, float* const* outputs, int numOutputs,
                                                    int numSamples, const juce::AudioIODeviceCallbackContext&)
 {
@@ -745,6 +1065,7 @@ void AudioEngine::renderBlock(float* const* outputs, int numOutputs, int numSamp
 {
     if (numSamples <= 0) return;
     juce::ScopedNoDenormals noDenormals;
+    const auto renderStart = juce::Time::getHighResolutionTicks();
 
     if (retired_.load(std::memory_order_acquire) == nullptr)
         if (auto* p = pending_.exchange(nullptr, std::memory_order_acq_rel))
@@ -856,191 +1177,51 @@ void AudioEngine::renderBlock(float* const* outputs, int numOutputs, int numSamp
 
     recorder_.beginPreviewBlock(*g);
     auto& main = g->nodes[(size_t) g->mainNode];
-    const bool releaseAll = bs.justStopped || bs.jumped;
 
-    // Automation overwrites the controls while playing and right after a locate (ENG-11).
-    // Evaluated once per block at the block start.
-    const bool automate = bs.playing || bs.jumped;
-    auto automationFor = [&](TrackNode& node) {
-        auto& controls = ctl[(size_t) node.controlIndex];
-        // Only hand edits made while playing override a lane: after a stop (or a locate while stopped) the next start rewrites everything.
-        if (! bs.playing)
-            controls.automationWrote.reset();
-        if (! automate)
-            return;
-        if (! node.automation.empty())
-        {
-            applyAutomation(node.automation, controls, bs.position);
-            if (! bs.playing)
-                controls.automationWrote.reset();
-        }
-        if (! node.clipEnvelopes.empty() || ! node.sessionEnvelopes.empty() || ! node.takes.empty())
-            applyClipEnvelopes(node, controls, bs.position);
-    };
+    // ---- tracks (children before their groups), then returns: jobs of g->schedule on one or several threads (ENG-14e)
+    BlockContext block;
+    block.engine = this;
+    block.graph = g;
+    block.controls = &ctl;
+    block.segs = segs;
+    block.numSegs = numSegs;
+    block.bs = bs;
+    block.tempo = tempo;
+    block.host = host;
+    block.anySolo = anySolo;
+    block.releaseAll = bs.justStopped || bs.jumped;
+    block.automate = bs.playing || bs.jumped; // automation overwrites the controls while playing and right after a locate (ENG-11)
+    block.inputs = inputs;
+    block.numInputs = numInputs;
+    block.numSamples = numSamples;
 
-    // ---- tracks (children before their groups)
-    for (int idx : g->trackOrder)
+    auto& schedule = g->schedule;
+    const int numJobs = (int) schedule.jobs.size();
+    int helpers = 0;
+    if (multiCore_.load(std::memory_order_relaxed) && workers_.count() > 0 && schedule.parallelSafe && schedule.width >= 2
+        && ! debugCheckDevices && ! recorder_.hasPreviewBank())
     {
-        auto& node = g->nodes[(size_t) idx];
-        auto& c = ctl[(size_t) node.controlIndex];
-
-        node.midiControllerOverflow = false;
-        if (bs.playing && ! node.midiWasPlaying) node.refreshMidiControllers = true;
-        node.midiWasPlaying = bs.playing;
-        automationFor(node);
-        if (node.clipsEdited)
-        {
-            const int scene = c.playingSlot.load(std::memory_order_relaxed);
-            const PreparedClip* replacement = scene >= 0 && (size_t) scene < node.sessionClips.size() && node.hasSessionClip[(size_t) scene]
-                                              ? &node.sessionClips[(size_t) scene] : nullptr;
-            if (recorder_.commitOverdub(node.controlIndex, scene, replacement, node.sessionElapsed, node.midi) && ! releaseAll)
-            {
-                node.clipsEdited = false; node.inputMonitored = false; node.refreshMidiControllers = true;
-            }
-        }
-        if (releaseAll || node.clipsEdited)
-        {
-            node.clipsEdited = false; node.refreshMidiControllers = true;
-            releaseMidiControllers(node.midi, 0);
-            for (int channel = 1; channel <= 16; ++channel) node.midi.addEvent(juce::MidiMessage::allNotesOff(channel), 0);
-            node.audioState.reset();
-        }
-        if (! recorder_.audioCapturesTrack(idx) && c.playingSlot.load(std::memory_order_relaxed) < 0 && c.queuedSlot.load(std::memory_order_relaxed) < 0) for (int i = 1; i < numSegs; ++i)
-        {
-            for (int channel = 1; channel <= 16; ++channel) node.midi.addEvent(juce::MidiMessage::allNotesOff(channel), segs[i].sampleOffset);
-            releaseMidiControllers(node.midi, segs[i].sampleOffset);
-            node.refreshMidiControllers = true;
-        }
-
-        const uint64_t route = c.inputRoute.load(std::memory_order_relaxed);
-        const auto kind = model::inputKind(route);
-        const bool recording = recorder_.audioCapturesTrack(idx);
-        if (kind == model::InputKind::Midi && node.kind == model::TrackKind::Midi)
-            inputMidiBlock_.addTo(node.inputMidi, model::inputMidiPort(route), model::inputChannel(route));
-        if (bs.playing && c.arrangementOn.load(std::memory_order_relaxed) && c.monitoring.load(std::memory_order_relaxed) != 0)
-            for (int i = 0; i < numSegs; ++i)
-                if (! renderMidiControllers(node.midiControllers, segs[i], node.midi, node.refreshMidiControllers || i > 0)) node.midiControllerOverflow = true;
-        renderTrackClips(node, c, segs, numSegs, tempo, bs, numSamples,
-                         recording ? recorder_.rangesForTrack(idx) : nullptr);
-        if (kind == model::InputKind::Midi && node.kind == model::TrackKind::Midi)
-        {
-            for (const auto event : node.inputMidi)
-                if (event.samplePosition >= 0 && event.samplePosition < numSamples && node.inputMonitorMask[(size_t) event.samplePosition])
-                    node.midi.addEvent(event.data, event.numBytes, event.samplePosition);
-        }
-        if (node.kind == model::TrackKind::Midi)
-        {
-            const int pitch = c.previewPitch.load(std::memory_order_relaxed);
-            if (pitch != node.previewPitch || (releaseAll && pitch >= 0))
-            {
-                if (node.previewPitch >= 0) node.midi.addEvent(juce::MidiMessage::noteOff(1, node.previewPitch), 0);
-                if (pitch >= 0 && pitch <= 127) node.midi.addEvent(juce::MidiMessage::noteOn(1, pitch, (juce::uint8) 100), 0);
-                node.previewPitch = pitch;
-            }
-        }
-        if (node.midiControllerOverflow)
-        {
-            for (int channel = 1; channel <= 16; ++channel) node.midi.addEvent(juce::MidiMessage::allNotesOff(channel), numSamples - 1);
-            releaseMidiControllers(node.midi, numSamples - 1);
-            node.refreshMidiControllers = true;
-            c.midiControllerOverflow.store(true, std::memory_order_relaxed);
-        }
-        if (node.kind == model::TrackKind::Audio && inputs
-            && (kind == model::InputKind::AudioMono || kind == model::InputKind::AudioStereo))
-            for (int ch = 0; ch < 2; ++ch)
-            {
-                const int channel = model::inputChannel(route) + (kind == model::InputKind::AudioMono ? 0 : ch);
-                if (channel < numInputs && inputs[channel])
-                    for (int sample = 0; sample < numSamples; ++sample)
-                        if (node.inputMonitorMask[(size_t) sample]) node.buffer.addSample(ch, sample, inputs[channel][sample]);
-            }
-
-        feedSidechains(*g, node, numSamples);
-        if (node.needTap[0])
-            copyTap(node.tap[0], node.buffer, numSamples);
-        if (! node.midi.isEmpty()) c.midiActivity.fetch_add(1, std::memory_order_relaxed);
-        processNode(node, c, numSamples, host); // devices, then post-FX tap, then volume / pan
-        if (node.needTap[2])
-            copyTap(node.tap[2], node.buffer, numSamples);
-        if (node.trackDelaySamples > 0)
-        {
-            juce::AudioBuffer<float> view(node.buffer.getArrayOfWritePointers(), 2, numSamples);
-            node.trackDelay.processInPlace(view, numSamples);
-        }
-
-        // The meter keeps measuring a muted track; the UI draws it grey while the mix leaves the track out (Live).
-        c.peakL.store(node.buffer.getMagnitude(0, 0, numSamples), std::memory_order_relaxed);
-        c.peakR.store(node.buffer.getMagnitude(1, 0, numSamples), std::memory_order_relaxed);
-
-        const bool audible = isTrackAudible(*g, ctl, node, anySolo);
-        auto& target = node.outputNode >= 0 ? g->nodes[(size_t) node.outputNode].buffer : main.buffer;
-        const int stemSlot = offlineStemSlot_ != nullptr ? (*offlineStemSlot_)[(size_t) idx] : -1;
-        if (stemSlot >= 0 && ! offlinePreMixer_)
-        {
-            auto& stem = offlineStemBuffers_[(size_t) stemSlot]; // the delayed signal is captured, then added to the parent as usual
-            stem.clear(0, numSamples);
-            if (audible && node.outputEnabled)
-            {
-                node.outDelay.addDelayed(node.buffer, stem, numSamples, 1.0f);
-                for (int ch = 0; ch < 2; ++ch)
-                    target.addFrom(ch, 0, stem, ch, 0, numSamples);
-            }
-            else
-                node.outDelay.pushSilence(numSamples);
-        }
-        else if ((audible || feedsParentWhileSilenced(*g, ctl, node, anySolo)) && node.outputEnabled)
-            node.outDelay.addDelayed(node.buffer, target, numSamples, 1.0f);
-        else
-            node.outDelay.pushSilence(numSamples);
-
-        for (size_t r = 0; r < g->returnNodes.size() && r < c.sends.size() && r < node.sendDelays.size(); ++r)
-        {
-            const float amount = c.sends[r].load(std::memory_order_relaxed);
-            if (! audible || amount <= 0.000317f) // Live's -inf (-70 dB)
-            {
-                node.sendDelays[r].pushSilence(numSamples); // keep the delay line in step
-                continue;
-            }
-            node.sendDelays[r].addDelayed(node.buffer, g->nodes[(size_t) g->returnNodes[r]].buffer, numSamples, amount);
-        }
+        // Waking helpers costs a few microseconds: light blocks stay on this thread (the output is the same either way).
+        double threshold = parallelThresholdMicros_.load(std::memory_order_relaxed);
+        if (threshold < 0) threshold = std::min(250.0, 0.1e6 * numSamples / sampleRate_);
+        if (threshold <= 0 || workAverageMicros_ > threshold) parallelNow_ = true;
+        else if (workAverageMicros_ < 0.5 * threshold) parallelNow_ = false;
+        // Automatic: about one helper per 0.4 ms of work, so a light block does not wake twelve realtime threads.
+        const bool automatic = parallelThresholdMicros_.load(std::memory_order_relaxed) < 0;
+        const int byWork = automatic ? std::max(1, (int) (workAverageMicros_ / 400.0)) : workers_.count();
+        if (parallelNow_) helpers = std::min({workers_.count(), schedule.width - 1, byWork});
     }
-
-    // ---- returns
-    for (int idx : g->returnNodes)
+    int threads = 1;
+    if (helpers > 0)
     {
-        auto& node = g->nodes[(size_t) idx];
-        auto& c = ctl[(size_t) node.controlIndex];
-        automationFor(node);
-        processNode(node, c, numSamples, host);
-        c.peakL.store(node.buffer.getMagnitude(0, 0, numSamples), std::memory_order_relaxed);
-        c.peakR.store(node.buffer.getMagnitude(1, 0, numSamples), std::memory_order_relaxed);
-        const bool returnOn = c.active.load(std::memory_order_relaxed) || c.solo.load(std::memory_order_relaxed); // solo wins, as on tracks
-        const int stemSlot = offlineStemSlot_ != nullptr ? (*offlineStemSlot_)[(size_t) idx] : -1;
-        if (stemSlot >= 0 && ! offlinePreMixer_)
-        {
-            auto& stem = offlineStemBuffers_[(size_t) stemSlot];
-            stem.clear(0, numSamples);
-            if (returnOn)
-            {
-                node.outDelay.addDelayed(node.buffer, stem, numSamples, 1.0f);
-                for (int ch = 0; ch < 2; ++ch)
-                    main.buffer.addFrom(ch, 0, stem, ch, 0, numSamples);
-            }
-            else
-                node.outDelay.pushSilence(numSamples);
-        }
-        else if (returnOn)
-            node.outDelay.addDelayed(node.buffer, main.buffer, numSamples, 1.0f);
-        else
-            node.outDelay.pushSilence(numSamples);
+        recorder_.freezePreviewBanks(); // no overdub preview bank exchange from a track's job
+        threads = workers_.run(schedule, &AudioEngine::runJob, &block, helpers);
     }
+    else
+        for (int j = 0; j < numJobs; ++j) runJob(&block, j);
 
     // ---- main
-    auto& mc = ctl[(size_t) main.controlIndex];
-    automationFor(main);
-    processNode(main, mc, numSamples, host);
-    mc.peakL.store(main.buffer.getMagnitude(0, 0, numSamples), std::memory_order_relaxed);
-    mc.peakR.store(main.buffer.getMagnitude(1, 0, numSamples), std::memory_order_relaxed);
+    renderMain(block);
 
     // Internal resampling needs the completed Main signal; external recording remains pre-FX/pre-mixer.
     if (numSegs == 0) recorder_.capture(inputs, numInputs, liveMidi_, bs.position, samplesPerBeat, numSamples,
@@ -1069,6 +1250,7 @@ void AudioEngine::renderBlock(float* const* outputs, int numOutputs, int numSamp
     renderPreview(outputs, numOutputs, numSamples);
     if (bs.playing)
         transport_.advanceTo(endPos);
+    publishLoad(*g, juce::Time::getHighResolutionTicks() - renderStart, numSamples, threads, helpers > 0);
 }
 
 // ============================================================================ offline render (Export)

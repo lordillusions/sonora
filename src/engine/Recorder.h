@@ -37,6 +37,10 @@ public:
     void collectRetiredPreviews() { collectPreviews(); } // message thread
     void beginPreviewBlock(const EngineGraph&); // audio thread; source identity/lifetime reconciliation
     bool hasOverdubPreview(int track, int scene, uint32_t uid); // audio only
+    // ENG-14e, audio thread: a live overdub preview makes the engine render serially; while tracks render on several
+    // threads the bank is only exchanged by beginPreviewBlock() (frozen), never from a track's job.
+    bool hasPreviewBank() const { return preview_ != nullptr; }
+    void freezePreviewBank(bool frozen) { previewFrozen_ = frozen; }
     bool renderOverdub(int track, int scene, const PreparedClip&, const BlockSegment&, const juce::MidiBuffer&,
                        const CaptureRange*, juce::MidiBuffer&, bool refresh, bool* overflow, float velocityScale = 1.0f); // audio only
     bool commitOverdub(int track, int scene, const PreparedClip* replacement, double elapsed, juce::MidiBuffer&); // after swap/clear
@@ -82,6 +86,7 @@ private:
     void updatePreviewBank(); // audio thread
     std::atomic<PreviewBank*> pendingPreview_{nullptr}, retiredPreview_{nullptr};
     PreviewBank* preview_ = nullptr; // audio owned until retired, never inspected by message thread
+    bool previewFrozen_ = false;     // audio thread (ENG-14e)
     std::atomic<bool> discardPreview_{false};
     std::atomic<bool> previewLive_{false};
     enum class State { Idle, Capturing, Draining, Finished };

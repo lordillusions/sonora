@@ -39,6 +39,8 @@ public:
     bool overdubsTrack(int track) const; // audio
     void beginSessionContent(int track, double elapsed); // audio
     void beginPreviewBlock(const EngineGraph&);
+    bool hasPreviewBank() const; // audio, after beginPreviewBlock(): an overdub preview is live (ENG-14e renders serially)
+    void freezePreviewBanks();   // audio: no bank exchange until the next beginPreviewBlock() (tracks on several threads)
     bool hasOverdubPreview(int track, int scene, uint32_t uid);
     bool renderOverdub(int track, int scene, const PreparedClip&, const BlockSegment&, const juce::MidiBuffer&,
                        const CaptureRange*, juce::MidiBuffer&, bool refresh, bool* overflow, float velocityScale = 1.0f);

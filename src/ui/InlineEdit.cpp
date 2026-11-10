@@ -12,6 +12,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 namespace sonora::ui
@@ -42,6 +43,27 @@ std::string singleLine(std::string s)
     return s;
 }
 
+// Word characters for Alt+arrows and double-click: letters, digits and any non-ASCII code point.
+bool wordByte(char c)
+{
+    const auto u = static_cast<unsigned char>(c);
+    return u >= 0x80 || std::isalnum(u) != 0 || c == '_';
+}
+
+size_t wordStart(const std::string& s, size_t i)
+{
+    while (i > 0 && ! wordByte(s[i - 1])) --i;
+    while (i > 0 && wordByte(s[i - 1])) --i;
+    return i;
+}
+
+size_t wordEnd(const std::string& s, size_t i)
+{
+    while (i < s.size() && ! wordByte(s[i])) ++i;
+    while (i < s.size() && wordByte(s[i])) ++i;
+    return i;
+}
+
 void repaint(UiContext& ctx) { if (ctx.requestRepaint) ctx.requestRepaint(); }
 
 int controlIndexOf(const UiContext& ctx, int trackId)
@@ -56,31 +78,34 @@ int controlIndexOf(const UiContext& ctx, int trackId)
 void InlineTextEdit::start(std::string initial)
 {
     text = singleLine(std::move(initial));
-    caret = text.size();
-    allSelected = true;
+    selectAll();
 }
 
 void InlineTextEdit::insert(const std::string& s)
 {
-    if (allSelected) { text.clear(); caret = 0; allSelected = false; }
+    const auto from = selectionStart();
+    text.erase(from, selectionEnd() - from);
     const auto clean = singleLine(s);
-    text.insert(caret, clean);
-    caret += clean.size();
+    text.insert(from, clean);
+    caret = anchor = from + clean.size();
 }
 
 InlineTextEdit::Result InlineTextEdit::key(const KeyEvent& k)
 {
     using KP = juce::KeyPress;
     const auto ch = k.textChar;
+    caret = std::min(caret, text.size());
+    anchor = std::min(anchor, text.size());
     if (k.keyCode == KP::escapeKey) return Result::Cancel;
     if (k.keyCode == KP::returnKey) return Result::Commit;
-    if (k.cmd && ! k.alt && (ch == 'a' || ch == 'A')) { allSelected = true; caret = text.size(); return Result::Edited; }
+    if (k.cmd && ! k.alt && (ch == 'a' || ch == 'A')) { selectAll(); return Result::Edited; }
     if (k.cmd && ! k.alt && (ch == 'c' || ch == 'C' || ch == 'x' || ch == 'X'))
     {
-        if (allSelected && ! text.empty())
+        if (hasSelection())
         {
-            juce::SystemClipboard::copyTextToClipboard(juce::String::fromUTF8(text.c_str()));
-            if (ch == 'x' || ch == 'X') { text.clear(); caret = 0; allSelected = false; }
+            const auto from = selectionStart();
+            juce::SystemClipboard::copyTextToClipboard(juce::String::fromUTF8(text.substr(from, selectionEnd() - from).c_str()));
+            if (ch == 'x' || ch == 'X') insert({});
         }
         return Result::Edited;
     }
@@ -89,28 +114,33 @@ InlineTextEdit::Result InlineTextEdit::key(const KeyEvent& k)
         insert(juce::SystemClipboard::getTextFromClipboard().toStdString());
         return Result::Edited;
     }
-    if (k.keyCode == KP::leftKey || k.keyCode == KP::rightKey)
+    const bool home = k.keyCode == KP::homeKey || k.keyCode == KP::upKey, end = k.keyCode == KP::endKey || k.keyCode == KP::downKey;
+    if (k.keyCode == KP::leftKey || k.keyCode == KP::rightKey || home || end)
     {
         const bool left = k.keyCode == KP::leftKey;
-        if (allSelected) caret = left ? 0 : text.size(); // like a text field: the arrow collapses the selection to that side
-        else if (k.cmd) caret = left ? 0 : text.size();
-        else caret = left ? previousBoundary(text, caret) : nextBoundary(text, caret);
-        allSelected = false;
+        size_t to = caret;
+        if (home) to = 0;
+        else if (end) to = text.size();
+        else if (hasSelection() && ! k.shift) to = left ? selectionStart() : selectionEnd(); // the arrow collapses the selection
+        else if (k.cmd) to = left ? 0 : text.size();
+        else if (k.alt) to = left ? wordStart(text, caret) : wordEnd(text, caret);
+        else to = left ? previousBoundary(text, caret) : nextBoundary(text, caret);
+        caret = to;
+        if (! k.shift) anchor = caret;
         return Result::Edited;
     }
-    if (k.keyCode == KP::homeKey || k.keyCode == KP::upKey) { caret = 0; allSelected = false; return Result::Edited; }
-    if (k.keyCode == KP::endKey || k.keyCode == KP::downKey) { caret = text.size(); allSelected = false; return Result::Edited; }
     if (k.keyCode == KP::backspaceKey || k.keyCode == KP::deleteKey)
     {
-        if (allSelected) { text.clear(); caret = 0; allSelected = false; return Result::Edited; }
+        if (hasSelection()) { insert({}); return Result::Edited; }
         if (k.keyCode == KP::backspaceKey && caret > 0)
         {
-            const auto from = k.cmd ? 0 : previousBoundary(text, caret);
+            const auto from = k.cmd ? 0 : k.alt ? wordStart(text, caret) : previousBoundary(text, caret);
             text.erase(from, caret - from);
             caret = from;
         }
         else if (k.keyCode == KP::deleteKey && caret < text.size())
-            text.erase(caret, nextBoundary(text, caret) - caret);
+            text.erase(caret, (k.alt ? wordEnd(text, caret) : nextBoundary(text, caret)) - caret);
+        anchor = caret;
         return Result::Edited;
     }
     if (ch >= 32 && ch != 127 && ! k.cmd && ! k.ctrl)
@@ -118,33 +148,93 @@ InlineTextEdit::Result InlineTextEdit::key(const KeyEvent& k)
     return Result::Edited;
 }
 
+namespace
+{
+Rect innerOf(const Rect& r) { return {r.x + 3, r.y + 1, r.w - 6, r.h - 2}; }
+
+// Horizontal scroll that keeps the caret inside the field (the same for drawing and hit-testing).
+float scrollFor(const SkFont& font, const std::string& text, size_t caret, float innerWidth)
+{
+    const float caretX = font.measureText(text.data(), std::min(caret, text.size()), SkTextEncoding::kUTF8);
+    return std::max(0.0f, caretX - innerWidth + 2);
+}
+} // namespace
+
+size_t InlineTextEdit::offsetAt(float x, const Rect& r, float fontSize, bool bold) const
+{
+    const auto inner = innerOf(r);
+    const auto font = gfx::uiFont(fontSize, bold);
+    const float local = x - inner.x + scrollFor(font, text, caret, inner.w);
+    size_t best = 0;
+    float bestDistance = std::fabs(local);
+    for (size_t i = nextBoundary(text, 0); i <= text.size() && ! text.empty(); i = nextBoundary(text, i))
+    {
+        const float distance = std::fabs(local - font.measureText(text.data(), i, SkTextEncoding::kUTF8));
+        if (distance < bestDistance) { bestDistance = distance; best = i; }
+        if (i == text.size()) break;
+    }
+    return best;
+}
+
+void InlineTextEdit::click(size_t offset, int clicks, bool shift)
+{
+    offset = std::min(offset, text.size());
+    if (clicks >= 3) { selectAll(); return; }
+    if (clicks == 2)
+    {
+        // The word under the pointer (or the run of spaces/punctuation between words).
+        size_t from = offset, to = offset;
+        const bool word = (offset < text.size() && wordByte(text[offset])) || (offset > 0 && wordByte(text[offset - 1]));
+        auto inside = [&](size_t i) { return wordByte(text[i]) == word; };
+        while (from > 0 && inside(from - 1)) --from;
+        while (to < text.size() && inside(to)) ++to;
+        anchor = from;
+        caret = to;
+        return;
+    }
+    caret = offset;
+    if (! shift) anchor = offset;
+}
+
 void InlineTextEdit::paint(SkCanvas& c, const Rect& r, SkColor back, SkColor ink, SkColor selectionBack, SkColor selectionInk,
                            float fontSize, bool bold) const
 {
     paint::fill(c, r, back);
     paint::stroke(c, r, ink, 1.0f);
-    const Rect inner{r.x + 3, r.y + 1, r.w - 6, r.h - 2};
+    paintText(c, r, ink, selectionBack, selectionInk, fontSize, bold, true);
+}
+
+void InlineTextEdit::paintText(SkCanvas& c, const Rect& r, SkColor ink, SkColor selectionBack, SkColor selectionInk, float fontSize,
+                               bool bold, bool caretShown) const
+{
+    const Rect inner = innerOf(r);
     if (inner.w <= 2) return;
     const auto font = gfx::uiFont(fontSize, bold);
-    const auto widthOf = [&](size_t bytes) { return font.measureText(text.data(), bytes, SkTextEncoding::kUTF8); };
-    const float full = widthOf(text.size());
-    const float caretX = widthOf(std::min(caret, text.size()));
-    // Scroll so the caret (or, with everything selected, the end of the name) stays inside the field.
-    const float scroll = std::max(0.0f, (allSelected ? full : caretX) - inner.w + 2);
+    const auto widthOf = [&](size_t bytes) { return font.measureText(text.data(), std::min(bytes, text.size()), SkTextEncoding::kUTF8); };
+    const float scroll = scrollFor(font, text, caret, inner.w);
     SkFontMetrics metrics;
     font.getMetrics(&metrics);
     const float baseline = std::round(inner.centreY() - (metrics.fAscent + metrics.fDescent) * 0.5f);
     c.save();
     c.clipRect(inner.sk());
     const float x = inner.x - scroll;
-    if (allSelected && ! text.empty())
-        paint::fill(c, {x, inner.y + 1, full, inner.h - 2}, selectionBack);
     SkPaint pen;
     pen.setAntiAlias(true);
-    pen.setColor(allSelected ? selectionInk : ink);
+    pen.setColor(ink);
     c.drawSimpleText(text.data(), text.size(), SkTextEncoding::kUTF8, x, baseline, font, pen);
-    if (! allSelected || text.empty())
-        paint::fill(c, {std::round(x + caretX), inner.y + 1, 1, inner.h - 2}, ink);
+    if (hasSelection())
+    {
+        const float from = x + widthOf(selectionStart()), to = x + widthOf(selectionEnd());
+        const Rect band{from, inner.y + 1, to - from, inner.h - 2};
+        paint::fill(c, band, selectionBack);
+        c.save();
+        c.clipRect(band.sk());
+        pen.setColor(selectionInk);
+        c.drawSimpleText(text.data(), text.size(), SkTextEncoding::kUTF8, x, baseline, font, pen);
+        c.restore();
+    }
+    else if (caretShown)
+        paint::fill(c, {std::round(x + widthOf(caret)), inner.y + 1, 1, inner.h - 2}, ink);
     c.restore();
 }
 

@@ -35,6 +35,7 @@ void EngineGraph::prepare(double sampleRate, int maxBlockSize)
         n.trackDelay.prepare(n.trackDelaySamples);
     }
     computeDelayCompensation();
+    schedule = buildRenderSchedule(*this);
 }
 
 // Latency of a node = slowest input path + its own devices. Every shorter path into a

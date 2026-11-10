@@ -12,6 +12,7 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkRect.h"
 #include "ui/RootWidget.h"
+#include "ui/SampleFiles.h"
 #include "ui/widgets/Splitter.h"
 #include "ui/UiContext.h"
 #include "core/DeviceCatalog.h"
@@ -172,7 +173,7 @@ std::vector<std::pair<std::string, Rect>> BrowserPanel::filterGroups() const
     }
     std::vector<std::pair<std::string, Rect>> result;
     const float left = sidebarArea().right() + 5;
-    float x = left, y = kSearch + 3;
+    float x = left, y = kSearch + 3 + similarRowHeight();
     for (const auto& group : *facetGroups_)
     {
         const float w = std::min(std::max(20.0f, width() - left - 5), gfx::measureText(group, ctx().theme.metrics.fontSize) + 23);
@@ -194,7 +195,7 @@ std::vector<Rect> BrowserPanel::filterChips() const
     if (! filtersVisible_) return {};
     const auto groups = filterGroups();
     const float left = sidebarArea().right() + 5;
-    float x = left, y = groups.empty() ? kSearch + 3 : groups.back().second.bottom() + 5;
+    float x = left, y = groups.empty() ? kSearch + 3 + similarRowHeight() : groups.back().second.bottom() + 5;
     std::vector<Rect> result;
     for (const auto& tag : filters_)
     {
@@ -214,10 +215,10 @@ Rect BrowserPanel::filterChipBounds(int index) const
 
 float BrowserPanel::filtersHeight() const
 {
-    if (! filtersVisible_) return 0;
+    if (! filtersVisible_) return similarRowHeight();
     const auto chips = filterChips();
     const auto groups = filterGroups();
-    return chips.empty() ? (groups.empty() ? 0 : groups.back().second.bottom() + 4 - kSearch)
+    return chips.empty() ? (groups.empty() ? similarRowHeight() : groups.back().second.bottom() + 4 - kSearch)
                          : chips.back().bottom() + 4 - kSearch;
 }
 
@@ -394,10 +395,11 @@ const std::vector<BrowserPanel::Item>& BrowserPanel::items(bool filtered, bool g
     if (! itemsKey_ || itemsKey_->contentRevision != context.browserContentRevision
         || itemsKey_->tagsRevision != context.browserTags.revision() || itemsKey_->category != selectedCategory_
         || itemsKey_->folderMode != folderMode_ || itemsKey_->query != query_ || itemsKey_->folder != context.browserFolder
-        || itemsKey_->filters != filters_ || itemsKey_->groups != expandedGroups_ || itemsKey_->folders != expandedFolders_)
+        || itemsKey_->filters != filters_ || itemsKey_->groups != expandedGroups_ || itemsKey_->folders != expandedFolders_
+        || itemsKey_->similarRevision != context.similarSamples.revision)
     {
         itemsKey_ = ItemsKey{context.browserContentRevision, context.browserTags.revision(), selectedCategory_, folderMode_,
-                             query_, context.browserFolder, filters_, expandedGroups_, expandedFolders_};
+                             query_, context.browserFolder, filters_, expandedGroups_, expandedFolders_, context.similarSamples.revision};
         for (auto& entry : itemsCache_) entry.reset();
         facetGroups_.reset();
     }
@@ -503,7 +505,8 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
     // UI-6b: a search in a folder lists matches from every subfolder once the recursive index of that folder is in.
     const bool indexed = listsFolder() && ! query_.empty() && ! context.browserSearchLoading
                          && ! context.browserSearchRoot.empty() && context.browserSearchRoot == context.browserFolder;
-    if (folderMode_) appendCategory(Samples, result, indexed);
+    if (similarList()) appendSimilar(result);
+    else if (folderMode_) appendCategory(Samples, result, indexed);
     else if (selectedCategory_ == AllItems)
         for (int category = Sounds; category <= Samples; ++category)
         {
@@ -549,6 +552,7 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
     }
     if (filtered && ! filters_.empty())
         std::erase_if(result, [&](const Item& item) { return item.directory || ! BrowserTags::matches(item.tags, filters_); });
+    if (similarList()) return result; // LIB-4: nearest first, never grouped
     if (groupRows && ! folderMode_ && selectedCategory_ == AllItems) return attachPresets(groupAll(std::move(result)));
     if (groupRows && ! folderMode_ && selectedCategory_ >= Sounds && selectedCategory_ <= PlugIns)
     {
@@ -837,12 +841,27 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
         ctl::triangle(canvas, fwd.centreX(), fwd.centreY(), 8, 5, ctl::Dir::Right, theme.color("TextDisabled"));
         paint::fill(canvas, row, theme.color("SurfaceBackground"));
         paint::stroke(canvas, row, searchFocused_ ? theme.color("SelectionFrame") : theme.color("SurfaceArea"));
-        paint::text(canvas, query_.empty() ? "Search (Cmd + F)" : query_, row.reduced(6, 0),
-                    query_.empty() ? theme.color("TextDisabled") : fg, theme.metrics.fontSize);
-        if (searchFocused_ && caretVisible())
+        // UI-78: the text with its selection and caret; a clear button at the right end while anything filters the list.
+        const bool clearable = clearSearchVisible();
+        const Rect text{row.x + 3, row.y, std::max(0.0f, row.w - 3 - (clearable ? 16.0f : 0.0f)), row.h};
+        if (query_.empty())
         {
-            const float caret = std::min(row.right() - 3, row.x + 6 + gfx::measureText(query_, theme.metrics.fontSize) + 1);
-            paint::line(canvas, caret, row.y + 4, caret, row.bottom() - 4, fg);
+            paint::text(canvas, "Search (Cmd + F)", row.reduced(6, 0), theme.color("TextDisabled"), theme.metrics.fontSize);
+            if (searchFocused_ && caretVisible()) paint::line(canvas, row.x + 6, row.y + 4, row.x + 6, row.bottom() - 4, fg);
+        }
+        else
+            searchEdit_.paintText(canvas, text, fg, searchFocused_ ? theme.color("SelectionBackground") : theme.color("StandbySelectionBackground"),
+                                  fg, theme.metrics.fontSize, false, searchFocused_ && caretVisible());
+        if (clearable)
+        {
+            const auto clear = clearSearchBounds();
+            SkPaint disc;
+            disc.setAntiAlias(true);
+            disc.setColor(paint::withAlpha(theme.color("TextDisabled"), 200));
+            canvas.drawCircle(clear.centreX(), clear.centreY(), 6.0f, disc);
+            const SkColor cross = theme.color("SurfaceBackground");
+            paint::line(canvas, clear.centreX() - 2.5f, clear.centreY() - 2.5f, clear.centreX() + 2.5f, clear.centreY() + 2.5f, cross, 1.3f);
+            paint::line(canvas, clear.centreX() - 2.5f, clear.centreY() + 2.5f, clear.centreX() + 2.5f, clear.centreY() - 2.5f, cross, 1.3f);
         }
         ctl::framed(canvas, theme, filter, theme.color(filtersVisible_ ? "ChosenDefault" : "ControlTextBack"));
         for (int i = 0; i < 3; ++i)
@@ -873,6 +892,25 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
         paint::text(canvas, label, Rect{row.x + 32, row.y, row.w - 36, row.h}, fg, theme.metrics.fontSize);
     }
     paint::fill(canvas, {side.right() - 1, side.y, 1, side.h}, paint::withAlpha(theme.color("SurfaceArea"), 110));
+
+    // LIB-4: "Similar to: <file>" with its x, and the search's progress or outcome beside it.
+    if (similarList())
+    {
+        const auto chip = similarChipBounds();
+        const auto& similar = ctx().similarSamples;
+        paint::fill(canvas, chip, theme.color("ChosenDefault"));
+        const auto name = juce::File(juce::String::fromUTF8(similar.reference.c_str())).getFileName().toStdString();
+        paint::text(canvas, "Similar to: " + name, {chip.x + 5, chip.y, chip.w - 21, chip.h}, fg, theme.metrics.fontSize);
+        paint::text(canvas, "\u00D7", {chip.right() - 14, chip.y, 12, chip.h}, fg, theme.metrics.fontSize);
+        std::string note;
+        if (similar.running)
+            note = similar.total > 0 ? "Comparing " + std::to_string(similar.done) + " of " + std::to_string(similar.total) + "..." : "Looking for samples...";
+        else if (! similar.message.empty()) note = similar.message;
+        else if (similar.clip.uid >= 0) note = "Double-click / Enter: use in the clip";
+        if (! note.empty() && chip.right() + 8 < width() - 4)
+            paint::text(canvas, note, {chip.right() + 8, chip.y, width() - chip.right() - 12, chip.h}, theme.color("TextDisabled"),
+                        theme.metrics.fontSize);
+    }
 
     // Facet selectors and removable active filters stay above the results column.
     for (const auto& [group, box] : filterGroups())
@@ -924,12 +962,21 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
             inset += 24;
         }
         if (! item.packId.empty()) { paintPack(canvas, theme, item, row, selected); continue; }
-        paint::text(canvas, item.label, Rect{row.x + inset, row.y, row.w - inset - 4, row.h}, fg,
+        float labelRight = row.right() - 4;
+        if (similarList() && ! item.hint.empty() && row.w > 220) // LIB-4: the folder each match lives in
+        {
+            const float hintWidth = std::min({row.w * 0.3f, 120.0f, gfx::measureText(item.hint, theme.metrics.fontSize) + 4});
+            paint::text(canvas, item.hint, {row.right() - hintWidth - 6, row.y, hintWidth, row.h}, theme.color("TextDisabled"),
+                        theme.metrics.fontSize, Align::Right);
+            labelRight -= hintWidth + 6;
+        }
+        paint::text(canvas, item.label, Rect{row.x + inset, row.y, labelRight - row.x - inset, row.h}, fg,
                     theme.metrics.fontSize, Align::Left, item.heading);
     }
     if (entries.empty())
     {
-        const char* note = ctx().browserLoading && folderMode_ ? "Loading..."
+        const char* note = similarList() ? (ctx().similarSamples.running ? "Searching for similar samples..." : "No similar samples found")
+                           : ctx().browserLoading && folderMode_ ? "Loading..."
                            : listsFolder() && ! query_.empty() && ctx().browserSearchLoading ? "Searching..." : "No results";
         paint::text(canvas, note, {list.x + 8, list.y, list.w - 12, 30}, theme.color("TextDisabled"), theme.metrics.fontSize);
     }
@@ -1002,6 +1049,7 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
 
 void BrowserPanel::navigate(const std::string& path)
 {
+    leaveSimilar();
     folderMode_ = true;
     selectedItem_ = -1;
     scroll_ = 0;
@@ -1010,6 +1058,7 @@ void BrowserPanel::navigate(const std::string& path)
 
 void BrowserPanel::selectCategory(int index)
 {
+    leaveSimilar();
     selectedCategory_ = index;
     filters_.clear(); tagEditing_ = false;
     selectedItem_ = -1;
@@ -1070,6 +1119,8 @@ void BrowserPanel::activate(const Item& item)
     }
     else if (! item.disclosure.empty() && ! item.drag) disclose(item, ! item.open); // LIB-2: a preset folder
     else if (item.directory) disclose(item, ! expandedFolders_.contains(item.path));
+    else if (item.sample && similarList() && ctx().similarSamples.clip.uid >= 0) // LIB-4/5: swap the clip's sample
+        replaceClipSampleWith(ctx(), ctx().similarSamples.clip, item.path);
     else if (item.sample && ctx().previewSample) ctx().previewSample(item.path);
     else if (item.drag && item.drag->kind == BrowserDrag::Kind::DevicePreset) // LIB-2: loads like a device (selected track)
     { if (ctx().dropBrowserItem) ctx().dropBrowserItem(*item.drag, ctx().selectedTrack, 0, -1); }
@@ -1100,6 +1151,22 @@ void BrowserPanel::showItemMenu(Item item)
         };
         menu.addItem(std::move(load));
     }
+    if (item.sample)
+    {
+        // LIB-4 / LIB-5: from a sample row, find what sounds like it, or put it into the selected (or searched-from) clip.
+        menu.addSeparator();
+        juce::PopupMenu::Item similar("Show Similar Files");
+        similar.isEnabled = static_cast<bool>(ctx().findSimilarSamples);
+        similar.action = [this, path = item.path] { if (Widget::isAlive(this)) showSimilarFiles(ctx(), path); };
+        menu.addItem(std::move(similar));
+        const auto target = similarList() && ctx().similarSamples.clip.uid >= 0 ? ctx().similarSamples.clip : ctx().selectedClipLocation();
+        const auto* clip = ctx().song ? model::findClip(*ctx().song, target) : nullptr;
+        juce::PopupMenu::Item replace(clip && clip->kind == model::Clip::Kind::Audio ? "Replace Sample of \"" + juce::String::fromUTF8(clip->name.c_str()) + "\""
+                                                                                     : juce::String("Replace Sample of Selected Clip"));
+        replace.isEnabled = clip && clip->kind == model::Clip::Kind::Audio && ctx().replaceClipSample;
+        replace.action = [this, target, path = item.path] { if (Widget::isAlive(this)) replaceClipSampleWith(ctx(), target, path); };
+        menu.addItem(std::move(replace));
+    }
     if (! item.path.empty())
     {
         menu.addSeparator();
@@ -1117,9 +1184,33 @@ void BrowserPanel::mouseDown(const MouseEvent& event)
     dragStartX_ = event.x;
     dragStartY_ = event.y;
     keyboardFocused_ = true;
+    syncSimilar();
     if (! tagFooter().contains(event.x, event.y)) tagEditing_ = false;
-    searchFocused_ = event.y < kSearch && event.x >= 47 && event.x < width() - 27;
-    if (searchFocused_) restartCaret();
+    const bool wasFocused = searchFocused_;
+    searchFocused_ = searchFieldBounds().reduced(0, -4).contains(event.x, event.y) && ! event.right;
+    if (searchFocused_)
+    {
+        restartCaret();
+        if (clearSearchVisible() && clearSearchBounds().reduced(-2, -4).contains(event.x, event.y))
+        {
+            clearSearch(); // UI-78: the x empties the field, drops tag filters and leaves a similar list
+            repaint();
+            return;
+        }
+        // UI-78: the first click into the field selects its text (typing replaces it); later clicks place the caret,
+        // a double click selects a word, a triple click everything, Shift extends and dragging selects.
+        if (! wasFocused && event.clicks < 2) searchEdit_.selectAll();
+        else searchEdit_.click(searchEdit_.offsetAt(event.x, searchFieldBounds(), ctx().theme.metrics.fontSize), event.clicks, event.shift);
+        selectingText_ = event.clicks < 2;
+        repaint();
+        return;
+    }
+    if (similarList() && similarChipBounds().contains(event.x, event.y))
+    {
+        if (event.x >= similarChipBounds().right() - 16) leaveSimilar();
+        repaint();
+        return;
+    }
     if (event.y < kSearch)
     {
         if (event.x >= width() - 27)
@@ -1206,6 +1297,13 @@ void BrowserPanel::mouseDown(const MouseEvent& event)
 
 void BrowserPanel::mouseDrag(const MouseEvent& event)
 {
+    if (selectingText_ && searchFocused_)
+    {
+        searchEdit_.dragTo(searchEdit_.offsetAt(event.x, searchFieldBounds(), ctx().theme.metrics.fontSize));
+        restartCaret();
+        repaint();
+        return;
+    }
     if (pendingDrag_ && std::hypot(event.x - dragStartX_, event.y - dragStartY_) >= 5)
     {
         ctx().browserDrag = pendingDrag_;
@@ -1217,7 +1315,7 @@ void BrowserPanel::mouseDrag(const MouseEvent& event)
 
 void BrowserPanel::mouseDoubleClick(const MouseEvent& event)
 {
-    if (event.right) { mouseDown(event); return; }
+    if (event.right || event.y < kSearch) { mouseDown(event); return; }
     const auto before = items();
     const int row = (int) ((event.y - listArea().y - 2 + scroll_) / kRow);
     if (listArea().contains(event.x, event.y) && row >= 0 && (size_t) row < before.size()
@@ -1246,6 +1344,8 @@ void BrowserPanel::tick()
 {
     // Blink the caret, and (re)index the shown folder while a search is typed in it (UI-6b).
     if ((searchFocused_ || tagEditing_) && caretVisible() != caretShown_) { caretShown_ = ! caretShown_; repaint(); }
+    syncSimilar();
+    if (! ctx().browserReveal.empty()) revealPending();
     const auto& context = ctx();
     if (listsFolder() && ! query_.empty() && context.indexBrowserFolder && ! context.browserFolder.empty()
         && context.browserSearchRoot != context.browserFolder)
@@ -1258,6 +1358,7 @@ void BrowserPanel::focusSearch()
     tagEditing_ = false;
     restartCaret();
     searchFocused_ = keyboardFocused_ = true;
+    searchEdit_.selectAll(); // UI-78: like the reference, Cmd+F selects what was typed, so typing starts a new search
     for (auto* ancestor = parent(); ancestor; ancestor = ancestor->parent())
         if (auto* root = dynamic_cast<RootWidget*>(ancestor)) root->setKeyboardFocus(this);
     repaint();
@@ -1300,7 +1401,15 @@ bool BrowserPanel::keyPressed(const KeyEvent& key)
             tagText_ += juce::String::charToString((juce::juce_wchar) key.textChar).toStdString();
         repaint(); return true;
     }
-    if (key.keyCode == juce::KeyPress::escapeKey) { searchFocused_ = keyboardFocused_ = false; repaint(); return true; }
+    if (key.keyCode == juce::KeyPress::escapeKey)
+    {
+        // UI-78: Escape clears the search, the tag filters and a similar list (like the reference) and leaves the field, so
+        // the next keys play clips / notes again.
+        if (clearSearchVisible()) clearSearch();
+        searchFocused_ = keyboardFocused_ = false;
+        repaint();
+        return true;
+    }
     if (! key.cmd && ! key.alt && (key.keyCode == juce::KeyPress::upKey || key.keyCode == juce::KeyPress::downKey))
     {
         moveSelection(key.keyCode == juce::KeyPress::upKey ? -1 : 1);
@@ -1331,18 +1440,20 @@ bool BrowserPanel::keyPressed(const KeyEvent& key)
         repaint();
         return true;
     }
-    if (searchFocused_ && ! key.cmd && ! key.alt)
+    if (searchFocused_)
     {
-        const bool starting = query_.empty();
+        // UI-78: the field edits like a text field (InlineTextEdit): selection, Cmd+A/C/X/V, word moves.
         restartCaret();
-        if (key.keyCode == juce::KeyPress::backspaceKey) paint::popLastCodePoint(query_);
-        else if (key.textChar >= 32 && key.textChar != 127) query_ += juce::String::charToString((juce::juce_wchar) key.textChar).toStdString();
-        else if (key.keyCode == juce::KeyPress::returnKey) searchFocused_ = false;
-        else return false;
-        // A new search re-reads the folder tree so it also finds files added since the last one.
-        if (starting && ! query_.empty() && listsFolder() && ctx().indexBrowserFolder) ctx().indexBrowserFolder(ctx().browserFolder);
-        selectedItem_ = -1;
-        scroll_ = 0;
+        if (key.keyCode == juce::KeyPress::returnKey) { searchFocused_ = false; repaint(); return true; }
+        if (key.ctrl || (key.cmd && key.textChar != 'a' && key.textChar != 'A' && key.textChar != 'c' && key.textChar != 'C'
+                         && key.textChar != 'x' && key.textChar != 'X' && key.textChar != 'v' && key.textChar != 'V'
+                         && key.keyCode != juce::KeyPress::leftKey && key.keyCode != juce::KeyPress::rightKey
+                         && key.keyCode != juce::KeyPress::backspaceKey))
+            return false; // other shortcuts keep working while the field has the focus
+        const bool starting = query_.empty();
+        const auto before = searchEdit_.text;
+        searchEdit_.key(key);
+        if (searchEdit_.text != before) searchChanged(starting);
         repaint();
         return true;
     }
@@ -1361,6 +1472,156 @@ bool BrowserPanel::mouseWheel(const MouseEvent& event)
     scroll_ = std::clamp(scroll_ - event.wheelDeltaY * kWheelPixels, 0.0f, maximum);
     repaint();
     return true;
+}
+
+// ---- UI-78 search field ---------------------------------------------------------------------------------------------
+
+Rect BrowserPanel::searchFieldBounds() const
+{
+    return {47, 4, std::max(0.0f, width() - 74), kSearch - 8};
+}
+
+Rect BrowserPanel::clearSearchBounds() const
+{
+    const auto field = searchFieldBounds();
+    return {field.right() - 16, field.y, 16, field.h};
+}
+
+bool BrowserPanel::clearSearchVisible() const
+{
+    return ! query_.empty() || ! filters_.empty() || similarList();
+}
+
+void BrowserPanel::searchChanged(bool starting)
+{
+    query_ = searchEdit_.text;
+    // A new search re-reads the folder tree so it also finds files added since the last one.
+    if (starting && ! query_.empty() && listsFolder() && ctx().indexBrowserFolder) ctx().indexBrowserFolder(ctx().browserFolder);
+    selectedItem_ = -1;
+    scroll_ = 0;
+    pendingDrag_.reset();
+}
+
+void BrowserPanel::clearSearch()
+{
+    searchEdit_.clear();
+    query_.clear();
+    filters_.clear();
+    tagEditing_ = false;
+    leaveSimilar();
+    selectedItem_ = -1;
+    scroll_ = 0;
+    pendingDrag_.reset();
+    if (ctx().previewSample) ctx().previewSample("");
+}
+
+// ---- LIB-4 similar list ----------------------------------------------------------------------------------------------
+
+bool BrowserPanel::similarList() const
+{
+    return ctx().similarSamples.active;
+}
+
+float BrowserPanel::similarRowHeight() const
+{
+    return similarList() ? kFacet + 2 : 0.0f;
+}
+
+Rect BrowserPanel::similarChipBounds() const
+{
+    if (! similarList()) return {};
+    const float left = sidebarArea().right() + 5;
+    const auto name = juce::File(juce::String::fromUTF8(ctx().similarSamples.reference.c_str())).getFileName().toStdString();
+    const float w = std::min(std::max(40.0f, width() - left - 5), gfx::measureText("Similar to: " + name, ctx().theme.metrics.fontSize) + 26);
+    return {left, kSearch + 3, w, kFacet - 3};
+}
+
+void BrowserPanel::appendSimilar(std::vector<Item>& result) const
+{
+    for (const auto& [path, distance] : ctx().similarSamples.results)
+    {
+        const juce::File file(juce::String::fromUTF8(path.c_str()));
+        Item item{file.getFileName().toStdString(), path, false, true,
+                  BrowserDrag{BrowserDrag::Kind::Sample, path, file.getFileName().toStdString()}};
+        item.hint = file.getParentDirectory().getFileName().toStdString();
+        result.push_back(std::move(item));
+    }
+}
+
+void BrowserPanel::leaveSimilar()
+{
+    if (! ctx().similarSamples.active && ! ctx().similarSamples.running) return;
+    leaveSimilarFiles(ctx());
+    shownSimilar_.clear();
+    selectedItem_ = -1;
+    scroll_ = 0;
+}
+
+void BrowserPanel::syncSimilar()
+{
+    const auto& similar = ctx().similarSamples;
+    const auto key = similar.active ? similar.reference + "#" + std::to_string(similar.clip.uid) : std::string{};
+    if (key == shownSimilar_) return;
+    shownSimilar_ = key;
+    if (! similar.active) return;
+    // A new list: start at its top with nothing filtering it.
+    searchEdit_.clear();
+    query_.clear();
+    filters_.clear();
+    tagEditing_ = false;
+    selectedItem_ = -1;
+    scroll_ = 0;
+    repaint();
+}
+
+// ---- LIB-3 Show in Browser -------------------------------------------------------------------------------------------
+// Opens the folder that holds UiContext::browserReveal (under the Place whose folder contains it, or as a plain folder
+// view like any folder outside Places), waits for its listing, then selects the file's row and scrolls it into view.
+void BrowserPanel::revealPending()
+{
+    auto& x = ctx();
+    const juce::File file(juce::String::fromUTF8(x.browserReveal.c_str()));
+    const auto folder = file.getParentDirectory().getFullPathName().toStdString();
+    if (revealing_ != x.browserReveal)
+    {
+        revealing_ = x.browserReveal;
+        leaveSimilar();
+        searchEdit_.clear();
+        query_.clear();
+        filters_.clear();
+        tagEditing_ = false;
+        int category = Samples;
+        const auto inside = [&](const std::string& root) {
+            const juce::File base(juce::String::fromUTF8(root.c_str()));
+            return ! root.empty() && (file.isAChildOf(base));
+        };
+        for (size_t i = 0; i < x.browserPlaces.size(); ++i)
+            if (inside(x.browserPlaces[i])) { category = (int) (categories().size() + i); break; }
+        if (category == Samples && x.song && inside(juce::File(juce::String::fromUTF8(x.song->sourcePath.c_str())).getParentDirectory().getFullPathName().toStdString()))
+            category = CurrentProject;
+        else if (category == Samples && inside(x.userLibraryPath)) category = UserLibrary;
+        selectedCategory_ = category;
+        navigate(folder);
+        keyboardFocused_ = true;
+        for (auto* ancestor = parent(); ancestor; ancestor = ancestor->parent())
+            if (auto* root = dynamic_cast<RootWidget*>(ancestor)) root->setKeyboardFocus(this);
+        repaint();
+        return;
+    }
+    if (! folderMode_ || x.browserFolder != folder) { x.browserReveal.clear(); revealing_.clear(); return; } // went elsewhere
+    if (x.browserLoading) return;
+    const auto& entries = items();
+    for (size_t i = 0; i < entries.size(); ++i)
+        if (entries[i].path == revealing_)
+        {
+            selectedItem_ = (int) i;
+            const float top = (float) i * kRow, view = listArea().h - 4;
+            if (top < scroll_ || top + kRow > scroll_ + view) scroll_ = std::max(0.0f, top - view * 0.4f);
+            break;
+        }
+    x.browserReveal.clear();
+    revealing_.clear();
+    repaint();
 }
 
 // ---- LIB-1 Packs list (docs/SAMPLE_PACKS.md) -------------------------------------------------------------------------

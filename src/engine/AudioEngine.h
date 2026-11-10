@@ -10,6 +10,7 @@
 #include "core/Model.h"
 #include "engine/AudioCapture.h"
 #include "engine/EngineGraph.h"
+#include "engine/EngineWorkers.h"
 #include "engine/MasterMonitor.h"
 #include "engine/Metronome.h"
 #include "engine/RecordingManager.h"
@@ -123,6 +124,29 @@ public:
     int blockSize() const { return blockSize_; }
     double cpuUsage() const { return deviceManager_.getCpuUsage(); }
 
+    // ---- ENG-14e multi-core rendering and the CPU meter details (UI-82). Message thread unless noted.
+    struct LoadStats
+    {
+        float current = 0, average = 0, peak = 0; // render time of a block / its buffer duration (1 = the whole buffer)
+        uint32_t overruns = 0;   // blocks that took longer than their buffer since the last reset
+        uint64_t blocks = 0;     // blocks measured since the last reset
+        float bufferMicros = 0;  // duration of the last block's buffer
+        int threads = 1;         // threads that rendered the last block (1: the callback thread alone)
+        int workers = 0;         // helper threads running
+        bool multiCore = true;   // the setting (Preferences > Audio, SONORA_ENGINE_THREADS=1 forces it off)
+        bool parallel = false;   // the last block was rendered on several threads
+        bool workgroup = false;  // the helpers joined the audio device's workgroup (macOS)
+    };
+    LoadStats loadStats() const;
+    void resetLoadStats() { resetLoad_.store(true, std::memory_order_release); } // the audio thread clears at its next block
+    // On by default. Off: every block renders on the callback thread only (the helper threads are stopped).
+    void setMultiCore(bool on);
+    bool multiCore() const { return multiCore_.load(std::memory_order_relaxed); }
+    // Tests and tools: threads in all (1 = serial, 0 = automatic: performance cores), and the smoothed work per block
+    // below which a block renders serially anyway (0 = always parallel when the graph allows it).
+    void setEngineThreads(int threads);
+    void setParallelThresholdMicros(double micros) { parallelThresholdMicros_.store(micros, std::memory_order_relaxed); }
+
     bool placeholderInstruments = true;
     // Diagnostics (off by default): after every device check the track buffer for NaN / inf / huge values
     // and call `onBadAudio(trackName, deviceName, inMagnitude, outMagnitude)` per occurrence. Used by tools/engine_probe.
@@ -150,6 +174,17 @@ private:
     static void applyPendingClips(TrackNode& node, TrackControls& controls);
     static void copyTap(juce::AudioBuffer<float>& tap, const juce::AudioBuffer<float>& src, int numSamples);
     void feedSidechains(EngineGraph& graph, TrackNode& node, int numSamples);
+    // ENG-14e: one block's shared, read-only inputs for the render jobs (built on the render thread's stack).
+    struct BlockContext;
+    static void runJob(void* context, int job);
+    void renderTrackJob(const BlockContext& b, int job);
+    void renderReturnJob(const BlockContext& b, int job);
+    void renderMain(const BlockContext& b);
+    void automate(const BlockContext& b, TrackNode& node);
+    void emitOutput(const BlockContext& b, TrackNode& source, juce::AudioBuffer<float>& target, int nodeIndex);
+    void emitSend(const BlockContext& b, TrackNode& source, size_t sendIndex, juce::AudioBuffer<float>& target);
+    void publishLoad(EngineGraph& graph, int64_t blockTicks, int numSamples, int threads, bool parallel);
+    void startWorkers(const juce::AudioWorkgroup& workgroup); // message thread
     void processNode(TrackNode& node, const TrackControls& ctl, int numSamples, const devices::HostInfo& host);
     void renderClips(TrackNode& node, const BlockSegment* segs, int numSegs, double tempo);
     // Arrangement + session clips of one track, including quantised launches / stops (ENG-6).
@@ -191,6 +226,22 @@ private:
     Preview* currentPreview_ = nullptr; // audio thread; freed after callback removal
     std::atomic<bool> previewPlaying_{false};
     std::atomic<midi::MidiClockOut*> clockOut_{nullptr};
+
+    // ENG-14e
+    EngineWorkers workers_;
+    std::atomic<bool> multiCore_{true};
+    int threadsOverride_ = 0;           // message thread: setEngineThreads() / SONORA_ENGINE_THREADS
+    struct WorkerConfig { int count = -1; double sampleRate = 0; int blockSize = 0; juce::AudioWorkgroup workgroup; } workerConfig_;
+    std::atomic<double> parallelThresholdMicros_{-1.0}; // < 0: automatic (min(250 us, 10 % of the buffer))
+    bool parallelNow_ = false;          // audio thread: hysteresis of the automatic choice
+    double workAverageMicros_ = 0;      // audio thread: smoothed sum of the job times per block
+    double ticksPerMicro_ = 1;
+    std::atomic<float> loadCurrent_{0}, loadAverage_{0}, loadPeak_{0}, bufferMicros_{0};
+    mutable std::atomic<float> loadRecent_{0}; // highest block since the last loadStats()
+    std::atomic<uint32_t> overruns_{0};
+    std::atomic<uint64_t> loadBlocks_{0};
+    std::atomic<int> threadsUsed_{1};
+    std::atomic<bool> parallelUsed_{false}, resetLoad_{false};
 
     // Offline render state (see beginOffline). The audio path only looks at offlineStemSlot_, which is null in real time.
     struct OfflineSaved

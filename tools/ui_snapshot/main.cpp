@@ -6,9 +6,10 @@
 //                       [--prefs plugins|midi|display|audio|keys|updates] [--zoom 1.25] [--midimap|--keymap] [--clip TRACK] [--clip-index N] [--scene N] [--count-in N]
 //                       [--floating-wavetables] [--wavetable-window] [--waveform-zoom FACTOR]
 //                       [--wavetable-browser] [--wavetable-preset NAME] [--wavetable-search TEXT]
-//                       [--collab share|share-wifi|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N] [--all-automation]
+//                       [--collab share|share-wifi|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N] [--all-automation] [--automation-write]
 //                       [--bench N [--gpu] [--warmup N] [--no-sweep|--device-sweep]]
-//                       [--native-swap-prompt] [--sampler-zones k|v|s]
+//                       [--native-swap-prompt] [--sampler-zones k|v|s] [--cpu]
+// --cpu (UI-82) opens the CPU meter details with synthetic load figures and a per-track cost for the set's tracks.
 // Benchmarks exclude 20 warm-up frames by default; --warmup 0 includes first-use work.
 //
 // --play-at plays the transport from that song beat, or with --clip/--scene from that many beats into the Session clip,
@@ -40,9 +41,15 @@
 // --browser-open LABEL (repeatable, in order) clicks the disclosure triangle of the first list row with that label
 // (a device with presets, a preset folder, a heading).
 //
+// LIB-3: --reveal FILE does Show in Browser on FILE (its folder opens and its row is selected). LIB-4: --similar FILE runs
+// Show Similar Files for real (dsp/SoundFeatures over FILE's folder and the one above it, cache in the temp folder), prints
+// the ranking to stdout and shows the browser's "Similar to" list; with --clip it is the clip's list (swap hint, header).
+// UI-78: --browser-query also works with --similar (it narrows the list).
+//
 // Without a .als it renders tests/fixtures/minimal_set.xml.
 
 #include "core/AppDataFolder.h"
+#include "engine/SoundSimilarity.h"
 #include "ui/views/PianoRoll.h"
 #include "ui/DeviceMenu.h"
 #include "devices/DeviceFactory.h"
@@ -141,6 +148,7 @@ int main(int argc, char** argv)
     std::string deviceMenu; // --device-menu TRACK:PATH
     double deviceDemoBeats = 0;
     std::string collabMode;
+    bool cpuDetails = false;
     float fileDragX = -1, fileDragY = -1;
     std::vector<std::string> fileDragPaths;
     juce::ScopedJuceInitialiser_GUI juceInit;
@@ -187,6 +195,7 @@ int main(int argc, char** argv)
     std::string regionDrag;
     int browserCategory = -1, browserSelection = -1;
     std::string browserQuery, browserPacks;
+    std::string revealPath, similarPath; // LIB-3 / LIB-4
     std::vector<std::string> browserOpen;
     ui::BrowserTags::Tags browserFilters;
     std::vector<int> selectedTracks;
@@ -226,6 +235,8 @@ int main(int argc, char** argv)
         }
         else if (a == "--automation")
             ctx.automationVisible = true;
+        else if (a == "--automation-write") // UI-77: Automation Write mode's orange controls
+            ctx.automationWriteMode = true;
         else if (a == "--all-automation")
             allAutomation = true;
         else if (a == "--automation-track") // one track's automation lane, as the A key shows it (UI-46)
@@ -289,6 +300,10 @@ int main(int argc, char** argv)
             browserSelection = std::stoi(next());
         else if (a == "--browser-query")
             browserQuery = next();
+        else if (a == "--reveal")
+            revealPath = juce::File::getCurrentWorkingDirectory().getChildFile(juce::String(next())).getFullPathName().toStdString();
+        else if (a == "--similar")
+            similarPath = juce::File::getCurrentWorkingDirectory().getChildFile(juce::String(next())).getFullPathName().toStdString();
         else if (a == "--browser-open")
             browserOpen.push_back(next());
         else if (a == "--browser-packs")
@@ -378,6 +393,8 @@ int main(int argc, char** argv)
             benchSweep = false;
         else if (a == "--collab")
             collabMode = next();
+        else if (a == "--cpu")
+            cpuDetails = true;
         else if (a == "--export") // Export dialog: idle | running | done | failed
         {
             const auto phase = next();
@@ -705,6 +722,33 @@ int main(int argc, char** argv)
         }
     }
 
+    if (cpuDetails)
+    {
+        // UI-82: what AppController::updateCpuView() fills from a busy set on an M-series Mac (12 threads).
+        auto& v = ctx.cpu;
+        ctx.cpuPanelOpen = true;
+        ctx.cpuUsage = 0.34;
+        v.current = 0.41f; v.average = 0.34f; v.peak = 1.12f;
+        v.overruns = 3; v.deviceDropouts = 1; v.overloaded = true;
+        v.sampleRate = 44100; v.bufferSize = 512; v.bufferMicros = 11610.0f;
+        v.inputLatencyMs = 13.1; v.outputLatencyMs = 14.8;
+        v.threads = 9; v.helpers = 11; v.multiCore = true; v.parallel = true; v.workgroup = true;
+        if (ctx.song)
+        {
+            int index = 0;
+            float micros = 2900.0f;
+            for (const auto& track : ctx.song->tracks)
+            {
+                v.tracks.push_back({index++, track.name, track.colorIndex, micros});
+                micros *= 0.78f;
+            }
+            v.tracks.push_back({index, "Main", ctx.song->main.colorIndex, 640.0f});
+            std::stable_sort(v.tracks.begin(), v.tracks.end(), [](const auto& a, const auto& b) { return a.micros > b.micros; });
+        }
+        ctx.resetCpuStats = [] {};
+        ctx.setMultiCore = [](bool) {};
+    }
+
     if (! recordingStates.empty())
     {
         ctx.recording = true;
@@ -805,7 +849,7 @@ int main(int argc, char** argv)
             mappingInput.addMapping(mapping);
             ctx.mapSelection = *target;
         }
-    if (! browserFolder.empty() || browserCategory == ui::BrowserPanel::AllItems) // All lists the Samples folder too
+    if (! browserFolder.empty() || browserCategory == ui::BrowserPanel::AllItems || ! revealPath.empty()) // All lists the Samples folder too
     {
         // With --browser-category all, --browser-folder stands in for the Samples folder (~/Music otherwise).
         const auto listed = [&](const std::string& path) { return browserCategory == ui::BrowserPanel::AllItems && ! browserFolder.empty() ? browserFolder : path; };
@@ -1014,6 +1058,47 @@ int main(int argc, char** argv)
                 ui::MouseEvent event; event.x = origin.x + box.centreX(); event.y = origin.y + box.centreY();
                 root.dispatchMouseDown(event); root.dispatchMouseUp(event);
             }
+    if (! revealPath.empty())
+    {
+        ctx.browserReveal = revealPath;
+        ctx.browserVisible = true;
+        root.layout();
+        for (int i = 0; i < 3; ++i) root.tickTree();
+        if (! ctx.browserReveal.empty()) std::fprintf(stderr, "warning: --reveal: %s was not listed\n", revealPath.c_str());
+    }
+    if (! similarPath.empty())
+    {
+        engine::SimilarSearch search;
+        search.reference = similarPath;
+        const juce::File reference(juce::String::fromUTF8(similarPath.c_str()));
+        search.roots = {reference.getParentDirectory().getFullPathName().toStdString(),
+                        reference.getParentDirectory().getParentDirectory().getFullPathName().toStdString()};
+        engine::SoundFeatureCache cache(juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_ui_snapshot_SoundFeatures.cache"));
+        std::string error;
+        const auto started = juce::Time::getMillisecondCounterHiRes();
+        const auto matches = engine::findSimilarSounds(search, cache, {}, {}, &error);
+        std::printf("similar to %s (%.0f ms)%s\n", reference.getFileName().toRawUTF8(), juce::Time::getMillisecondCounterHiRes() - started,
+                    error.empty() ? "" : (": " + error).c_str());
+        for (size_t i = 0; i < matches.size() && i < 25; ++i)
+            std::printf("  %2zu  %.3f  %s\n", i + 1, (double) matches[i].distance, matches[i].path.c_str());
+        auto& similar = ctx.similarSamples;
+        similar.active = true;
+        similar.reference = similarPath;
+        similar.clip = clipTrack >= 0 ? ctx.selectedClipLocation() : model::ClipLocation{};
+        similar.message = error.empty() ? std::string{} : "Nothing found: " + error;
+        for (const auto& match : matches) similar.results.emplace_back(match.path, match.distance);
+        ++similar.revision;
+        ctx.browserVisible = true;
+        root.layout();
+        root.tickTree();
+        if (! browserQuery.empty())
+            for (auto& child : root.children())
+                if (auto* browser = dynamic_cast<ui::BrowserPanel*>(child.get()))
+                {
+                    browser->focusSearch();
+                    for (const auto ch : browserQuery) { ui::KeyEvent key; key.textChar = (uint32_t) (unsigned char) ch; root.dispatchKey(key); }
+                }
+    }
     if (browserSelection >= 0)
         for (auto& child : root.children())
             if (auto* browser = dynamic_cast<ui::BrowserPanel*>(child.get()))

@@ -8,6 +8,9 @@
 namespace sonora::ui
 {
 
+// UI-77: whether a mappable control has an automation lane (mixer, device parameters and switches, tempo).
+bool isAutomationWritable(const midi::ControlTarget&);
+
 class RootWidget : public Widget
 {
 public:
@@ -70,6 +73,7 @@ private:
     int hoverTicks_ = 0;
     Rect capturedOrigin_;
     bool capturedRight_ = false;
+    std::optional<midi::ControlTarget> writeTouch_; // UI-77: the control pressed in Automation Write mode
     UiContext& ctx_;
     bool dirty_ = true;
     Cursor cursor_ = Cursor::Default;

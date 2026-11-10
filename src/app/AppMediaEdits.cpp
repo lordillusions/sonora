@@ -42,6 +42,7 @@ void AppController::runMediaEdit(std::string label, bool offline, std::function<
     if (offline) { closePluginWindows(); closeWavetableWindows(); }
     if (offline && ! engine_.beginOffline()) { ui_.statusText = "The audio engine is not ready"; return; }
     auto snapshot = std::make_shared<const model::Song>(*song_);
+    if (autosavePending()) autosaveNow("before a render", snapshot); // PRJ-4: a render is the riskiest edit
     const auto generation = documentGeneration_;
     exporting_ = true; exportCancel_ = false; exportProgress_ = 0;
     ui_.exportOpen = true; ui_.exportState = {}; ui_.exportState.phase = ui::ExportState::Phase::Running;

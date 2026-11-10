@@ -750,7 +750,8 @@ static_assert(sizeof(Device) == 648, "model::Device changed: update ModelCodec")
 static_assert(sizeof(Device::Chain) == 128, "model::Device::Chain changed: update ModelCodec");
 static_assert(sizeof(Track) == 1144, "model::Track changed: update ModelCodec");
 static_assert(sizeof(Mixer) == 200, "model::Mixer changed: update ModelCodec");
-static_assert(sizeof(Song) == 1528, "model::Song changed: update ModelCodec");
+// Song::patchSourcePath (PRJ-4) is left out on purpose: a recovery copy on this machine, never part of a session.
+static_assert(sizeof(Song) == 1552, "model::Song changed: update ModelCodec");
 static_assert(sizeof(MidiNote) == 48, "model::MidiNote changed: update ModelCodec");
 static_assert(sizeof(SamplePart) == 440, "model::SamplePart changed: update ModelCodec");
 static_assert(sizeof(PluginInfo) == 184, "model::PluginInfo changed: update ModelCodec");

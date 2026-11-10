@@ -14,6 +14,7 @@
 #include "ui/views/PreferencesPanel.h"
 #include "ui/views/CollabPanel.h"
 #include "ui/views/CollabVideo.h"
+#include "ui/views/CpuPanel.h"
 #include "ui/views/ExportPanel.h"
 #include "ui/views/SessionView.h"
 #include "ui/views/StatusBar.h"
@@ -71,6 +72,7 @@ MainLayout::MainLayout(UiContext& ctx) : RootWidget(ctx)
     video_ = add<CollabVideoTiles>(); // over the views, under the modal panels
     prefs_ = add<PreferencesPanel>();
     collab_ = add<CollabPanel>();
+    cpu_ = add<CpuPanel>(); // UI-82: over the views, under Export
     export_ = add<ExportPanel>(); // last child: drawn and hit-tested on top
 }
 
@@ -207,6 +209,11 @@ void MainLayout::layout()
     export_->setBounds(r0);
     collab_->visible = context().collabOpen && ! context().exportOpen;
     collab_->setBounds(r0);
+    if (context().preferencesOpen || context().exportOpen || context().collabOpen) context().cpuPanelOpen = false;
+    cpu_->visible = context().cpuPanelOpen;
+    if (const auto box = top_->cpuBounds(); box.w > 0) context().cpuAnchor = box.translated(top_->bounds().x, top_->bounds().y);
+    cpu_->setBounds(r0);
+    lastCpu_ = context().cpuPanelOpen;
     lastPrefs_ = context().preferencesOpen;
     lastExport_ = context().exportOpen;
     lastCollab_ = context().collabOpen;
@@ -233,8 +240,34 @@ std::string describeMapping(const midi::Mapping& m)
 
 // MIDI map mode: every mappable control gets an outline (orange = free, blue = mapped, with
 // the controller number), the selected one is filled.
+namespace
+{
+// The part of a widget its ancestors let show (scrolled-out mixer strips sit under the fixed return/Main columns).
+Rect shownBounds(const Widget* w)
+{
+    auto r = w->boundsInRoot();
+    for (const auto* a = w->parent(); a != nullptr; a = a->parent())
+    {
+        const auto b = a->boundsInRoot();
+        const float x0 = std::max(r.x, b.x), y0 = std::max(r.y, b.y);
+        const float x1 = std::min(r.right(), b.right()), y1 = std::min(r.bottom(), b.bottom());
+        r = {x0, y0, std::max(0.0f, x1 - x0), std::max(0.0f, y1 - y0)};
+    }
+    return r;
+}
+} // namespace
+
 void MainLayout::paintOverChildren(SkCanvas& c, const Theme& t)
 {
+    // A control counts as shown when it is what a click at its centre would reach (strips scrolled under the fixed
+    // return / Main columns are not).
+    auto onTop = [this](Widget* w, const Rect& r) {
+        if (r.w < 2 || r.h < 2) return false;
+        float lx = 0, ly = 0;
+        for (auto* hit = findAt(r.x + r.w * 0.5f, r.y + r.h * 0.5f, lx, ly); hit != nullptr; hit = hit->parent())
+            if (hit == w) return true;
+        return false;
+    };
     if (context().preferencesOpen || context().exportOpen || context().collabOpen) return;
     RootWidget::paintOverChildren(c, t);
     auto& x = context();
@@ -248,6 +281,31 @@ void MainLayout::paintOverChildren(SkCanvas& c, const Theme& t)
         const auto inner = mainBounds_.reduced(1.0f);
         c.drawRoundRect(inner.sk(), t.metrics.panelRadius, t.metrics.panelRadius, frame);
     }
+    if (x.automationWriteMode && ! x.midiMapMode && ! x.keyMapMode)
+    {
+        // UI-77: every control that can be automated is tinted orange; automated ones a little stronger.
+        const SkColor orange = t.color("AutomationWrite");
+        std::function<void(Widget*)> tint = [&](Widget* w) {
+            if (! w->visible) return;
+            if (w->midiTarget && ! w->bounds().isEmpty() && isAutomationWritable(*w->midiTarget))
+            {
+                const auto r = shownBounds(w);
+                if (! onTop(w, r)) { for (auto& ch : w->children()) tint(ch.get()); return; }
+                const bool automated = isControlAutomated(x, *w->midiTarget);
+                paint::fill(c, r, paint::withAlpha(orange, automated ? 90 : 55));
+                paint::stroke(c, r, orange, automated ? 1.5f : 1.0f);
+            }
+            for (auto& ch : w->children()) tint(ch.get());
+        };
+        tint(this);
+        auto bar = localBounds().removeFromBottom(24);
+        paint::fill(c, bar, paint::withAlpha(orange, 235));
+        paint::text(c, x.transport && x.transport->isPlaying()
+                           ? "Automation Write: moving an orange control records its automation as the song plays. Opt+Cmd+A to leave."
+                           : "Automation Write: move an orange control to set a breakpoint at the play position; press Play to record moves. Opt+Cmd+A to leave.",
+                    bar.reduced(10, 0), paint::contrastText(orange), t.metrics.fontSize);
+        return;
+    }
     if (! x.midiMapMode && ! x.keyMapMode)
         return;
     const auto mappings = x.midi != nullptr ? x.midi->mappings() : std::vector<midi::Mapping>{};
@@ -256,9 +314,9 @@ void MainLayout::paintOverChildren(SkCanvas& c, const Theme& t)
     std::function<void(Widget*)> visit = [&](Widget* w) {
         if (! w->visible)
             return;
-        if (! x.keyMapMode && w->midiTarget && ! w->bounds().isEmpty())
+        if (! x.keyMapMode && w->midiTarget && ! w->bounds().isEmpty() && onTop(w, shownBounds(w)))
         {
-            const auto r = w->boundsInRoot();
+            const auto r = shownBounds(w);
             const midi::Mapping* mapped = nullptr;
             for (const auto& m : mappings)
                 if (m.keyCode == 0 && m.target == *w->midiTarget)
@@ -292,7 +350,7 @@ void MainLayout::tick()
     auto& x = context();
     const auto zoneTarget = sampler::zoneEditorTarget(x);
     if ((zoneTarget.device != nullptr ? zoneTarget.device->id : -1) != lastZoneDevice_ || compactDevices() != lastCompact_ || hasResynthEditor() != lastResynth_ || x.detailTab != lastTab_ || x.mainView != lastView_ || x.browserVisible != lastBrowser_ || x.detailVisible != lastDetail_
-        || x.preferencesOpen != lastPrefs_ || x.exportOpen != lastExport_ || x.collabOpen != lastCollab_
+        || x.preferencesOpen != lastPrefs_ || x.exportOpen != lastExport_ || x.collabOpen != lastCollab_ || x.cpuPanelOpen != lastCpu_
         || x.collab.videoTiles.size() != lastVideoTiles_ || x.collab.showVideo != lastShowVideo_)
     {
         layout();
@@ -309,6 +367,7 @@ bool MainLayout::keyPressed(const KeyEvent& k)
         return prefs_->keyPressed(k) ? (layout(), markDirty(), true) : false;
     if (x.collabOpen)
         return collab_->keyPressed(k) ? (layout(), markDirty(), true) : false;
+    if (x.cpuPanelOpen && cpu_->keyPressed(k)) { layout(); markDirty(); return true; } // Escape closes the CPU details
     const auto ch = k.textChar >= 'A' && k.textChar <= 'Z' ? k.textChar + ('a' - 'A') : k.textChar;
     auto focusDetail = [this](DetailTab tab) {
         context().detailVisible = true; context().detailTab = tab; layout();
@@ -321,6 +380,11 @@ bool MainLayout::keyPressed(const KeyEvent& k)
         if (tab == DetailTab::Clip) find(detail_);
         setKeyboardFocus(target);
     };
+    // UI-77: Option+Cmd+A toggles Automation Write mode (macOS turns Option+A into "å"); Escape leaves it.
+    if (k.cmd && k.alt && ! k.ctrl && ! k.shift && (ch == 'a' || k.keyCode == 'A' || k.keyCode == 'a' || k.textChar == 0xE5))
+    { if (x.setAutomationWriteMode) x.setAutomationWriteMode(! x.automationWriteMode); else x.automationWriteMode = ! x.automationWriteMode; markDirty(); return true; }
+    if (x.automationWriteMode && k.keyCode == juce::KeyPress::escapeKey && ! k.cmd && ! k.alt)
+    { if (x.setAutomationWriteMode) x.setAutomationWriteMode(false); else x.automationWriteMode = false; markDirty(); return true; }
     if (k.cmd && ! k.ctrl && ! k.alt && ! k.shift && ch == 'e' && x.mainView == MainView::Arrangement && ! x.clipEditorFocused)
     { splitArrangementSelection(x); return true; }
     if (k.cmd && ! k.ctrl && ! k.alt && ! k.shift && ch == 'j' && x.mainView == MainView::Arrangement && ! x.clipEditorFocused)

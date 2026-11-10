@@ -1,6 +1,7 @@
 // engine_probe — headless engine check: load a set, time the build, render audio offline.
 //
 //   engine_probe <set.als> [--export file.wav|--stems folder] [--to <beat>] [--tail <s>] [--normalize] [--render <seconds>] [--from <beat>] [--out file.wav] [--no-plugins] [--check-finite] [--stress] [--bypass NAME]... [--editor-query-at <s>] [--launch TRACK:SCENE]... [--profile] [--block N]
+//                [--threads N] [--parallel-always] [--hash] [--realtime]
 //
 // Prints: model load time, graph build time (UI-blocking part), background sample load time,
 // failed samples, build log. With --render it plays the arrangement from --from (default 0)
@@ -8,6 +9,10 @@
 // prints peak / RMS per second, optionally writing a 24-bit stereo WAV.
 // --profile times every callback (worst block per second against the realtime budget of
 // --block samples, default 256) and every top-level device, to find what overloads playback.
+// --threads N renders with N threads in all (1 = serial, ENG-14e; default: performance cores), --parallel-always skips the
+// "too little work" serial blocks, --hash prints a hash of the float output to compare serial and parallel renders,
+// --realtime renders each block at its buffer deadline on a time-constraint thread (the app's conditions: helpers idle
+// between blocks; an unpaced render keeps them busy and macOS demotes such realtime threads).
 
 #include "devices/DeviceFactory.h"
 #include "devices/RackProcessor.h"
@@ -22,6 +27,13 @@
 #include <juce_events/juce_events.h>
 
 #include <algorithm>
+#include <cstring>
+#include <thread>
+#if JUCE_MAC
+ #include <mach/mach.h>
+ #include <mach/thread_policy.h>
+ #include <pthread.h>
+#endif
 #include <chrono>
 #include <cstdio>
 #include <functional>
@@ -82,6 +94,10 @@ int main(int argc, char** argv)
     double exportTo = 0.0, exportTail = 0.0;
     std::vector<std::string> launches;
     std::vector<std::string> bypassNames; // devices to bypass by name (bisecting problems)
+    int engineThreads = -1;      // ENG-14e: --threads N (1 = serial), default: the app's automatic choice
+    bool parallelAlways = false; // ENG-14e: --parallel-always: no "too little work" serial blocks
+    bool hashOutput = false;
+    bool realtime = false;       // ENG-14e: --realtime paces blocks at the buffer rate on a time-constraint thread, like CoreAudio     // ENG-14e: --hash prints a hash of the rendered float output (serial vs parallel A/B)
     double editorQueryAt = -1.0; // PLG-13: ask every device hasEditor() at this render time, like the device title does
     for (int i = 2; i < argc; ++i)
     {
@@ -118,6 +134,14 @@ int main(int argc, char** argv)
             profile = true;
         else if (a == "--block" && i + 1 < argc)
             blockSize = std::clamp(std::atoi(argv[++i]), 16, 4096);
+        else if (a == "--threads" && i + 1 < argc)
+            engineThreads = std::max(0, std::atoi(argv[++i]));
+        else if (a == "--parallel-always")
+            parallelAlways = true;
+        else if (a == "--hash")
+            hashOutput = true;
+        else if (a == "--realtime")
+            realtime = true;
     }
 
     auto t0 = juce::Time::getMillisecondCounterHiRes();
@@ -223,6 +247,8 @@ int main(int argc, char** argv)
         host.loadCache();
     midi::MidiManager midi;
     engine::AudioEngine engine(host, midi);
+    if (engineThreads >= 0) engine.setEngineThreads(engineThreads);
+    if (parallelAlways) engine.setParallelThresholdMicros(0.0);
 
     const auto log = engine.loadSong(*r.song);
     std::printf("graph build     %7.0f ms  (blocks the UI)\n", lap());
@@ -365,14 +391,29 @@ int main(int argc, char** argv)
 
         std::vector<float> l((size_t) block), rr((size_t) block);
         float* out[2] = {l.data(), rr.data()};
+        uint64_t hash = 1469598103934665603ull; // FNV-1a over the float bits of both channels
+        int parallelBlocks = 0, maxThreads = 1;
         bool reported = false;
         double sumSq = 0.0;
         float peak = 0.0f;
         juce::int64 samplesInSecond = 0;
         int second = 0;
         const auto renderStart = juce::Time::getMillisecondCounterHiRes();
+#if JUCE_MAC
+        if (realtime) // the callback thread's scheduling: time-constraint, one buffer period (as CoreAudio's IO thread)
+        {
+            const auto ticks = [](double ms) { return (uint32_t) juce::Time::secondsToHighResolutionTicks(ms / 1000.0); };
+            thread_time_constraint_policy_data_t policy{ticks(budgetMs), ticks(budgetMs), ticks(budgetMs), 1};
+            if (thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY, (thread_policy_t) &policy,
+                                  THREAD_TIME_CONSTRAINT_POLICY_COUNT) != KERN_SUCCESS)
+                std::printf("realtime: could not make the render thread time-constraint\n");
+        }
+#endif
+        const auto paceStart = std::chrono::steady_clock::now();
         for (juce::int64 b = 0; b < totalBlocks; ++b)
         {
+            if (realtime) // wait for this buffer's deadline like a sound card would
+                std::this_thread::sleep_until(paceStart + std::chrono::duration<double, std::milli>((double) b * budgetMs));
             const double beatBefore = engine.transport().positionBeats();
             for (auto* t : timed) t->blockMs = 0.0;
             if (editorQueryAt >= 0.0 && b == (juce::int64) (editorQueryAt * sr / block))
@@ -390,6 +431,19 @@ int main(int argc, char** argv)
             }
             const auto blockStart = std::chrono::steady_clock::now();
             engine.renderBlock(out, 2, block);
+            if (hashOutput)
+                for (int i = 0; i < block; ++i)
+                    for (const float v : {l[(size_t) i], rr[(size_t) i]})
+                    {
+                        uint32_t bits;
+                        std::memcpy(&bits, &v, sizeof(bits));
+                        for (int k = 0; k < 4; ++k) hash = (hash ^ ((bits >> (8 * k)) & 0xffu)) * 1099511628211ull;
+                    }
+            {
+                const auto stats = engine.loadStats();
+                parallelBlocks += stats.parallel ? 1 : 0;
+                maxThreads = std::max(maxThreads, stats.threads);
+            }
             if (profile)
             {
                 const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - blockStart).count();
@@ -459,6 +513,9 @@ int main(int argc, char** argv)
         }
         const auto wall = (juce::Time::getMillisecondCounterHiRes() - renderStart) / 1000.0;
         std::printf("rendered %.1f s of audio in %.2f s (%.1fx realtime)\n", renderSeconds, wall, renderSeconds / wall);
+        std::printf("engine threads: %d helpers, %d of %lld blocks on several threads (up to %d threads)\n",
+                    engine.loadStats().workers, parallelBlocks, (long long) totalBlocks, maxThreads);
+        if (hashOutput) std::printf("output hash %016llx\n", (unsigned long long) hash);
         if (profile)
         {
             std::printf("blocks over the %.2f ms budget: %lld of %lld\n", budgetMs, totalOver, (long long) totalBlocks);
