@@ -16,7 +16,9 @@
 #include <limits>
 #include <set>
 
+#ifndef _WIN32
 #include <pthread.h>
+#endif
 
 using namespace sonora;
 
@@ -1853,6 +1855,7 @@ TEST_CASE("wavetable: imported unit and envelope-time modulation domains equal t
     }
 }
 
+#ifndef _WIN32 // pthread stack sizes: POSIX only (the worker pool's 16 MB stacks cover Windows)
 // Bounce / freeze / export render devices on a worker thread whose stack is small. `voices_ = {}` used to build a
 // 32-voice temporary (~220 KB) in both snapshot() and process(), which overflowed that stack (SIGBUS in snapshot()).
 namespace
@@ -1895,3 +1898,4 @@ TEST_CASE("wavetable: processing, mono/bypass transitions and reset fit a 256 KB
     pthread_attr_destroy(&attributes);
     CHECK(run.ok);
 }
+#endif
