@@ -16,6 +16,8 @@
 #include <limits>
 #include <set>
 
+#include <pthread.h>
+
 using namespace sonora;
 
 namespace
@@ -1849,4 +1851,47 @@ TEST_CASE("wavetable: imported unit and envelope-time modulation domains equal t
         const auto set = renderWith([&](W& synth) { synth.setParameter(W::envParam(0, W::Attack), direct); });
         CHECK(difference(routed, set) < 1e-5);
     }
+}
+
+// Bounce / freeze / export render devices on a worker thread whose stack is small. `voices_ = {}` used to build a
+// 32-voice temporary (~220 KB) in both snapshot() and process(), which overflowed that stack (SIGBUS in snapshot()).
+namespace
+{
+struct SmallStackRun
+{
+    bool ok = false;
+    static void* entry(void* arg)
+    {
+        auto& self = *static_cast<SmallStackRun*>(arg);
+        auto synth = std::make_unique<W>();
+        synth->prepare(sampleRate, 512);
+        juce::AudioBuffer<float> audio(2, 512);
+        juce::MidiBuffer midi;
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 100), 0);
+        for (int pass = 0; pass < 3; ++pass)
+        {
+            audio.clear();
+            if (pass == 1) synth->setParameter(W::voiceModeParam(W::MonoOn), 1); // mono transition clears the voices
+            if (pass == 2) synth->setBypassed(true);                               // bypass transition clears them too
+            synth->process(audio, midi);
+            midi.clear();
+        }
+        synth->reset();
+        self.ok = true;
+        return nullptr;
+    }
+};
+}
+
+TEST_CASE("wavetable: processing, mono/bypass transitions and reset fit a 256 KB thread stack")
+{
+    SmallStackRun run;
+    pthread_attr_t attributes;
+    pthread_attr_init(&attributes);
+    CHECK(pthread_attr_setstacksize(&attributes, 256 * 1024) == 0);
+    pthread_t thread;
+    REQUIRE(pthread_create(&thread, &attributes, &SmallStackRun::entry, &run) == 0);
+    pthread_join(thread, nullptr);
+    pthread_attr_destroy(&attributes);
+    CHECK(run.ok);
 }

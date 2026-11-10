@@ -364,7 +364,8 @@ private:
     juce::OwnedArray<juce::DocumentWindow> wavetableWindows_; // UI-27, survive device edits (unlike pluginWindows_)
     juce::OwnedArray<juce::DocumentWindow> hushWindows_;      // PLG-14g, like wavetableWindows_
     juce::OwnedArray<juce::DocumentWindow> kickstractTimelines_; // PLG-17e, like hushWindows_
-    juce::ThreadPool pool_{juce::ThreadPoolOptions{}.withNumberOfThreads(2)};
+    // 16 MB stacks: offline renders (bounce, freeze, export) run whole devices on these threads; the default 512 KB overflowed.
+    juce::ThreadPool pool_{juce::ThreadPoolOptions{}.withNumberOfThreads(2).withThreadStackSizeBytes(16u * 1024 * 1024)};
     std::unique_ptr<juce::PropertiesFile> settings_;
     std::atomic<bool> scanning_{false};
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);

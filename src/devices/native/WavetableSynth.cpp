@@ -310,7 +310,8 @@ struct WavetableSynth::TableBank
     std::array<std::array<std::array<Wave, tableMips>, tableFrames>, kGeneratedTableFamilies> wave{};
     TableBank()
     {
-        std::array<std::array<float, tableSamples>, tableHarmonics> basis{};
+        // Heap scratch: as a local this was a 500+ KB frame, which overflows a worker thread's stack if one builds the bank first.
+        std::vector<std::array<float, tableSamples>> basis(tableHarmonics);
         for (int h = 1; h <= tableHarmonics; ++h)
             for (int i = 0; i < tableSamples; ++i)
                 basis[static_cast<size_t>(h - 1)][static_cast<size_t>(i)] = static_cast<float>(std::sin(tau * h * i / tableSamples));
@@ -545,9 +546,13 @@ void WavetableSynth::resetEffects()
     for (auto& line : directSubAlignment_) if (line.capacity() > 0) line.reset();
     masterGainInitialized_ = false;
 }
+void WavetableSynth::clearVoices()
+{
+    for (auto& voice : voices_) voice = Voice{};
+}
 void WavetableSynth::reset()
 {
-    voices_ = {};
+    clearVoices();
     monoVoice_.reset();
     for (auto& row : *mediaVoices_) for (auto& media : row) media.reset();
     bends_ = {}; pressures_ = {}; pedals_ = {};
@@ -1044,7 +1049,7 @@ void WavetableSynth::snapshot()
     const bool mono = block_[voiceModeParam(MonoOn)] >= 0.5f;
     if (mono != monoActive_)
     {
-        voices_ = {}; monoVoice_.reset();
+        clearVoices(); monoVoice_.reset();
         for (auto& row : *mediaVoices_) for (auto& media : row) media.reset();
         monoActive_ = mono;
     }
@@ -2723,7 +2728,7 @@ void WavetableSynth::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& 
     const bool bypass = isBypassed();
     if (bypass != wasBypassed_)
     {
-        voices_ = {};
+        clearVoices();
         monoVoice_.reset();
         for (auto& row : *mediaVoices_) for (auto& media : row) media.reset();
         resetEffects();

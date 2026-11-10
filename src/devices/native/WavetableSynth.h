@@ -481,6 +481,9 @@ private:
         bool envelope = true;
     };
     void snapshot();
+    // `voices_ = {}` builds a 32-voice temporary (~220 KB) on the stack. Offline renders run on worker threads with small
+    // stacks, so do it one voice at a time in a function of its own (DEV bounce crash: snapshot + process + renderBlock > 512 KB).
+    [[gnu::noinline]] void clearVoices();
     void startVoice(Voice&, int note, int channel, int velocity, bool monoRetrigger = false);
     void applyMonoTransition(const WavetableVoiceMode::Transition&);
     void event(const uint8_t* data, int size);
