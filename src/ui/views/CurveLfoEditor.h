@@ -85,4 +85,30 @@ private:
     bool dragAll_ = false, syncShown_ = true;
     unsigned revision_ = 0;
 };
+
+// UI-83: the Curve LFO folded to its graph in the device chain (the title arrow toggles it). Read only: the selected
+// graph's curve with the audio scope behind it, the moving playhead and its level, a level bar and the rate / depth.
+// It repaints only when the processor's display revision or the shown settings change. A click calls onClick.
+class CurveLfoMini final : public Widget
+{
+public:
+    static constexpr float kWidth = 232;
+    explicit CurveLfoMini(devices::CurveLfo* processor) : processor_(processor) {}
+    std::function<void()> onClick;
+    void paint(SkCanvas&, const Theme&) override;
+    void mouseDown(const MouseEvent&) override {}
+    void mouseUp(const MouseEvent&) override;
+    void tick() override;
+    // Geometry and live values (local coordinates); exposed for tests.
+    Rect plot() const;
+    Rect levelBar() const;
+    float playheadX() const;
+    float level() const; // the selected graph's value at the playhead, 0..1
+
+private:
+    float settingsSignature() const;
+    devices::CurveLfo* processor_;
+    unsigned revision_ = 0;
+    float signature_ = -1;
+};
 } // namespace sonora::ui

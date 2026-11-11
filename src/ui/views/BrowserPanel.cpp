@@ -893,6 +893,20 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
     }
     paint::fill(canvas, {side.right() - 1, side.y, 1, side.h}, paint::withAlpha(theme.color("SurfaceArea"), 110));
 
+    // LIB-5c: "Replace sample of <clip>" with the scope it applies to and its x.
+    if (const auto* target = sampleSwapClip(ctx()))
+    {
+        const auto bar = swapBarBounds(), scope = swapScopeBounds();
+        paint::fill(canvas, bar, theme.color("ChosenAlert"));
+        const auto ink = theme.color("ControlOnForeground");
+        paint::text(canvas, "Replace: " + target->name,
+                    {bar.x + 5, bar.y, std::max(0.0f, scope.x - bar.x - 8), bar.h}, ink, theme.metrics.fontSize);
+        ctl::framed(canvas, theme, scope, paint::withAlpha(theme.color("SurfaceBackground"), 60));
+        paint::text(canvas, swapScopeLabel(), {scope.x + 4, scope.y, scope.w - 14, scope.h}, ink, theme.metrics.fontSize);
+        ctl::triangle(canvas, scope.right() - 6, scope.centreY(), 5, 3, ctl::Dir::Down, ink);
+        paint::text(canvas, "\u00D7", {bar.right() - 14, bar.y, 12, bar.h}, ink, theme.metrics.fontSize);
+    }
+
     // LIB-4: "Similar to: <file>" with its x, and the search's progress or outcome beside it.
     if (similarList())
     {
@@ -906,7 +920,9 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
         if (similar.running)
             note = similar.total > 0 ? "Comparing " + std::to_string(similar.done) + " of " + std::to_string(similar.total) + "..." : "Looking for samples...";
         else if (! similar.message.empty()) note = similar.message;
-        else if (similar.clip.uid >= 0) note = "Double-click / Enter: use in the clip";
+        else if (ctx().soundIndex.running && ctx().soundIndex.total > 0)
+            note = "Library index: " + std::to_string(ctx().soundIndex.done) + " of " + std::to_string(ctx().soundIndex.total) + " sounds";
+        else if (similar.clip.uid >= 0 && ! swapBar()) note = "Double-click / Enter: use in the clip";
         if (! note.empty() && chip.right() + 8 < width() - 4)
             paint::text(canvas, note, {chip.right() + 8, chip.y, width() - chip.right() - 12, chip.h}, theme.color("TextDisabled"),
                         theme.metrics.fontSize);
@@ -1119,6 +1135,8 @@ void BrowserPanel::activate(const Item& item)
     }
     else if (! item.disclosure.empty() && ! item.drag) disclose(item, ! item.open); // LIB-2: a preset folder
     else if (item.directory) disclose(item, ! expandedFolders_.contains(item.path));
+    else if (item.sample && swapBar()) // LIB-5c: the replace target takes any sample row
+        replaceClipSampleWith(ctx(), ctx().sampleSwap.clip, item.path);
     else if (item.sample && similarList() && ctx().similarSamples.clip.uid >= 0) // LIB-4/5: swap the clip's sample
         replaceClipSampleWith(ctx(), ctx().similarSamples.clip, item.path);
     else if (item.sample && ctx().previewSample) ctx().previewSample(item.path);
@@ -1159,7 +1177,8 @@ void BrowserPanel::showItemMenu(Item item)
         similar.isEnabled = static_cast<bool>(ctx().findSimilarSamples);
         similar.action = [this, path = item.path] { if (Widget::isAlive(this)) showSimilarFiles(ctx(), path); };
         menu.addItem(std::move(similar));
-        const auto target = similarList() && ctx().similarSamples.clip.uid >= 0 ? ctx().similarSamples.clip : ctx().selectedClipLocation();
+        const auto target = swapBar() ? ctx().sampleSwap.clip
+                            : similarList() && ctx().similarSamples.clip.uid >= 0 ? ctx().similarSamples.clip : ctx().selectedClipLocation();
         const auto* clip = ctx().song ? model::findClip(*ctx().song, target) : nullptr;
         juce::PopupMenu::Item replace(clip && clip->kind == model::Clip::Kind::Audio ? "Replace Sample of \"" + juce::String::fromUTF8(clip->name.c_str()) + "\""
                                                                                      : juce::String("Replace Sample of Selected Clip"));
@@ -1202,6 +1221,22 @@ void BrowserPanel::mouseDown(const MouseEvent& event)
         if (! wasFocused && event.clicks < 2) searchEdit_.selectAll();
         else searchEdit_.click(searchEdit_.offsetAt(event.x, searchFieldBounds(), ctx().theme.metrics.fontSize), event.clicks, event.shift);
         selectingText_ = event.clicks < 2;
+        repaint();
+        return;
+    }
+    if (swapBar() && swapBarBounds().contains(event.x, event.y))
+    {
+        if (swapCloseBounds().contains(event.x, event.y))
+        {
+            if (similarList() && ctx().similarSamples.clip.uid == ctx().sampleSwap.clip.uid) leaveSimilar();
+            endSampleSwap(ctx());
+        }
+        else if (swapScopeBounds().contains(event.x, event.y))
+        {
+            juce::PopupMenu menu;
+            addSampleScopeMenu(menu, ctx(), ctx().sampleSwap.clip);
+            menu.showMenuAsync(juce::PopupMenu::Options());
+        }
         repaint();
         return;
     }
@@ -1346,6 +1381,7 @@ void BrowserPanel::tick()
     if ((searchFocused_ || tagEditing_) && caretVisible() != caretShown_) { caretShown_ = ! caretShown_; repaint(); }
     syncSimilar();
     if (! ctx().browserReveal.empty()) revealPending();
+    if (ctx().sampleSwap.active && ! swapBar()) { endSampleSwap(ctx()); repaint(); } // its clip went away
     const auto& context = ctx();
     if (listsFolder() && ! query_.empty() && context.indexBrowserFolder && ! context.browserFolder.empty()
         && context.browserSearchRoot != context.browserFolder)
@@ -1405,7 +1441,9 @@ bool BrowserPanel::keyPressed(const KeyEvent& key)
     {
         // UI-78: Escape clears the search, the tag filters and a similar list (like the reference) and leaves the field, so
         // the next keys play clips / notes again.
+        // LIB-5c: with nothing else to clear, Escape ends a replace target.
         if (clearSearchVisible()) clearSearch();
+        else if (ctx().sampleSwap.active) endSampleSwap(ctx());
         searchFocused_ = keyboardFocused_ = false;
         repaint();
         return true;
@@ -1524,7 +1562,7 @@ bool BrowserPanel::similarList() const
 
 float BrowserPanel::similarRowHeight() const
 {
-    return similarList() ? kFacet + 2 : 0.0f;
+    return (similarList() ? kFacet + 2 : 0.0f) + (swapBar() ? kFacet + 2 : 0.0f);
 }
 
 Rect BrowserPanel::similarChipBounds() const
@@ -1533,7 +1571,44 @@ Rect BrowserPanel::similarChipBounds() const
     const float left = sidebarArea().right() + 5;
     const auto name = juce::File(juce::String::fromUTF8(ctx().similarSamples.reference.c_str())).getFileName().toStdString();
     const float w = std::min(std::max(40.0f, width() - left - 5), gfx::measureText("Similar to: " + name, ctx().theme.metrics.fontSize) + 26);
-    return {left, kSearch + 3, w, kFacet - 3};
+    return {left, kSearch + 3 + (swapBar() ? kFacet + 2 : 0.0f), w, kFacet - 3};
+}
+
+// ---- LIB-5c replace target bar ---------------------------------------------------------------------------------------
+
+bool BrowserPanel::swapBar() const
+{
+    return sampleSwapClip(ctx()) != nullptr;
+}
+
+Rect BrowserPanel::swapBarBounds() const
+{
+    if (! swapBar()) return {};
+    const float left = sidebarArea().right() + 5;
+    return {left, kSearch + 3, std::max(40.0f, width() - left - 5), kFacet - 3};
+}
+
+std::string BrowserPanel::swapScopeLabel() const
+{
+    const auto scope = ctx().sampleReplaceScope;
+    std::string label = std::string("in ") + sampleScopeShortLabel(scope);
+    if (scope != model::SampleScope::Clip && ctx().song)
+        label += " (" + std::to_string(model::clipsUsingSample(*ctx().song, ctx().sampleSwap.clip, scope).size()) + ")";
+    return label;
+}
+
+Rect BrowserPanel::swapCloseBounds() const
+{
+    const auto bar = swapBarBounds();
+    return bar.w > 0 ? Rect{bar.right() - 16, bar.y, 16, bar.h} : Rect{};
+}
+
+Rect BrowserPanel::swapScopeBounds() const
+{
+    const auto bar = swapBarBounds();
+    if (bar.w <= 0) return {};
+    const float w = gfx::measureText(swapScopeLabel(), ctx().theme.metrics.fontSize) + 18;
+    return {bar.right() - 18 - w, bar.y + 1, w, bar.h - 2};
 }
 
 void BrowserPanel::appendSimilar(std::vector<Item>& result) const

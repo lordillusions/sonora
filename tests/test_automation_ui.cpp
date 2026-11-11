@@ -362,6 +362,47 @@ TEST_CASE("automation arm (UI-65): edits in a plugin's window are recorded; a pr
     CHECK(sawFirst);
 }
 
+TEST_CASE("automation write (UI-77c): the capture reports what moves; a watch records nothing; a take has a preview")
+{
+    Rig rig;
+    rig.song.tracks[0].automation.clear();
+    engine::AutomationCapture watch;
+    watch.begin();
+    watch.poll(rig.song, rig.graph, 4.0, false); // first look
+    CHECK(watch.takeMoved().empty());
+    rig.plugin.edit(7, 0.6f);
+    watch.poll(rig.song, rig.graph, 4.0, false);
+    (*rig.graph.controls)[0].volume.store(0.5f);
+    watch.poll(rig.song, rig.graph, 4.0, false);
+    (*rig.graph.controls)[0].volume.store(0.4f);
+    watch.poll(rig.song, rig.graph, 4.0, false);
+    auto moved = watch.takeMoved();
+    REQUIRE(moved.size() == 2); // each control once, in the order noticed
+    CHECK(moved[0].hostedPlugin); CHECK(moved[0].index == 7); CHECK(moved[0].targetId == -1); CHECK(moved[0].deviceSlot == 0);
+    CHECK(moved[1].kind == engine::AutomationBinding::Kind::Volume); CHECK(moved[1].targetId == 100);
+    CHECK_NEAR(moved[1].value, 0.4, 1e-6);
+    CHECK(! watch.touched());
+    CHECK(watch.takeMoved().empty());
+    // A take: the preview holds what the lane will get, and the take goes on.
+    engine::AutomationCapture take;
+    take.begin();
+    take.poll(rig.song, rig.graph, 0.0);
+    rig.plugin.edit(5, 0.8f);
+    take.poll(rig.song, rig.graph, 1.0);
+    rig.plugin.edit(5, 0.2f);
+    take.poll(rig.song, rig.graph, 2.0);
+    const auto preview = take.preview(rig.song, rig.graph, 2.5);
+    REQUIRE(preview.size() == 1);
+    CHECK(preview[0].envelope.targetId == 200);
+    CHECK_NEAR(preview[0].envelope.points.back().time, 2.5, 1e-9);
+    CHECK_NEAR(preview[0].envelope.points.back().value, 0.2, 1e-6);
+    CHECK(take.touched());
+    CHECK(take.takeMoved().size() == 1);
+    const auto done = take.finish(rig.song, rig.graph, 3.0);
+    REQUIRE(done.size() == 1);
+    CHECK_NEAR(done[0].envelope.points.back().time, 3.0, 1e-9);
+}
+
 TEST_CASE("automation override (UI-65): a hand edit in a plugin's window takes the parameter from its lane")
 {
     FakePlugin plugin(8);

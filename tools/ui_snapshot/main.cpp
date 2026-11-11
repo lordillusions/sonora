@@ -4,7 +4,7 @@
 //   ui_snapshot out.png [set.als] [--session] [--set-view] [--track N] [--size 1440x900] [--scale 2] [--bench N [--gpu]]
 //                       [--theme "/path/Live Theme.ask"] [--no-browser] [--no-detail]
 //                       [--prefs plugins|midi|display|audio|keys|updates] [--zoom 1.25] [--midimap|--keymap] [--clip TRACK] [--clip-index N] [--scene N] [--count-in N]
-//                       [--floating-wavetables] [--wavetable-window] [--waveform-zoom FACTOR]
+//                       [--floating-wavetables] [--wavetable-window] [--waveform-zoom FACTOR] [--device-mini] [--add-devices TYPES]
 //                       [--wavetable-browser] [--wavetable-preset NAME] [--wavetable-search TEXT]
 //                       [--collab share|share-wifi|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N] [--all-automation] [--automation-write]
 //                       [--bench N [--gpu] [--warmup N] [--no-sweep|--device-sweep]]
@@ -24,6 +24,8 @@
 //
 // Sonora Prism editors render docked by default here; --floating-wavetables shows the app's default (a stub in the
 // chain) and --wavetable-window renders the floating editor window of the selected track's first Wavetable (UI-27).
+// --device-mini (UI-83) folds every Sonora Curve LFO to its mini graph and shows every Prism's mini view (floating);
+// --add-devices TYPE[,TYPE...] appends native devices (e.g. SonoraWavetable,SonoraCurveLfo) to the --track's chain.
 // --wavetable-browser opens the first Wavetable editor's preset browser (UI-28i); --wavetable-preset marks an installed
 // Serum 2 preset as the loaded one (navigation state only: no importer runs here) and --wavetable-search types TEXT into
 // the search field through RootWidget::dispatchKey.
@@ -45,6 +47,8 @@
 // Show Similar Files for real (dsp/SoundFeatures over FILE's folder and the one above it, cache in the temp folder), prints
 // the ranking to stdout and shows the browser's "Similar to" list; with --clip it is the clip's list (swap hint, header).
 // UI-78: --browser-query also works with --similar (it narrows the list).
+// LIB-4c: --similar-root DIR (repeatable) searches those folders instead, like the app's library index (set folders left
+// out); the first pass describes every file (timed), a second pass reads the cache (timed too).
 //
 // Without a .als it renders tests/fixtures/minimal_set.xml.
 
@@ -146,6 +150,7 @@ int main(int argc, char** argv)
     std::string wavetablePreset, wavetableSearch;
     bool trackMenu = false, arrangementMenu = false, nativeSwapPrompt = false, nativeSwap = false;
     std::string deviceMenu; // --device-menu TRACK:PATH
+    std::string addDevices; // --add-devices TYPE[,TYPE...]
     double deviceDemoBeats = 0;
     std::string collabMode;
     bool cpuDetails = false;
@@ -196,6 +201,7 @@ int main(int argc, char** argv)
     int browserCategory = -1, browserSelection = -1;
     std::string browserQuery, browserPacks;
     std::string revealPath, similarPath; // LIB-3 / LIB-4
+    std::vector<std::string> similarRoots; // LIB-4c
     std::vector<std::string> browserOpen;
     ui::BrowserTags::Tags browserFilters;
     std::vector<int> selectedTracks;
@@ -302,6 +308,8 @@ int main(int argc, char** argv)
             browserQuery = next();
         else if (a == "--reveal")
             revealPath = juce::File::getCurrentWorkingDirectory().getChildFile(juce::String(next())).getFullPathName().toStdString();
+        else if (a == "--similar-root")
+            similarRoots.push_back(juce::File::getCurrentWorkingDirectory().getChildFile(juce::String(next())).getFullPathName().toStdString());
         else if (a == "--similar")
             similarPath = juce::File::getCurrentWorkingDirectory().getChildFile(juce::String(next())).getFullPathName().toStdString();
         else if (a == "--browser-open")
@@ -365,6 +373,10 @@ int main(int argc, char** argv)
             ctx.wavetableFloatingDefault = true;
         else if (a == "--wavetable-window")
             wavetableWindow = ctx.wavetableFloatingDefault = true;
+        else if (a == "--device-mini") // UI-83: Curve LFO folded to its graph, Prism floating with its mini view in the chain
+            ctx.deviceMinimizedDefault = ctx.wavetableFloatingDefault = true;
+        else if (a == "--add-devices") // UI-83: TYPE[,TYPE...] native devices appended to the --track's chain
+            addDevices = next();
         else if (a == "--wavetable-browser")
             wavetableBrowser = true;
         else if (a == "--wavetable-preset")
@@ -521,6 +533,14 @@ int main(int argc, char** argv)
         }
         if (auto command = plugins::replaceWithNative(*loaded.song, found); command.apply) command.apply(*loaded.song);
     }
+    if (! addDevices.empty()) // UI-83: native devices appended to the selected track's chain (e.g. Prism + Curve LFO)
+        if (auto* track = model::trackAt(*loaded.song, ctx.selectedTrack))
+            for (const auto& type : juce::StringArray::fromTokens(juce::String(addDevices), ",", ""))
+            {
+                auto device = devices::nativeDeviceModel(type.toStdString());
+                model::allocateDeviceIds(*loaded.song, device);
+                track->devices.push_back(std::move(device));
+            }
     for (int track : selectedTracks)
         if (track >= 0 && (size_t) track < loaded.song->tracks.size())
         {
@@ -1074,6 +1094,14 @@ int main(int argc, char** argv)
         search.roots = {reference.getParentDirectory().getFullPathName().toStdString(),
                         reference.getParentDirectory().getParentDirectory().getFullPathName().toStdString()};
         engine::SoundFeatureCache cache(juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_ui_snapshot_SoundFeatures.cache"));
+        if (! similarRoots.empty())
+        {
+            search.roots = similarRoots;
+            search.maxCandidates = 100000;
+            const auto indexStart = juce::Time::getMillisecondCounterHiRes();
+            const int indexed = engine::indexSoundLibrary(search, cache, {}, {});
+            std::printf("library index: %d sounds (%.0f ms)\n", indexed, juce::Time::getMillisecondCounterHiRes() - indexStart);
+        }
         std::string error;
         const auto started = juce::Time::getMillisecondCounterHiRes();
         const auto matches = engine::findSimilarSounds(search, cache, {}, {}, &error);

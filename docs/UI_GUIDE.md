@@ -145,9 +145,12 @@ whether the automation goes along (With Automation / Clip Only / Always / Cancel
 default (Ask, Always Move With Clips, Lock Envelopes). Duplicating tracks that have automation asks whether the copies get it.
 
 **Automation Write mode** (UI-77): the control-bar button after Automation Arm, Options > Automation Write Mode or
-Option+Cmd+A (Escape leaves). Every automatable control turns orange. Let go of a control and its lane opens on its track;
-with the transport stopped its value becomes a breakpoint at the play position, while playing every move is recorded over
-time (no Record needed). `ui_snapshot --automation-write` renders the orange state. The audio Clip tab shows a stereo source waveform with the saved warp
+Option+Cmd+A (Escape leaves). Every automatable control turns orange. Press a control and its lane opens on its track (the
+track's lane chooser switches to it; in the Session view on release); moves the app sees only as value changes (a plugin's
+own window, a MIDI-mapped control) open the lane too (UI-77c). With the transport stopped the moved value is drawn at once
+as a breakpoint at the play position (red while it is being written) and stored on release; while playing every move is
+recorded over time (no Record needed) and the lane draws the take as it goes (`UiContext::automationPreview`).
+`ui_snapshot --automation-write` renders the orange state. The audio Clip tab shows a stereo source waveform with the saved warp
 markers; Cmd+wheel zooms around the cursor, wheel scrolls. With Warp on, double-click the marker strip to
 add/remove a marker (at least two anchors remain), drag horizontally to change its source time, or
 Shift-drag vertically to change its beat (Alt disables beat snapping). Neighbouring anchors cannot cross.
@@ -208,7 +211,11 @@ and selects its row. Show Similar Files fills `UiContext::similarSamples`; the l
 (`similarChipBounds()`), each match's folder dimmed at the right; with a clip as the source, double-click / Enter puts the
 row's file into it. The audio sample editor header: bold file name (click = Show in Browser), format, dimmed folder, then
 "Replace in Clip | Track | Set" (`UiContext::sampleReplaceScope`) and "Similar < >" swap arrows; a dragged sample frames
-the editor and says what the drop will replace.
+the editor and says what the drop will replace. Similar files come from the indexed library (LIB-4c: Places, the Samples
+folder, User Library, packs, the reference's Core Library sounds; set folders left out), not the clip's own folders.
+Replace Sample... (LIB-5c) has no file chooser: it opens the browser on the clip's similar list under an orange
+"Replace: clip" bar (`swapBarBounds()`, scope menu `swapScopeBounds()`, x `swapCloseBounds()`); while the bar is up a
+double-click / Enter on any sample row in any folder replaces the clip's file, and Escape (with nothing else to clear) ends it.
 
 **All (UI-64)** is the first Library entry: every Library category in one list, a heading per category in sidebar order
 (Sounds is left out while it has nothing to list) over that category's own groups or, for Samples, the Samples folder's

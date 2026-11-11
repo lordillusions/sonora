@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <random>
+#include <set>
 
 using namespace sonora;
 
@@ -180,6 +181,64 @@ TEST_CASE("similar sounds: files are ranked through an on-disk cache keyed by si
         CHECK(! error.empty());
     }
     folder.deleteRecursively();
+}
+
+TEST_CASE("library sound index (LIB-4c): set folders and excluded folders are left out, copies are listed once")
+{
+    const auto library = scratchFolder("sonora_sound_library");
+    writeWav(library.getChildFile("Packs/Kicks/Kick A.wav"), kick(160, 50, 0.18));
+    writeWav(library.getChildFile("Packs/Kicks/Kick B.wav"), kick(130, 45, 0.25));
+    writeWav(library.getChildFile("Packs/Hats/Hat A.wav"), hat(1, 0.03));
+    // A copy of Kick B elsewhere in the library: listed once.
+    library.getChildFile("Other").createDirectory();
+    REQUIRE(library.getChildFile("Packs/Kicks/Kick B.wav").copyFileTo(library.getChildFile("Other/Kick B.wav")));
+    // A set's project folder inside the library (renders, recordings, imported copies): left out.
+    library.getChildFile("My Song Project/Ableton Project Info").createDirectory();
+    writeWav(library.getChildFile("My Song Project/Samples/Processed/Freeze Kick.wav"), kick(150, 48, 0.2));
+    // The open set's own folder (passed as `exclude`).
+    writeWav(library.getChildFile("Open Set/Samples/Kick Here.wav"), kick(158, 50, 0.18));
+    // The reference lives in the set being edited, outside the library.
+    const auto set = scratchFolder("sonora_sound_library_set");
+    writeWav(set.getChildFile("Samples/Imported/Kick A.wav"), kick(160, 50, 0.18)); // a copy of Kick A
+
+    engine::SimilarSearch search;
+    search.roots = {library.getFullPathName().toStdString()};
+    search.exclude = {library.getChildFile("Open Set").getFullPathName().toStdString()};
+    search.reference = set.getChildFile("Samples/Imported/Kick A.wav").getFullPathName().toStdString();
+    const auto candidates = engine::similarCandidates(search, {});
+    std::set<std::string> names;
+    for (const auto& path : candidates) names.insert(juce::File(path).getFileName().toStdString());
+    CHECK(candidates.size() == 4); // Kick A, Kick B, Hat A, Other/Kick B
+    CHECK(! names.contains("Freeze Kick.wav"));
+    CHECK(! names.contains("Kick Here.wav"));
+
+    const auto cacheFile = set.getChildFile("SoundFeatures.cache");
+    {
+        // The background index describes the library once; a search afterwards only reads the cache.
+        engine::SoundFeatureCache cache(cacheFile);
+        int lastDone = 0, lastTotal = 0, pauses = 0;
+        const int indexed = engine::indexSoundLibrary(search, cache, {}, [&](int done, int total) { lastDone = done; lastTotal = total; },
+                                                      [&] { ++pauses; });
+        CHECK(indexed == 4);
+        CHECK(lastDone == 4); CHECK(lastTotal == 4);
+        CHECK(pauses == 4);
+        CHECK(cache.size() == 4);
+        // A second pass finds everything described already.
+        pauses = 0;
+        CHECK(engine::indexSoundLibrary(search, cache, {}, {}, [&] { ++pauses; }) == 4);
+        CHECK(pauses == 0);
+    }
+    {
+        engine::SoundFeatureCache cache(cacheFile);
+        std::string error;
+        const auto ranked = engine::findSimilarSounds(search, cache, {}, {}, &error);
+        // The library's Kick A is the reference's own copy (same name and size): left out. Kick B once, then the hat.
+        REQUIRE(ranked.size() == 2);
+        CHECK(juce::File(ranked[0].path).getFileName() == "Kick B.wav");
+        CHECK(juce::File(ranked[1].path).getFileName() == "Hat A.wav");
+    }
+    library.deleteRecursively();
+    set.deleteRecursively();
 }
 
 TEST_CASE("replace sample: scopes, warp markers and names follow the reference, one undo step, saved and reloaded")

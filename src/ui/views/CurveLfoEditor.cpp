@@ -55,6 +55,16 @@ bool routeActive(const L& lfo, int destination, int graph)
     return (int) std::lround(lfo.getParameter(L::sourceParam(destination))) == graph
         && std::abs(lfo.getParameter(L::amountParam(destination))) > 0.001f;
 }
+// The rate as the display caption shows it: the synced division (dotted / triplet variants only when enabled) or Hz.
+std::string rateText(const L& lfo)
+{
+    if (lfo.getParameter(L::Sync) <= 0.5f) return formatValue("Hz", {}, lfo.getParameter(L::Hertz));
+    const auto& rates = lfo.parameters()[(size_t) L::Rate].choices;
+    int index = std::clamp((int) std::lround(lfo.getParameter(L::Rate)), 0, L::kRates - 1);
+    const int variant = index % 3;
+    if ((variant == 1 && lfo.getParameter(L::Dotted) < 0.5f) || (variant == 2 && lfo.getParameter(L::Triplet) < 0.5f)) index -= variant;
+    return rates[(size_t) index];
+}
 void strokeCurve(SkCanvas& c, const Graph& graph, const Rect& r, SkColor colour, float width, int steps)
 {
     SkPathBuilder path;
@@ -549,16 +559,7 @@ void CurveLfoEditor::paintDisplay(SkCanvas& c, const Theme& t)
         if (routeActive(*processor_, dest, selected)) routes += std::string(routes.empty() ? "" : ", ") + routeName(dest);
     paint::text(c, "Graph " + std::to_string(selected + 1) + (routes.empty() ? "  (not routed)" : "  >  " + routes),
                 {area.x + 4, area.y + 2, area.w * 0.6f, 14}, paint::withAlpha(scale, 200), small);
-    std::string timing;
-    if (processor_->getParameter(L::Sync) > 0.5f)
-    {
-        const auto& rates = processor_->parameters()[(size_t) L::Rate].choices;
-        int index = std::clamp((int) std::lround(processor_->getParameter(L::Rate)), 0, L::kRates - 1);
-        const int variant = index % 3;
-        if ((variant == 1 && processor_->getParameter(L::Dotted) < 0.5f) || (variant == 2 && processor_->getParameter(L::Triplet) < 0.5f)) index -= variant;
-        timing = rates[(size_t) index];
-    }
-    else timing = formatValue("Hz", {}, processor_->getParameter(L::Hertz));
+    std::string timing = rateText(*processor_);
     if (warpIndex != 3) timing += "  " + processor_->parameters()[(size_t) L::warpParam(selected)].choices[(size_t) warpIndex];
     if (! running) timing += "  (stopped)";
     paint::text(c, timing, {area.x + area.w * 0.4f, area.y + 2, area.w * 0.6f - 4, 14}, paint::withAlpha(scale, 200), small, Align::Right);
@@ -753,6 +754,167 @@ bool CurveLfoEditor::mouseWheel(const MouseEvent& e)
     else return false;
     repaint();
     return true;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Mini face (UI-83)
+
+namespace
+{
+constexpr float kMiniCaption = 13, kMiniFooter = 15, kMiniBar = 6;
+int shownGraph(const L& lfo) { return std::clamp((int) std::lround(lfo.getParameter(L::SelectedGraph)), 0, L::kGraphs - 1); }
+} // namespace
+
+Rect CurveLfoMini::plot() const
+{
+    const Rect screen{0, 0, std::max(40.0f, width() - kMiniBar - 4), std::max(30.0f, height() - kMiniFooter)};
+    return {screen.x + 5, screen.y + kMiniCaption + 2, screen.w - 10, std::max(10.0f, screen.h - kMiniCaption - 7)};
+}
+Rect CurveLfoMini::levelBar() const
+{
+    const auto p = plot();
+    return {width() - kMiniBar, p.y, kMiniBar, p.h};
+}
+float CurveLfoMini::playheadX() const
+{
+    const auto p = plot();
+    return p.x + std::clamp(processor_->displayPosition(shownGraph(*processor_)), 0.0f, 1.0f) * p.w;
+}
+float CurveLfoMini::level() const
+{
+    const int graph = shownGraph(*processor_);
+    return std::clamp(processor_->graph(graph).eval(processor_->displayPosition(graph)), 0.0f, 1.0f);
+}
+
+float CurveLfoMini::settingsSignature() const
+{
+    // Everything the mini face shows besides the playhead: a cheap weighted sum of the atomic parameters it reads.
+    const int graph = shownGraph(*processor_);
+    float sum = (float) graph * 7.0f + (processor_->displayRunning() ? 0.5f : 0.0f);
+    int weight = 1;
+    for (const int p : {(int) L::Sync, (int) L::Rate, (int) L::Dotted, (int) L::Triplet, (int) L::Hertz, (int) L::Depth, L::warpParam(graph)})
+        sum += processor_->getParameter(p) * (float) (weight++ * 13);
+    for (int d = 0; d < L::kDestinations; ++d)
+        sum += processor_->getParameter(L::sourceParam(d)) * (float) ((weight + d) * 3) + processor_->getParameter(L::amountParam(d)) * (float) ((weight + d) * 5 + 1);
+    const auto g = processor_->graph(graph);
+    sum += (float) g.count * 101.0f;
+    for (int i = 0; i < g.count; ++i) sum += g.x[i] * (float) (i + 3) + g.y[i] * (float) (i + 5) * 1.7f + g.curve[i] * (float) (i + 2) * 0.9f;
+    return sum;
+}
+
+void CurveLfoMini::tick()
+{
+    const auto revision = processor_->displayRevision();
+    const float signature = settingsSignature();
+    if (revision != revision_ || std::abs(signature - signature_) > 1e-6f)
+    {
+        revision_ = revision;
+        signature_ = signature;
+        repaint();
+    }
+}
+
+void CurveLfoMini::mouseUp(const MouseEvent& e)
+{
+    if (! e.right && localBounds().contains(e.x, e.y) && onClick) onClick();
+}
+
+void CurveLfoMini::paint(SkCanvas& c, const Theme& t)
+{
+    const int selected = shownGraph(*processor_);
+    const float small = t.metrics.smallFontSize;
+    const auto screen = t.color("RetroDisplayBackground"), scale = t.color("RetroDisplayScaleText");
+    const auto accent = t.color("RetroDisplayForeground");
+    const bool running = processor_->displayRunning();
+    const auto area = plot();
+    const Rect screenArea{0, 0, area.right() + 5, area.bottom() + 5};
+    paint::fill(c, screenArea, screen);
+
+    // Caption: the graph and the destinations it drives.
+    std::string routes;
+    for (int dest : CurveLfoEditor::kRouteOrder)
+        if (routeActive(*processor_, dest, selected)) routes += std::string(routes.empty() ? "" : ", ") + routeName(dest);
+    paint::text(c, "Graph " + std::to_string(selected + 1) + (routes.empty() ? "  (not routed)" : "  >  " + routes),
+                {area.x, 1, area.w, kMiniCaption}, paint::withAlpha(scale, 210), small);
+
+    for (int i = 1; i < 4; ++i)
+    {
+        const float x = area.x + area.w * (float) i / 4;
+        paint::line(c, x, area.y, x, area.bottom(), paint::withAlpha(scale, i == 2 ? 50 : 30));
+    }
+    paint::line(c, area.x, area.centreY(), area.right(), area.centreY(), paint::withAlpha(scale, 40));
+    paint::stroke(c, area, paint::withAlpha(scale, 40));
+
+    // The audio through one cycle, faint behind the curve (the full face's scope, output only).
+    {
+        constexpr int bins = L::kScopeBins, step = 4;
+        float peak = 0.25f;
+        for (int i = 0; i < bins; ++i) peak = std::max(peak, processor_->scopeInput(i));
+        const float half = area.h * 0.5f, cy = area.centreY();
+        SkPathBuilder path;
+        path.moveTo(area.x, cy);
+        for (int i = 0; i < bins; i += step)
+            path.lineTo(area.x + area.w * ((float) i + 0.5f * step) / bins, cy - std::min(1.0f, processor_->scopeOutput(i) / peak) * half);
+        path.lineTo(area.right(), cy);
+        for (int i = bins - step; i >= 0; i -= step)
+            path.lineTo(area.x + area.w * ((float) i + 0.5f * step) / bins, cy + std::min(1.0f, processor_->scopeOutput(i) / peak) * half);
+        path.close();
+        SkPaint wave; wave.setAntiAlias(true); wave.setColor(paint::withAlpha(scale, 48));
+        c.drawPath(path.detach(), wave);
+    }
+
+    // The curve: translucent gradient fill, then the line.
+    const auto graph = processor_->graph(selected);
+    const auto pointX = [&](float phase) { return area.x + std::clamp(phase, 0.0f, 1.0f) * area.w; };
+    const auto pointY = [&](float v) { return area.y + (1 - std::clamp(v, 0.0f, 1.0f)) * area.h; };
+    SkPathBuilder line, fill;
+    constexpr int steps = 160;
+    fill.moveTo(area.x, area.bottom());
+    for (int i = 0; i <= steps; ++i)
+    {
+        const float phase = (float) i / steps;
+        const float x = pointX(phase), y = pointY(graph.eval(phase));
+        if (i == 0) line.moveTo(x, y); else line.lineTo(x, y);
+        fill.lineTo(x, y);
+    }
+    fill.lineTo(area.right(), area.bottom()); fill.close();
+    {
+        const SkPoint ends[2] = {{0, area.y}, {0, area.bottom()}};
+        const SkColor colours[2] = {paint::withAlpha(accent, 64), paint::withAlpha(accent, 6)};
+        SkPaint shade; shade.setAntiAlias(true);
+        shade.setShader(SkGradientShader::MakeLinear(ends, colours, nullptr, 2, SkTileMode::kClamp));
+        c.drawPath(fill.detach(), shade);
+    }
+    SkPaint pen; pen.setAntiAlias(true); pen.setColor(accent); pen.setStrokeWidth(1.6f); pen.setStyle(SkPaint::kStroke_Style);
+    pen.setStrokeJoin(SkPaint::kRound_Join);
+    c.drawPath(line.detach(), pen);
+
+    // Playhead and the current level on the curve; dimmed while the transport is stopped.
+    const float head = playheadX(), value = level();
+    paint::line(c, head, area.y, head, area.bottom(), paint::withAlpha(scale, running ? 170 : 70), 1.0f);
+    {
+        SkPaint glow; glow.setAntiAlias(true);
+        const float y = pointY(value);
+        glow.setColor(paint::withAlpha(accent, running ? 70 : 30)); c.drawCircle(head, y, 5.5f, glow);
+        glow.setColor(running ? accent : paint::withAlpha(accent, 140)); c.drawCircle(head, y, 3, glow);
+    }
+
+    // Level bar: the value the graph sends right now.
+    const auto bar = levelBar();
+    paint::fill(c, bar, screen);
+    const float filled = bar.h * value;
+    paint::fill(c, {bar.x + 1, bar.bottom() - filled, bar.w - 2, filled}, running ? accent : paint::withAlpha(accent, 140));
+
+    // Footer: rate and depth.
+    const auto fg = t.color("ControlForeground"), dim = t.color("TextDisabled");
+    const Rect footer{0, height() - kMiniFooter + 2, width(), kMiniFooter - 2};
+    std::string rate = rateText(*processor_);
+    if (! running) rate += "  (stopped)";
+    paint::text(c, "Rate", footer.withWidth(28), dim, small);
+    paint::text(c, rate, {footer.x + 28, footer.y, footer.w * 0.6f - 28, footer.h}, fg, small);
+    paint::text(c, "Depth", {footer.x + footer.w * 0.6f, footer.y, 34, footer.h}, dim, small);
+    paint::text(c, formatValue("%", {}, processor_->getParameter(L::Depth)), {footer.x + footer.w * 0.6f + 34, footer.y, footer.w * 0.4f - 34, footer.h},
+                fg, small, Align::Right);
 }
 
 } // namespace sonora::ui

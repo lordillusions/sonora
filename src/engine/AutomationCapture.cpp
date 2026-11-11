@@ -36,9 +36,21 @@ void AutomationCapture::begin()
     prevDriven_.clear();
     wasOverridden_.clear();
     series_.clear();
+    moved_.clear();
 }
 
-void AutomationCapture::poll(const model::Song& song, const EngineGraph& graph, double beat)
+void AutomationCapture::noteMoved(const Key& key, bool hostedPlugin, int targetId, double value)
+{
+    for (auto& m : moved_)
+        if (m.track == key.track && m.kind == key.kind && m.index == key.index && m.deviceSlot == key.slot)
+        {
+            m.value = value;
+            return;
+        }
+    moved_.push_back({key.track, key.kind, key.index, key.slot, hostedPlugin, targetId, value});
+}
+
+void AutomationCapture::poll(const model::Song& song, const EngineGraph& graph, double beat, bool record)
 {
     using Kind = AutomationBinding::Kind;
     if (! graph.controls)
@@ -79,6 +91,9 @@ void AutomationCapture::poll(const model::Song& song, const EngineGraph& graph, 
             seen_[key] = current;
             if (! moved)
                 return;
+            noteMoved(key, false, targetId, current);
+            if (! record)
+                return;
             auto& series = series_[key];
             if (series.points.empty())
             {
@@ -111,7 +126,7 @@ void AutomationCapture::poll(const model::Song& song, const EngineGraph& graph, 
             visit(device.enabledTargetId, Kind::DeviceOn, 0, (int) d, proc->isBypassed() ? 0.0 : 1.0);
             if (proc->isHostedPlugin())
             {
-                pollHosted(ci, (int) d, *track, device, *proc, beat); // UI-65: edits the plugin reports
+                pollHosted(ci, (int) d, *track, device, *proc, beat, record); // UI-65: edits the plugin reports
                 continue;
             }
             const auto& infos = proc->parameters();
@@ -129,7 +144,7 @@ void AutomationCapture::poll(const model::Song& song, const EngineGraph& graph, 
 }
 
 void AutomationCapture::pollHosted(int ci, int slot, const model::Track& track, const model::Device& device,
-                                   const devices::DeviceProcessor& processor, double beat)
+                                   const devices::DeviceProcessor& processor, double beat, bool record)
 {
     const int count = (int) processor.parameters().size();
     auto& state = hosted_[{ci, slot}];
@@ -167,6 +182,9 @@ void AutomationCapture::pollHosted(int ci, int slot, const model::Track& track, 
         for (const auto& p : device.pluginParams)
             if (p.parameterId == hostId && p.automationTargetId >= 0) { targetId = p.automationTargetId; break; }
         const Key key{ci, AutomationBinding::Kind::DeviceParam, index, slot};
+        noteMoved(key, true, targetId, edit.value);
+        if (! record)
+            continue;
         auto& series = series_[key];
         if (series.points.empty())
         {
@@ -191,6 +209,18 @@ void AutomationCapture::pollHosted(int ci, int slot, const model::Track& track, 
 }
 
 std::vector<AutomationCapture::TouchedEnvelope> AutomationCapture::finish(const model::Song& song, const EngineGraph& graph, double endBeat)
+{
+    auto out = preview(song, graph, endBeat);
+    hosted_.clear();
+    series_.clear();
+    seen_.clear();
+    prevDriven_.clear();
+    wasOverridden_.clear();
+    moved_.clear();
+    return out;
+}
+
+std::vector<AutomationCapture::TouchedEnvelope> AutomationCapture::preview(const model::Song& song, const EngineGraph& graph, double endBeat) const
 {
     using Kind = AutomationBinding::Kind;
     std::vector<TouchedEnvelope> out;
@@ -232,11 +262,6 @@ std::vector<AutomationCapture::TouchedEnvelope> AutomationCapture::finish(const 
         out.push_back({key.track, std::move(env), key.kind, key.index, key.slot, series.hostedPlugin, series.hostParameterId,
                        series.hostParameterName});
     }
-    hosted_.clear();
-    series_.clear();
-    seen_.clear();
-    prevDriven_.clear();
-    wasOverridden_.clear();
     return out;
 }
 

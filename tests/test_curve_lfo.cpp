@@ -247,6 +247,15 @@ TEST_CASE("curve LFO: graphs, routing and selection survive state capture, .als 
     REQUIRE(again.song->tracks[0].devices.size() == 1);
     const auto& reloaded = again.song->tracks[0].devices[0];
     CHECK(reloaded.type == "SonoraCurveLfo");
+    {
+        // UI-83: a fresh device reads back unfolded; folding it (the chain's mini graph) is its IsExpanded leaf.
+        CHECK_NEAR(reloaded.plain.at("IsExpanded"), 1, 0);
+        song.tracks[0].devices[0].plain["IsExpanded"] = 0;
+        const auto foldedFile = dir.getChildFile("Curve LFO folded.als");
+        REQUIRE(io::saveAls(song, foldedFile, io::AlsSaveOptions{}).ok);
+        auto back = io::loadAls(foldedFile); REQUIRE(back);
+        CHECK_NEAR(back.song->tracks[0].devices[0].plain.at("IsExpanded"), 0, 0);
+    }
     auto restored = devices::createDevice(reloaded, context); auto* back = dynamic_cast<L*>(restored.get()); REQUIRE(back);
     const Graph g = back->graph(7);
     CHECK(g.count == custom.count); CHECK_NEAR(g.curve[0], 0.4, 1e-6);

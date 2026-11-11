@@ -69,12 +69,15 @@ public:
         Draw,           // pencil
         Keyboard,       // piano keys
         FloatWindow,    // window with an outward arrow: open an editor in its own window
+        FoldOpen,       // UI-83: disclosure triangle pointing down (the full face is shown; a click folds it)
+        FoldClosed,     // UI-83: disclosure triangle pointing right (only the compact face is shown; a click unfolds it)
         SessionView,
         ArrangementView,
     };
 
     explicit IconButton(Icon icon) : icon_(icon) {}
     Icon icon() const { return icon_; }
+    void setIcon(Icon icon) { icon_ = icon; }
 
     std::function<bool()> isOn;
     std::function<void()> onClick;

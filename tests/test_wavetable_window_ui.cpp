@@ -8,6 +8,7 @@
 #include "midi/MidiManager.h"
 #include "ui/views/MainLayout.h"
 #include "ui/views/WavetableEditor.h"
+#include "ui/views/WavetableMiniView.h"
 #include "ui/views/WavetableWindowView.h"
 #include "ui/widgets/Buttons.h"
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -27,11 +28,6 @@ template <typename T> std::vector<T*> all(ui::Widget& root)
     std::vector<T*> result;
     collect(root, result);
     return result;
-}
-ui::TextButton* button(ui::Widget& root, const std::string& label)
-{
-    for (auto* b : all<ui::TextButton>(root)) if (b->visible && b->label() == label) return b;
-    return nullptr;
 }
 ui::IconButton* icon(ui::Widget& root, ui::IconButton::Icon kind)
 {
@@ -86,16 +82,18 @@ struct WindowRig
 };
 } // namespace
 
-TEST_CASE("wavetable window: floating by default, Show Editor opens it, Dock and Float toggle the same instance")
+TEST_CASE("wavetable window: floating by default, the mini view opens it, Dock and Float toggle the same instance")
 {
     WindowRig rig;
     const Key lead{10, 42, -1, -1}, pad{11, 42, -1, -1};
     CHECK(rig.context.wavetableKey(0, 0) == lead);
     CHECK(rig.context.isWavetableFloating(lead));
-    CHECK(rig.dockedEditors() == 0); // the chain shows a stub, not the 1080 px dashboard
-    click(*rig.root, button(*rig.root, "Show Editor"));
+    CHECK(rig.dockedEditors() == 0); // the chain shows the mini view (UI-83), not the 1080 px dashboard
+    REQUIRE(all<ui::WavetableMiniView>(*rig.root).size() == 1);
+    click(*rig.root, all<ui::WavetableMiniView>(*rig.root)[0]); // a click on the mini view opens the window
     REQUIRE(rig.opened.size() == 1); CHECK(rig.opened[0] == lead);
-    click(*rig.root, icon(*rig.root, ui::IconButton::Icon::Wrench)); // title wrench, like a plug-in's
+    CHECK(rig.dockedEditors() == 0);
+    click(*rig.root, icon(*rig.root, ui::IconButton::Icon::FloatWindow)); // the title's window icon, as when docked
     REQUIRE(rig.opened.size() == 2); CHECK(rig.opened[1] == lead);
 
     // The floating window: header with the name and Dock, the full dashboard below.
@@ -121,15 +119,22 @@ TEST_CASE("wavetable window: floating by default, Show Editor opens it, Dock and
     REQUIRE(rig.opened.size() == 1); CHECK(rig.opened[0] == lead);
     CHECK(rig.dockedEditors() == 0);
 
-    // The chain stub can dock too; another track's instance keeps its own choice.
+    // The mini view's title arrow docks the full dashboard; the docked one's arrow folds it back without a window.
     rig.closed.clear();
-    click(*rig.root, button(*rig.root, "Dock"));
+    click(*rig.root, icon(*rig.root, ui::IconButton::Icon::FoldClosed));
     CHECK(! rig.context.isWavetableFloating(lead));
     REQUIRE(rig.closed.size() == 1); CHECK(rig.closed[0] == lead);
+    CHECK(rig.dockedEditors() == 1); CHECK(all<ui::WavetableMiniView>(*rig.root).empty());
+    rig.opened.clear();
+    click(*rig.root, icon(*rig.root, ui::IconButton::Icon::FoldOpen));
+    CHECK(rig.context.isWavetableFloating(lead)); CHECK(rig.opened.empty());
+    CHECK(rig.dockedEditors() == 0); CHECK(all<ui::WavetableMiniView>(*rig.root).size() == 1);
+    click(*rig.root, icon(*rig.root, ui::IconButton::Icon::FoldClosed));
     CHECK(rig.dockedEditors() == 1);
+    // Another track's instance keeps its own choice.
     rig.context.selectedTrack = 1;
     CHECK(rig.dockedEditors() == 0);
-    CHECK(button(*rig.root, "Show Editor") != nullptr);
+    CHECK(all<ui::WavetableMiniView>(*rig.root).size() == 1);
 }
 
 TEST_CASE("wavetable window: follows graph rebuilds and id swaps, closes when docked or deleted")

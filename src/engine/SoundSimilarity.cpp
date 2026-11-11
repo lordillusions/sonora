@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <map>
 #include <set>
 
 namespace sonora::engine
@@ -128,6 +130,24 @@ std::vector<std::string> similarCandidates(const SimilarSearch& search, const st
 {
     std::vector<std::string> result;
     std::set<std::string> seen{search.reference};
+    std::vector<juce::File> excluded;
+    for (const auto& folder : search.exclude)
+        if (! folder.empty()) excluded.emplace_back(juce::String::fromUTF8(folder.c_str()));
+    const auto music = juce::File::getSpecialLocation(juce::File::userMusicDirectory);
+    if (search.skipProjects) for (const char* name : {"Music", "iTunes"}) excluded.push_back(music.getChildFile(name));
+    // Whether a folder (or one above it, up to the root being listed) is left out; answers are kept per folder.
+    std::map<std::string, bool> skipped;
+    std::function<bool(const juce::File&, const juce::File&)> skip = [&](const juce::File& folder, const juce::File& root) -> bool {
+        const auto key = folder.getFullPathName().toStdString();
+        if (const auto found = skipped.find(key); found != skipped.end()) return found->second;
+        bool left = false;
+        for (const auto& out : excluded)
+            if (folder == out || folder.isAChildOf(out)) { left = true; break; }
+        if (! left && search.skipProjects && folder.getChildFile("Ableton Project Info").isDirectory()) left = true;
+        if (! left && folder != root && folder.isAChildOf(root)) left = skip(folder.getParentDirectory(), root);
+        skipped[key] = left;
+        return left;
+    };
     for (const auto& root : search.roots)
     {
         const juce::File folder(juce::String::fromUTF8(root.c_str()));
@@ -140,11 +160,49 @@ std::vector<std::string> similarCandidates(const SimilarSearch& search, const st
             if (! isAudioFile(file)) continue;
             auto path = file.getFullPathName().toStdString();
             if (! seen.insert(path).second) continue;
+            if (skip(file.getParentDirectory(), folder)) continue;
             result.push_back(std::move(path));
             if (result.size() >= search.maxCandidates) return result;
         }
     }
     return result;
+}
+
+std::optional<dsp::SoundFeatures> describeCached(juce::AudioFormatManager& formats, SoundFeatureCache& cache, const juce::File& file,
+                                                 double maxSeconds)
+{
+    if (auto cached = cache.find(file)) return cached;
+    auto features = describeSoundFile(formats, file, maxSeconds);
+    // Unreadable / too long files are cached as invalid, so the next search skips them quickly as well.
+    cache.store(file, features ? *features : dsp::SoundFeatures{});
+    return features;
+}
+
+int indexSoundLibrary(const SimilarSearch& library, SoundFeatureCache& cache, const std::function<bool()>& cancelled,
+                      const std::function<void(int, int)>& progress, const std::function<void()>& pause)
+{
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    const auto candidates = similarCandidates(library, cancelled);
+    const int total = (int) candidates.size();
+    if (progress) progress(0, total);
+    int indexed = 0, described = 0;
+    for (int i = 0; i < total; ++i)
+    {
+        if (cancelled && cancelled()) break;
+        const juce::File file(juce::String::fromUTF8(candidates[(size_t) i].c_str()));
+        auto features = cache.find(file);
+        if (! features)
+        {
+            features = describeCached(formats, cache, file, library.maxSeconds);
+            if (++described % 250 == 0) cache.save();
+            if (pause) pause();
+        }
+        if (features && features->valid) ++indexed;
+        if (progress && ((i + 1) % 32 == 0 || i + 1 == total)) progress(i + 1, total);
+    }
+    cache.save();
+    return indexed;
 }
 
 std::vector<SimilarMatch> findSimilarSounds(const SimilarSearch& search, SoundFeatureCache& cache, const std::function<bool()>& cancelled,
@@ -153,13 +211,7 @@ std::vector<SimilarMatch> findSimilarSounds(const SimilarSearch& search, SoundFe
     auto fail = [&](const char* why) { if (error) *error = why; return std::vector<SimilarMatch>{}; };
     juce::AudioFormatManager formats;
     formats.registerBasicFormats();
-    auto describe = [&](const juce::File& file) -> std::optional<dsp::SoundFeatures> {
-        if (auto cached = cache.find(file)) return cached;
-        auto features = describeSoundFile(formats, file, search.maxSeconds);
-        // Unreadable / too long files are cached as invalid, so the next search skips them quickly as well.
-        cache.store(file, features ? *features : dsp::SoundFeatures{});
-        return features;
-    };
+    auto describe = [&](const juce::File& file) { return describeCached(formats, cache, file, search.maxSeconds); };
     const juce::File referenceFile(juce::String::fromUTF8(search.reference.c_str()));
     // The reference is described even when it is long: it is what the user asked about.
     std::optional<dsp::SoundFeatures> reference = cache.find(referenceFile);
@@ -184,9 +236,20 @@ std::vector<SimilarMatch> findSimilarSounds(const SimilarSearch& search, SoundFe
         if (progress && ((i + 1) % 16 == 0 || i + 1 == total)) progress(i + 1, total);
     }
     cache.save();
-    auto ranked = rankBySimilarity(*reference, described, search.maxResults);
-    if (ranked.empty()) return fail("no other samples were found near it");
-    return ranked;
+    // The same file kept in several places (a pack copied into a project, a sample under two Places) is listed once, and
+    // never when it is a copy of the reference itself.
+    auto ranked = rankBySimilarity(*reference, described, search.maxResults * 2);
+    std::set<std::pair<std::string, int64_t>> listed{{referenceFile.getFileName().toLowerCase().toStdString(), referenceFile.getSize()}};
+    std::vector<SimilarMatch> unique;
+    for (auto& match : ranked)
+    {
+        const juce::File file(juce::String::fromUTF8(match.path.c_str()));
+        if (! listed.insert({file.getFileName().toLowerCase().toStdString(), file.getSize()}).second) continue;
+        unique.push_back(std::move(match));
+        if (unique.size() >= search.maxResults) break;
+    }
+    if (unique.empty()) return fail("no other samples were found near it");
+    return unique;
 }
 
 } // namespace sonora::engine

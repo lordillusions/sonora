@@ -267,7 +267,8 @@ private:
     void findSimilarSamples(const std::string& path, const model::ClipLocation& clip, int pendingSwap = 0);
     void swapSimilarSample(const model::ClipLocation& location, int direction);
     void replaceClipSample(const model::ClipLocation& location, const std::string& path, model::SampleScope scope);
-    void chooseClipSample(const model::ClipLocation& location);
+    engine::SimilarSearch librarySearch() const; // LIB-4c: the indexed library (Places, Samples, User Library, packs, Core Library)
+    void restartSoundIndex();                    // (re)builds the library sound index in the background
     // LIB-1 (AppSamplePacks.cpp): the Browser's Packs list and downloads.
     void setUpSamplePacks();
     void publishSamplePacks();
@@ -302,6 +303,30 @@ private:
     void setAutomationWriteMode(bool on);
     void automationWriteTouch(const midi::ControlTarget& control, bool down);
     bool writeCapture_ = false; // the running capture belongs to Automation Write mode (not to a recording)
+    // UI-77c: Automation Write mode with the transport stopped watches every control (plugin windows included) for moves:
+    // the first move shows the control's lane, the lane draws the new breakpoint at once, and it is stored when the control
+    // is let go (or settles, for a plugin's own window).
+    engine::AutomationCapture writeWatch_;
+    bool writeWatching_ = false, writeHeld_ = false;
+    // A new graph, edit (or undo) or set starts the watch over.
+    const engine::EngineGraph* writeWatchGraph_ = nullptr;
+    const model::Song* writeWatchSong_ = nullptr;
+    int writeWatchVersion_ = -1;
+    struct PendingWrite
+    {
+        midi::ControlTarget control;
+        double beat = 0;
+        uint32_t changedAt = 0;
+    };
+    std::optional<PendingWrite> pendingWrite_;
+    std::optional<std::pair<midi::ControlTarget, uint32_t>> lastWriteLane_; // the lane last shown for a move, and when
+    std::optional<midi::ControlTarget> deferredWriteLane_; // Session view: the lane shows when the control is let go
+    bool showWriteLane(const midi::ControlTarget&);
+    std::optional<midi::ControlTarget> controlForMove(const engine::AutomationCapture::Moved&, const engine::EngineGraph&) const;
+    void showMovedLanes(const std::vector<engine::AutomationCapture::Moved>&, const engine::EngineGraph&);
+    void watchStoppedWrites(const engine::EngineGraph&);
+    void commitPendingWrite();
+    void publishCapturePreview(const engine::EngineGraph&);
     engine::AutomationCapture automationCapture_;
     bool automationRecording_ = false, automationOnly_ = false; // automationOnly_: recording without any armed track
     double lastAutomationBeat_ = 0.0;
@@ -438,7 +463,12 @@ private:
     // LIB-4: Show Similar Files decodes many files; its own thread keeps the browser's folder reads (pool_) responsive.
     std::shared_ptr<engine::SoundFeatureCache> soundFeatures_;
     std::shared_ptr<std::atomic<int>> similarGeneration_ = std::make_shared<std::atomic<int>>(0);
-    juce::ThreadPool similarPool_{1}; // last: its job ends first
+    juce::ThreadPool similarPool_{1}; // its job ends before the cache and generation above go away
+    // LIB-4c: the library sound index, one low-priority thread that sleeps between files. Not `background`: macOS throttles
+    // that class's disk reads so hard that a library took over half an hour (448 files in 113 s, measured).
+    std::shared_ptr<std::atomic<int>> soundIndexGeneration_ = std::make_shared<std::atomic<int>>(0);
+    juce::ThreadPool soundIndexPool_{juce::ThreadPoolOptions{}.withThreadName("Sonora sound index").withNumberOfThreads(1)
+                                         .withDesiredThreadPriority(juce::Thread::Priority::low)}; // last: ends first
 };
 
 } // namespace sonora::app

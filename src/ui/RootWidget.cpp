@@ -83,6 +83,9 @@ void RootWidget::dispatchMouseDown(MouseEvent e)
                 break;
             }
         }
+    // UI-77c: the lane of the pressed control shows at once (the app defers it in the Session view until the release).
+    if (writeTouch_) ctx_.automationWriteTouch(*writeTouch_, true);
+    if (! isAlive(captured_)) { captured_ = nullptr; writeTouch_.reset(); return; }
     for (auto* a = captured_; a != nullptr && a != this; a = a->parent())
         a->descendantPressed(captured_);
     if (! isAlive(captured_)) { captured_ = nullptr; return; }

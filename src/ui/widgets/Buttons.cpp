@@ -94,7 +94,9 @@ void IconButton::paint(SkCanvas& c, const Theme& t)
 {
     const bool on = isOn ? isOn() : false;
     const auto r = localBounds();
-    SkColor fg = t.color(flat ? "ControlForeground" : "TransportOffForeground");
+    // UI-83: a disclosure triangle is always bare (title text colour, no button face), so it never reads as Play.
+    const bool bare = flat || icon_ == Icon::FoldOpen || icon_ == Icon::FoldClosed;
+    SkColor fg = t.color(bare ? "ControlForeground" : "TransportOffForeground");
     if (isEnabled && ! isEnabled())
         fg = t.color("TextDisabled");
     const bool transport = icon_ == Icon::Play || icon_ == Icon::Stop || icon_ == Icon::Record;
@@ -123,7 +125,7 @@ void IconButton::paint(SkCanvas& c, const Theme& t)
                           : icon_ == Icon::AutomationWrite ? t.color("AutomationWrite") : t.color("ChosenDefault"));
         fg = t.color("ControlOnForeground");
     }
-    else if (! transport && ! flat)
+    else if (! transport && ! bare)
         paint::fill(c, r, t.color("TransportOffBackground"));
 
     const float s = std::min(r.w, r.h) * (transport ? 0.62f : 0.5f);
@@ -286,6 +288,19 @@ void IconButton::paint(SkCanvas& c, const Theme& t)
             paint::line(c, cx - 1, cy + 1, cx + 5, cy - 5, fg, 1.3f);
             paint::line(c, cx + 1.5f, cy - 5, cx + 5, cy - 5, fg, 1.3f);
             paint::line(c, cx + 5, cy - 5, cx + 5, cy - 1.5f, fg, 1.3f);
+            break;
+        }
+        case Icon::FoldOpen:
+        case Icon::FoldClosed:
+        {
+            // A ring like the device title's hot-swap / save / menu circles (12.3 px, 9 % stroke) around the triangle.
+            constexpr float d = 12.3f;
+            SkPaint ring;
+            ring.setAntiAlias(true); ring.setStyle(SkPaint::kStroke_Style); ring.setStrokeWidth(d * 0.09f); ring.setColor(fg);
+            c.drawCircle(r.centreX(), r.centreY(), d * 0.5f - d * 0.045f, ring);
+            const bool open = icon_ == Icon::FoldOpen;
+            ctl::triangle(c, r.centreX() + (open ? 0.0f : 0.5f), r.centreY() + (open ? 0.5f : 0.0f), 5.6f, 4.6f,
+                          open ? ctl::Dir::Down : ctl::Dir::Right, fg);
             break;
         }
         case Icon::Wrench:

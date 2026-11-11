@@ -72,6 +72,46 @@ bool replaceClipSampleWith(UiContext& ctx, const model::ClipLocation& location, 
     return true;
 }
 
+namespace
+{
+bool canReplace(const UiContext& ctx, const model::ClipLocation& location)
+{
+    const auto* track = ctx.trackAt(location.track);
+    return audioClip(ctx, location) && static_cast<bool>(ctx.replaceClipSample) && ! ctx.recording && ! ctx.recordingRequested
+           && track != nullptr && ! track->frozen;
+}
+} // namespace
+
+bool beginSampleSwap(UiContext& ctx, const model::ClipLocation& location)
+{
+    if (! canReplace(ctx, location)) return false;
+    ctx.sampleSwap = {true, location};
+    ctx.browserVisible = true;
+    const auto path = clipSamplePath(ctx, location);
+    const bool similar = ! path.empty() && showSimilarFiles(ctx, path, location);
+    const auto* clip = audioClip(ctx, location);
+    ctx.statusText = std::string(path.empty() ? "The sample file is missing. " : "")
+                   + "Double-click a sample in the browser (any folder) to put it into \u201C" + (clip ? clip->name : std::string{})
+                   + "\u201D; Escape ends";
+    if (! similar) refresh(ctx);
+    else if (ctx.requestRepaint) ctx.requestRepaint();
+    return true;
+}
+
+void endSampleSwap(UiContext& ctx)
+{
+    if (! ctx.sampleSwap.active) return;
+    ctx.sampleSwap = {};
+    if (ctx.requestRepaint) ctx.requestRepaint();
+}
+
+const model::Clip* sampleSwapClip(const UiContext& ctx)
+{
+    if (! ctx.sampleSwap.active) return nullptr;
+    const auto* clip = audioClip(ctx, ctx.sampleSwap.clip);
+    return clip != nullptr && clip->uid == ctx.sampleSwap.clip.uid ? clip : nullptr;
+}
+
 const char* sampleScopeShortLabel(model::SampleScope scope)
 {
     switch (scope)
@@ -90,8 +130,7 @@ std::vector<MenuAction> sampleFileActions(UiContext& ctx, model::ClipLocation lo
     const bool found = ! path.empty();
     const auto* song = ctx.song;
     auto valid = [&ctx, song, location] { return ctx.song == song && audioClip(ctx, location) != nullptr; };
-    const bool editable = static_cast<bool>(ctx.replaceClipSample) && static_cast<bool>(ctx.chooseClipSample) && ! ctx.recording
-                          && ! ctx.recordingRequested && ! ctx.trackAt(location.track)->frozen;
+    const bool editable = canReplace(ctx, location);
     return {
         {"Show in Browser", [&ctx, valid, location] { if (valid()) showInBrowser(ctx, clipSamplePath(ctx, location)); }, found},
         {"Show in Finder", [&ctx, valid, location] {
@@ -99,7 +138,7 @@ std::vector<MenuAction> sampleFileActions(UiContext& ctx, model::ClipLocation lo
         }, found && static_cast<bool>(ctx.revealInFinder)},
         {"Show Similar Files", [&ctx, valid, location] { if (valid()) showSimilarFiles(ctx, clipSamplePath(ctx, location), location); },
          found && static_cast<bool>(ctx.findSimilarSamples)},
-        {"Replace Sample...", [&ctx, valid, location] { if (valid() && ctx.chooseClipSample) ctx.chooseClipSample(location); }, editable},
+        {"Replace Sample...", [&ctx, valid, location] { if (valid()) beginSampleSwap(ctx, location); }, editable},
     };
 }
 

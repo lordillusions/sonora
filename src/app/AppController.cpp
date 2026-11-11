@@ -859,6 +859,7 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     closePluginWindows();
     closeWavetableWindows();
     ui_.wavetableFloating.clear(); // placements are per document (not saved): a loaded set starts floating again
+    ui_.deviceMinimized.clear();   // UI-83: a loaded set's Curve LFOs fold as their IsExpanded leaf says
     ++ui_.wavetablePlacementRevision;
 
     // 1) Point the UI at nothing so no view touches the old graph while we swap.
@@ -1387,9 +1388,14 @@ void AppController::duplicateSelectedTracks(bool withAutomation)
 void AppController::setAutomationWriteMode(bool on)
 {
     ui_.automationWriteMode = on;
+    if (! on) commitPendingWrite();
+    writeWatching_ = writeHeld_ = false;
+    lastWriteLane_.reset();
+    deferredWriteLane_.reset();
     if (on) automationPoller_.startTimerHz(60);
     else if (writeCapture_) finishAutomationRecording();
     else if (! automationRecording_) automationPoller_.stopTimer();
+    if (! on) ui_.automationPreview.clear();
     ui_.statusText = on ? "Automation Write on: move an orange control to write its automation (Option+Cmd+A leaves)"
                         : "Automation Write off";
     if (ui_.requestRepaint) ui_.requestRepaint();
@@ -1397,15 +1403,146 @@ void AppController::setAutomationWriteMode(bool on)
 
 // UI-77: a control let go in Automation Write mode shows its lane; with the transport stopped its value becomes a breakpoint
 // at the play position (while playing, the capture above records the move).
+// UI-77/77c: pressing a control in Automation Write mode shows its lane at once; letting it go stores the breakpoint the
+// stopped-transport watch drew while it moved (a press without a move writes nothing).
 void AppController::automationWriteTouch(const midi::ControlTarget& control, bool down)
 {
     // No model sync here: it locks the audio callback; the lane reads the control's value from the engine.
-    if (down || ! song_ || ! ui_.automationWriteMode || editingDevices_ || syncingModel_ || exporting_) return;
-    if (ui::AutomationEditor::touchControl(ui_, control) < 0) return;
-    if (! engine_.transport().isPlaying() && ! ui_.recording)
-        if (ui::AutomationEditor::writePoint(ui_, control, engine_.transport().positionBeats()))
-            ui_.statusText = "Wrote a breakpoint at the play position";
+    if (! song_ || ! ui_.automationWriteMode || editingDevices_ || syncingModel_ || exporting_) return;
+    writeHeld_ = down;
+    if (down)
+    {
+        if (! showWriteLane(control)) return;
+        lastWriteLane_ = std::pair{control, juce::Time::getMillisecondCounter()};
+    }
+    else
+    {
+        if (const auto deferred = std::exchange(deferredWriteLane_, std::nullopt))
+            ui::AutomationEditor::touchControl(ui_, *deferred);
+        commitPendingWrite();
+    }
     if (ui_.layoutChanged) ui_.layoutChanged();
+    if (ui_.requestRepaint) ui_.requestRepaint();
+}
+
+// The lane of `control` comes into view in the Arrangement. A control held in the Session view keeps its view until it is let
+// go: switching views under the mouse would hide the fader being dragged.
+bool AppController::showWriteLane(const midi::ControlTarget& control)
+{
+    int track = -1;
+    if (ui::AutomationEditor::targetFor(ui_, control, track) == -1 || track < 0) return false;
+    if (writeHeld_ && ui_.mainView != ui::MainView::Arrangement)
+    {
+        deferredWriteLane_ = control;
+        return true;
+    }
+    return ui::AutomationEditor::touchControl(ui_, control) >= 0;
+}
+
+std::optional<midi::ControlTarget> AppController::controlForMove(const engine::AutomationCapture::Moved& moved,
+                                                                 const engine::EngineGraph& graph) const
+{
+    using K = engine::AutomationBinding::Kind;
+    using C = midi::ControlTarget::Kind;
+    midi::ControlTarget target;
+    target.track = moved.track;
+    switch (moved.kind)
+    {
+        case K::Volume: target.kind = C::TrackVolume; return target;
+        case K::Pan: target.kind = C::TrackPan; return target;
+        case K::Active: target.kind = C::TrackActivator; return target;
+        case K::Send: target.kind = C::TrackSend; target.index = moved.index; return target;
+        case K::DeviceOn: target.kind = C::DeviceOn; target.device = moved.deviceSlot; return target;
+        case K::DeviceParam:
+        {
+            target.kind = C::DeviceParameter;
+            target.device = moved.deviceSlot;
+            if (moved.hostedPlugin) { target.param = std::to_string(moved.index); return target; } // hosted: by index
+            if ((size_t) moved.track >= graph.nodes.size()) return std::nullopt;
+            const auto& processors = graph.nodes[(size_t) moved.track].processorForModelDevice;
+            const auto* proc = (size_t) moved.deviceSlot < processors.size() ? processors[(size_t) moved.deviceSlot] : nullptr;
+            if (proc == nullptr || (size_t) moved.index >= proc->parameters().size()) return std::nullopt;
+            target.param = proc->parameters()[(size_t) moved.index].id;
+            return target;
+        }
+        case K::Tempo: target.kind = C::Tempo; return target;
+    }
+    return std::nullopt;
+}
+
+// UI-77c: the lane of the control moved last comes into view (once per touch: a control that keeps moving does not
+// re-layout the Arrangement every frame).
+void AppController::showMovedLanes(const std::vector<engine::AutomationCapture::Moved>& moved, const engine::EngineGraph& graph)
+{
+    if (moved.empty()) return;
+    const auto control = controlForMove(moved.back(), graph);
+    if (! control) return;
+    const auto now = juce::Time::getMillisecondCounter();
+    if (lastWriteLane_ && lastWriteLane_->first == *control && now - lastWriteLane_->second < 1500)
+    {
+        lastWriteLane_->second = now;
+        return;
+    }
+    if (! showWriteLane(*control)) return;
+    lastWriteLane_ = std::pair{*control, now};
+    if (ui_.layoutChanged) ui_.layoutChanged();
+}
+
+void AppController::watchStoppedWrites(const engine::EngineGraph& graph)
+{
+    if (! writeWatching_ || writeWatchGraph_ != &graph || writeWatchSong_ != song_.get() || writeWatchVersion_ != history_.version())
+    {
+        // Track indices and processors may have changed: values seen before are not comparable any more.
+        writeWatch_.begin();
+        writeWatching_ = true;
+        writeWatchGraph_ = &graph;
+        writeWatchSong_ = song_.get();
+        writeWatchVersion_ = history_.version();
+    }
+    const double beat = engine_.transport().positionBeats();
+    writeWatch_.poll(*song_, graph, beat, false);
+    const auto moved = writeWatch_.takeMoved();
+    showMovedLanes(moved, graph);
+    const auto now = juce::Time::getMillisecondCounter();
+    if (! moved.empty())
+        if (const auto control = controlForMove(moved.back(), graph))
+        {
+            if (pendingWrite_ && ! (pendingWrite_->control == *control)) commitPendingWrite(); // another control now
+            pendingWrite_ = PendingWrite{*control, beat, now};
+            int track = -1, targetId = -1;
+            if (auto env = ui::AutomationEditor::pointEnvelope(ui_, *control, beat, track, targetId))
+            {
+                ui_.automationPreview.clear();
+                ui_.automationPreview[{track, targetId}] = std::move(*env);
+            }
+            if (ui_.requestRepaint) ui_.requestRepaint();
+        }
+    // A plugin's own window has no release the app can see: its move is stored once it rests for a moment.
+    if (pendingWrite_ && ! writeHeld_ && now - pendingWrite_->changedAt > 350) commitPendingWrite();
+}
+
+void AppController::commitPendingWrite()
+{
+    const auto pending = std::exchange(pendingWrite_, std::nullopt);
+    ui_.automationPreview.clear();
+    if (! pending || ! song_ || editingDevices_ || syncingModel_ || exporting_ || ui_.recording) return;
+    if (ui::AutomationEditor::writePoint(ui_, pending->control, pending->beat))
+        ui_.statusText = "Wrote a breakpoint at the play position";
+    if (ui_.requestRepaint) ui_.requestRepaint();
+}
+
+// UI-77c: while Automation Write mode records a play pass, the lanes draw what the take holds so far.
+void AppController::publishCapturePreview(const engine::EngineGraph& graph)
+{
+    ui_.automationPreview.clear();
+    for (auto& touched : automationCapture_.preview(*song_, graph, lastAutomationBeat_))
+    {
+        const int id = touched.envelope.targetId >= 0 ? touched.envelope.targetId
+                       : touched.hostedPlugin ? ui::AutomationEditor::pendingTargetId(touched.deviceSlot, touched.index) : -1;
+        if (id == -1) continue;
+        touched.envelope.targetId = id;
+        ui_.automationPreview[{touched.track, id}] = std::move(touched.envelope);
+    }
     if (ui_.requestRepaint) ui_.requestRepaint();
 }
 
@@ -1437,6 +1574,8 @@ void AppController::pollAutomation()
     if (ui_.automationWriteMode && ! automationRecording_ && ! ui_.recording && ! ui_.recordingRequested
         && engine_.transport().isPlaying() && song_ && graph != nullptr && ! editingDevices_ && ! syncingModel_ && ! exporting_)
     {
+        commitPendingWrite();
+        writeWatching_ = false;
         automationCapture_.begin();
         automationRecording_ = writeCapture_ = true;
         lastAutomationBeat_ = engine_.transport().positionBeats();
@@ -1444,6 +1583,9 @@ void AppController::pollAutomation()
     if (! automationRecording_)
     {
         if (! ui_.automationWriteMode) automationPoller_.stopTimer();
+        else if (song_ && graph != nullptr && ! ui_.recording && ! ui_.recordingRequested && ! editingDevices_ && ! syncingModel_
+                 && ! exporting_ && ! engine_.transport().isPlaying())
+            watchStoppedWrites(*graph); // UI-77c
         return;
     }
     if (! song_ || graph == nullptr || editingDevices_ || syncingModel_)
@@ -1458,6 +1600,9 @@ void AppController::pollAutomation()
     {
         lastAutomationBeat_ = engine_.transport().positionBeats();
         automationCapture_.poll(*song_, *graph, lastAutomationBeat_);
+        const auto moved = automationCapture_.takeMoved();
+        if (writeCapture_) showMovedLanes(moved, *graph);
+        if (automationCapture_.touched()) publishCapturePreview(*graph); // Automation Arm takes draw live too
     }
 }
 
@@ -1467,6 +1612,7 @@ void AppController::finishAutomationRecording()
 {
     automationPoller_.stopTimer();
     automationRecording_ = false;
+    ui_.automationPreview.clear();
     const bool written = std::exchange(writeCapture_, false);
     if (ui_.automationWriteMode) automationPoller_.startTimerHz(60); // keep watching for the next play pass
     (void) written;
@@ -1774,6 +1920,7 @@ void AppController::addBrowserFolder()
             for (const auto& place : ui_.browserPlaces) places.add(juce::String::fromUTF8(place.c_str()));
             settings().setValue("browserPlaces", places.joinIntoString("\n"));
             openBrowserFolder(path);
+            restartSoundIndex(); // LIB-4c: the new Place joins the library sound index
         });
 }
 

@@ -515,17 +515,38 @@ struct UiContext
         wavetableFloating[key] = floating;
         ++wavetablePlacementRevision;
     }
-    // A track-level edit gives the device a fresh id; its placement (and nested ones) follow it.
+    // UI-83: a Sonora Curve LFO shows only its graph in the chain ("mini" face) or its full face, per instance, with the
+    // same keys. (A Prism's mini view is its floating placement above.) Session choices win; without one the device's
+    // IsExpanded leaf (saved with the set) decides, then the default (tests/snapshots can fold every instance).
+    std::map<WavetableKey, bool> deviceMinimized;
+    bool deviceMinimizedDefault = false;
+    bool isDeviceMinimized(const WavetableKey& key, const model::Device* device = nullptr) const
+    {
+        if (const auto found = deviceMinimized.find(key); found != deviceMinimized.end()) return found->second;
+        if (device != nullptr)
+            if (const auto leaf = device->plain.find("IsExpanded"); leaf != device->plain.end()) return leaf->second < 0.5;
+        return deviceMinimizedDefault;
+    }
+    void setDeviceMinimized(const WavetableKey& key, bool minimized)
+    {
+        deviceMinimized[key] = minimized;
+        ++wavetablePlacementRevision; // the chain rebuilds the box with the other face
+    }
+    // A track-level edit gives the device a fresh id; its placement and fold state (and nested ones) follow it.
     void renameWavetableDevice(int trackId, int oldId, int newId)
     {
-        std::map<WavetableKey, bool> renamed;
-        for (const auto& [key, floating] : wavetableFloating)
-        {
-            auto moved = key;
-            if (key.trackId == trackId && key.deviceId == oldId) moved.deviceId = newId;
-            renamed[moved] = floating;
-        }
-        wavetableFloating = std::move(renamed);
+        const auto rename = [&](std::map<WavetableKey, bool>& states) {
+            std::map<WavetableKey, bool> renamed;
+            for (const auto& [key, state] : states)
+            {
+                auto moved = key;
+                if (key.trackId == trackId && key.deviceId == oldId) moved.deviceId = newId;
+                renamed[moved] = state;
+            }
+            states = std::move(renamed);
+        };
+        rename(wavetableFloating);
+        rename(deviceMinimized);
     }
     std::optional<WavetableKey> wavetableKey(int track, int device, int chain = -1, int child = -1) const
     {
@@ -569,12 +590,29 @@ struct UiContext
         uint64_t revision = 0;                // advance after any change
     };
     SimilarSamples similarSamples;
+    // LIB-4c: the library sound index (Places, the Samples folder, User Library, packs, the reference's Core Library sounds)
+    // that Show Similar Files ranks against. Built in the background by the app; `indexed` = sounds described so far.
+    struct SoundIndex
+    {
+        bool running = false;
+        int done = 0, total = 0, indexed = 0;
+    };
+    SoundIndex soundIndex;
+    // LIB-5c: Replace Sample... opens the browser on the clip's similar list with a "Replace sample of <clip>" bar (like the
+    // reference's Hot-Swap): while it is up, double-click / Enter on any sample row (similar list, folders, search results)
+    // puts that file into the clip in the remembered scope. Its x, Escape (with nothing else to clear) or the clip going away
+    // ends it.
+    struct SampleSwap
+    {
+        bool active = false;
+        model::ClipLocation clip{};
+    };
+    SampleSwap sampleSwap;
     std::function<void(const std::string& path, const model::ClipLocation& clip)> findSimilarSamples;
     std::function<void()> cancelSimilarSamples; // also leaves the list
     // LIB-5: replacing a clip's sample. The scope is remembered (This Clip / All Clips on This Track / All Clips in the Set).
     model::SampleScope sampleReplaceScope = model::SampleScope::Clip;
     std::function<void(const model::ClipLocation&, const std::string& path)> replaceClipSample; // decodes on a worker
-    std::function<void(const model::ClipLocation&)> chooseClipSample;                       // "Replace Sample..." file chooser
     // The next (+1) / previous (-1) file of the similar list (searched first when needed) replaces the clip's file.
     std::function<void(const model::ClipLocation&, int direction)> swapSimilarSample;
     // ---- LIB-1 sample packs (docs/SAMPLE_PACKS.md): the Browser's Packs list, filled by app/AppSamplePacks.cpp.
@@ -651,6 +689,10 @@ struct UiContext
     std::function<void(bool)> setAutomationWriteMode; // the app starts/stops the write capture
     // A control was pressed (down) or released in Automation Write mode (RootWidget calls it).
     std::function<void(const midi::ControlTarget&, bool down)> automationWriteTouch;
+    // UI-77c: lanes being written right now, keyed by (control index, target id; AutomationEditor::pendingTargetId for an
+    // unlisted plugin parameter): what the lane will hold when the take ends (playing) or when the moved control settles
+    // (stopped). The lanes draw these instead of the stored envelope; the app fills and clears them.
+    std::map<std::pair<int, int>, model::AutomationEnvelope> automationPreview;
     // UI-76: what goes with an Arrangement clip that is moved, copied or duplicated (Options > Clip Automation):
     // 0 ask when the clip's time range holds automation, 1 always move it with the clip (the reference's default),
     // 2 never (the reference's Lock Envelopes).

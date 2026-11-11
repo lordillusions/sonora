@@ -673,6 +673,9 @@ Device readDevice(const XmlElement* x, std::vector<std::string>& warnings)
         if (d.type == "StringStudio") // DEV-28j: the face's tab is a plain leaf
             if (const auto* leaf = x->getChildByName("CurrentTab"); leaf && leaf->hasAttribute("Value"))
                 d.plain["CurrentTab"] = leaf->getDoubleAttribute("Value");
+        if (d.type == "SonoraCurveLfo") // UI-83: "false" = the chain shows only the graph (the writer keeps the leaf)
+            if (const auto* leaf = x->getChildByName("IsExpanded"); leaf && leaf->hasAttribute("Value"))
+                d.plain["IsExpanded"] = leaf->getStringAttribute("Value").equalsIgnoreCase("false") ? 0.0 : 1.0;
         if (d.type == "Tuner" || d.type == "Delay" || d.type == "StereoGain")
             for (const auto* key : d.type == "Tuner" ? tunerKeys : d.type == "Delay" ? delayKeys : utilityKeys)
                 if (const auto* leaf = x->getChildByName(key); leaf && leaf->hasAttribute("Value"))

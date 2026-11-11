@@ -31,6 +31,7 @@
 #include "ui/views/HushFace.h"
 #include "devices/native/HushSession.h"
 #include "ui/views/WavetableEditor.h"
+#include "ui/views/WavetableMiniView.h"
 #include "engine/EngineGraph.h"
 #include "plugins/PluginDevice.h"
 #include "ui/Controls.h"
@@ -199,8 +200,10 @@ private:
 class DeviceBox : public Widget
 {
 public:
+    // `compact` (UI-83): a Sonora Prism floats its dashboard and the chain shows its mini view; a Sonora Curve LFO shows
+    // only its graph. The chain rebuilds the box when the choice changes (UiContext::wavetablePlacementRevision).
     DeviceBox(const model::Device& model, DeviceProcessor* proc, int trackIndex, int deviceIndex, int chain = -1, int child = -1,
-              bool floatingWavetable = false)
+              bool compact = false)
         : model_(model), proc_(proc), trackIndex_(trackIndex), deviceIndex_(deviceIndex), chain_(chain), child_(child)
     {
         if (model_.plugin)
@@ -252,7 +255,16 @@ public:
             return;
         if (auto* lfo = dynamic_cast<devices::CurveLfo*>(proc_))
         {
-            curveLfo_ = add<CurveLfoEditor>(lfo, [this](Widget* widget, int parameter) { tag(widget, parameter); });
+            // UI-83: the title arrow folds the face to its live graph and back.
+            if (compact)
+            {
+                curveLfoMini_ = add<CurveLfoMini>(lfo);
+                curveLfoMini_->onClick = [this] { setCurveLfoMinimized(false); };
+            }
+            else curveLfo_ = add<CurveLfoEditor>(lfo, [this](Widget* widget, int parameter) { tag(widget, parameter); });
+            foldButton_ = add<IconButton>(compact ? IconButton::Icon::FoldClosed : IconButton::Icon::FoldOpen);
+            foldButton_->tooltip = compact ? "Show the whole device" : "Show only the graph";
+            foldButton_->onClick = [this, compact] { setCurveLfoMinimized(! compact); };
             return;
         }
         if (auto* kick = dynamic_cast<devices::Kickstract*>(proc_)) // PLG-17
@@ -297,20 +309,26 @@ public:
         if (auto* lfo = dynamic_cast<devices::LfoShaper*>(proc_)) lfoCurve_ = add<LfoCurveEditor>(lfo);
         if (auto* synth = dynamic_cast<devices::WavetableSynth*>(proc_))
         {
-            // UI-27: the dashboard floats in its own window unless this instance was docked; the chain keeps a stub.
-            if (floatingWavetable)
+            // UI-27 / UI-83: the dashboard floats in its own window unless this instance was docked; the chain then shows
+            // the mini view. The title arrow docks the full dashboard (or folds it back); the window icon opens the window.
+            if (compact)
             {
-                wavetableFloating_ = true;
-                wavetableOpen_ = add<IconButton>(IconButton::Icon::Wrench);
+                wavetableMini_ = add<WavetableMiniView>(synth);
+                wavetableMini_->onClick = [this] { showWavetableWindow(); };
+                foldButton_ = add<IconButton>(IconButton::Icon::FoldClosed);
+                foldButton_->tooltip = "Show the whole device in the chain";
+                foldButton_->onClick = [this] { placeWavetable(false); };
+                wavetableOpen_ = add<IconButton>(IconButton::Icon::FloatWindow);
+                wavetableOpen_->tooltip = "Open the editor in its own window";
                 wavetableOpen_->onClick = [this] { showWavetableWindow(); };
-                wavetableShow_ = add<TextButton>("Show Editor", TextButton::Style::Plain);
-                wavetableShow_->onClick = [this] { showWavetableWindow(); };
-                wavetableDock_ = add<TextButton>("Dock", TextButton::Style::Plain);
-                wavetableDock_->onClick = [this] { placeWavetable(false); };
                 return;
             }
             wavetable_ = add<WavetableEditor>(synth, trackIndex, deviceIndex, chain, child);
+            foldButton_ = add<IconButton>(IconButton::Icon::FoldOpen);
+            foldButton_->tooltip = "Show the compact view";
+            foldButton_->onClick = [this] { placeWavetable(true, false); };
             wavetableFloat_ = add<IconButton>(IconButton::Icon::FloatWindow);
+            wavetableFloat_->tooltip = "Open the editor in its own window";
             wavetableFloat_->onClick = [this] { placeWavetable(true); };
             return;
         }
@@ -638,16 +656,28 @@ public:
     const std::array<float, 2>& meterRms() const { return meterRms_; }
     IconButton* wavetableFloatButton() const { return wavetableFloat_; }
 
-    // Floating <-> docked for this Wavetable instance. The chain rebuilds on the next layout (placement revision), so
-    // nothing here touches this box after the change.
-    void placeWavetable(bool floating)
+    // Floating (the chain shows the mini view) <-> docked for this Wavetable instance; `openWindow` false folds the docked
+    // dashboard without opening the window. The chain rebuilds on the next layout (placement revision), so nothing here
+    // touches this box after the change.
+    void placeWavetable(bool floating, bool openWindow = true)
     {
         auto& x = ctx();
         const auto key = x.wavetableKey(trackIndex_, deviceIndex_, chain_, child_);
         if (! key) return;
         x.setWavetableFloating(*key, floating);
-        if (floating && x.openWavetableWindow) x.openWavetableWindow(*key);
+        if (floating && openWindow && x.openWavetableWindow) x.openWavetableWindow(*key);
         if (! floating && x.closeWavetableWindow) x.closeWavetableWindow(*key);
+        if (x.requestRepaint) x.requestRepaint();
+        repaint();
+    }
+    // UI-83: the Curve LFO's fold state for this instance; the device's IsExpanded leaf saves it with the set.
+    void setCurveLfoMinimized(bool minimized)
+    {
+        auto& x = ctx();
+        const auto key = x.wavetableKey(trackIndex_, deviceIndex_, chain_, child_);
+        if (! key) return;
+        x.setDeviceMinimized(*key, minimized);
+        if (x.setDeviceViewValue) x.setDeviceViewValue(trackIndex_, deviceIndex_, chain_, child_, "IsExpanded", minimized ? 0.0 : 1.0);
         if (x.requestRepaint) x.requestRepaint();
         repaint();
     }
@@ -673,9 +703,10 @@ public:
         if (effectPanel_ && ! expandedControls_) return effectPanel_->preferredWidth() + 8;
         if (lfoCurve_) return 730;
         if (curveLfo_) return CurveLfoEditor::kPreferredWidth + 12;
+        if (curveLfoMini_) return CurveLfoMini::kWidth + 12;
         if (kickstract_) return KickstractFace::kPreferredWidth + 12;
         if (hush_) return (std::max(40.0f, (height() > kTitle ? height() - kTitle : ReferenceFace::kDefaultBody) - 12)) * HushFace::kWidth / HushFace::kHeight + 12;
-        if (wavetableFloating_) return 150;
+        if (wavetableMini_) return WavetableMiniView::kWidth + 12;
         if (wavetable_) return WavetableEditor::kPreferredWidth + 12;
         if (proc_ == nullptr)
             return 150;
@@ -716,7 +747,9 @@ public:
             resynth_->setBounds({r.x, r.y, ResynthEditor::preferredWidth, ResynthEditor::preferredHeight});
             return;
         }
+        if (foldButton_) foldButton_->setBounds({width() - kTitleIcons - 21, 1, 17, 16}); // where Hush has its window icon
         if (curveLfo_) { curveLfo_->setBounds(r); return; }
+        if (curveLfoMini_) { curveLfoMini_->setBounds(r); return; }
         if (kickstract_) { kickstract_->setBounds(r); return; }
         if (hush_)
         {
@@ -742,16 +775,15 @@ public:
             for (auto& group : groups_) for (auto* widget : group.widgets) widget->visible = expandedControls_;
             if (! expandedControls_) { shapeSignature_ = groupSignature(); effectPanel_->setBounds(r); return; }
         }
-        if (wavetableFloating_)
+        if (wavetableMini_)
         {
-            wavetableOpen_->setBounds({width() - kTitleIcons - 21, 1, 17, 16});
-            wavetableShow_->setBounds({r.x, r.y + 22, r.w, 18});
-            wavetableDock_->setBounds({r.x, r.y + 44, r.w, 18});
+            wavetableOpen_->setBounds({width() - kTitleIcons - 40, 1, 17, 16});
+            wavetableMini_->setBounds(r);
             return;
         }
         if (wavetable_)
         {
-            wavetableFloat_->setBounds({width() - kTitleIcons - 21, 1, 17, 16});
+            wavetableFloat_->setBounds({width() - kTitleIcons - 40, 1, 17, 16});
             wavetable_->setBounds(r);
             return;
         }
@@ -878,9 +910,13 @@ public:
         const SkColor band = picked ? paint::mix(t.color("SurfaceHighlight"), t.color("ChosenAlternative"), 0.2f) : t.color("SurfaceHighlight");
         paint::fillRounded(c, title, 3, band); // rounded top corners, square where it meets the body
         paint::fill(c, {title.x, title.y + 3, title.w, title.h - 3}, band);
+        // UI-83: title icons left of the hot-swap / save / menu circles (fold arrow, window) end the name before them.
+        float titleWidgets = width() - kTitleIcons;
+        for (const Widget* icon : {static_cast<const Widget*>(foldButton_), static_cast<const Widget*>(wavetableOpen_), static_cast<const Widget*>(wavetableFloat_)})
+            if (icon != nullptr) titleWidgets = std::min(titleWidgets, icon->bounds().x);
         const Rect nameRect = pluginPanel_ ? Rect{52, 0, width() - 56 - kTitleIcons, kTitle}
                               : rackFace_  ? Rect{20, 0, std::max(10.0f, randButton_->bounds().x - 24), kTitle}
-                                           : Rect{20, 0, width() - 24 - kTitleIcons, kTitle};
+                                           : Rect{20, 0, std::max(10.0f, titleWidgets - 24), kTitle};
         if (pluginPanel_)
         {
             ctl::triangle(c, 24, 9, 7, 6, ctl::Dir::Down, t.color("ControlForeground"));
@@ -920,10 +956,6 @@ public:
             paint::text(c, deactivated ? "Activate Track to load it" : model_.type, r.reduced(8, 0).translated(0, 22).withHeight(40), t.color("TextDisabled"),
                         t.metrics.smallFontSize);
         }
-        else if (wavetableFloating_)
-        {
-            paint::text(c, "Editor in its own window", r.reduced(6, 6).withHeight(16), t.color("TextDisabled"), t.metrics.smallFontSize);
-        }
         else if (proc_ && proc_->name().find("(placeholder)") != std::string::npos)
         {
             paint::text(c, "Placeholder sine synth", r.reduced(8, 0).withHeight(30), t.color("ChosenAlert"),
@@ -951,13 +983,14 @@ private:
     std::vector<TextButton*> sampleTabs_;
     LfoCurveEditor* lfoCurve_ = nullptr;
     CurveLfoEditor* curveLfo_ = nullptr;
+    CurveLfoMini* curveLfoMini_ = nullptr; // UI-83: folded to its graph
+    IconButton* foldButton_ = nullptr;     // UI-83: the title arrow (Curve LFO, Prism)
     KickstractFace* kickstract_ = nullptr;
     HushFace* hush_ = nullptr;
     IconButton* hushWindow_ = nullptr;
     WavetableEditor* wavetable_ = nullptr;
-    bool wavetableFloating_ = false;
+    WavetableMiniView* wavetableMini_ = nullptr; // UI-83: floating dashboard, compact view in the chain
     IconButton *wavetableFloat_ = nullptr, *wavetableOpen_ = nullptr;
-    TextButton *wavetableShow_ = nullptr, *wavetableDock_ = nullptr;
     TextButton* pageButton_ = nullptr;
     TextButton* onButton_ = nullptr;
     IconButton* editorButton_ = nullptr;
@@ -999,8 +1032,9 @@ void paintChainMeter(SkCanvas& c, const Theme& t, const Rect& r, const std::arra
 }
 } // namespace
 
-// UI-27: a Sonora Prism shows a stub in the chain while its editor floats in its own window.
-static bool floatsWavetable(const UiContext& x, int device, int chain, int child)
+// UI-27 / UI-83: a Sonora Prism shows its mini view in the chain while its editor floats in its own window; a Sonora
+// Curve LFO shows only its graph while folded.
+static bool compactDevice(const UiContext& x, int device, int chain, int child)
 {
     const auto* track = x.trackAt(x.selectedTrack);
     if (track == nullptr || device < 0 || (size_t) device >= track->devices.size()) return false;
@@ -1010,9 +1044,10 @@ static bool floatsWavetable(const UiContext& x, int device, int chain, int child
         if ((size_t) chain >= model->chains.size() || child < 0 || (size_t) child >= model->chains[(size_t) chain].devices.size()) return false;
         model = &model->chains[(size_t) chain].devices[(size_t) child];
     }
-    if (model->type != "SonoraWavetable") return false;
+    if (model->type != "SonoraWavetable" && model->type != "SonoraCurveLfo") return false;
     const auto key = x.wavetableKey(x.selectedTrack, device, chain, child);
-    return key && x.isWavetableFloating(*key);
+    if (! key) return false;
+    return model->type == "SonoraWavetable" ? x.isWavetableFloating(*key) : x.isDeviceMinimized(*key, model);
 }
 
 void DetailView::rebuild()
@@ -1069,7 +1104,7 @@ void DetailView::rebuild()
     {
         DeviceProcessor* proc = node && i < node->processorForModelDevice.size() ? node->processorForModelDevice[i]
                                                                                   : nullptr;
-        boxes_.push_back(add<DeviceBox>(track->devices[i], proc, x.selectedTrack, (int) i, -1, -1, floatsWavetable(x, (int) i, -1, -1)));
+        boxes_.push_back(add<DeviceBox>(track->devices[i], proc, x.selectedTrack, (int) i, -1, -1, compactDevice(x, (int) i, -1, -1)));
         const auto& model = track->devices[i];
         auto* rack = dynamic_cast<devices::RackProcessor*>(proc);
         if (rack && model.id == x.selectedRackId && x.selectedRackChain >= 0)
@@ -1081,7 +1116,7 @@ void DetailView::rebuild()
                     const auto& processors = rack->chains()[ci].processorForModelDevice;
                     auto* child = di < processors.size() ? processors[di] : nullptr;
                     auto* box = add<DeviceBox>(model.chains[ci].devices[di], child, x.selectedTrack, (int) i, (int) ci, (int) di,
-                                               floatsWavetable(x, (int) i, (int) ci, (int) di));
+                                               compactDevice(x, (int) i, (int) ci, (int) di));
                     box->addMapOverlay(); // UI-66: the rack's Map mode
                     boxes_.push_back(box);
                 }

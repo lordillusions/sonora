@@ -13,6 +13,7 @@
 #include "ui/views/AutomationEditor.h"
 
 #include <juce_core/juce_core.h>
+#include <juce_graphics/juce_graphics.h>
 
 #include <cmath>
 
@@ -276,6 +277,42 @@ TEST_CASE("automation write (UI-77): a released control shows its lane and write
     rig.root->dispatchMouseDown(e); rig.root->dispatchMouseUp(e);
     CHECK(touches == 0);
     rig.ctx.automationWriteMode = true;
-    rig.root->dispatchMouseDown(e); rig.root->dispatchMouseUp(e);
-    CHECK(touches == 1);
+    rig.root->dispatchMouseDown(e);
+    CHECK(touches == 100); // UI-77c: pressed: the lane shows at once
+    rig.root->dispatchMouseUp(e);
+    CHECK(touches == 101);
+}
+
+TEST_CASE("automation write (UI-77c): the lane being written draws its preview, the point the stopped watch would store")
+{
+    Rig rig;
+    midi::ControlTarget pan;
+    pan.kind = midi::ControlTarget::Kind::TrackPan; pan.track = 0;
+    (*rig.graph.controls)[0].pan.store(-1.0f);
+    int track = -1, target = -1;
+    auto env = ui::AutomationEditor::pointEnvelope(rig.ctx, pan, 12, track, target);
+    REQUIRE(env.has_value());
+    CHECK(track == 0); CHECK(target == panTarget);
+    CHECK(rig.song.tracks[0].automation[0].points.size() == 3); // nothing stored yet
+    CHECK_NEAR(model::laneValueAt(*env, 12, {model::AutomationLaw::Linear, -1, 1}), -1.0, 1e-9);
+    // Drawn from the preview (in the record colour), not from the stored lane.
+    const auto stored = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_write_stored.png");
+    const auto live = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_write_preview.png");
+    REQUIRE(gfx::renderToPng(*rig.root, 900, 70, 1, stored.getFullPathName().toStdString()));
+    rig.ctx.automationPreview[{0, panTarget}] = *env;
+    REQUIRE(gfx::renderToPng(*rig.root, 900, 70, 1, live.getFullPathName().toStdString()));
+    const auto a = juce::ImageFileFormat::loadFrom(stored), b = juce::ImageFileFormat::loadFrom(live);
+    REQUIRE(a.isValid()); REQUIRE(b.isValid());
+    // Beat 10 (between 8 at the top and 12 at the bottom): the stored lane holds 1.0 there, the preview passes the middle.
+    const int px = (int) Rig::x(10.0), mid = (int) Rig::y(0.0);
+    auto reddish = [](juce::Colour c) { return c.getRed() > 180 && c.getGreen() < 140 && c.getBlue() < 140; };
+    bool before = false, after = false;
+    for (int dy = -3; dy <= 3; ++dy)
+    {
+        before = before || reddish(a.getPixelAt(px, mid + dy));
+        after = after || reddish(b.getPixelAt(px, mid + dy));
+    }
+    CHECK(! before);
+    CHECK(after);
+    stored.deleteFile(); live.deleteFile();
 }

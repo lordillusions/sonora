@@ -91,7 +91,6 @@ struct Rig
         };
         ctx.cancelSimilarSamples = [this] { ++cancels; };
         ctx.replaceClipSample = [this](const model::ClipLocation& at, const std::string& path) { replaced.push_back({at.uid, path}); };
-        ctx.chooseClipSample = [](const model::ClipLocation&) {};
         ctx.swapSimilarSample = [this](const model::ClipLocation&, int direction) { swaps.push_back(direction); };
         root = std::make_unique<ui::MainLayout>(ctx);
         root->setBounds({0, 0, 1300, 800});
@@ -294,4 +293,59 @@ TEST_CASE("sample editor: the scope switch, swap arrows and a dropped sample rep
     rig.root->dispatchMouseUp(mouseAt(x, y));
     REQUIRE(rig.replaced.size() == 1);
     CHECK(rig.replaced[0].second == rig.files.path("Drums/Hat.wav"));
+}
+
+TEST_CASE("replace sample (LIB-5c): the browser opens on the similar list under a replace bar that any sample row answers")
+{
+    Rig rig;
+    const auto location = rig.ctx.selectedClipLocation();
+    rig.ctx.browserVisible = false;
+    for (const auto& action : ui::clipContextActions(rig.ctx, location))
+        if (action.label == "Replace Sample...") action.run();
+    CHECK(rig.ctx.browserVisible);
+    CHECK(rig.ctx.sampleSwap.active);
+    REQUIRE(rig.similarSearches.size() == 1); // it starts on the samples that sound like the clip's file
+    rig.root->layout();
+    rig.tick();
+    auto& browser = rig.browser();
+    REQUIRE(browser.swapBar());
+    CHECK(browser.similarList());
+    CHECK(browser.similarChipBounds().y >= browser.swapBarBounds().bottom()); // the similar chip sits under the bar
+    CHECK(browser.listRowBounds(0).y > browser.similarChipBounds().bottom());
+    rig.png("sonora_replace_bar.png");
+    // A similar match replaces the clip's file; the bar stays for the next try.
+    rig.click(browser, browser.listRowBounds(0), 2);
+    REQUIRE(rig.replaced.size() == 1);
+    CHECK(rig.replaced[0].second == rig.files.path("Drums/Kick 2.wav"));
+    CHECK(browser.swapBar());
+    // Any folder: the similar list goes, the bar stays, a double-clicked sample row replaces (instead of auditioning).
+    browser.showFolder(rig.files.root.getChildFile("Drums").getFullPathName().toStdString());
+    rig.root->layout();
+    rig.tick();
+    CHECK(! browser.similarList());
+    CHECK(browser.swapBar());
+    const int hat = browser.rowIndex("Hat.wav");
+    REQUIRE(hat >= 0);
+    rig.click(browser, browser.listRowBounds(hat), 2);
+    REQUIRE(rig.replaced.size() == 2);
+    CHECK(rig.replaced[1].second == rig.files.path("Drums/Hat.wav"));
+    CHECK(rig.replaced[1].first == location.uid);
+    // Escape with nothing else to clear ends it; the bar's x too.
+    rig.root->dispatchKey(keyCode(juce::KeyPress::escapeKey));
+    CHECK(! rig.ctx.sampleSwap.active);
+    REQUIRE(ui::beginSampleSwap(rig.ctx, location));
+    rig.root->layout();
+    rig.tick();
+    const auto close = browser.swapCloseBounds();
+    REQUIRE(! close.isEmpty());
+    rig.click(browser, close);
+    CHECK(! rig.ctx.sampleSwap.active);
+    CHECK(! browser.similarList()); // the clip's similar list goes with it
+    // The clip going away ends it too.
+    REQUIRE(ui::beginSampleSwap(rig.ctx, location));
+    rig.song->tracks[1].arrangementClips.clear();
+    rig.tick();
+    CHECK(! rig.ctx.sampleSwap.active);
+    // A MIDI clip or nothing to replace: no bar.
+    CHECK(! ui::beginSampleSwap(rig.ctx, location));
 }

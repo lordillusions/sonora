@@ -55,6 +55,7 @@ public:
     devices::CurveLfo& lfo() { return lfo_; }
     const devices::CurveLfo& lfo() const { return lfo_; }
     std::vector<std::string> buildLog; // load notes, newest last
+    bool editorMini = false; // UI-83: the window shows only the graph (per instance while the host keeps it; not in the state)
 
     // ---- ParameterOwner: plain values of the host parameters
     float parameterValue(int index) const override;

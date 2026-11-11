@@ -57,6 +57,11 @@ public:
     // LIB-4: the "Similar to" chip above the similar list (its right end leaves the list).
     bool similarList() const;
     Rect similarChipBounds() const;
+    // LIB-5c: the "Replace sample of <clip>" bar above it while UiContext::sampleSwap is up: its scope switch and x.
+    bool swapBar() const;
+    Rect swapBarBounds() const;
+    Rect swapScopeBounds() const;
+    Rect swapCloseBounds() const;
     bool wantsTextInput() const override { return searchFocused_ || tagEditing_; }
     // Audition lives in the right-hand content column. Shared with hit tests.
     Rect previewButton() const;
@@ -136,7 +141,8 @@ private:
     void leaveSimilar();
     void syncSimilar();                // a new similar list: selection and scroll start over
     void revealPending();              // LIB-3
-    float similarRowHeight() const;
+    float similarRowHeight() const; // the swap bar and the similar chip rows
+    std::string swapScopeLabel() const;
     void appendSimilar(std::vector<Item>& result) const;
     Rect sidebarArea() const;
     Rect listArea() const;

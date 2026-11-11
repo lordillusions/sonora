@@ -5,6 +5,7 @@
 #include "plugin/CurveLfoPlugin.h"
 #include "plugin/CurveLfoPluginEditor.h"
 #include "ui/views/CurveLfoEditor.h"
+#include "ui/widgets/Buttons.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <cmath>
@@ -269,6 +270,31 @@ TEST_CASE("curve lfo plugin: the editor shows the device face over the plug-in's
     view.layout();
     const auto png = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_curve_lfo_plugin.png");
     CHECK(gfx::renderToPng(view, window->getWidth(), window->getHeight(), 2.0f, png.getFullPathName().toStdString()));
+
+    // UI-83: the header arrow folds the window to the graph and back (a real click on it).
+    const auto clickOn = [&](ui::Widget* widget) {
+        REQUIRE(widget != nullptr);
+        const auto r = widget->boundsInRoot();
+        ui::MouseEvent e; e.x = r.centreX(); e.y = r.centreY();
+        view.dispatchMouseDown(e); view.dispatchMouseUp(e);
+        view.setBounds({0, 0, (float) window->getWidth(), (float) window->getHeight()});
+        view.layout();
+    };
+    const int fullWidth = window->getWidth();
+    clickOn(view.foldButton());
+    CHECK(view.showsMini()); CHECK(p.editorMini);
+    CHECK(! view.editor()->visible); CHECK(view.mini()->visible);
+    CHECK(window->getWidth() == plugin::CurveLfoPluginEditor::kMiniWidth);
+    CHECK(window->getHeight() == plugin::CurveLfoPluginEditor::kMiniHeight);
+    CHECK(view.foldButton()->icon() == ui::IconButton::Icon::FoldClosed);
+    const auto miniPng = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_curve_lfo_plugin_mini.png");
+    CHECK(gfx::renderToPng(view, window->getWidth(), window->getHeight(), 2.0f, miniPng.getFullPathName().toStdString()));
+    clickOn(view.foldButton());
+    CHECK(! view.showsMini()); CHECK(! p.editorMini);
+    CHECK(window->getWidth() == fullWidth);
+    clickOn(view.foldButton());
+    clickOn(view.mini()); // a click on the graph unfolds too
+    CHECK(! view.showsMini()); CHECK(window->getWidth() == fullWidth);
     p.editorBeingDeleted(editor.get()); // what a host's wrapper does
     editor.reset();
 }

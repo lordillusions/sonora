@@ -19,6 +19,7 @@
 #include <map>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace sonora::devices
@@ -35,9 +36,22 @@ class AutomationCapture
 {
 public:
     void begin();
-    // Message thread; `beat` is the transport position.
-    void poll(const model::Song& song, const EngineGraph& graph, double beat);
+    // Message thread; `beat` is the transport position. With `record` false (UI-77c: Automation Write mode with the
+    // transport stopped) moves are only reported through takeMoved(), nothing is recorded.
+    void poll(const model::Song& song, const EngineGraph& graph, double beat, bool record = true);
     bool touched() const { return ! series_.empty(); }
+
+    // UI-77c: the controls moved by hand since the last call, in the order they were noticed (each once).
+    struct Moved
+    {
+        int track = 0;
+        AutomationBinding::Kind kind = AutomationBinding::Kind::Volume;
+        int index = 0, deviceSlot = 0;
+        bool hostedPlugin = false;
+        int targetId = -1; // -1: a plugin parameter the set does not list yet
+        double value = 0;
+    };
+    std::vector<Moved> takeMoved() { return std::exchange(moved_, {}); }
 
     struct TouchedEnvelope
     {
@@ -51,6 +65,8 @@ public:
     };
     // The envelopes to store (existing lanes with the recorded stretch replaced) and forget what was captured.
     std::vector<TouchedEnvelope> finish(const model::Song& song, const EngineGraph& graph, double endBeat);
+    // UI-77c: what finish() would store if the take ended at `beat`, without ending it (the lanes draw it while recording).
+    std::vector<TouchedEnvelope> preview(const model::Song& song, const EngineGraph& graph, double beat) const;
 
 private:
     struct Key
@@ -79,7 +95,9 @@ private:
         std::vector<uint32_t> serials;
     };
     void pollHosted(int ci, int slot, const model::Track& track, const model::Device& device,
-                    const devices::DeviceProcessor& processor, double beat);
+                    const devices::DeviceProcessor& processor, double beat, bool record);
+    void noteMoved(const Key& key, bool hostedPlugin, int targetId, double value);
+    std::vector<Moved> moved_;
     std::map<std::pair<int, int>, HostedState> hosted_; // (control index, device slot)
     std::map<Key, double> seen_, prevDriven_;
     std::map<Key, bool> wasOverridden_;

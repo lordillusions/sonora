@@ -29,6 +29,13 @@ void leaveSimilarFiles(UiContext&);
 // Replaces the clip's sample with `path` in the remembered scope (UiContext::sampleReplaceScope).
 bool replaceClipSampleWith(UiContext&, const model::ClipLocation&, const std::string& path);
 
+// LIB-5c "Replace Sample...": opens the browser with the clip as the replace target (UiContext::sampleSwap) and lists the
+// samples that sound like its file. False when the clip cannot take another sample now (MIDI, frozen, recording).
+bool beginSampleSwap(UiContext&, const model::ClipLocation&);
+void endSampleSwap(UiContext&);
+// The replace target's clip while the bar is up, nullptr when it is not or the clip went away (the browser then ends it).
+const model::Clip* sampleSwapClip(const UiContext&);
+
 // "Show in Browser", "Show in Finder", "Show Similar Files", "Replace Sample..." for an audio clip (empty for MIDI clips).
 std::vector<MenuAction> sampleFileActions(UiContext&, model::ClipLocation);
 

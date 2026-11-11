@@ -418,7 +418,11 @@ void AutomationEditor::paint(SkCanvas& c, const Theme& t)
     auto it = std::find_if(ts.begin(), ts.end(), [&](const Target& a) { return a.id == targetId_; });
     if (it == ts.end()) it = ts.begin();
     const auto& target = *it;
-    const auto env = dragging_ || drawing_ || (gesture_ != Gesture::None && gesture_ != Gesture::Range) ? preview_ : envelope(target);
+    // UI-77c: a lane being written in Automation Write mode shows the take so far.
+    const auto live = ctx().automationPreview.find({track_, target.id});
+    const bool writing = live != ctx().automationPreview.end();
+    const auto env = dragging_ || drawing_ || (gesture_ != Gesture::None && gesture_ != Gesture::Range) ? preview_
+                     : writing ? live->second : envelope(target);
     const engine::AutomationLane lane(env, target.law, target.min, target.max);
     const auto r = plot();
     c.save();
@@ -446,8 +450,9 @@ void AutomationEditor::paint(SkCanvas& c, const Theme& t)
     // control with no automation yet shows its current value as a dashed line (the first click on it adds a breakpoint).
     const bool overridden = target.overrideKey >= 0 && ctx().controls && (size_t) track_ < ctx().controls->size()
                             && engine::isAutomationOverridden((*ctx().controls)[(size_t) track_], target.overrideKey);
-    const auto ink = overridden ? t.color("AutomationDisabled") : t.color("AutomationColor");
-    if (! dragging_ && ! drawing_ && ! (moved_ && gesture_ != Gesture::None && gesture_ != Gesture::Range) && ! isAutomated(ctx(), track_, target.id))
+    const auto ink = writing ? t.color("ChosenRecord") : overridden ? t.color("AutomationDisabled") : t.color("AutomationColor");
+    if (! writing && ! dragging_ && ! drawing_ && ! (moved_ && gesture_ != Gesture::None && gesture_ != Gesture::Range)
+        && ! isAutomated(ctx(), track_, target.id))
     {
         const float y = valueY(currentValue(target), target);
         SkPaint pen;
@@ -1475,15 +1480,15 @@ int AutomationEditor::touchControl(UiContext& ctx, const midi::ControlTarget& co
     return track;
 }
 
-bool AutomationEditor::writePoint(UiContext& ctx, const midi::ControlTarget& control, double beat)
+std::optional<model::AutomationEnvelope> AutomationEditor::pointEnvelope(const UiContext& ctx, const midi::ControlTarget& control,
+                                                                         double beat, int& track, int& targetId)
 {
-    if (! ctx.song || ! ctx.applyEdit || ctx.recording) return false;
-    int track = -1;
-    const int targetId = targetFor(ctx, control, track);
-    if (targetId == -1 || track < 0) return false;
+    track = -1;
+    targetId = targetFor(ctx, control, track);
+    if (targetId == -1 || track < 0) return std::nullopt;
     const auto all = targets(ctx, track);
     const auto found = std::find_if(all.begin(), all.end(), [&](const Target& t) { return t.id == targetId; });
-    if (found == all.end()) return false;
+    if (found == all.end()) return std::nullopt;
     double value = controlValue(ctx, track, *found);
     if (found->stepped) value = std::round(value);
     auto env = envelopeOf(ctx, track, *found);
@@ -1496,8 +1501,18 @@ bool AutomationEditor::writePoint(UiContext& ctx, const midi::ControlTarget& con
     std::erase_if(env.points, [&](const auto& p) { return p.time >= 0 && std::abs(p.time - beat) < 1e-9; });
     env.points.push_back({beat, value});
     std::stable_sort(env.points.begin(), env.points.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
-    if (store(ctx, track, *found, std::move(env)) == -1) return false;
-    return true;
+    return env;
+}
+
+bool AutomationEditor::writePoint(UiContext& ctx, const midi::ControlTarget& control, double beat)
+{
+    if (! ctx.song || ! ctx.applyEdit || ctx.recording) return false;
+    int track = -1, targetId = -1;
+    auto env = pointEnvelope(ctx, control, beat, track, targetId);
+    if (! env) return false;
+    const auto all = targets(ctx, track);
+    const auto found = std::find_if(all.begin(), all.end(), [&](const Target& t) { return t.id == targetId; });
+    return found != all.end() && store(ctx, track, *found, std::move(*env)) != -1;
 }
 
 } // namespace sonora::ui

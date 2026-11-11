@@ -71,6 +71,9 @@ public:
     // flat at that value). Returns the track's control index, -1 when the control has no target.
     static int touchControl(UiContext& ctx, const midi::ControlTarget& control);
     static bool writePoint(UiContext& ctx, const midi::ControlTarget& control, double beat);
+    // UI-77c: the lane writePoint would store (its control index and target id in `track` / `targetId`), not stored.
+    static std::optional<model::AutomationEnvelope> pointEnvelope(const UiContext& ctx, const midi::ControlTarget& control, double beat,
+                                                                  int& track, int& targetId);
     // UI-76: the lane's right-click commands at (x, y), in menu order ("Insert Shape/<name>" go into a submenu).
     std::vector<MenuAction> contextActions(float x, float y);
 

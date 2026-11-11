@@ -280,6 +280,7 @@ add_library(sonora_ui STATIC
     ui/views/KickstractTimeline.cpp
     ui/views/WavetableEditor.cpp
     ui/views/WavetableWindowView.cpp
+    ui/views/WavetableMiniView.cpp
     ui/views/WavetablePresetBrowser.cpp
     ui/views/WavetableModulationEditor.cpp
     ui/views/WavetableRoutingEditor.cpp
