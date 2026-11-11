@@ -45,7 +45,11 @@ fetch_opus() {
     local dir="$1/opus"
     [ "$(cat "$dir/SONORA_VERSION" 2>/dev/null)" = "$OPUS_VERSION" ] && return 0
     rm -rf "$dir" && mkdir -p "$dir"
-    curl -fsSL -o "$dir/o.tgz" "https://downloads.xiph.org/releases/opus/opus-${OPUS_VERSION}.tar.gz"
+    # downloads.xiph.org refused GitHub's Linux runners for an hour (curl 35, SSL_ERROR_SYSCALL, 2026-11-11, three tries)
+    # while it answered elsewhere: retry, then xiph's own GitHub release of the same archive (same pinned SHA-256).
+    curl -fsSL --retry 3 --retry-delay 5 -o "$dir/o.tgz" "https://downloads.xiph.org/releases/opus/opus-${OPUS_VERSION}.tar.gz" \
+        || curl -fsSL --retry 3 --retry-delay 5 -o "$dir/o.tgz" \
+               "https://github.com/xiph/opus/releases/download/v${OPUS_VERSION}/opus-${OPUS_VERSION}.tar.gz"
     if (cd "$dir" && { command -v sha256sum >/dev/null && echo "${OPUS_SHA256}  o.tgz" | sha256sum -c - >/dev/null \
             || echo "${OPUS_SHA256}  o.tgz" | shasum -a 256 -c - >/dev/null; }); then
         tar -xzf "$dir/o.tgz" -C "$dir" --strip-components=1 && rm "$dir/o.tgz" && echo "$OPUS_VERSION" > "$dir/SONORA_VERSION"
