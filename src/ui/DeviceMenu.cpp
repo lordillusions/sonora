@@ -32,20 +32,26 @@ const model::Device* deviceAt(const UiContext& ctx, int trackIndex, const std::v
     return device;
 }
 
-juce::PopupMenu createMenu(UiContext& ctx, int track, const std::vector<int>& path)
+juce::PopupMenu menuFrom(const std::vector<MenuAction>& actions)
 {
     juce::PopupMenu menu;
-    for (const auto& action : deviceContextActions(ctx, track, path))
+    for (const auto& action : actions)
     {
         if (action.label.empty()) { menu.addSeparator(); continue; }
         juce::PopupMenu::Item item(juce::String::fromUTF8(action.label.c_str()));
         item.isEnabled = action.enabled;
         item.isTicked = action.ticked;
         item.shortcutKeyDescription = juce::String::fromUTF8(action.shortcut.c_str());
-        item.action = action.run;
+        if (! action.submenu.empty()) item.subMenu = std::make_unique<juce::PopupMenu>(menuFrom(action.submenu));
+        else item.action = action.run;
         menu.addItem(std::move(item));
     }
     return menu;
+}
+
+juce::PopupMenu createMenu(UiContext& ctx, int track, const std::vector<int>& path)
+{
+    return menuFrom(deviceContextActions(ctx, track, path));
 }
 } // namespace
 
@@ -69,6 +75,13 @@ std::vector<MenuAction> deviceContextActions(UiContext& ctx, int track, const st
         actions.push_back({"", {}, false});
         actions.push_back({"Group", {}, false});
         actions.push_back({"Save as Default Preset", {}, false});
+        if (auto sources = sidechainActions(ctx, track, path[0]); ! sources.empty())
+        {
+            actions.push_back({"", {}, false});
+            MenuAction sidechain{"Sidechain", {}, true};
+            sidechain.submenu = std::move(sources);
+            actions.push_back(std::move(sidechain));
+        }
     }
     const auto alternative = plugins::nativeAlternativeFor(*device);
     if (alternative == plugins::NativeAlternative::None || song == nullptr) return actions;
@@ -85,6 +98,55 @@ std::vector<MenuAction> deviceContextActions(UiContext& ctx, int track, const st
             if (ctx.song == song) replaceWithNativeDevices(ctx, track, path, true);
         }, editable});
     return actions;
+}
+
+bool deviceTakesSidechain(const model::Device& device)
+{
+    const auto& t = device.type;
+    return t == "SonoraHush" || t == "Compressor2" || t == "GlueCompressor" || t == "Gate" || t == "SonoraPhaseAlign";
+}
+
+std::vector<MenuAction> sidechainActions(UiContext& ctx, int track, int deviceIndex)
+{
+    std::vector<MenuAction> actions;
+    const auto* host = ctx.trackAt(track);
+    if (host == nullptr || deviceIndex < 0 || (size_t) deviceIndex >= host->devices.size() || ctx.song == nullptr) return actions;
+    const auto& device = host->devices[(size_t) deviceIndex];
+    if (! deviceTakesSidechain(device)) return actions;
+    const bool editable = ! ctx.recording && ! ctx.recordingRequested && static_cast<bool>(ctx.editDevice) && ! host->frozen;
+    const auto* song = ctx.song;
+    const auto route = [&ctx, song, track, deviceIndex](int source, std::string name) {
+        if (ctx.song != song || ! ctx.editDevice) return;
+        ctx.editDevice(track, deviceIndex, [source](model::Device& d) {
+            d.sidechain.on = source >= 0;
+            d.sidechain.sourceTrackId = source;
+            d.sidechain.tap = model::Sidechain::Tap::PostFx;
+            d.sidechain.edited = true;
+            // The device's own switch follows: Hush "Sidechain_on", the reference's dynamics "SideChain/OnOff".
+            for (auto& p : d.parameters)
+                if (p.path == "Sidechain_on" || p.path == "SideChain/OnOff") p.value = source >= 0 ? 1.0 : 0.0;
+        }, source >= 0 ? "Sidechain from " + name : "Sidechain off");
+        ctx.statusText = source >= 0 ? "Sidechain from " + name : std::string("Sidechain off");
+    };
+    actions.push_back({"None", [route] { route(-1, {}); }, editable, {}, ! device.sidechain.routed()});
+    actions.push_back({"", {}, false});
+    for (const auto& t : ctx.song->tracks)
+    {
+        if (t.id == host->id) continue;
+        const std::string name = t.name.empty() ? "Track " + std::to_string(t.id) : t.name;
+        const int id = t.id;
+        actions.push_back({name, [route, id, name] { route(id, name); }, editable, {},
+                           device.sidechain.routed() && device.sidechain.sourceTrackId == id});
+    }
+    return actions;
+}
+
+void showSidechainMenu(UiContext& ctx, int track, int device)
+{
+    auto actions = sidechainActions(ctx, track, device);
+    if (actions.empty()) return;
+    actions.insert(actions.begin(), MenuAction{"Sidechain from", {}, false});
+    menuFrom(actions).showMenuAsync(juce::PopupMenu::Options());
 }
 
 void showDeviceContextMenu(UiContext& ctx, int track, const std::vector<int>& path)

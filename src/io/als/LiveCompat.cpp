@@ -158,6 +158,9 @@ std::array<uint32_t, 4> sonoraVst3Uid(std::string_view tag)
     else if (tag == "SonoraCurveLfo") code = fourCC("SnCl");
     else if (tag == "SonoraHush") code = fourCC("SnHs");
     else if (tag == "SonoraKickstract") code = fourCC("SnKk");
+    else if (tag == "SonoraStutter") code = fourCC("SnSt");
+    else if (tag == "SonoraPhaseAlign") code = fourCC("SnPa");
+    else if (tag == "SonoraSweep") code = fourCC("SnSw");
     else if (tag == "SonoraFm") code = fourCC("SnFm");
     else if (tag == "SonoraVector") code = fourCC("SnVc");
     else if (tag == "SonoraResynth") code = fourCC("SnRs");

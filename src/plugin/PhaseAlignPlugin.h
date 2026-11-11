@@ -1,0 +1,65 @@
+#pragma once
+// Sonora Phase Align as a VST3 audio effect (PLG-21): the same PhaseAlign device and face the app uses. Put it on the bass
+// and route the kick into its sidechain input (Live: the device's Sidechain section / Audio From). Every control is a
+// host parameter (frequencies and times on a log scale). No latency.
+
+#include "devices/native/PhaseAlign.h"
+#include "plugin/PluginCommon.h"
+
+#include <juce_audio_processors/juce_audio_processors.h>
+
+#include <atomic>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace sonora::plugin
+{
+class PhaseAlignPlugin final : public juce::AudioProcessor, public ParameterOwner, private juce::Timer
+{
+public:
+    PhaseAlignPlugin();
+    ~PhaseAlignPlugin() override;
+
+    // ---- juce::AudioProcessor
+    const juce::String getName() const override { return "Sonora Phase Align"; }
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    bool isBusesLayoutSupported(const BusesLayout&) const override;
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void releaseResources() override {}
+    void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    using juce::AudioProcessor::processBlock;
+    bool hasEditor() const override { return true; }
+    juce::AudioProcessorEditor* createEditor() override;
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock&) override;
+    void setStateInformation(const void* data, int sizeInBytes) override;
+
+    devices::PhaseAlign& device() { return device_; }
+    std::vector<std::string> buildLog; // load notes, newest last
+
+    // ---- ParameterOwner
+    float parameterValue(int index) const override { return device_.getParameter(index); }
+    void setParameterValue(int index, float plainValue) override;
+    juce::AudioProcessorParameter* hostParameter(int index) const { return hostParameters_[(size_t) index]; }
+
+    // Editor edits write the device directly: tells the host about every parameter that changed since the last call
+    // (the timer runs it 20 times a second).
+    void reportEditorChanges();
+
+private:
+    void timerCallback() override { reportEditorChanges(); }
+
+    devices::PhaseAlign device_;
+    std::vector<juce::AudioProcessorParameter*> hostParameters_;
+    std::unique_ptr<std::atomic<float>[]> reported_;
+    juce::AudioBuffer<float> stereo_, sidechain_;
+    double sampleRate_ = 44100.0;
+};
+} // namespace sonora::plugin

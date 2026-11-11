@@ -81,7 +81,13 @@ void appendActions(juce::PopupMenu& menu, const std::vector<MenuAction>& actions
         item.isEnabled = action.enabled;
         item.isTicked = action.ticked;
         item.shortcutKeyDescription = juce::String(action.shortcut);
-        item.action = action.run;
+        if (! action.submenu.empty())
+        {
+            juce::PopupMenu sub;
+            appendActions(sub, action.submenu);
+            item.subMenu = std::make_unique<juce::PopupMenu>(std::move(sub));
+        }
+        else item.action = action.run;
         menu.addItem(std::move(item));
     }
 }
@@ -430,6 +436,20 @@ std::vector<MenuAction> clipContextActions(UiContext& ctx, model::ClipLocation l
             result.push_back({"Strip Silence", [&ctx, valid, location] {
                 if (valid() && ctx.stripSilence) ctx.stripSilence(location);
             }, editable && ! ctx.trackAt(location.track)->frozen && static_cast<bool>(ctx.stripSilence)});
+        // PLG-19: the clip's sample as a reverse swell rising into it (Riser) or falling away from it (Downlifter), rendered
+        // by Sonora Sweep onto a new audio track.
+        for (const bool up : {true, false})
+        {
+            MenuAction make{up ? "Make Riser from Clip" : "Make Downlifter from Clip", {}, editable && static_cast<bool>(ctx.makeSweepFromClip)};
+            for (const auto& length : {std::pair<const char*, double>{"1 Bar", 4.0}, {"2 Bars", 8.0}, {"4 Bars", 16.0}, {"8 Bars", 32.0}})
+            {
+                const double sweepBeats = length.second;
+                make.submenu.push_back({length.first, [&ctx, valid, location, up, sweepBeats] {
+                    if (valid() && ctx.makeSweepFromClip) ctx.makeSweepFromClip(location, up, sweepBeats);
+                }, make.enabled});
+            }
+            result.push_back(std::move(make));
+        }
         result.push_back({"Resynthesize to New MIDI Track", [&ctx, valid, location] {
             if (valid() && ctx.resynthesizeClip) ctx.resynthesizeClip(location);
         }, editable && static_cast<bool>(ctx.resynthesizeClip)});

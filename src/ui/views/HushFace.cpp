@@ -4,6 +4,7 @@
 #include "devices/native/HushSession.h"
 #include "engine/EngineGraph.h"
 #include "gfx/Fonts.h"
+#include "ui/DeviceMenu.h"
 #include "ui/Painter.h"
 
 #include "include/core/SkPathBuilder.h"
@@ -609,6 +610,7 @@ void HushFace::mouseDown(const ui::MouseEvent& raw)
         if (e.alt && (c->kind == Kind::Box || c->kind == Kind::Knob)) { resetValue(c->param); return; }
         if (c->kind == Kind::Toggle)
         {
+            if (c->param == H::Sidechain && onSidechainToggle && onSidechainToggle()) return;
             beginEdit(c->param);
             setValue(c->param, value(c->param) >= 0.5f ? 0.0f : 1.0f);
             endEdit();
@@ -1422,17 +1424,33 @@ void HushWindowView::rebuild()
         return -1;
     }();
     if (key_.chain < 0 && device >= 0)
+    {
         face_->mappingTarget = [this, track, device](int parameter) -> std::optional<midi::ControlTarget> {
             if (face_ == nullptr) return std::nullopt;
             return midi::ControlTarget{midi::ControlTarget::Kind::DeviceParameter, track, device, 0,
                                        face_->session().hush().parameters()[(size_t) parameter].id};
         };
+        // PLG-14i: no source routed yet -> the Sidechain switch opens the track chooser (as in the device chain).
+        face_->onSidechainToggle = [this, track, device] {
+            auto& c = context();
+            const auto* t = c.trackAt(track);
+            if (t == nullptr || device >= (int) t->devices.size() || t->devices[(size_t) device].sidechain.routed()) return false;
+            showSidechainMenu(c, track, device);
+            return true;
+        };
+    }
 }
 
 void HushWindowView::layout()
 {
     if (stale()) rebuild();
-    if (face_ != nullptr) face_->setBounds(localBounds());
+    // The face scales with its width, so it must never be taller than the window: fit both sides and centre it (a window
+    // whose content came out shorter than the aspect ratio, e.g. clamped to the screen, cut the bottom buttons off).
+    if (face_ == nullptr) return;
+    const auto r = localBounds();
+    const float s = std::max(0.01f, std::min(r.w / HushFace::kWidth, r.h / HushFace::kHeight));
+    const float w = HushFace::kWidth * s, h = HushFace::kHeight * s;
+    face_->setBounds({std::floor((r.w - w) * 0.5f), std::floor((r.h - h) * 0.5f), w, h});
 }
 
 void HushWindowView::paint(SkCanvas& c, const Theme& t)

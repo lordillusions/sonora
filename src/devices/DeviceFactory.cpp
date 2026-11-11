@@ -36,6 +36,10 @@
 #include "devices/native/CurveLfo.h"
 #include "devices/native/HushSession.h"
 #include "devices/native/Kickstract.h"
+#include "devices/native/Stutter.h"
+#include "devices/native/BeatRepeat.h"
+#include "devices/native/PhaseAlign.h"
+#include "devices/native/Sweep.h"
 #include "devices/native/MidiVelocity.h"
 #include "devices/native/MidiNoteEffects.h"
 #include "devices/native/Arpeggiator.h"
@@ -221,6 +225,30 @@ std::unique_ptr<DeviceProcessor> createSonoraStandIn(const model::Device& d, Bui
             note(ctx, d.plugin->name + ": the saved settings could not be read (" + error + "), using the defaults");
         dev = std::move(kick);
     }
+    else if (which == SonoraPlugin::Stutter) // PLG-18
+    {
+        auto stutter = std::make_unique<Stutter>();
+        if (! body.empty() && ! plugins::decodeStutterState(body.data(), body.size(), *stutter, error))
+            note(ctx, d.plugin->name + ": the saved settings could not be read (" + error + "), using the defaults");
+        dev = std::move(stutter);
+    }
+    else if (which == SonoraPlugin::Sweep) // PLG-19: parameters + the sample's path
+    {
+        auto sweep = std::make_unique<Sweep>();
+        std::map<std::string, std::string> attributes;
+        if (! body.empty() && ! plugins::decodeParameterState(body.data(), body.size(), *sweep, "SonoraSweep", "Sonora Sweep", error, &attributes))
+            note(ctx, d.plugin->name + ": the saved settings could not be read (" + error + "), using the defaults");
+        if (const auto path = attributes.find("samplePath"); path != attributes.end() && ! path->second.empty())
+            if (std::string loadError; ! sweep->loadSample(path->second, loadError)) note(ctx, d.plugin->name + ": " + loadError);
+        dev = std::move(sweep);
+    }
+    else if (which == SonoraPlugin::PhaseAlign) // PLG-21
+    {
+        auto phase = std::make_unique<PhaseAlign>();
+        if (! body.empty() && ! plugins::decodeParameterState(body.data(), body.size(), *phase, "SonoraPhaseAlign", "Sonora Phase Align", error))
+            note(ctx, d.plugin->name + ": the saved settings could not be read (" + error + "), using the defaults");
+        dev = std::move(phase);
+    }
     else // COL-4e: the VST3's state body is the built-in device's session state
     {
         auto hush = std::make_unique<HushDevice>();
@@ -377,6 +405,23 @@ std::unique_ptr<DeviceProcessor> createNative(const model::Device& d, std::vecto
     }
     else if (d.type == "SonoraKickstract") // PLG-17
         dev = std::make_unique<Kickstract>();
+    else if (d.type == "SonoraStutter") // PLG-18
+        dev = std::make_unique<Stutter>();
+    else if (d.type == "BeatRepeat") // PLG-18b
+        dev = std::make_unique<BeatRepeat>();
+    else if (d.type == "SonoraPhaseAlign") // PLG-21
+        dev = std::make_unique<PhaseAlign>();
+    else if (d.type == "SonoraSweep") // PLG-19: the Sample source's file is native content "SonoraSweep/Sample" (a path)
+    {
+        auto sweep = std::make_unique<Sweep>();
+        if (d.nativeContent && d.nativeContent->format == "SonoraSweep/Sample" && ! d.nativeContent->data.empty())
+        {
+            const std::string path(d.nativeContent->data.begin(), d.nativeContent->data.end());
+            std::string error;
+            if (! sweep->loadSample(path, error) && warnings) warnings->push_back("Sonora Sweep: " + error);
+        }
+        dev = std::move(sweep);
+    }
     else if (d.type == "SonoraVelocity")
         dev = std::make_unique<MidiVelocity>();
 
@@ -405,11 +450,15 @@ namespace
 std::vector<uint8_t> sonoraVst3State(const model::Device& d)
 {
     if (d.type == "SonoraWavetable") return plugins::encodePrismPreset(d);
-    if (d.type != "SonoraCurveLfo" && d.type != "SonoraHush" && d.type != "SonoraKickstract") return {};
+    if (d.type != "SonoraCurveLfo" && d.type != "SonoraHush" && d.type != "SonoraKickstract" && d.type != "SonoraStutter" && d.type != "SonoraPhaseAlign" && d.type != "SonoraSweep") return {};
     const auto dev = createNative(d);
     if (const auto* lfo = dynamic_cast<const CurveLfo*>(dev.get())) return plugins::encodeCurveLfoState(*lfo);
     if (auto* hush = dynamic_cast<HushDevice*>(dev.get())) return hush->session().encodeState();
     if (const auto* kick = dynamic_cast<const Kickstract*>(dev.get())) return plugins::encodeKickstractState(*kick);
+    if (const auto* stutter = dynamic_cast<const Stutter*>(dev.get())) return plugins::encodeStutterState(*stutter);
+    if (const auto* phase = dynamic_cast<const PhaseAlign*>(dev.get())) return plugins::encodeParameterState(*phase, "SonoraPhaseAlign");
+    if (const auto* sweep = dynamic_cast<const Sweep*>(dev.get()))
+        return plugins::encodeParameterState(*sweep, "SonoraSweep", {{"samplePath", sweep->samplePath()}});
     return {};
 }
 } // namespace

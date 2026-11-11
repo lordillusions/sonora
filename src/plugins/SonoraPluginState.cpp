@@ -2,6 +2,7 @@
 
 #include "devices/native/CurveLfo.h"
 #include "devices/native/Kickstract.h"
+#include "devices/native/Stutter.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -37,6 +38,9 @@ SonoraPlugin sonoraPluginFor(const model::PluginInfo& info, model::DeviceKind ki
         case fourCC("SnCl"): return SonoraPlugin::CurveLfo;
         case fourCC("SnHs"): return SonoraPlugin::Hush;
         case fourCC("SnKk"): return SonoraPlugin::Kickstract;
+        case fourCC("SnSt"): return SonoraPlugin::Stutter;
+        case fourCC("SnPa"): return SonoraPlugin::PhaseAlign;
+        case fourCC("SnSw"): return SonoraPlugin::Sweep;
         default: return SonoraPlugin::None;
     }
 }
@@ -114,10 +118,13 @@ bool decodeCurveLfoState(const void* data, size_t size, devices::CurveLfo& lfo, 
     return true;
 }
 
-std::vector<uint8_t> encodeKickstractState(const devices::Kickstract& device)
+std::vector<uint8_t> encodeParameterState(const devices::NativeDevice& device, const char* rootTag,
+                                          const std::map<std::string, std::string>& attributes)
 {
-    juce::XmlElement root("SonoraKickstract");
+    juce::XmlElement root(rootTag);
     root.setAttribute(kVersion, kStateVersion);
+    for (const auto& [name, value] : attributes)
+        root.setAttribute(juce::Identifier(juce::String(name)), juce::String::fromUTF8(value.c_str()));
     const auto& infos = device.parameters();
     for (size_t i = 0; i < infos.size(); ++i)
     {
@@ -131,16 +138,20 @@ std::vector<uint8_t> encodeKickstractState(const devices::Kickstract& device)
     return {bytes, bytes + block.getSize()};
 }
 
-bool decodeKickstractState(const void* data, size_t size, devices::Kickstract& device, std::string& error)
+bool decodeParameterState(const void* data, size_t size, devices::NativeDevice& device, const char* rootTag,
+                          const char* displayName, std::string& error, std::map<std::string, std::string>* attributes)
 {
     if (data == nullptr || size == 0) { error = "empty state"; return false; }
     const auto root = juce::AudioProcessor::getXmlFromBinary(data, (int) size);
-    if (root == nullptr || ! root->hasTagName("SonoraKickstract")) { error = "not a Sonora Kickstract state"; return false; }
+    if (root == nullptr || ! root->hasTagName(rootTag)) { error = std::string("not a ") + displayName + " state"; return false; }
     if (root->getIntAttribute(kVersion) > kStateVersion)
     {
-        error = "saved by a newer Sonora Kickstract (state version " + root->getStringAttribute(kVersion).toStdString() + ")";
+        error = std::string("saved by a newer ") + displayName + " (state version " + root->getStringAttribute(kVersion).toStdString() + ")";
         return false;
     }
+    if (attributes != nullptr)
+        for (int i = 0; i < root->getNumAttributes(); ++i)
+            (*attributes)[root->getAttributeName(i).toStdString()] = root->getAttributeValue(i).toStdString();
     const auto& infos = device.parameters();
     std::unordered_map<std::string, size_t> byId;
     for (size_t i = 0; i < infos.size(); ++i) byId.emplace(infos[i].id, i);
@@ -152,5 +163,25 @@ bool decodeKickstractState(const void* data, size_t size, devices::Kickstract& d
         if (std::isfinite(value)) device.setParameter((int) found->second, (float) value);
     }
     return true;
+}
+
+std::vector<uint8_t> encodeKickstractState(const devices::Kickstract& device)
+{
+    return encodeParameterState(device, "SonoraKickstract");
+}
+
+bool decodeKickstractState(const void* data, size_t size, devices::Kickstract& device, std::string& error)
+{
+    return decodeParameterState(data, size, device, "SonoraKickstract", "Sonora Kickstract", error);
+}
+
+std::vector<uint8_t> encodeStutterState(const devices::Stutter& device)
+{
+    return encodeParameterState(device, "SonoraStutter");
+}
+
+bool decodeStutterState(const void* data, size_t size, devices::Stutter& device, std::string& error)
+{
+    return decodeParameterState(data, size, device, "SonoraStutter", "Sonora Stutter", error);
 }
 } // namespace sonora::plugins

@@ -357,6 +357,7 @@ AppController::AppController() : engine_(host_, midi_)
     ui_.stripSilence = [this](const model::ClipLocation& location) { stripSilence(location); };
     ui_.jumpToTransient = [this](int direction) { jumpToTransient(direction); };
     ui_.resynthesizeClip = [this](const auto& location) { resynthesizeClip(location); };
+    ui_.makeSweepFromClip = [this](const auto& location, bool up, double beats) { makeSweepFromClip(location, up, beats); };
     ui_.importResynth = [this](int track, int device, const auto& path, int chain, int child) { importResynth(track, device, path, chain, child); };
     ui_.createResynthPhrase = [this](int track, int device, int chain, int child) { createResynthPhrase(track, device, chain, child); };
     ui_.cropClip = [this](const model::ClipLocation& location) { cropClipSample(location); };

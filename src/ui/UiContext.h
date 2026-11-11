@@ -750,6 +750,9 @@ struct UiContext
     std::function<void(const model::ClipLocation&)> stripSilence; // TRK-3, Arrangement audio clips
     std::function<void(int direction)> jumpToTransient;         // TRK-3: insertion cursor to the next/previous transient
     std::function<void(const model::ClipLocation&)> resynthesizeClip;
+    // PLG-19: renders the clip's sample through Sonora Sweep (up: reversed riser ending where the clip starts; down: a
+    // downlifter starting with it) onto a new audio track. `beats`: the sweep length.
+    std::function<void(const model::ClipLocation&, bool up, double beats)> makeSweepFromClip;
     std::function<void(int track, int device, const std::string& path, int chain, int child)> importResynth;
     std::function<void(int track, int device, int chain, int child)> createResynthPhrase;
     bool stemsRunning = false;

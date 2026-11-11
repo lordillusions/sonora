@@ -96,6 +96,7 @@ add_library(sonora_engine STATIC
     engine/AudioEngine.cpp
     engine/AudioClipPlayer.cpp
     engine/SampleExport.cpp
+    engine/SweepFromClip.cpp
     engine/Automation.cpp
     engine/AutomationCapture.cpp
     engine/ClipLauncher.cpp
@@ -141,6 +142,10 @@ add_library(sonora_engine STATIC
     devices/native/HushCurve.cpp
     devices/native/HushSession.cpp
     devices/native/Kickstract.cpp
+    devices/native/Stutter.cpp
+    devices/native/BeatRepeat.cpp
+    devices/native/PhaseAlign.cpp
+    devices/native/Sweep.cpp
     devices/native/Compressor.cpp
     devices/native/Limiter.cpp
     devices/native/Bands.cpp
@@ -277,6 +282,9 @@ add_library(sonora_ui STATIC
     ui/views/CurveLfoEditor.cpp
     ui/views/HushFace.cpp
     ui/views/KickstractFace.cpp
+    ui/views/StutterFace.cpp
+    ui/views/PhaseAlignFace.cpp
+    ui/views/SweepFace.cpp
     ui/views/KickstractTimeline.cpp
     ui/views/WavetableEditor.cpp
     ui/views/WavetableWindowView.cpp
@@ -370,7 +378,11 @@ option(SONORA_BUILD_PRISM_VST3 "Build Sonora Prism as a VST3 instrument" ${APPLE
 option(SONORA_BUILD_CURVE_LFO_VST3 "Build Sonora Curve LFO as a VST3 effect" ${APPLE})
 option(SONORA_BUILD_HUSH_VST3 "Build Sonora Hush (resonance suppressor) as a VST3 effect" ${APPLE})
 option(SONORA_BUILD_KICKSTRACT_VST3 "Build Sonora Kickstract (kick extractor) as a VST3 effect" ${APPLE})
-if (APPLE AND (SONORA_BUILD_PRISM_VST3 OR SONORA_BUILD_CURVE_LFO_VST3 OR SONORA_BUILD_HUSH_VST3 OR SONORA_BUILD_KICKSTRACT_VST3))
+option(SONORA_BUILD_STUTTER_VST3 "Build Sonora Stutter (vocal stutter / retrigger) as a VST3 effect" ${APPLE})
+option(SONORA_BUILD_PHASE_ALIGN_VST3 "Build Sonora Phase Align (kick / bass phase aligner) as a VST3 effect" ${APPLE})
+option(SONORA_BUILD_SWEEP_VST3 "Build Sonora Sweep (risers / downlifters) as a VST3 instrument" ${APPLE})
+if (APPLE AND (SONORA_BUILD_PRISM_VST3 OR SONORA_BUILD_CURVE_LFO_VST3 OR SONORA_BUILD_HUSH_VST3 OR SONORA_BUILD_KICKSTRACT_VST3
+               OR SONORA_BUILD_STUTTER_VST3 OR SONORA_BUILD_PHASE_ALIGN_VST3 OR SONORA_BUILD_SWEEP_VST3))
     set_property(SOURCE gfx/MetalLayerView.mm APPEND PROPERTY COMPILE_OPTIONS -fobjc-arc) # not JUCE's own .mm files
 endif()
 if (SONORA_BUILD_PRISM_VST3)
@@ -417,6 +429,39 @@ if (SONORA_BUILD_KICKSTRACT_VST3) # PLG-17
         NEEDS_MIDI_INPUT FALSE
         VST3_CATEGORIES Fx Filter Dynamics
         SOURCES plugin/KickstractPlugin.cpp plugin/KickstractPluginEditor.cpp)
+endif()
+if (SONORA_BUILD_STUTTER_VST3) # PLG-18
+    sonora_add_native_vst3(SonoraStutter
+        METAL_VIEW SonoraStutterMetalView
+        PRODUCT_NAME "Sonora Stutter"
+        BUNDLE_ID "org.sonora.stutter"
+        PLUGIN_CODE SnSt
+        IS_SYNTH FALSE
+        NEEDS_MIDI_INPUT TRUE
+        VST3_CATEGORIES Fx Delay
+        SOURCES plugin/StutterPlugin.cpp plugin/StutterPluginEditor.cpp)
+endif()
+if (SONORA_BUILD_PHASE_ALIGN_VST3) # PLG-21
+    sonora_add_native_vst3(SonoraPhaseAlign
+        METAL_VIEW SonoraPhaseAlignMetalView
+        PRODUCT_NAME "Sonora Phase Align"
+        BUNDLE_ID "org.sonora.phasealign"
+        PLUGIN_CODE SnPa
+        IS_SYNTH FALSE
+        NEEDS_MIDI_INPUT FALSE
+        VST3_CATEGORIES Fx Tools
+        SOURCES plugin/PhaseAlignPlugin.cpp plugin/PhaseAlignPluginEditor.cpp)
+endif()
+if (SONORA_BUILD_SWEEP_VST3) # PLG-19
+    sonora_add_native_vst3(SonoraSweep
+        METAL_VIEW SonoraSweepMetalView
+        PRODUCT_NAME "Sonora Sweep"
+        BUNDLE_ID "org.sonora.sweep"
+        PLUGIN_CODE SnSw
+        IS_SYNTH TRUE
+        NEEDS_MIDI_INPUT TRUE
+        VST3_CATEGORIES Instrument Synth
+        SOURCES plugin/SweepPlugin.cpp plugin/SweepPluginEditor.cpp)
 endif()
 
 # ------------------------------------------------------------------ app

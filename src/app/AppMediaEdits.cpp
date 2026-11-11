@@ -1,5 +1,6 @@
 // UI-38: render/analysis jobs share the export modal, cancellation and document edit guard.
 #include "app/AppController.h"
+#include "engine/SweepFromClip.h"
 #include "core/ClipOperations.h"
 #include "engine/AudioToMidi.h"
 #include "engine/ClipRender.h"
@@ -494,3 +495,48 @@ void AppController::captureAudio()
 }
 
 }
+
+namespace sonora::app
+{
+// PLG-19: Clip > Make Riser / Make Downlifter from Clip. The clip's sample (up to 20 s) through Sonora Sweep offline at
+// the set's tempo: Up = reversed with a reverb tail, rising in pitch, ending exactly where the clip starts; Down = forwards,
+// falling, starting with the clip. The result goes to a new audio track under the clip's track (same group).
+void AppController::makeSweepFromClip(const model::ClipLocation& location, bool up, double beats)
+{
+    if (! song_) return;
+    const auto* clip = model::findClip(*song_, location);
+    if (clip == nullptr || clip->kind != model::Clip::Kind::Audio) return;
+    if (location.kind != model::ClipLocation::Kind::Arrangement)
+    {
+        ui_.statusText = "Make Riser / Downlifter works on arrangement clips";
+        return;
+    }
+    if (up && clip->currentStart < beats - 1e-6)
+    {
+        ui_.statusText = "Not enough room before the clip for a riser that long: move the clip later or pick a shorter one";
+        return;
+    }
+    const auto path = io::resolveSamplePath(*song_, clip->sample);
+    if (path.empty())
+    {
+        ui_.statusText = "Cannot make a sweep: the sample file was not found";
+        return;
+    }
+    const std::string label = up ? "Make Riser from Clip" : "Make Downlifter from Clip";
+    runMediaEdit(label, false, [this, location, up, beats, path](const model::Song& song) {
+        MediaEditResult result;
+        const auto data = engine_.sampleCache().load(path);
+        if (! data || data->sampleRate <= 0)
+        {
+            result.error = "Cannot read the clip's sample";
+            return result;
+        }
+        const auto stem = juce::File(juce::String::fromUTF8(path.c_str())).getFileNameWithoutExtension().toStdString();
+        auto made = engine::sweepFromClip(song, location, up, beats, data->audio, data->sampleRate, stem, processedFolder(song, "Sweep"));
+        result.error = made.error;
+        result.edit = std::move(made.edit);
+        result.selectTrack = made.newTrack;
+        return result;
+    });
+}
+} // namespace sonora::app

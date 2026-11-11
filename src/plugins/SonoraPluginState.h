@@ -8,13 +8,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <map>
 #include <string>
 #include <vector>
 
-namespace sonora::devices { class CurveLfo; class Kickstract; }
+namespace sonora::devices { class CurveLfo; class Kickstract; class NativeDevice; class Stutter; }
 namespace sonora::plugins
 {
-enum class SonoraPlugin { None, Prism, CurveLfo, Hush, Kickstract };
+enum class SonoraPlugin { None, Prism, CurveLfo, Hush, Kickstract, Stutter, PhaseAlign, Sweep };
 
 // Which Sonora VST3 this plug-in reference is, by class id only.
 SonoraPlugin sonoraPluginFor(const model::PluginInfo& info, model::DeviceKind kind);
@@ -31,4 +32,16 @@ bool decodeCurveLfoState(const void* data, size_t size, devices::CurveLfo& lfo, 
 // wrapper and the built-in stand-in for a missing VST3.
 std::vector<uint8_t> encodeKickstractState(const devices::Kickstract& device);
 bool decodeKickstractState(const void* data, size_t size, devices::Kickstract& device, std::string& error);
+
+// Any native device whose whole state is its parameters: <rootTag version=..><Param id= value=/>...</rootTag>. Unknown
+// ids (a newer version's controls) are skipped; a newer state version is refused. Kickstract and Stutter use it.
+// `attributes`: extra strings on the root (Sweep's sample path); decode hands back every root attribute.
+std::vector<uint8_t> encodeParameterState(const devices::NativeDevice& device, const char* rootTag,
+                                          const std::map<std::string, std::string>& attributes = {});
+bool decodeParameterState(const void* data, size_t size, devices::NativeDevice& device, const char* rootTag,
+                          const char* displayName, std::string& error, std::map<std::string, std::string>* attributes = nullptr);
+
+// PLG-18 Stutter state (parameters by id, root "SonoraStutter").
+std::vector<uint8_t> encodeStutterState(const devices::Stutter& device);
+bool decodeStutterState(const void* data, size_t size, devices::Stutter& device, std::string& error);
 } // namespace sonora::plugins

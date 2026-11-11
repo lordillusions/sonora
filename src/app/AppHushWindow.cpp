@@ -21,6 +21,7 @@ public:
         view_.onTitleChanged = [this](const std::string& title) { setName(juce::String::fromUTF8(title.c_str())); };
         view_.menuHost = [this]() -> juce::Component* { return canvas_; };
         view_.onScaleChosen = [this](float scale) {
+            scale = fitScreen(scale);
             if (canvas_ != nullptr)
                 canvas_->setSize(juce::roundToInt(ui::HushFace::kWidth * scale), juce::roundToInt(ui::HushFace::kHeight * scale));
         };
@@ -34,6 +35,7 @@ public:
         float scale = 1050.0f / ui::HushFace::kWidth; // the VST3's default size
         if (const auto site = ui::HushWindowView::find(ui, key); site && site->processor != nullptr)
             scale = std::clamp(site->processor->session().editorScale, 0.5f, 3.0f);
+        scale = fitScreen(scale);
         canvas_->setSize(juce::roundToInt(ui::HushFace::kWidth * scale), juce::roundToInt(ui::HushFace::kHeight * scale));
         setContentOwned(canvas_, true);
         setResizable(true, false);
@@ -52,8 +54,8 @@ public:
     void resized() override
     {
         DocumentWindow::resized();
-        if (auto* face = view_.face(); face != nullptr && canvas_ != nullptr && canvas_->getWidth() > 0)
-            face->session().editorScale = (float) canvas_->getWidth() / ui::HushFace::kWidth;
+        if (auto* face = view_.face(); face != nullptr && face->width() > 0)
+            face->session().editorScale = face->width() / ui::HushFace::kWidth;
     }
     const ui::UiContext::WavetableKey& key() const { return view_.key(); }
     void setKey(const ui::UiContext::WavetableKey& key) { view_.setKey(key); }
@@ -64,6 +66,18 @@ public:
     }
 
 private:
+    // A scale whose window (plus the title bar) fits the screen's free area: a bigger one gets clamped by the system.
+    static float fitScreen(float scale)
+    {
+        if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+        {
+            const auto area = display->userBounds;
+            scale = std::min({scale, ((float) area.getWidth() - 40.0f) / ui::HushFace::kWidth,
+                              ((float) area.getHeight() - 80.0f) / ui::HushFace::kHeight});
+        }
+        return std::max(0.5f, scale);
+    }
+
     ui::HushWindowView view_;
     gfx::SkiaCanvasComponent* canvas_ = nullptr; // owned by the window (content component)
     std::function<void(HushWindow*)> onClose_;

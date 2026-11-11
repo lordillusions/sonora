@@ -20,6 +20,7 @@ struct MenuAction
     bool enabled = true;
     std::string shortcut{};
     bool ticked = false;
+    std::vector<MenuAction> submenu{}; // non-empty: the item opens these (DeviceMenu)
 };
 
 class GridChoiceTable final : public juce::PopupMenu::CustomComponent

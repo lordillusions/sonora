@@ -93,6 +93,7 @@ public:
     std::vector<int> audioCaptureTargets() const;
     void jumpToTransient(int direction);               // TRK-3: Option+Left/Right in the Arrangement
     std::map<int, std::pair<int, std::vector<double>>> transientBeats_; // clip uid -> (edit version, onsets in song beats)
+    void makeSweepFromClip(const model::ClipLocation&, bool up, double beats); // PLG-19 (AppMediaEdits.cpp)
     void resynthesizeClip(const model::ClipLocation&, double endBeat = -1); // endBeat: analyze only up to here (a cut the user accepted)
     void collectAllAndSave();
     // Asks to save unsaved changes first; quits afterwards unless the user cancels.

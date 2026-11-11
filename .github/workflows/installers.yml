@@ -6,7 +6,7 @@
 #            with the SPARKLE_ED_PRIVATE_KEY secret; the app carries packaging/macos/updates.env (feed + public key).
 #            Plus the VST3 installers
 #            Sonora-Prism-VST3-<v>.pkg (PLG-11c), Sonora-Curve-LFO-VST3-<v>.pkg (PLG-12b), Sonora-Hush-VST3-<v>.pkg (PLG-14) and
-#            Sonora-Kickstract-VST3-<v>.pkg (PLG-17). Not
+#            Sonora-Kickstract-VST3-<v>.pkg (PLG-17), Sonora-Stutter-VST3-<v>.pkg (PLG-18), Sonora-Phase-Align-VST3-<v>.pkg (PLG-21), Sonora-Sweep-VST3-<v>.pkg (PLG-19). Not
 #            Developer ID signed or notarized yet (COM-4b). Off by default for manual runs (macOS minutes cost 10x).
 # A v* tag builds all three and attaches them to a draft GitHub Release; nothing is published automatically.
 # The tag must equal project() in CMakeLists.txt (the version About shows), and the release must carry every file the
@@ -228,7 +228,7 @@ jobs:
         run: |
           cmake -S . -B build-release-app -G Ninja -DCMAKE_BUILD_TYPE=Release -DSONORA_APP_VERSION="$VERSION" -DSONORA_BUILD_TESTS=OFF \
               -DSONORA_UPDATE_FEED_URL="${SONORA_UPDATE_FEED_URL:-}" -DSONORA_UPDATE_PUBLIC_KEY="${SONORA_UPDATE_PUBLIC_KEY:-}"
-          cmake --build build-release-app --target Sonora SonoraPrism_VST3 SonoraCurveLfo_VST3 SonoraHush_VST3 SonoraKickstract_VST3
+          cmake --build build-release-app --target Sonora SonoraPrism_VST3 SonoraCurveLfo_VST3 SonoraHush_VST3 SonoraKickstract_VST3 SonoraStutter_VST3 SonoraPhaseAlign_VST3 SonoraSweep_VST3
 
       - name: Disk image (ad hoc signed, not notarized)
         if: env.SONORA_UPDATE_FEED_URL == ''
@@ -275,6 +275,12 @@ jobs:
               "dist/macos/Sonora-Hush-VST3-$VERSION.pkg"
           packaging/macos/make_vst3_pkg.sh "build-release-app/src/SonoraKickstract_artefacts/Release/VST3/Sonora Kickstract.vst3" \
               "dist/macos/Sonora-Kickstract-VST3-$VERSION.pkg"
+          packaging/macos/make_vst3_pkg.sh "build-release-app/src/SonoraStutter_artefacts/Release/VST3/Sonora Stutter.vst3" \
+              "dist/macos/Sonora-Stutter-VST3-$VERSION.pkg"
+          packaging/macos/make_vst3_pkg.sh "build-release-app/src/SonoraPhaseAlign_artefacts/Release/VST3/Sonora Phase Align.vst3" \
+              "dist/macos/Sonora-Phase-Align-VST3-$VERSION.pkg"
+          packaging/macos/make_vst3_pkg.sh "build-release-app/src/SonoraSweep_artefacts/Release/VST3/Sonora Sweep.vst3" \
+              "dist/macos/Sonora-Sweep-VST3-$VERSION.pkg"
           # Every bundle must say the release's version (the plug-ins' own About/host info).
           for b in build-release-app/src/*_artefacts/Release/VST3/*.vst3 build-release-app/src/Sonora_artefacts/Release/Sonora.app; do
             v="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$b/Contents/Info.plist")"
@@ -315,6 +321,9 @@ jobs:
           cp "Sonora-Curve-LFO-VST3-$VERSION.pkg" Sonora-Curve-LFO-VST3-macOS.pkg
           cp "Sonora-Hush-VST3-$VERSION.pkg" Sonora-Hush-VST3-macOS.pkg
           cp "Sonora-Kickstract-VST3-$VERSION.pkg" Sonora-Kickstract-VST3-macOS.pkg
+          cp "Sonora-Stutter-VST3-$VERSION.pkg" Sonora-Stutter-VST3-macOS.pkg
+          cp "Sonora-Phase-Align-VST3-$VERSION.pkg" Sonora-Phase-Align-VST3-macOS.pkg
+          cp "Sonora-Sweep-VST3-$VERSION.pkg" Sonora-Sweep-VST3-macOS.pkg
           cp "Sonora-$VERSION-windows-x64-setup.exe" Sonora-Windows-x64-setup.exe
           cp "Sonora-$VERSION-x86_64.AppImage" Sonora-Linux-x86_64.AppImage
           cp "sonora_${VERSION}_amd64.deb" Sonora-Linux-amd64.deb

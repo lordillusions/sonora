@@ -52,6 +52,9 @@ constexpr std::array kCatalog{
     CatalogEntry{"SonoraCurveLfo", "Sonora Curve LFO", R::AudioEffect, true},
     CatalogEntry{"SonoraHush", "Sonora Hush", R::AudioEffect, true},
     CatalogEntry{"SonoraKickstract", "Sonora Kickstract", R::AudioEffect, true},
+    CatalogEntry{"SonoraStutter", "Sonora Stutter", R::AudioEffect, true},
+    CatalogEntry{"SonoraPhaseAlign", "Sonora Phase Align", R::AudioEffect, true},
+    CatalogEntry{"SonoraSweep", "Sonora Sweep", R::Instrument, true},
     CatalogEntry{"SonoraVelocity", "Sonora Velocity", R::MidiEffect, true},
     CatalogEntry{"InstrumentGroupDevice", "Sonora Instrument Rack", R::Instrument, true},
     CatalogEntry{"DrumGroupDevice", "Sonora Drum Rack", R::Instrument, true},
@@ -63,7 +66,7 @@ constexpr std::array kCatalog{
     CatalogEntry{"InstrumentImpulse", "Impulse", R::Instrument, false},
     CatalogEntry{"Amp", "Amp", R::AudioEffect, false},
     CatalogEntry{"AutoShift", "Auto Shift", R::AudioEffect, false},
-    CatalogEntry{"BeatRepeat", "Beat Repeat", R::AudioEffect, false},
+    CatalogEntry{"BeatRepeat", "Beat Repeat", R::AudioEffect, true},
     CatalogEntry{"Cabinet", "Cabinet", R::AudioEffect, false},
     CatalogEntry{"ChannelEq", "Channel EQ", R::AudioEffect, true},
     CatalogEntry{"Chorus", "Chorus (Legacy)", R::AudioEffect, false},
@@ -153,7 +156,7 @@ std::string_view deviceCategory(const CatalogEntry& entry)
     if (tag == "Eq8" || tag == "FilterEQ3" || tag == "ChannelEq" || tag == "AutoFilter" || tag == "AutoFilter2"
         || tag == "SonoraKickstract")
         return "EQ & Filters";
-    if (tag == "Reverb" || tag == "Delay" || tag == "SonoraEcho") return "Delay & Reverb";
+    if (tag == "Reverb" || tag == "Delay" || tag == "SonoraEcho" || tag == "SonoraStutter" || tag == "BeatRepeat") return "Delay & Reverb";
     if (tag == "Compressor2" || tag == "GlueCompressor" || tag == "Limiter" || tag == "MultibandDynamics" || tag == "Gate"
         || tag == "SonoraHush")
         return "Dynamics";

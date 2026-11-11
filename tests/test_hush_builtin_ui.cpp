@@ -152,6 +152,18 @@ TEST_CASE("hush built-in face: the device chain shows the Hush face at the chain
     CHECK_NEAR(hush->getParameter(H::Mode), 0.0, 1e-6);
     const auto windowPng = snapshotFolder().getChildFile("sonora_hush_builtin_window.png");
     CHECK(gfx::renderToPng(window, 1050, 621, 1.0f, windowPng.getFullPathName().toStdString()));
+    // A window shorter than the face's aspect (clamped to the screen, or resized): the whole face still fits, bottom
+    // buttons included, centred (it used to scale by the width only and lose the footer).
+    window.setBounds({0, 0, 1050, 520});
+    window.layout();
+    CHECK(window.face()->bounds().bottom() <= 520.5f);
+    CHECK(window.face()->bounds().y >= 0.0f);
+    CHECK_NEAR(window.face()->width() / window.face()->height(), ui::HushFace::kWidth / ui::HushFace::kHeight, 1e-3);
+    CHECK_NEAR(window.face()->bounds().centreX(), 525.0, 1.0);
+    const auto shortPng = snapshotFolder().getChildFile("sonora_hush_builtin_window_short.png");
+    CHECK(gfx::renderToPng(window, 1050, 520, 1.0f, shortPng.getFullPathName().toStdString()));
+    window.setBounds({0, 0, 1050, 621});
+    window.layout();
     song.tracks[0].devices.clear();
     auto rebuilt = engine::buildGraph(song, build, samples);
     context.graph = rebuilt.graph.get();

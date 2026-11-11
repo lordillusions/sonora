@@ -40,6 +40,9 @@ public:
     std::function<void(float scale)> onScaleChosen;
     // Size button: "Open in a window" when set (the built-in device in the device chain).
     std::function<void()> onOpenWindow;
+    // PLG-14i, built-in Hush: the Sidechain switch was clicked; returns true when it handled the click (opened the source
+    // chooser because no track is routed yet), false to toggle as usual. Unset in the VST3 (the host routes it).
+    std::function<bool()> onSidechainToggle;
     // The MIDI map / key map target for a parameter (the device chain maps controls like any device's knobs).
     std::function<std::optional<midi::ControlTarget>(int parameter)> mappingTarget;
     std::string version; // shown under the wordmark; empty = the running application's version
