@@ -55,6 +55,7 @@ void AppController::startRecovery()
 
 void AppController::autosaveTick()
 {
+    recoverStuckDeviceEdit();
     if (! recovery_.started()) return;
     const auto now = nowMs();
     if (now - recoveryHeartbeatAt_ >= 60000)

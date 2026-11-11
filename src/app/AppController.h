@@ -350,6 +350,13 @@ private:
     void snapshotTrackUi();
     void beginDeviceEdit();
     bool editingDevices_ = false;
+    // A device edit that never finished left editingDevices_ on, and every save, autosave and device edit after it was
+    // refused in silence (reported on 0.1.34). recoverStuckDeviceEdit() clears it once nothing is running for 5 s and writes
+    // what was being edited to <data folder>/Diagnostics.log.
+    double editingDevicesSince_ = 0;
+    std::string editingDevicesWhat_;
+    bool recoverStuckDeviceEdit();
+    void editFailed(const std::string& label, const std::string& what); // log, release the flag, rebuild, tell the user
     bool syncingModel_ = false;
     std::unique_ptr<model::Song> deferredSong_;
     void queueDeferredSong();

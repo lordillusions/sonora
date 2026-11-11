@@ -68,6 +68,7 @@ public:
     // Message thread: prepare inserted processors, briefly pause the device callback to edit the
     // chain, retain existing instances/state, refresh bindings and latency, then resume.
     std::vector<std::string> updateTrackDevices(int trackIndex, const model::Song& song);
+    bool changingDevices() const { return changingDevices_; } // message thread: a device update or reprepare is running
     void reprepareGraph(); // message thread; retains instances, controls and transport on device changes
     bool graphPreparedForDevice() const
     { return latest_ && juce::approximatelyEqual(latest_->preparedSampleRate, sampleRate_) && latest_->preparedBlockSize >= blockSize_; }

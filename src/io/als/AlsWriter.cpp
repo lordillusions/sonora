@@ -21,6 +21,18 @@ using juce::XmlElement;
 
 namespace
 {
+// The XML a device without an element in the set is written from: its own template (sourceXml) when it is one of this
+// type, else a fresh template for the type (a device whose template got lost, e.g. replaced by a loaded preset).
+std::unique_ptr<XmlElement> newDeviceElement(const model::Device& device)
+{
+    if (device.sourceXml)
+        if (auto source = juce::XmlDocument::parse(juce::String(*device.sourceXml)); source && source->getTagName().toStdString() == device.type)
+            return source;
+    if (auto fresh = juce::XmlDocument::parse(juce::String(deviceTemplate(device))); fresh && fresh->getTagName().toStdString() == device.type)
+        return fresh;
+    return nullptr;
+}
+
 // ---------------------------------------------------------------- small DOM helpers
 
 XmlElement* child(XmlElement* e, const char* name)
@@ -201,8 +213,63 @@ void patchPluginParameterList(XmlElement* x, const model::Device& d)
     }
 }
 
+// PLG-22: ids for elements the writer creates (a device's new <SideChain>), from the set's NextPointeeId; patchAlsDom sets it
+// up and writes the counter back. 0 when unset (then nothing is created).
+int* newPointeeIds = nullptr;
+int takePointeeId() { return newPointeeIds != nullptr ? (*newPointeeIds)++ : 0; }
+
+bool takesSidechainXml(const std::string& type)
+{
+    return type == "PluginDevice" || type == "AuPluginDevice" || type == "SonoraHush" || type == "SonoraPhaseAlign" || type == "Compressor2"
+           || type == "GlueCompressor" || type == "Gate";
+}
+
+// A device inserted in Sonora (its template) has no <SideChain>: built like the reference's, so the routing, Gain, Mix and
+// on/off chosen in the Sidechain section are saved (they were silently dropped).
+void ensureSidechainXml(XmlElement* x)
+{
+    if (x == nullptr || child(x, "SideChain") != nullptr || newPointeeIds == nullptr) return;
+    auto leafValue = [](XmlElement* parent, const char* tag, const juce::String& v) { parent->createNewChildElement(tag)->setAttribute("Value", v); };
+    auto target = [](XmlElement* parent, const char* tag) {
+        auto* t = parent->createNewChildElement(tag);
+        t->setAttribute("Id", takePointeeId());
+        t->createNewChildElement("LockEnvelope")->setAttribute("Value", "0");
+    };
+    auto* side = x->createNewChildElement("SideChain");
+    auto* onOff = side->createNewChildElement("OnOff");
+    leafValue(onOff, "LomId", "0");
+    leafValue(onOff, "Manual", "false");
+    target(onOff, "AutomationTarget");
+    auto* thresholds = onOff->createNewChildElement("MidiCCOnOffThresholds");
+    leafValue(thresholds, "Min", "64");
+    leafValue(thresholds, "Max", "127");
+    auto* input = side->createNewChildElement("RoutedInput");
+    auto* routable = input->createNewChildElement("Routable");
+    leafValue(routable, "Target", "AudioIn/None");
+    leafValue(routable, "UpperDisplayString", "No Input");
+    leafValue(routable, "LowerDisplayString", "");
+    auto* mpe = routable->createNewChildElement("MpeSettings");
+    leafValue(mpe, "ZoneType", "0");
+    leafValue(mpe, "FirstNoteChannel", "1");
+    leafValue(mpe, "LastNoteChannel", "15");
+    leafValue(routable, "MpePitchBendUsesTuning", "true");
+    auto knob = [&](XmlElement* parent, const char* tag, const char* min, const char* max) {
+        auto* p = parent->createNewChildElement(tag);
+        leafValue(p, "LomId", "0");
+        leafValue(p, "Manual", "1");
+        auto* range = p->createNewChildElement("MidiControllerRange");
+        leafValue(range, "Min", min);
+        leafValue(range, "Max", max);
+        target(p, "AutomationTarget");
+        target(p, "ModulationTarget");
+    };
+    knob(input, "Volume", "0.0003162277571", "15.8489332");
+    knob(side, "DryWet", "0", "1");
+}
+
 void patchDevice(XmlElement* x, const model::Device& d)
 {
+    if (d.sidechain.edited && takesSidechainXml(d.type)) ensureSidechainXml(x);
     if (d.sidechain.edited)
     {
         setManual(at(x, "SideChain/OnOff"), d.sidechain.on ? 1.0 : 0.0);
@@ -1309,8 +1376,7 @@ void patchTrackMixerAndDevices(XmlElement* x, const model::Track& t)
             const auto found = std::find_if(old.begin(), old.end(), [&](const auto* dx) {
                 return dx->getIntAttribute("Id", -1) == device.id && dx->getTagName().toStdString() == device.type;
             });
-            auto dx = found != old.end() ? std::make_unique<XmlElement>(**found)
-                                         : device.sourceXml ? juce::XmlDocument::parse(juce::String(*device.sourceXml)) : nullptr;
+            auto dx = found != old.end() ? std::make_unique<XmlElement>(**found) : newDeviceElement(device);
             if (! dx) continue; // validated before patching
             dx->setAttribute("Id", device.id);
             patchDevice(dx.get(), device);
@@ -1706,6 +1772,12 @@ AlsSaveResult patchAlsDom(const model::Song& song, XmlElement& root)
         r.error = "Not a Live Set (no <LiveSet>)";
         return r;
     }
+    // Ids for elements created while patching (PLG-22 sidechain sections), after every id the set or the model uses.
+    int pointeeCounter = std::max(1, song.nextPointeeId);
+    if (auto* next = child(liveSet, "NextPointeeId")) pointeeCounter = std::max(pointeeCounter, next->getIntAttribute("Value"));
+    const int firstCreatedPointee = pointeeCounter;
+    newPointeeIds = &pointeeCounter;
+    struct Reset { ~Reset() { newPointeeIds = nullptr; } } resetPointees;
 
     if (auto* tracksX = liveSet->getChildByName("Tracks"))
     {
@@ -1722,8 +1794,7 @@ AlsSaveResult patchAlsDom(const model::Song& song, XmlElement& root)
                 if (list)
                     for (auto* dx : list->getChildIterator())
                         found |= dx->getIntAttribute("Id", -1) == device.id && dx->getTagName().toStdString() == device.type;
-                auto source = ! found && device.sourceXml ? juce::XmlDocument::parse(juce::String(*device.sourceXml)) : nullptr;
-                if ((! found && (! source || source->getTagName().toStdString() != device.type)) || (! list && ! track.devices.empty()))
+                if ((! found && newDeviceElement(device) == nullptr) || (! list && ! track.devices.empty()))
                     r.error = "No XML template/container for device " + device.displayName;
             }
         };
@@ -1763,6 +1834,12 @@ AlsSaveResult patchAlsDom(const model::Song& song, XmlElement& root)
             if (song.nextPointeeId > next->getIntAttribute("Value")) setNumber(next, song.nextPointeeId);
         }
         else liveSet->createNewChildElement("NextPointeeId")->setAttribute("Value", song.nextPointeeId);
+    }
+
+    if (pointeeCounter > firstCreatedPointee) // created elements took ids: the set's counter moves past them
+    {
+        if (auto* next = child(liveSet, "NextPointeeId")) { if (pointeeCounter > next->getIntAttribute("Value")) setNumber(next, pointeeCounter); }
+        else liveSet->createNewChildElement("NextPointeeId")->setAttribute("Value", pointeeCounter);
     }
 
     patchScale(*liveSet, song.scaleRoot, song.scaleName, "InKey", song.inKey);

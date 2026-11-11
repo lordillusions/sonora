@@ -1270,3 +1270,78 @@ TEST_CASE("als writer: rack chains use the reference branch and chain classes, o
     auto loaded = io::loadAls(fixture("minimal_set.xml"));
     REQUIRE(loaded);
 }
+
+#include "devices/DeviceFactory.h"
+
+TEST_CASE("als writer: a device that lost its XML template (a Prism after loading a preset) still saves")
+{
+    // Reported on 0.1.34: insert Sonora Prism, load the Serum preset "PL - Dark Room" in it, save -> "Could not save: No XML
+    // template/container for device PL - Dark Room". Loading the preset replaced the device with one that had no template,
+    // and the edit gave it a new id, so the writer found neither its element nor a template and refused the whole set.
+    const auto fixtureFile = fixture("minimal_set.xml");
+    auto loaded = io::loadAls(fixtureFile);
+    REQUIRE(loaded);
+    model::Song& song = *loaded.song;
+    int midiTrack = -1;
+    for (size_t t = 0; t < song.tracks.size(); ++t)
+        if (song.tracks[t].kind == model::TrackKind::Midi) { midiTrack = (int) t; break; }
+    REQUIRE(midiTrack >= 0);
+    auto prism = devices::nativeDeviceModel("SonoraWavetable"); // no sourceXml, like the preset's device
+    prism.displayName = "PL - Dark Room";
+    model::allocateDeviceIds(song, prism);
+    CHECK(prism.sourceXml == nullptr);
+    auto& devices = song.tracks[(size_t) midiTrack].devices;
+    devices.insert(devices.begin(), prism);
+    const int id = prism.id;
+
+    juce::TemporaryFile out(".als");
+    const auto saved = io::saveAls(song, out.getFile());
+    CHECK(saved.error.empty());
+    REQUIRE(saved.ok);
+    auto again = io::loadAls(out.getFile());
+    REQUIRE(again);
+    bool found = false;
+    for (const auto& d : again.song->tracks[(size_t) midiTrack].devices) found |= d.id == id && d.type == "SonoraWavetable";
+    CHECK(found);
+}
+
+TEST_CASE("als writer: a device's sidechain (source, tap, Gain, Mix, on) survives save and reload")
+{
+    const auto fixtureFile = fixture("two_tracks.xml");
+    auto loaded = io::loadAls(fixtureFile);
+    REQUIRE(loaded);
+    model::Song& song = *loaded.song;
+    REQUIRE(song.tracks.size() >= 2);
+    for (const char* type : {"SonoraHush", "Compressor2"})
+    {
+        auto device = devices::nativeDeviceModel(type);
+        model::allocateDeviceIds(song, device);
+        device.sourceXml = std::make_shared<const std::string>(io::deviceTemplate(device));
+        device.sidechain.on = true;
+        device.sidechain.sourceTrackId = song.tracks[0].id;
+        device.sidechain.tap = model::Sidechain::Tap::PreFx;
+        device.sidechain.gain = 0.5;
+        device.sidechain.mix = 0.25;
+        device.sidechain.edited = true;
+        song.tracks[1].devices.push_back(device);
+    }
+    juce::TemporaryFile out(".als");
+    const auto saved = io::saveAls(song, out.getFile());
+    REQUIRE(saved.ok);
+    auto again = io::loadAls(out.getFile());
+    REQUIRE(again);
+    int checked = 0;
+    for (const auto& d : again.song->tracks[1].devices)
+        if (d.type == "SonoraHush" || d.type == "Compressor2")
+        {
+            std::printf("    %s: routed %d source %d tap %d gain %.2f mix %.2f\n", d.type.c_str(), (int) d.sidechain.routed(),
+                        d.sidechain.sourceTrackId, (int) d.sidechain.tap, d.sidechain.gain, d.sidechain.mix);
+            CHECK(d.sidechain.routed());
+            CHECK(d.sidechain.sourceTrackId == song.tracks[0].id);
+            CHECK(d.sidechain.tap == model::Sidechain::Tap::PreFx);
+            CHECK_NEAR(d.sidechain.gain, 0.5, 1e-6);
+            CHECK_NEAR(d.sidechain.mix, 0.25, 1e-6);
+            ++checked;
+        }
+    CHECK(checked == 2);
+}

@@ -1125,17 +1125,33 @@ control::ApplyResult AppController::applyEdit(model::EditCommand cmd)
     if (cmd.structureChanged && ui_.recording) { ui_.statusText = "Finish recording before grouping tracks"; return control::ApplyResult::failure("recording_conflict", ui_.statusText); }
     const bool structure = cmd.structureChanged;
     if (structure) { syncModelFromEngine(); snapshotTrackUi(); } // before the track list changes
-    if (devicesChanged) beginDeviceEdit();
-    const auto linked = structure ? std::map<int, std::vector<model::MidiNote>>{} : model::snapshotLinkedNotes(*song_); // TRK-5
-    history_.perform(*song_, std::move(cmd));
-    auto changed = tracks;
-    if (! linked.empty())
-        if (auto sync = model::syncLinkedClips(*song_, linked); sync.apply)
-        {
-            for (int t : sync.tracks) if (std::find(changed.begin(), changed.end(), t) == changed.end()) changed.push_back(t);
-            history_.amendLast(*song_, std::move(sync)); // one undo step with the edit that caused it
-        }
-    afterEdit(changed, songLevel, devicesChanged, takesOnly, structure, gainTracks);
+    if (devicesChanged) { beginDeviceEdit(); editingDevicesWhat_ = "edit: " + label; }
+    // An exception here used to leave editingDevices_ on for good: every later save, autosave and device edit was then
+    // refused in silence (reported on 0.1.34). It is caught, written to Diagnostics.log and shown; the engine is rebuilt from
+    // the model so the set stays playable and saveable.
+    try
+    {
+        const auto linked = structure ? std::map<int, std::vector<model::MidiNote>>{} : model::snapshotLinkedNotes(*song_); // TRK-5
+        history_.perform(*song_, std::move(cmd));
+        auto changed = tracks;
+        if (! linked.empty())
+            if (auto sync = model::syncLinkedClips(*song_, linked); sync.apply)
+            {
+                for (int t : sync.tracks) if (std::find(changed.begin(), changed.end(), t) == changed.end()) changed.push_back(t);
+                history_.amendLast(*song_, std::move(sync)); // one undo step with the edit that caused it
+            }
+        afterEdit(changed, songLevel, devicesChanged, takesOnly, structure, gainTracks);
+    }
+    catch (const std::exception& error)
+    {
+        editFailed(label, error.what());
+        return control::ApplyResult::failure("edit_failed", ui_.statusText);
+    }
+    catch (...)
+    {
+        editFailed(label, "unknown exception");
+        return control::ApplyResult::failure("edit_failed", ui_.statusText);
+    }
     if (inCollabSession())
     {
         // COL-2: the session finds the objects this edit changed and shares them.
@@ -1158,7 +1174,7 @@ void AppController::undo()
     if (ui_.recording && history_.undoChangesInput()) { ui_.statusText = "Finish recording before changing inputs"; return; }
     if (ui_.recording && history_.undoChangesRecordingRange()) { ui_.statusText = "Finish recording before changing the punch/loop region"; return; }
     if (ui_.recording && history_.undoChangesDevices()) { ui_.statusText = "Finish recording before changing devices"; return; }
-    if (history_.undoChangesDevices()) { syncModelFromEngine(); beginDeviceEdit(); }
+    if (history_.undoChangesDevices()) { syncModelFromEngine(); beginDeviceEdit(); editingDevicesWhat_ = "undo: " + history_.undoLabel(); }
     const auto* next = history_.nextUndo();
     if (next && next->structureChanged)
     {
@@ -1166,11 +1182,17 @@ void AppController::undo()
         syncModelFromEngine();
         snapshotTrackUi();
     }
-    if (const auto* c = history_.undo(*song_))
+    try
     {
-        ui_.statusText = "Undo " + c->label;
-        afterEdit(c->tracks, c->songLevel, c->devicesChanged, c->takeLanesOnly, c->structureChanged, c->gainTracks);
+        if (const auto* c = history_.undo(*song_))
+        {
+            ui_.statusText = "Undo " + c->label;
+            afterEdit(c->tracks, c->songLevel, c->devicesChanged, c->takeLanesOnly, c->structureChanged, c->gainTracks);
+        }
+        else if (editingDevices_) { editingDevices_ = false; editingDevicesSince_ = 0; ui_.song = song_.get(); }
     }
+    catch (const std::exception& error) { editFailed("Undo", error.what()); }
+    catch (...) { editFailed("Undo", "unknown exception"); }
 }
 
 void AppController::redo()
@@ -1185,7 +1207,7 @@ void AppController::redo()
     if (ui_.recording && history_.redoChangesInput()) { ui_.statusText = "Finish recording before changing inputs"; return; }
     if (ui_.recording && history_.redoChangesRecordingRange()) { ui_.statusText = "Finish recording before changing the punch/loop region"; return; }
     if (ui_.recording && history_.redoChangesDevices()) { ui_.statusText = "Finish recording before changing devices"; return; }
-    if (history_.redoChangesDevices()) beginDeviceEdit();
+    if (history_.redoChangesDevices()) { beginDeviceEdit(); editingDevicesWhat_ = "redo"; }
     const auto* next = history_.nextRedo();
     if (next && next->structureChanged)
     {
@@ -1193,16 +1215,59 @@ void AppController::redo()
         syncModelFromEngine();
         snapshotTrackUi();
     }
-    if (const auto* c = history_.redo(*song_))
+    try
     {
-        ui_.statusText = "Redo " + c->label;
-        afterEdit(c->tracks, c->songLevel, c->devicesChanged, c->takeLanesOnly, c->structureChanged, c->gainTracks);
+        if (const auto* c = history_.redo(*song_))
+        {
+            ui_.statusText = "Redo " + c->label;
+            afterEdit(c->tracks, c->songLevel, c->devicesChanged, c->takeLanesOnly, c->structureChanged, c->gainTracks);
+        }
+        else if (editingDevices_) { editingDevices_ = false; editingDevicesSince_ = 0; ui_.song = song_.get(); }
     }
+    catch (const std::exception& error) { editFailed("Redo", error.what()); }
+    catch (...) { editFailed("Redo", "unknown exception"); }
+}
+
+void AppController::editFailed(const std::string& label, const std::string& what)
+{
+    const auto line = juce::Time::getCurrentTime().toString(true, true, true, true) + "  edit \"" + juce::String::fromUTF8(label.c_str())
+                      + "\" failed: " + juce::String::fromUTF8(what.c_str()) + "; version "
+                      + juce::JUCEApplication::getInstance()->getApplicationVersion() + "\n";
+    core::appDataDirectory().getChildFile("Diagnostics.log").appendText(line, false, false, "\n");
+    logf("%s", line.toRawUTF8());
+    editingDevices_ = false;
+    editingDevicesSince_ = 0;
+    try { rebuildEngine(); } // the engine follows the model again (whatever part of the edit went through)
+    catch (...) { ui_.song = song_.get(); }
+    ui_.statusText = "That edit failed (" + what + "); the set can still be saved";
+    juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "An edit failed",
+                                           juce::String::fromUTF8(("\"" + label + "\" did not complete: " + what
+                                                                   + ".\nThe set is still playable and can be saved. Details are in Diagnostics.log.").c_str()));
+    if (ui_.modelChanged) ui_.modelChanged();
+}
+
+bool AppController::recoverStuckDeviceEdit()
+{
+    if (! editingDevices_ || engine_.changingDevices()) return false;
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    if (editingDevicesSince_ <= 0 || now - editingDevicesSince_ < 5000) return false;
+    const auto line = juce::Time::getCurrentTime().toString(true, true, true, true) + "  released a device edit that never finished ("
+                      + juce::String::fromUTF8(editingDevicesWhat_.c_str()) + ", " + juce::String((int) ((now - editingDevicesSince_) / 1000))
+                      + " s); version " + juce::JUCEApplication::getInstance()->getApplicationVersion() + "\n";
+    core::appDataDirectory().getChildFile("Diagnostics.log").appendText(line, false, false, "\n");
+    logf("%s", line.toRawUTF8());
+    editingDevices_ = false;
+    editingDevicesSince_ = 0;
+    ui_.song = song_.get();
+    if (ui_.modelChanged) ui_.modelChanged();
+    return true;
 }
 
 void AppController::beginDeviceEdit()
 {
     editingDevices_ = true;
+    editingDevicesSince_ = juce::Time::getMillisecondCounterHiRes();
+    editingDevicesWhat_ = "device edit / reprepare";
     closePluginWindows();
     deviceIdsBeforeEdit_ = song_ ? ui::deviceIdsByTrack(*song_) : ui::DeviceIdsByTrack{};
     ui_.song = nullptr;
@@ -1239,6 +1304,7 @@ void AppController::afterEdit(const std::vector<int>& tracks, bool songLevel, bo
         followWavetableIds(); // before any view sees the new song
         ui_.song = song_.get();
         editingDevices_ = false;
+        editingDevicesSince_ = 0;
         auto mappings = midi_.mappings();
         auto order = midi::deviceOrder(*song_);
         midi::rebindDeviceMappings(deviceOrder_, order, mappings);
@@ -2258,7 +2324,19 @@ void AppController::updateWindowTitle()
 
 bool AppController::writeSet(const juce::File& destination, const io::AlsSaveOptions& options)
 {
-    if (editingDevices_ || syncingModel_) { ui_.statusText = "Wait until the device operation has finished"; return false; }
+    recoverStuckDeviceEdit(); // a device edit that never finished must not block saving forever
+    const auto refuse = [this](const std::string& why) { // a failed save must never pass unnoticed (status text alone did)
+        ui_.statusText = why;
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "The set was not saved",
+                                               juce::String::fromUTF8(why.c_str()));
+    };
+    if (editingDevices_ || syncingModel_)
+    {
+        refuse("Could not save: a device operation is still running (editing " + std::string(editingDevices_ ? "devices" : "")
+               + (syncingModel_ ? " syncing" : "") + "). Try again in a moment.");
+        logf("save refused: editingDevices=%d syncingModel=%d", (int) editingDevices_, (int) syncingModel_);
+        return false;
+    }
     syncModelFromEngine();
     song_->inKey = ui_.scaleHighlight; // Scale Mode is a view toggle; the set stores it as <InKey> (UI-30b)
     ui::captureSetView(ui_, *song_);
@@ -2266,7 +2344,7 @@ bool AppController::writeSet(const juce::File& destination, const io::AlsSaveOpt
     bool ok = result.ok;
     if (! result.ok)
     {
-        ui_.statusText = "Could not save: " + result.error;
+        refuse("Could not save: " + result.error);
         logf("save failed: %s", result.error.c_str());
     }
     else
@@ -2979,6 +3057,10 @@ void AppController::importWavetablePreset(int trackIndex, int index, const std::
                     }
             imported.device.id = target->id;
             imported.device.enabledTargetId = target->enabledTargetId;
+            // The device's XML template stays: the preset's device has none, and without it a set holding this Prism
+            // could not be saved ("No XML template/container for device <patch name>", reported on 0.1.34).
+            imported.device.sourceXml = target->sourceXml;
+            imported.device.sourceDirectory = target->sourceDirectory;
             *target = std::move(imported.device);
             changed = true;
         }
