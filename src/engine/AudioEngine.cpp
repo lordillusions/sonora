@@ -188,6 +188,42 @@ std::vector<std::string> AudioEngine::updateTrackDevices(int trackIndex, const m
         return std::find(node.processorForModelDevice.begin(), node.processorForModelDevice.end(), link.device)
                    == node.processorForModelDevice.end();
     });
+    // PLG-22: link the sidechains of this track's new or re-routed devices, as buildGraph does for a whole set. Without
+    // this a sidechain chosen in the app reached the model but never the device until the set was reopened.
+    {
+        const int numTracks = (int) song.tracks.size();
+        const auto nodeOf = [&](model::TrackId id) {
+            for (int i = 0; i < numTracks; ++i) if (song.tracks[(size_t) i].id == id) return i;
+            for (size_t i = 0; i < song.returns.size(); ++i) if (song.returns[i].id == id) return numTracks + (int) i;
+            return -1;
+        };
+        bool linked = false;
+        for (size_t di = 0; di < track->devices.size() && di < node.processorForModelDevice.size(); ++di)
+        {
+            const auto& sc = track->devices[di].sidechain;
+            auto* proc = node.processorForModelDevice[di];
+            if (! sc.routed() || proc == nullptr) continue;
+            if (std::any_of(node.sidechains.begin(), node.sidechains.end(), [&](const auto& l) { return l.device == proc; })) continue;
+            const int source = nodeOf(sc.sourceTrackId);
+            if (source < 0 || source == trackIndex || source >= (int) latest_->nodes.size())
+            {
+                log.push_back("Sidechain of '" + track->devices[di].displayName + "' listens to a track we cannot find: ignored");
+                continue;
+            }
+            const int tap = sc.tap == model::Sidechain::Tap::PreFx ? 0 : sc.tap == model::Sidechain::Tap::PostFx ? 1 : 2;
+            auto& from = latest_->nodes[(size_t) source];
+            if (! from.needTap[(size_t) tap]) // the audio callback is detached here: allocating is fine
+            {
+                from.tap[(size_t) tap].setSize(2, std::max({1, blockSize_, latest_->preparedBlockSize}));
+                from.tap[(size_t) tap].clear();
+                from.needTap[(size_t) tap] = true;
+            }
+            node.sidechains.push_back({proc, source, tap, (float) sc.gain});
+            proc->setSidechainLevels((float) sc.gain, (float) sc.mix);
+            linked = true;
+        }
+        if (linked) latest_->orderSidechainSources();
+    }
     const bool clipsChanged = node.clipsEdited || node.clipSwap->pending.load() != nullptr;
     delete node.clipSwap->pending.exchange(nullptr);
     delete node.clipSwap->retired.exchange(nullptr);

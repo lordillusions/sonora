@@ -208,6 +208,9 @@ struct EngineGraph
     int preparedBlockSize = 0;
     std::vector<TrackNode> nodes; // tracks (incl. groups), then returns, then main (last)
     std::vector<int> trackOrder;  // processing order for tracks: children before groups
+    // PLG-22: after links were added to a built graph: moves tracks so every sidechain source (and every group's child)
+    // is processed before what depends on it; a loop leaves the order as it is.
+    void orderSidechainSources();
     std::vector<int> returnNodes;
     int mainNode = -1;
     std::shared_ptr<ControlBank> controls;

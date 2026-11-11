@@ -135,3 +135,64 @@ TEST_CASE("hush sidechain: the reduction follows the sidechain (a 1 kHz key cuts
     const auto png = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_hush_sidechain.png");
     CHECK(gfx::renderToPng(root, 1050, 621, 1.0f, png.getFullPathName().toStdString()));
 }
+
+TEST_CASE("hush sidechain: choosing the source in the app (a device edit on a running engine) links it at once")
+{
+    // The reported case: the set was loaded without a sidechain, then the Sidechain panel routed Hush to the kick track.
+    // That is AudioEngine::updateTrackDevices (no full rebuild), which used to drop new links on the floor.
+    juce::ScopedJuceInitialiser_GUI juceInit;
+    plugins::PluginHost host;
+    midi::MidiManager midi;
+    engine::AudioEngine eng(host, midi);
+    model::Song song;
+    for (int i = 0; i < 2; ++i)
+    {
+        model::Track t;
+        t.id = 30 + i;
+        t.kind = model::TrackKind::Audio;
+        t.name = i == 0 ? "Bass" : "Kick"; // the listener comes first: the source must be moved before it
+        song.tracks.push_back(t);
+    }
+    auto hush = devices::nativeDeviceModel("SonoraHush");
+    hush.id = 7;
+    for (auto& p : hush.parameters) if (p.path == "Sidechain_listen") p.value = 1;
+    song.tracks[0].devices.push_back(hush);
+    eng.loadSong(song);
+    auto* graph = eng.latestGraph();
+    REQUIRE(graph != nullptr);
+    graph->nodes[1].devices.insert(graph->nodes[1].devices.begin(), std::make_unique<Tone>(1000.0f, 0.5f)); // the kick
+    graph->nodes[1].outputEnabled = false;
+    CHECK(graph->nodes[0].sidechains.empty());
+
+    // The edit: Hush (a fresh processor, as editDevice makes) now listens to the kick track, Sidechain on.
+    auto edited = song;
+    auto& device = edited.tracks[0].devices[0];
+    device.id = 8;
+    device.sidechain.on = true;
+    device.sidechain.sourceTrackId = 31;
+    device.sidechain.edited = true;
+    for (auto& p : device.parameters) if (p.path == "Sidechain_on") p.value = 1;
+    eng.updateTrackDevices(0, edited);
+    REQUIRE(graph->nodes[0].sidechains.size() == 1);
+    CHECK(graph->nodes[0].sidechains[0].sourceNode == 1);
+    CHECK(graph->nodes[1].needTap[1]);
+    const auto kickAt = std::find(graph->trackOrder.begin(), graph->trackOrder.end(), 1);
+    const auto bassAt = std::find(graph->trackOrder.begin(), graph->trackOrder.end(), 0);
+    CHECK(kickAt < bassAt); // the source runs first now
+
+    std::vector<float> l(512), r(512);
+    float* out[2] = {l.data(), r.data()};
+    eng.transport().play();
+    float peak = 0;
+    for (int b = 0; b < 200; ++b)
+    {
+        eng.renderBlock(out, 2, 512);
+        if (b > 100) for (float v : l) peak = std::max(peak, std::abs(v));
+    }
+    std::printf("    after the app's edit, the bass track with Sidechain listen peaks at %.4f\n", peak);
+    CHECK(peak > 0.2f);
+    auto* listener = dynamic_cast<devices::HushDevice*>(graph->nodes[0].processorForModelDevice[0]);
+    REQUIRE(listener != nullptr);
+    CHECK(listener->sidechainConnected());
+    CHECK(listener->detectingSidechain());
+}

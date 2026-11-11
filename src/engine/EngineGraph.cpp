@@ -564,4 +564,34 @@ GraphBuildResult buildGraph(const model::Song& song, devices::BuildContext ctx, 
     return result;
 }
 
+void EngineGraph::orderSidechainSources()
+{
+    // Constraints between track nodes: a child before the group it plays into, a sidechain source before its listener.
+    std::vector<std::pair<int, int>> before;
+    const auto isTrack = [&](int index) { return std::find(trackOrder.begin(), trackOrder.end(), index) != trackOrder.end(); };
+    for (const int i : trackOrder)
+    {
+        const auto& n = nodes[(size_t) i];
+        if (n.outputNode >= 0 && isTrack(n.outputNode)) before.push_back({i, n.outputNode});
+        for (const auto& link : n.sidechains)
+            if (isTrack(link.sourceNode)) before.push_back({link.sourceNode, i});
+    }
+    // Move a violated pair's later side right after its earlier side until none is left (bounded: a loop stays).
+    for (int pass = 0; pass < (int) (trackOrder.size() * trackOrder.size()) + 4; ++pass)
+    {
+        bool moved = false;
+        for (const auto& [first, second] : before)
+        {
+            const auto a = std::find(trackOrder.begin(), trackOrder.end(), first);
+            const auto b = std::find(trackOrder.begin(), trackOrder.end(), second);
+            if (a == trackOrder.end() || b == trackOrder.end() || a < b) continue;
+            const int value = *b;
+            trackOrder.erase(b);
+            trackOrder.insert(std::find(trackOrder.begin(), trackOrder.end(), first) + 1, value);
+            moved = true;
+        }
+        if (! moved) return;
+    }
+}
+
 } // namespace sonora::engine
