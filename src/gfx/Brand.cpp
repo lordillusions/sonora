@@ -480,39 +480,80 @@ float promptButtonsTop(const PromptState& state)
 }
 } // namespace
 
-float promptHeight(const PromptState& state) { return promptButtonsTop(state) + promptButtonH + 22; }
-
-std::vector<SkRect> promptButtonRects(const PromptState& state, float width, float height)
+namespace
+{
+// The buttons' rects relative to the top of the button area, and that area's height. One row like a macOS alert: the
+// primary rightmost, the other trailing buttons leftwards in index order, the leading ones from the text column. When
+// the labels are too long for that, the leading ones move under the icon; when they still collide, the buttons stack
+// in a column under the text, primary on top and the leading ones last (macOS's vertical alert).
+struct PromptButtonLayout
+{
+    std::vector<SkRect> rects;
+    float height = promptButtonH;
+};
+PromptButtonLayout layoutPromptButtons(const PromptState& state, float width)
 {
     const auto f = font(promptMessageSize, true);
-    std::vector<SkRect> rects(state.buttons.size());
-    const float y = height - 22 - promptButtonH;
-    float right = width - promptPad;
-    // Primary first (rightmost), then the other trailing buttons leftwards in index order; leading ones from the left.
-    std::vector<size_t> trailing;
+    PromptButtonLayout layout;
+    layout.rects.resize(state.buttons.size());
+    std::vector<size_t> trailing, leading;
     for (size_t i = 0; i < state.buttons.size(); ++i)
         if (state.buttons[i].primary && ! state.buttons[i].leading) trailing.push_back(i);
     for (size_t i = 0; i < state.buttons.size(); ++i)
         if (! state.buttons[i].primary && ! state.buttons[i].leading) trailing.push_back(i);
+    for (size_t i = 0; i < state.buttons.size(); ++i)
+        if (state.buttons[i].leading) leading.push_back(i);
     auto widthOf = [&](size_t i) {
         const auto& label = state.buttons[i].label;
         return std::max(promptButtonMinW, f.measureText(label.data(), label.size(), SkTextEncoding::kUTF8) + 30);
     };
+    float right = width - promptPad;
     for (const auto i : trailing)
     {
         const float w = widthOf(i);
-        rects[i] = SkRect::MakeXYWH(right - w, y, w, promptButtonH);
+        layout.rects[i] = SkRect::MakeXYWH(right - w, 0, w, promptButtonH);
         right -= w + promptButtonGap;
     }
-    float left = promptTextX;
-    for (size_t i = 0; i < state.buttons.size(); ++i)
-        if (state.buttons[i].leading)
+    float leadingWidth = 0;
+    for (const auto i : leading) leadingWidth += widthOf(i) + promptButtonGap;
+    // `right` is now one gap left of the trailing row; leadingWidth already counts one gap after the last leading one.
+    const float trailingLeft = right + promptButtonGap;
+    for (const float start : {promptTextX, promptPad})
+        if (start + leadingWidth <= trailingLeft + 0.5f)
         {
-            const float w = widthOf(i);
-            rects[i] = SkRect::MakeXYWH(left, y, w, promptButtonH);
-            left += w + promptButtonGap;
+            float left = start;
+            for (const auto i : leading)
+            {
+                const float w = widthOf(i);
+                layout.rects[i] = SkRect::MakeXYWH(left, 0, w, promptButtonH);
+                left += w + promptButtonGap;
+            }
+            return layout;
         }
-    return rects;
+    std::vector<size_t> column = trailing;
+    column.insert(column.end(), leading.begin(), leading.end());
+    float y = 0;
+    for (const auto i : column)
+    {
+        layout.rects[i] = SkRect::MakeLTRB(promptTextX, y, width - promptPad, y + promptButtonH);
+        y += promptButtonH + promptButtonGap;
+    }
+    layout.height = std::max(promptButtonH, y - promptButtonGap);
+    return layout;
+}
+} // namespace
+
+float promptHeight(const PromptState& state)
+{
+    return promptButtonsTop(state) + layoutPromptButtons(state, promptWidth).height + 22;
+}
+
+std::vector<SkRect> promptButtonRects(const PromptState& state, float width, float height)
+{
+    auto layout = layoutPromptButtons(state, width);
+    const float top = height - 22 - layout.height;
+    for (auto& r : layout.rects) r.offset(0, top);
+    return layout.rects;
 }
 
 void drawPrompt(SkCanvas& canvas, float width, float height, const PromptState& state)

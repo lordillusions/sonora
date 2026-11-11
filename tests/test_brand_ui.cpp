@@ -1,4 +1,5 @@
 #include "TestFramework.h"
+#include <cmath>
 
 #include "app/AboutUpdates.h"
 #include "gfx/Brand.h"
@@ -101,6 +102,38 @@ TEST_CASE("brand: save prompt buttons sit inside the panel like a macOS alert (U
     CHECK(SkColorGetR(save) > 200); // the primary button is the light one
     const auto cancel = pixels.getColor((int) rects[2].left() + 6, (int) rects[2].centerY());
     CHECK(SkColorGetR(cancel) < 80);
+}
+
+TEST_CASE("brand: long prompt button labels never overlap (UI-44c)")
+{
+    // The Duplicate Tracks question: two long trailing labels pushed Cancel's slot under "Without Automation".
+    auto disjoint = [](const std::vector<SkRect>& rects) {
+        for (size_t a = 0; a < rects.size(); ++a)
+            for (size_t b = a + 1; b < rects.size(); ++b)
+                if (SkRect::Intersects(rects[a].makeOutset(4, 4), rects[b])) return false;
+        return true;
+    };
+    gfx::brand::PromptState state;
+    state.title = "Duplicate the automation too?";
+    state.message = "The selected tracks have automation. Should the copies get it as well?";
+    state.buttons = {{"With Automation", true, false}, {"Without Automation", false, false}, {"Cancel", false, true}};
+    float w = gfx::brand::promptWidth, h = gfx::brand::promptHeight(state);
+    auto rects = gfx::brand::promptButtonRects(state, w, h);
+    CHECK(disjoint(rects));
+    for (const auto& r : rects) CHECK(r.left() > 0 && r.right() < w && r.top() > 0 && r.bottom() < h);
+    CHECK(rects[0].right() > rects[1].right() && rects[1].left() > rects[2].right()); // still one row: Cancel at the left
+    CHECK(std::abs(rects[0].top() - rects[2].top()) < 0.01f);
+
+    // Labels that fit no row stack in a column, primary on top, Cancel last, and the panel grows to hold them.
+    gfx::brand::PromptState column = state;
+    column.buttons = {{"Replace Every Instance in the Set", true, false}, {"Keep the Plug-ins as They Are", false, false},
+                      {"Cancel", false, true}};
+    h = gfx::brand::promptHeight(column);
+    CHECK(h > gfx::brand::promptHeight(state));
+    rects = gfx::brand::promptButtonRects(column, w, h);
+    CHECK(disjoint(rects));
+    for (const auto& r : rects) CHECK(r.left() > 0 && r.right() < w && r.top() > 0 && r.bottom() < h);
+    CHECK(rects[0].top() < rects[1].top() && rects[1].top() < rects[2].top());
 }
 
 TEST_CASE("brand: About window buttons stay inside the panel, apart, and the height follows the supporters (COM-8)")

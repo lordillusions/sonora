@@ -90,6 +90,14 @@ int main(int argc, char** argv)
     const float promptH = brand::promptHeight(prompt);
     ok &= writePng((dir / "preview-prompt.png").string(), (int) brand::promptWidth * 2, (int) promptH * 2, 2.0f,
                    [&](SkCanvas& c) { brand::drawPrompt(c, brand::promptWidth, promptH, prompt); });
+    brand::PromptState choice; // long labels (UI-44c): the Duplicate Tracks question
+    choice.title = "Duplicate the automation too?";
+    choice.message = "The selected tracks have automation. Should the copies get it as well?";
+    choice.buttons = {{"With Automation", true, false}, {"Without Automation", false, false}, {"Cancel", false, true}};
+    choice.focused = 0;
+    const float choiceH = brand::promptHeight(choice);
+    ok &= writePng((dir / "preview-prompt-choice.png").string(), (int) brand::promptWidth * 2, (int) choiceH * 2, 2.0f,
+                   [&](SkCanvas& c) { brand::drawPrompt(c, brand::promptWidth, choiceH, choice); });
     // About window (COM-8), with sample supporters and with none.
     for (const bool sample : {true, false})
     {

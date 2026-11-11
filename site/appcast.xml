@@ -3,6 +3,23 @@
     <channel>
         <title>Sonora</title>
         <item>
+            <title>0.1.30</title>
+            <pubDate>Wed, 11 Nov 2026 02:49:00 +0000</pubDate>
+            <link>https://sonoradaw.com/download.html</link>
+            <sparkle:version>0.1.30</sparkle:version>
+            <sparkle:shortVersionString>0.1.30</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<p>Sonora 0.1.30. <a href="https://github.com/lordillusions/sonora/releases/tag/v0.1.30">What is new in this version</a>.</p>
+]]></description>
+            <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.30/Sonora-0.1.30.zip" length="19304564" type="application/octet-stream" sparkle:edSignature="0FTdpoFy7iEIvz4dMFmCfEmuaJrbrDXt/7YHlIkFGyU2cinqGy8bsLIyFVUtqXvWYWIh7H57f4P+cizr7xyZDg=="/>
+            <sparkle:deltas>
+                <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.30/Sonora0.1.30-0.1.29.delta" sparkle:deltaFrom="0.1.29" length="1367698" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="45l7l1TzdYP+lXb71e0Mh8h4RK+8IUUVvp10fOxq3FagbZcp0Bt4wAhkmVnnTiE8/5qdQHsN1bhfHs3kbR23DA=="/>
+                <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.30/Sonora0.1.30-0.1.28.delta" sparkle:deltaFrom="0.1.28" length="1810066" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="Y40+joSuzfZsDg0Egzu24pZQRxSNbRBzCqLMuJRvJ05R04s566mAY0vim+CrH5nnC5mYq84Ry4eZz6biM68xBQ=="/>
+                <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.30/Sonora0.1.30-0.1.27.delta" sparkle:deltaFrom="0.1.27" length="1811630" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="n283oh3OgPu41j3oke7P3vRp36jy5RJBYalQYZnY11n/H9Z2V3J+ZEv7wusPsH36tufUGu5rn4jma3rduvhcBQ=="/>
+            </sparkle:deltas>
+        </item>
+        <item>
             <title>0.1.29</title>
             <pubDate>Tue, 10 Nov 2026 14:40:00 +0000</pubDate>
             <link>https://sonoradaw.com/download.html</link>
@@ -10,8 +27,6 @@
             <sparkle:shortVersionString>0.1.29</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<p>Sonora 0.1.29. <a href="https://github.com/lordillusions/sonora/releases/tag/v0.1.29">What is new in this version</a>.</p>
-]]></description>
             <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.29/Sonora-0.1.29.zip" length="19273195" type="application/octet-stream" sparkle:edSignature="Adpau02Np/pxnxAMyRV9jFQlq+LztWTt1rvfdzFPnX0/yCX0VCyl8zxYI0q6ZLX2FaxaH3yL+dDauP1WjV7rDQ=="/>
             <sparkle:deltas>
                 <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.29/Sonora0.1.29-0.1.28.delta" sparkle:deltaFrom="0.1.28" length="1798302" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="mZYfbpNlXwnSaPthQ+VvmwtHHzN1OFFTDYROkzWElnlHnCE9YnT3WHjP/s8gDQnZhpngYtP8Eu8jWzSqq5LuBQ=="/>
@@ -32,21 +47,6 @@
                 <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.28/Sonora0.1.28-0.1.27.delta" sparkle:deltaFrom="0.1.27" length="758382" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="y+aLxSkFB9N8QG5km48PkJNtH4nfd5KhWw9M6u11p1Z4qsdMq21rFKrlLwdFyXzSoNID6CNb5tum2+cQIKtLBw=="/>
                 <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.28/Sonora0.1.28-0.1.26.delta" sparkle:deltaFrom="0.1.26" length="1330134" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="arwDIrX8pS7gfTXjgwbjpKNvuRkQvPG4zlEq0OabSlXgtQnSFX+o5odpj6Ny7BJmLPtO4OugV28QzjVCYBjqBQ=="/>
                 <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.28/Sonora0.1.28-0.1.25.delta" sparkle:deltaFrom="0.1.25" length="1403082" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="KMNhUi4mRWN05K7OZTTevTDP0trvbclwXvDghs7wH1oPzqLb/YYLTG9QYQFUjN87stfu2KEIn93Mcm9WJH92AA=="/>
-            </sparkle:deltas>
-        </item>
-        <item>
-            <title>0.1.27</title>
-            <pubDate>Mon, 09 Nov 2026 14:12:34 +0000</pubDate>
-            <link>https://sonoradaw.com/download.html</link>
-            <sparkle:version>0.1.27</sparkle:version>
-            <sparkle:shortVersionString>0.1.27</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.27/Sonora-0.1.27.zip" length="19085505" type="application/octet-stream" sparkle:edSignature="G34uNgDLD/0AIUKRA16rcBh9w2I/MiQiYapFtbaJ6irZsNDHv0ohFeYW8Vjw4lF8Zkxp62rUlcg2x+9tE2X1BQ=="/>
-            <sparkle:deltas>
-                <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.27/Sonora0.1.27-0.1.26.delta" sparkle:deltaFrom="0.1.26" length="1339494" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="gTcXXenHIjvuMW2tni8GIXsxHJlHQnIxV9cYfq38KTnFovChpyPeAw0XQ6X0Y8BxoOGaXwlFQkZCMr1NxMDtAw=="/>
-                <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.27/Sonora0.1.27-0.1.25.delta" sparkle:deltaFrom="0.1.25" length="1397186" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="MwE+hXneOR7FHUTZmLY1oz1FsquzuvBk5xU+1UUbfEWAYqqWas33boQKwn9apwKka1AeJxfVgja1oP7QfLfZCQ=="/>
-                <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.27/Sonora0.1.27-0.1.24.delta" sparkle:deltaFrom="0.1.24" length="1407414" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977616" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="kk+4Yc1xZXH2OyNJuDhfIXk/uW/u6rGP/ikgBHIej0m823zBRnHRAanzhmsnx0iLjfC+u1TfzQDJqFA7AkfPCQ=="/>
             </sparkle:deltas>
         </item>
     </channel>
