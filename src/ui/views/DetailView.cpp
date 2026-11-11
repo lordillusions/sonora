@@ -31,6 +31,7 @@
 #include "ui/views/StutterFace.h"
 #include "ui/views/PhaseAlignFace.h"
 #include "ui/views/SweepFace.h"
+#include "ui/views/SidechainPanel.h"
 #include "ui/views/HushFace.h"
 #include "devices/native/HushSession.h"
 #include "ui/views/WavetableEditor.h"
@@ -209,6 +210,21 @@ public:
               bool compact = false)
         : model_(model), proc_(proc), trackIndex_(trackIndex), deviceIndex_(deviceIndex), chain_(chain), child_(child)
     {
+        // PLG-22: the reference's Sidechain section, folded by a small arrow, for every top-level device that listens to
+        // another track and has no sidechain section of its own (plug-ins with a sidechain input, Hush, Phase Align).
+        if (proc_ != nullptr && chain_ < 0 && proc_->takesSidechain() && model_.type != "Compressor2"
+            && model_.type != "GlueCompressor" && model_.type != "Gate")
+        {
+            sidechainPanel_ = add<SidechainPanel>(proc_, trackIndex, deviceIndex);
+            sidechainArrow_ = add<TextButton>("", TextButton::Style::Plain);
+            sidechainArrow_->tooltip = "Show or hide the Sidechain section";
+            sidechainArrow_->onClick = [this] {
+                auto& closed = ctx().sidechainPanelsClosed;
+                if (! closed.erase(model_.id)) closed.insert(model_.id);
+                if (parent_) parent_->layout();
+                repaint();
+            };
+        }
         if (model_.plugin)
         {
             pluginPanel_ = add<PluginPanel>(proc_, trackIndex, model.id, deviceIndex, chain);
@@ -761,7 +777,13 @@ public:
         if (const auto key = x.wavetableKey(trackIndex_, deviceIndex_, chain_, child_); key && x.openHushWindow) x.openHushWindow(*key);
     }
 
-    float preferredWidth() const
+    float preferredWidth() const { return bodyWidth() + sidechainWidth(); }
+    bool sidechainOpen() const { return sidechainPanel_ != nullptr && ! ctx().sidechainPanelsClosed.count(model_.id); }
+    float sidechainWidth() const
+    {
+        return sidechainPanel_ == nullptr ? 0.0f : SidechainPanel::kArrowWidth + (sidechainOpen() ? SidechainPanel::kWidth : 0.0f);
+    }
+    float bodyWidth() const
     {
         if (pluginPanel_) return 150;
         if (referenceFace_) return referenceFace_->preferredWidth(height() > kTitle ? height() - kTitle : ReferenceFace::kDefaultBody);
@@ -812,6 +834,17 @@ public:
             return;
         }
         r = (pluginPanel_ || effectPanel_ || deviceFace_) ? r.reduced(4, 2) : r.reduced(6, 6);
+        if (sidechainPanel_) // PLG-22: [Sidechain panel][arrow] on the left of the device's own body
+        {
+            const bool open = sidechainOpen();
+            sidechainPanel_->visible = open;
+            if (open) sidechainPanel_->setBounds({r.x, r.y, SidechainPanel::kWidth, r.h});
+            const float arrowX = r.x + (open ? SidechainPanel::kWidth : 0.0f);
+            sidechainArrow_->setLabel(open ? "\xe2\x97\x80" : "\xe2\x96\xb6");
+            sidechainArrow_->setBounds({arrowX, r.centreY() - 8, SidechainPanel::kArrowWidth - 1, 16});
+            r.x += sidechainWidth();
+            r.w = std::max(10.0f, r.w - sidechainWidth());
+        }
         if (resynth_)
         {
             resynth_->setBounds({r.x, r.y, ResynthEditor::preferredWidth, ResynthEditor::preferredHeight});
@@ -1062,6 +1095,8 @@ private:
     StutterFace* stutter_ = nullptr;
     PhaseAlignFace* phaseAlign_ = nullptr;
     SweepFace* sweep_ = nullptr;
+    SidechainPanel* sidechainPanel_ = nullptr;
+    TextButton* sidechainArrow_ = nullptr;
     HushFace* hush_ = nullptr;
     IconButton* hushWindow_ = nullptr;
     WavetableEditor* wavetable_ = nullptr;

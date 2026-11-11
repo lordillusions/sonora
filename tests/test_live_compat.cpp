@@ -163,3 +163,61 @@ TEST_CASE("live compat: a Simpler LFO's RateType is written as an enum, and olde
     REQUIRE(repaired != nullptr);
     CHECK(repaired->getChildByName("RateType")->getChildByName("Manual")->getStringAttribute("Value") == "1");
 }
+
+TEST_CASE("live compat: Sonora's Swiss Army Meter gets its routings, and goes out wrapped when its patch is missing (ALS-15d)")
+{
+    juce::TemporaryFile patch(".amxd");
+    REQUIRE(patch.getFile().replaceWithText("max"));
+    auto authored = [](const std::string& path) {
+        model::Device meter;
+        meter.id = 93;
+        meter.type = "MxDeviceAudioEffect";
+        meter.kind = model::DeviceKind::MaxForLive;
+        meter.maxPatch = "Swiss Army Meter";
+        meter.maxPatchPath = path;
+        return juce::parseXML(juce::String(io::deviceTemplate(meter)));
+    };
+    // A fresh insert carries the routables the reference writes.
+    auto fresh = authored(patch.getFile().getFullPathName().toStdString());
+    REQUIRE(fresh != nullptr);
+    CHECK(fresh->getChildByName("Routables")->getChildByName("InRoutings")->getChildByName("MxDInRoutable") != nullptr);
+    CHECK(fresh->getChildByName("Routables")->getChildByName("OutRoutings")->getChildByName("MxDOutRoutable") != nullptr);
+
+    for (const bool found : {true, false})
+    {
+        auto dom = io::createNewSetDom();
+        auto* list = firstDevices(*dom);
+        REQUIRE(list != nullptr);
+        auto device = authored(found ? patch.getFile().getFullPathName().toStdString() : std::string());
+        REQUIRE(device != nullptr);
+        // What 0.1.28 wrote: no routables.
+        for (const char* tag : {"InRoutings", "OutRoutings"})
+            device->getChildByName("Routables")->getChildByName(tag)->deleteAllChildElements();
+        const auto before = device->toString();
+        list->addChildElement(device.release());
+        const auto xml = juce::parseXML(writtenText(*dom));
+        REQUIRE(xml != nullptr);
+        auto* written = firstDevices(*xml)->getChildElement(0);
+        REQUIRE(written != nullptr);
+        if (found)
+        {
+            CHECK(written->hasTagName("MxDeviceAudioEffect"));
+            CHECK(written->getChildByName("Routables")->getChildByName("InRoutings")->getNumChildElements() == 1);
+            CHECK(written->getChildByName("Routables")->getChildByName("OutRoutings")->getNumChildElements() == 1);
+        }
+        else
+        {
+            CHECK(written->hasTagName("PluginDevice")); // the reference shows a missing plug-in instead of crashing
+            CHECK(written->getChildByName("PluginDesc")->getChildByName("Vst3PluginInfo")->getChildByName("Name")
+                      ->getStringAttribute("Value") == "Swiss Army Meter");
+            juce::TemporaryFile file(".xml");
+            std::string error;
+            REQUIRE(io::writeAlsDom(*dom, file.getFile(), error));
+            auto back = io::readAlsDom(file.getFile(), error);
+            REQUIRE(back != nullptr);
+            auto* restored = firstDevices(*back)->getChildElement(0);
+            REQUIRE(restored != nullptr);
+            CHECK(restored->toString() == before); // Sonora gets its device back unchanged
+        }
+    }
+}

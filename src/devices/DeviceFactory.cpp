@@ -286,6 +286,7 @@ std::unique_ptr<DeviceProcessor> createPlugin(const model::Device& d, BuildConte
     const auto t0 = juce::Time::getMillisecondCounterHiRes();
     auto dev = std::make_unique<plugins::PluginDevice>(std::move(instance));
     dev->setBypassed(! d.enabled);
+    dev->setSidechainRouted(d.sidechain.routed() && dev->takesSidechain()); // PLG-22: before the graph prepares it
     const auto prepareMs = juce::Time::getMillisecondCounterHiRes() - t0;
     static const double thresholdMs = std::getenv("SONORA_LOG_LOAD") != nullptr ? 0.0 : 150.0; // SONORA_LOG_LOAD=1 logs every plugin
     if (createMs + stateMs + prepareMs >= thresholdMs)

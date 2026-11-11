@@ -230,7 +230,7 @@
 							<Branches>
 								<AudioEffectBranch Id="0">
 									<Name><EffectiveName Value="Low" /><UserName Value="" /></Name>
-									<DeviceChain><DeviceChain><Devices>
+									<DeviceChain><AudioToAudioDeviceChain Id="0"><Devices>
 										<Eq8 Id="11">
 											<On><Manual Value="true" /></On>
 											<GlobalGain>
@@ -239,7 +239,7 @@
 												<MidiControllerRange><Min Value="-12" /><Max Value="12" /></MidiControllerRange>
 											</GlobalGain>
 										</Eq8>
-									</Devices></DeviceChain></DeviceChain>
+									</Devices></AudioToAudioDeviceChain></DeviceChain>
 									<MixerDevice><Volume><Manual Value="1" /></Volume><Panorama><Manual Value="0" /></Panorama><Speaker><Manual Value="true" /></Speaker></MixerDevice>
 									<ZoneSettings><KeyRange><Min Value="24" /><Max Value="72" /></KeyRange><VelocityRange><Min Value="10" /><Max Value="100" /></VelocityRange></ZoneSettings>
 									<BranchSelectorRange><Min Value="0" /><Max Value="63" /></BranchSelectorRange>

@@ -52,6 +52,49 @@ XmlElement* booleanEnumManual(const XmlElement& e)
     return v == "true" || v == "false" ? manual : nullptr;
 }
 
+// ALS-15d: a Max for Live device Sonora authored (DEV-23 inserts write no <Pointee>; every device the reference writes has one).
+bool isAuthoredMaxDevice(const XmlElement& e)
+{
+    return e.getTagName().startsWith("MxDevice") && e.hasAttribute("Id") && e.getChildByName("Pointee") == nullptr;
+}
+
+const XmlElement* maxFileRef(const XmlElement& e)
+{
+    const auto* slot = e.getChildByName("PatchSlot");
+    const auto* value = slot ? slot->getChildByName("Value") : nullptr;
+    const auto* ref = value ? value->getFirstChildElement() : nullptr;
+    return ref ? ref->getChildByName("FileRef") : nullptr;
+}
+
+// The reference crashes (no dialog) on a Max device whose patch it cannot find when Sonora wrote it; those go out wrapped
+// like Sonora's own devices, so the reference shows a missing plug-in and Sonora gets the device back on reload.
+bool authoredMaxPatchMissing(const XmlElement& e)
+{
+    if (! isAuthoredMaxDevice(e)) return false;
+    const auto* ref = maxFileRef(e);
+    const auto* path = ref ? ref->getChildByName("Path") : nullptr;
+    const auto text = path ? path->getStringAttribute("Value") : juce::String();
+    return ! juce::File::isAbsolutePath(text) || ! juce::File(text).existsAsFile();
+}
+
+// It also crashes when the patch's audio routings are absent: Swiss Army Meter has one input and one output routable.
+bool authoredMaxRoutingsMissing(const XmlElement& e)
+{
+    if (! isAuthoredMaxDevice(e)) return false;
+    const auto* ref = maxFileRef(e);
+    const auto* relative = ref ? ref->getChildByName("RelativePath") : nullptr;
+    if (relative == nullptr || ! relative->getStringAttribute("Value").endsWith("Swiss Army Meter.amxd")) return false;
+    const auto* routables = e.getChildByName("Routables");
+    const auto* in = routables ? routables->getChildByName("InRoutings") : nullptr;
+    const auto* out = routables ? routables->getChildByName("OutRoutings") : nullptr;
+    return in == nullptr || out == nullptr || in->getNumChildElements() == 0 || out->getNumChildElements() == 0;
+}
+
+bool needsWrapper(const XmlElement& device)
+{
+    return isSonoraOnlyDevice(device) || authoredMaxPatchMissing(device);
+}
+
 bool needsChange(const XmlElement& e)
 {
     if (e.hasAttribute("Value") && wholeNumberText(e.getStringAttribute("Value")).isNotEmpty()) return true;
@@ -61,7 +104,7 @@ bool needsChange(const XmlElement& e)
     if (booleanEnumManual(e) != nullptr) return true;
     const bool devices = e.hasTagName("Devices");
     for (const auto* c : e.getChildIterator())
-        if ((devices && isSonoraOnlyDevice(*c)) || needsChange(*c)) return true;
+        if ((devices && (needsWrapper(*c) || authoredMaxRoutingsMissing(*c))) || needsChange(*c)) return true;
     return false;
 }
 
@@ -78,7 +121,7 @@ std::unique_ptr<XmlElement> wrapperFor(const XmlElement& original)
     plugin.enabled = native.enabled;
     const auto* entry = model::findCatalogEntry(tag);
     model::PluginInfo info;
-    info.name = entry ? std::string(entry->displayName) : tag;
+    info.name = entry ? std::string(entry->displayName) : ! native.maxPatch.empty() ? native.maxPatch : tag;
     info.vendor = "Sonora";
     info.vst3Uid = sonoraVst3Uid(tag);
     info.isInstrument = entry && entry->role == model::DeviceRole::Instrument;
@@ -110,7 +153,9 @@ void makeCompatible(XmlElement& e)
         auto* c = e.getChildElement(i);
         if (slotValue && ! c->hasAttribute("Id")) c->setAttribute("Id", 0);
         makeCompatible(*c);
-        if (! devices || ! isSonoraOnlyDevice(*c)) continue;
+        if (devices && ! needsWrapper(*c) && authoredMaxRoutingsMissing(*c))
+            if (auto* routables = c->getChildByName("Routables")) addSwissArmyMeterRoutings(*routables);
+        if (! devices || ! needsWrapper(*c)) continue;
         auto wrapper = wrapperFor(*c);
         if (! wrapper) continue; // never fail a save: the device stays as it was
         e.removeChildElement(c, false);
@@ -130,7 +175,8 @@ int unwrap(XmlElement& e)
         auto* c = e.getChildElement(i);
         if (devices && c->hasTagName("PluginDevice"))
             if (auto* holder = c->getChildByName(kWrapperTag); holder && holder->getIntAttribute("Version") <= kWrapperVersion)
-                if (auto* inner = holder->getFirstChildElement(); inner && isSonoraOnlyDevice(*inner))
+                if (auto* inner = holder->getFirstChildElement();
+                    inner && (isSonoraOnlyDevice(*inner) || inner->getTagName().startsWith("MxDevice")))
                 {
                     holder->removeChildElement(inner, false);
                     e.replaceChildElement(c, inner); // deletes the wrapper

@@ -206,6 +206,8 @@ void patchDevice(XmlElement* x, const model::Device& d)
     if (d.sidechain.edited)
     {
         setManual(at(x, "SideChain/OnOff"), d.sidechain.on ? 1.0 : 0.0);
+        setManual(at(x, "SideChain/RoutedInput/Volume"), d.sidechain.gain);
+        setManual(at(x, "SideChain/DryWet"), d.sidechain.mix);
         if (auto* target = at(x, "SideChain/RoutedInput/Routable/Target"))
             setValueAttr(target, d.sidechain.sourceTrackId < 0 ? "AudioIn/None"
                            : juce::String("AudioIn/Track.") + juce::String(d.sidechain.sourceTrackId)
@@ -2202,7 +2204,12 @@ bool writeAlsDom(const juce::XmlElement& root, const juce::File& destination, st
     juce::XmlElement::TextFormat format;
     format.newLineChars = "\n";
     format.lineWrapLength = 100000; // never wrap attribute lists: Live writes one element per line
-    const auto compatible = liveCompatibleCopy(root); // ALS-15: what the reference app can open (LiveCompat.h)
+    auto compatible = liveCompatibleCopy(root); // ALS-15: what the reference app can open (LiveCompat.h)
+    if (rackBranchesNeedRepair(compatible ? *compatible : root)) // ALS-15d: rack chains saved by 0.1.28 and earlier
+    {
+        if (! compatible) compatible = std::make_unique<juce::XmlElement>(root);
+        repairRackBranches(*compatible);
+    }
     const auto text = (compatible ? *compatible : root).toString(format);
     juce::TemporaryFile temp(destination);
     {

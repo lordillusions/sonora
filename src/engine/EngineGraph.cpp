@@ -513,6 +513,7 @@ GraphBuildResult buildGraph(const model::Song& song, devices::BuildContext ctx, 
             const int tapIndex = sc.tap == model::Sidechain::Tap::PreFx ? 0 : sc.tap == model::Sidechain::Tap::PostFx ? 1 : 2;
             g->nodes[(size_t) src->second].needTap[(size_t) tapIndex] = true;
             node.sidechains.push_back({proc, src->second, tapIndex, (float) sc.gain});
+            proc->setSidechainLevels((float) sc.gain, (float) sc.mix); // the panel changes them live (PLG-22)
             if ((int) nodeIndex < numTracks)
                 edges.push_back({src->second, (int) nodeIndex});
         }

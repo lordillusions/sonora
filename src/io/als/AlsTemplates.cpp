@@ -1,5 +1,6 @@
 #include "io/als/AlsTemplates.h"
 #include "core/WavetableFormat.h"
+#include "core/DeviceCatalog.h"
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
@@ -283,6 +284,96 @@ std::string audioClipTemplate(const model::Clip& clip)
     return root.toString().toStdString();
 }
 
+void addSwissArmyMeterRoutings(juce::XmlElement& routables)
+{
+    // ALS-15d: what the reference writes for the patch's sidechain input and its output (both unrouted).
+    for (const auto& [list, kind, target] : {std::tuple{"InRoutings", "MxDInRoutable", "AudioIn/None"},
+                                             std::tuple{"OutRoutings", "MxDOutRoutable", "AudioOut/None"}})
+    {
+        auto* holder = routables.getChildByName(list);
+        if (! holder) holder = routables.createNewChildElement(list);
+        if (holder->getNumChildElements() > 0) continue;
+        auto* item = holder->createNewChildElement(kind);
+        item->setAttribute("Id", 0);
+        auto* routable = item->createNewChildElement("Routable");
+        value(*routable, "Target", target);
+        value(*routable, "UpperDisplayString", "No Output");
+        value(*routable, "LowerDisplayString", "");
+        auto* mpe = routable->createNewChildElement("MpeSettings");
+        value(*mpe, "ZoneType", "0"); value(*mpe, "FirstNoteChannel", "1"); value(*mpe, "LastNoteChannel", "15");
+        value(*routable, "MpePitchBendUsesTuning", "true");
+        value(*item, "LomId", "0");
+    }
+}
+
+std::pair<const char*, const char*> rackBranchClasses(const std::string& rackType)
+{
+    if (rackType == "DrumGroupDevice") return {"DrumBranch", "MidiToAudioDeviceChain"};
+    if (rackType == "AudioEffectGroupDevice") return {"AudioEffectBranch", "AudioToAudioDeviceChain"};
+    if (rackType == "MidiEffectGroupDevice") return {"MidiEffectBranch", "MidiToMidiDeviceChain"};
+    return {"InstrumentBranch", "MidiToAudioDeviceChain"};
+}
+
+juce::XmlElement* rackBranchDevices(juce::XmlElement& branch, const std::string& rackType)
+{
+    const auto [branchTag, chainTag] = rackBranchClasses(rackType);
+    branch.setTagName(branchTag);
+    auto* deviceChain = branch.getChildByName("DeviceChain");
+    if (! deviceChain) deviceChain = branch.createNewChildElement("DeviceChain");
+    auto* inner = deviceChain->getChildByName(chainTag);
+    if (! inner)
+    {
+        // A wrong chain class, or none (0.1.28 and earlier wrote Devices straight into DeviceChain): its content moves inside.
+        auto* stray = deviceChain->getFirstChildElement();
+        inner = new juce::XmlElement(chainTag);
+        if (stray && ! stray->hasTagName("Devices") && stray->getChildByName("Devices"))
+        {
+            for (auto* c = stray->getFirstChildElement(); c != nullptr; c = stray->getFirstChildElement())
+            {
+                stray->removeChildElement(c, false); inner->addChildElement(c);
+            }
+        }
+        for (auto* c = deviceChain->getFirstChildElement(); c != nullptr; c = deviceChain->getFirstChildElement())
+        {
+            deviceChain->removeChildElement(c, false);
+            if (c->hasTagName("Devices") && ! inner->getChildByName("Devices")) inner->addChildElement(c);
+            else delete c;
+        }
+        inner->setAttribute("Id", 0);
+        deviceChain->addChildElement(inner);
+    }
+    auto* devices = inner->getChildByName("Devices");
+    return devices ? devices : inner->createNewChildElement("Devices");
+}
+
+bool rackBranchesNeedRepair(const juce::XmlElement& x)
+{
+    const auto tag = x.getTagName().toStdString();
+    if (model::isRackTag(tag))
+        if (const auto* branches = x.getChildByName("Branches"))
+            for (const auto* branch : branches->getChildIterator())
+            {
+                const auto [branchTag, chainTag] = rackBranchClasses(tag);
+                const auto* deviceChain = branch->getChildByName("DeviceChain");
+                const auto* inner = deviceChain ? deviceChain->getChildByName(chainTag) : nullptr;
+                if (! branch->hasTagName(branchTag) || ! inner || ! inner->getChildByName("Devices")) return true;
+            }
+    for (const auto* c : x.getChildIterator())
+        if (rackBranchesNeedRepair(*c)) return true;
+    return false;
+}
+
+void repairRackBranches(juce::XmlElement& x)
+{
+    const auto tag = x.getTagName().toStdString();
+    if (model::isRackTag(tag))
+        if (auto* branches = x.getChildByName("Branches"))
+            for (auto* branch : branches->getChildIterator())
+                rackBranchDevices(*branch, tag);
+    for (auto* c : x.getChildIterator())
+        repairRackBranches(*c);
+}
+
 std::string deviceTemplate(const model::Device& device)
 {
     XmlElement root(juce::String(device.type));
@@ -322,6 +413,7 @@ std::string deviceTemplate(const model::Device& device)
         root.createNewChildElement("BlobSlot")->createNewChildElement("Value");
         auto* routables = root.createNewChildElement("Routables");
         for (const char* tag : {"InRoutings", "OutRoutings", "MidiInRoutings", "MidiOutRoutings"}) routables->createNewChildElement(tag);
+        if (device.maxPatch == "Swiss Army Meter") addSwissArmyMeterRoutings(*routables);
         value(root, "MpeEnabled", "false");
         value(root, "MpeTuningEnabled", "false");
     }
@@ -416,8 +508,11 @@ std::string deviceTemplate(const model::Device& device)
             int index = 0;
             for (const auto& chain : device.chains)
             {
+                // ALS-15d: each rack kind has its own branch class and chain class in the reference; the devices live in
+                // <DeviceChain><ChainClass Id="0"><Devices>, never directly in <DeviceChain> ("Unknown class 'Devices'").
                 const bool drum = device.type == "DrumGroupDevice";
-                auto* branch = branches->createNewChildElement(drum ? "DrumBranch" : "InstrumentBranch");
+                const bool midiRack = device.type == "MidiEffectGroupDevice";
+                auto* branch = branches->createNewChildElement(rackBranchClasses(device.type).first);
                 if (chain.sourceXml)
                     if (auto source = juce::XmlDocument::parse(juce::String(*chain.sourceXml)))
                     {
@@ -425,8 +520,11 @@ std::string deviceTemplate(const model::Device& device)
                     }
                 branch->setAttribute("Id", index++);
                 value(*path(*branch, "Name"), "EffectiveName", juce::String(chain.name));
-                parameter(*branch, "MixerDevice/Volume", chain.volume, -1);
-                parameter(*branch, "MixerDevice/Panorama", chain.pan, -1);
+                if (! midiRack) // MidiBranchMixerDevice has only Speaker
+                {
+                    parameter(*branch, "MixerDevice/Volume", chain.volume, -1);
+                    parameter(*branch, "MixerDevice/Panorama", chain.pan, -1);
+                }
                 parameter(*branch, "MixerDevice/Speaker", chain.speakerOn ? 1 : 0, -1, true);
                 auto range = [&](const char* key, int min, int max) {
                     auto* r = path(*branch, key); value(*r, "Min", juce::String(min)); value(*r, "Max", juce::String(max));
@@ -440,14 +538,7 @@ std::string deviceTemplate(const model::Device& device)
                     value(*info, "ReceivingNote", juce::String(chain.receivingNote >= 0 ? 128 - chain.receivingNote : 0));
                     value(*info, "SendingNote", juce::String(chain.sendingNote)); value(*info, "ChokeGroup", juce::String(chain.chokeGroup));
                 }
-                auto findDevices = [](auto&& self, XmlElement* parent, int depth) -> XmlElement* {
-                    if (depth > 4) return nullptr;
-                    if (parent->hasTagName("Devices")) return parent;
-                    for (auto* c : parent->getChildIterator()) if (auto* found = self(self, c, depth + 1)) return found;
-                    return nullptr;
-                };
-                auto* children = findDevices(findDevices, branch, 0);
-                if (! children) children = path(*branch, "DeviceChain/Devices");
+                auto* children = rackBranchDevices(*branch, device.type);
                 children->deleteAllChildElements();
                 for (const auto& child : chain.devices)
                 {

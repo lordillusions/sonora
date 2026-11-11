@@ -1,4 +1,6 @@
 #include "ui/TrackMenu.h"
+
+#include "core/DrumFill.h"
 #include "ui/ClipAutomation.h"
 #include "ui/SampleFiles.h"
 #include "ui/views/AutomationEditor.h"
@@ -426,6 +428,25 @@ std::vector<MenuAction> clipContextActions(UiContext& ctx, model::ClipLocation l
     result.push_back({"Bounce Track in Place", [&ctx, valid, location] {
         if (valid() && ctx.renderTrack) ctx.renderTrack(location.track, false, false);
     }, editable && static_cast<bool>(ctx.renderTrack)});
+    if (clip && clip->kind == model::Clip::Kind::Midi)
+    {
+        // PLG-20: a drum fill over the clip's last beats, in a style picked at random; ask again for another (one undo each).
+        MenuAction fill{"Generate Drum Fill", {}, editable};
+        for (const auto& length : {std::pair<const char*, double>{"Last Beat", 1.0}, {"Last 2 Beats", 2.0}, {"Last Bar", 4.0}, {"Last 2 Bars", 8.0}})
+        {
+            const double fillBeats = length.second;
+            fill.submenu.push_back({length.first, [&ctx, valid, location, fillBeats] {
+                if (! valid() || ! ctx.applyEdit) return;
+                std::string message;
+                auto command = model::drumFill(*ctx.song, location, fillBeats, juce::Random::getSystemRandom().nextInt() & 0x7fffffff, message);
+                if (command.apply) ctx.applyEdit(std::move(command));
+                ctx.statusText = message;
+                if (ctx.requestRepaint) ctx.requestRepaint();
+            }, editable});
+        }
+        result.push_back({"", {}, false});
+        result.push_back(std::move(fill));
+    }
     if (clip && clip->kind == model::Clip::Kind::Audio)
     {
         result.push_back({"", {}, false});

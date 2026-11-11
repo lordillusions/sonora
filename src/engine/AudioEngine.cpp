@@ -686,7 +686,7 @@ void AudioEngine::feedSidechains(EngineGraph& g, TrackNode& node, int)
     for (const auto& link : node.sidechains)
     {
         const auto& source = g.nodes[(size_t) link.sourceNode];
-        link.device->setSidechain(source.needTap[(size_t) link.tap] ? &source.tap[(size_t) link.tap] : nullptr, link.gain);
+        link.device->setSidechain(source.needTap[(size_t) link.tap] ? &source.tap[(size_t) link.tap] : nullptr, link.device->sidechainGainLevel());
     }
 }
 

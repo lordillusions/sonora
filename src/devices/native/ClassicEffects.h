@@ -22,6 +22,7 @@ public:
     void reset() override;
     void process(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     void setSidechain(const juce::AudioBuffer<float>* source, float gain) override { sidechain_ = source; sidechainGain_ = gain; }
+    bool takesSidechain() const override { return true; }
     int latencySamples() const override { return latency_; }
     float reduction() const { return reduction_.load(std::memory_order_relaxed); }
 private:

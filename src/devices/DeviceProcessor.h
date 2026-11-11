@@ -117,6 +117,17 @@ public:
     // External sidechain: the engine points the device at another track's tapped audio for this block
     // (nullptr == use the device's own input). Audio thread, before process().
     virtual void setSidechain(const juce::AudioBuffer<float>* /*audio*/, float /*gain*/) {}
+    // PLG-22: devices that listen to another track (the chain shows the Sidechain panel for them).
+    virtual bool takesSidechain() const { return false; }
+    // Sidechain Gain (linear) and Mix (0..1) of the running device: set from the model when the graph is built and live
+    // from the panel's knobs; the engine passes sidechainGainLevel() with the tapped audio every block.
+    void setSidechainLevels(float gain, float mix)
+    {
+        sidechainGainLevel_.store(gain, std::memory_order_relaxed);
+        sidechainMixLevel_.store(mix, std::memory_order_relaxed);
+    }
+    float sidechainGainLevel() const { return sidechainGainLevel_.load(std::memory_order_relaxed); }
+    float sidechainMixLevel() const { return sidechainMixLevel_.load(std::memory_order_relaxed); }
     virtual int latencySamples() const { return 0; }
 
     // ---- parameters (plain values, i.e. in the units of ParameterInfo)
@@ -178,6 +189,7 @@ public:
 
 protected:
     std::atomic<bool> bypassed{false};
+    std::atomic<float> sidechainGainLevel_{1.0f}, sidechainMixLevel_{1.0f};
 };
 
 } // namespace sonora::devices

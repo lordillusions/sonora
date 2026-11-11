@@ -451,6 +451,10 @@ struct UiContext
     // Native sample/chain editing; message thread. chain == -1 addresses a top-level sampler.
     std::function<void(const BrowserDrag&, int track, int device, int chain, int zone, int child)> dropDeviceItem;
     std::function<void(int track, int device, std::function<void(model::Device&)>, std::string)> editDevice;
+    // PLG-22: the Sidechain panel's Gain (linear) / Mix (0..1) into the model, without rebuilding the device (it already
+    // runs with them) and without an undo step per knob move, like the other live device knobs.
+    std::function<void(int track, int device, float gain, float mix)> setDeviceSidechainLevels;
+    std::set<int> sidechainPanelsClosed; // PLG-22: device ids whose Sidechain panel the arrow folded away
     std::function<void(int track, int device, int oscillator, const std::string& path, int chain, int child)> importWavetable;
     std::function<void(int track, int device, int oscillator, const std::string& path, int chain, int child)> importOscillatorMedia;
     std::function<void(int track, int device, const std::string& path, int chain, int child)> importWavetablePreset;

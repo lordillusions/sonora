@@ -233,8 +233,12 @@ EQ Eight band `Mode`: 0 LowCut48, 1 LowCut12, 2 LowShelf, 3 Bell, 4 Notch, 5 Hig
 
 ### Racks
 `InstrumentGroupDevice`, `AudioEffectGroupDevice`, `MidiEffectGroupDevice`, `DrumGroupDevice`:
-`Branches/{InstrumentBranch|AudioEffectBranch|DrumBranch|MidiEffectBranch}*` each with a nested
-`.../Devices`, `MixerDevice/{Volume,Panorama,Speaker}/Manual` ✅.
+`Branches/{InstrumentBranch|AudioEffectBranch|DrumBranch|MidiEffectBranch}*` each with
+`DeviceChain/{MidiToAudioDeviceChain|AudioToAudioDeviceChain|MidiToMidiDeviceChain} Id="0"/Devices` (instrument and drum
+branches MidiToAudio, audio effect AudioToAudio, MIDI effect MidiToMidi), `MixerDevice/{Volume,Panorama,Speaker}/Manual`
+(a MIDI branch's `MidiBranchMixerDevice` has only Speaker) ✅. The reference refuses `Devices` straight under the branch's
+`DeviceChain` ("Unknown class 'Devices'"): 0.1.28 and earlier wrote that for chains made in Sonora; every save now
+rewrites those branches (`io::repairRackBranches`, ALS-15d).
 Drum pads: `BranchInfo/ReceivingNote` — **inferred** encoding `128 - MIDI note` (92 = C1 = 36), and
 `BranchInfo/SendingNote` (default 60) ✅ (ALS-8 to confirm).
 
@@ -495,6 +499,11 @@ templates through `juce::String(double, 17)`) and offers to "repair" it when two
   (`AutomationTarget`, `*ModulationTarget`, `Pointee`, `ControllerTargets.N`) after their first use get fresh ids from
   `NextPointeeId` on (sets from before 0.1.14 repeated a duplicated track's `FreezeSequencer` modulation targets; track
   duplication now renumbers them).
+- Max for Live devices Sonora inserted (DEV-23 Swiss Army Meter, an `MxDevice*` without `<Pointee>`) crash the
+  reference (no dialog, verified 12.4.6) unless the patch file exists at `FileRef/Path` **and** the patch's routables are
+  present (`MxDInRoutable`/`MxDOutRoutable` Id 0, `AudioIn/None` / `AudioOut/None`). Saves add the routables; when the
+  `.amxd` is not on disk the device goes out inside the same `PluginDevice` wrapper as Sonora's own devices (a missing
+  "Swiss Army Meter" plug-in in the reference, the device unchanged in Sonora) (ALS-15d).
 - A set the reference saved again has no `SonoraNativeDevice` any more: Prism / Curve LFO / Hush come back as their
   VST3s (played by the built-in stand-ins when not installed, COL-4c); FM, Echo, ... as missing plug-ins.
 

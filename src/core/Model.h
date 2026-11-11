@@ -330,6 +330,7 @@ struct Sidechain
     int sourceTrackId = -1;       // <Target Value="AudioIn/Track.N/PreFxOut"/>: N
     enum class Tap { PreFx, PostFx, PostMixer } tap = Tap::PostFx;
     double gain = 1.0;            // SideChain/RoutedInput/Volume (linear)
+    double mix = 1.0;             // SideChain/DryWet: plug-ins get mix x external + (1 - mix) x their own input
     bool edited = false;
     bool routed() const { return on && sourceTrackId >= 0; }
 };

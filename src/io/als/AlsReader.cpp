@@ -357,6 +357,7 @@ Sidechain readSidechain(const XmlElement* device)
         return sc;
     sc.on = boolean(side, "OnOff/Manual", false);
     sc.gain = num(side, "RoutedInput/Volume/Manual", 1.0);
+    sc.mix = num(side, "DryWet/Manual", 1.0);
     const auto target = str(side, "RoutedInput/Routable/Target");
     if (target.startsWith("AudioIn/Track."))
     {

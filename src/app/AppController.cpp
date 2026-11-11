@@ -221,6 +221,15 @@ AppController::AppController() : engine_(host_, midi_)
         dropBrowserItem(item, track, beat, scene);
     };
     ui_.editDevice = [this](int track, int device, const auto& edit, const std::string& label) { editDevice(track, device, edit, label); };
+    ui_.setDeviceSidechainLevels = [this](int track, int device, float gain, float mix) { // PLG-22: live knobs
+        auto* t = song_ ? model::trackAt(*song_, track) : nullptr;
+        if (t == nullptr || device < 0 || (size_t) device >= t->devices.size()) return;
+        auto& sc = t->devices[(size_t) device].sidechain;
+        sc.gain = gain;
+        sc.mix = mix;
+        sc.edited = true;
+        ui_.documentDirty = true;
+    };
     // DEV-14b: view leaves (the Sampler's tab and zone editor switch) go straight into the model: saved, not an undo step.
     ui_.setDeviceViewValue = [this](int track, int device, int chain, int child, const std::string& key, double value) {
         auto* t = song_ ? model::trackAt(*song_, track) : nullptr;

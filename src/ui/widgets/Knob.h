@@ -21,6 +21,7 @@ public:
     };
 
     Knob(std::string label, Source source) : label_(std::move(label)), src_(std::move(source)) {}
+    const Source& source() const { return src_; } // tests and owners that set the value directly
 
     void paint(SkCanvas& c, const Theme& t) override;
     void mouseDown(const MouseEvent& e) override;

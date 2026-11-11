@@ -438,6 +438,7 @@ template <class IO> void visit(IO& io, Sidechain& s)
     io.v(s.sourceTrackId);
     io.e(s.tap, 2);
     io.v(s.gain);
+    io.v(s.mix);
     io.v(s.edited);
 }
 
@@ -746,7 +747,7 @@ template <class F> void decodeWith(std::string_view bytes, F&& body)
 #if defined(__APPLE__) && defined(__aarch64__) && defined(_LIBCPP_VERSION)
 // A new model field changes these sizes: add it to the visitors above (and to the live/identity split), then update.
 static_assert(sizeof(Clip) == 520, "model::Clip changed: update ModelCodec");
-static_assert(sizeof(Device) == 648, "model::Device changed: update ModelCodec");
+static_assert(sizeof(Device) == 656, "model::Device changed: update ModelCodec");
 static_assert(sizeof(Device::Chain) == 128, "model::Device::Chain changed: update ModelCodec");
 static_assert(sizeof(Track) == 1144, "model::Track changed: update ModelCodec");
 static_assert(sizeof(Mixer) == 200, "model::Mixer changed: update ModelCodec");

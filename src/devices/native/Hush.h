@@ -84,6 +84,7 @@ public:
     void reset() override;
     void process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi) override;
     void setSidechain(const juce::AudioBuffer<float>* audio, float gain) override;
+    bool takesSidechain() const override { return true; }
     int latencySamples() const override { return latency_.load(std::memory_order_relaxed); }
     // Latency for a configuration (the plug-in tells the host when it changes).
     static int latencyFor(double sampleRate, bool linearPhase, bool lowLatency);

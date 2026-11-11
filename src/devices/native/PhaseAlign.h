@@ -43,6 +43,7 @@ public:
     void reset() override;
     void process(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     void setSidechain(const juce::AudioBuffer<float>* audio, float gain) override { sidechain_ = audio; sidechainGain_ = gain; }
+    bool takesSidechain() const override { return true; }
     std::vector<UiGroup> uiGroups() const override;
 
     // ---- display (message thread reads; audio thread writes)

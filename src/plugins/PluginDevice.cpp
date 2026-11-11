@@ -98,6 +98,7 @@ bool PluginDevice::captureState(model::Device& device) const
 PluginDevice::PluginDevice(std::unique_ptr<juce::AudioPluginInstance> instance) : instance_(std::move(instance))
 {
     instrument_ = instance_->getPluginDescription().isInstrument;
+    sidechainCapable_ = instance_->getBusCount(true) >= 2; // PLG-22
     // Parameters are exposed normalised 0..1 (plugins define their own display units).
     const auto& params = instance_->getParameters();
     hand_ = std::make_unique<HandSlot[]>((size_t) params.size());
@@ -169,7 +170,16 @@ void PluginDevice::prepare(double sampleRate, int maxBlockSize)
         layout.inputBuses.getReference(0) = juce::AudioChannelSet::stereo();
     if (! layout.outputBuses.isEmpty())
         layout.outputBuses.getReference(0) = juce::AudioChannelSet::stereo();
-    instance_->setBusesLayout(layout); // best effort, plugins may refuse
+    // PLG-22: the sidechain bus (the second input) on only while a track is routed to it.
+    if (layout.inputBuses.size() >= 2)
+        layout.inputBuses.getReference(1) = sidechainRouted_ ? juce::AudioChannelSet::stereo() : juce::AudioChannelSet::disabled();
+    if (! instance_->setBusesLayout(layout) && sidechainRouted_ && layout.inputBuses.size() >= 2)
+    {
+        layout.inputBuses.getReference(1) = juce::AudioChannelSet::mono(); // some take a mono key only
+        instance_->setBusesLayout(layout); // best effort, plugins may refuse
+    }
+    mainInputs_ = instance_->getBusCount(true) > 0 ? instance_->getChannelCountOfBus(true, 0) : 0;
+    sidechainChannels_ = instance_->getBusCount(true) >= 2 ? instance_->getChannelCountOfBus(true, 1) : 0;
 
     instance_->setRateAndBufferSizeDetails(sampleRate, maxBlockSize);
     playHead_.info.sampleRate = sampleRate;
@@ -189,9 +199,27 @@ void PluginDevice::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
 
     const bool instrument = instrument_;
     io_.clear(0, n);
-    if (! instrument)
-        for (int ch = 0; ch < 2; ++ch)
+    if (! instrument) // with a sidechain bus active, only the main bus's own channels (a mono main bus has one)
+        for (int ch = 0; ch < (sidechainChannels_ > 0 ? std::min(2, mainInputs_) : 2); ++ch)
             io_.copyFrom(ch, 0, audio, ch, 0, n);
+    if (sidechainChannels_ > 0)
+    {
+        // Channels after the main input's: Mix x Gain x the routed track + (1 - Mix) x the plug-in's own input.
+        const int first = instrument ? 0 : mainInputs_;
+        const float mix = sidechainMixLevel(), gain = sidechainGain_;
+        for (int ch = 0; ch < sidechainChannels_ && first + ch < io_.getNumChannels(); ++ch)
+        {
+            float* key = io_.getWritePointer(first + ch);
+            if (sidechain_ != nullptr && sidechain_->getNumSamples() >= n && sidechain_->getNumChannels() > 0)
+            {
+                const float* ext = sidechain_->getReadPointer(std::min(ch, sidechain_->getNumChannels() - 1));
+                juce::FloatVectorOperations::copyWithMultiply(key, ext, mix * gain, n);
+            }
+            else juce::FloatVectorOperations::clear(key, n);
+            if (mix < 1.0f && ! instrument)
+                juce::FloatVectorOperations::addWithMultiply(key, audio.getReadPointer(std::min(ch, audio.getNumChannels() - 1)), 1.0f - mix, n);
+        }
+    }
 
     juce::AudioBuffer<float> view(io_.getArrayOfWritePointers(), io_.getNumChannels(), n);
     instance_->processBlock(view, midi);

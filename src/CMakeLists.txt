@@ -44,6 +44,7 @@ add_library(sonora_core STATIC
     core/Model.cpp
     core/ResynthModel.cpp
     core/Edit.cpp
+    core/DrumFill.cpp
     core/AutomationEdits.cpp
     core/ClipOperations.cpp
     core/ClipGeometry.cpp
@@ -285,6 +286,7 @@ add_library(sonora_ui STATIC
     ui/views/StutterFace.cpp
     ui/views/PhaseAlignFace.cpp
     ui/views/SweepFace.cpp
+    ui/views/SidechainPanel.cpp
     ui/views/KickstractTimeline.cpp
     ui/views/WavetableEditor.cpp
     ui/views/WavetableWindowView.cpp

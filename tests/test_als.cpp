@@ -1204,3 +1204,69 @@ TEST_CASE("scale: Live 11 sets store RootNote and the scale's name; both are rea
     CHECK(written.contains("<Name Value=\"Phrygian\""));
     CHECK(! written.contains("<Root Value=")); // no Live 12 children mixed in
 }
+
+TEST_CASE("als writer: rack chains use the reference branch and chain classes, old saves are repaired (ALS-15d)")
+{
+    model::Device child;
+    child.id = 7;
+    child.type = "StereoGain";
+    child.displayName = "Utility";
+    const struct { const char* rack; const char* branch; const char* chain; } kinds[] = {
+        {"DrumGroupDevice", "DrumBranch", "MidiToAudioDeviceChain"},
+        {"InstrumentGroupDevice", "InstrumentBranch", "MidiToAudioDeviceChain"},
+        {"AudioEffectGroupDevice", "AudioEffectBranch", "AudioToAudioDeviceChain"},
+        {"MidiEffectGroupDevice", "MidiEffectBranch", "MidiToMidiDeviceChain"},
+    };
+    for (const auto& k : kinds)
+    {
+        model::Device rack;
+        rack.id = 1;
+        rack.type = k.rack;
+        rack.kind = model::DeviceKind::Rack;
+        model::Device::Chain fresh; // created in Sonora: no source XML
+        fresh.name = "Pad";
+        fresh.devices.push_back(child);
+        model::Device::Chain old; // what 0.1.28 wrote for a fresh chain
+        old.name = "Old";
+        old.sourceXml = std::make_shared<const std::string>(
+            "<InstrumentBranch Id=\"3\"><Name><EffectiveName Value=\"Old\"/></Name><DeviceChain><Devices><StereoGain Id=\"9\"/></Devices></DeviceChain></InstrumentBranch>");
+        old.devices.push_back(child);
+        rack.chains = {fresh, old};
+        auto xml = juce::XmlDocument::parse(juce::String(io::deviceTemplate(rack)));
+        REQUIRE(xml != nullptr);
+        auto* branches = xml->getChildByName("Branches");
+        REQUIRE(branches != nullptr);
+        CHECK(branches->getNumChildElements() == 2);
+        for (auto* branch : branches->getChildIterator())
+        {
+            CHECK(branch->hasTagName(k.branch));
+            auto* deviceChain = branch->getChildByName("DeviceChain");
+            REQUIRE(deviceChain != nullptr);
+            CHECK(deviceChain->getNumChildElements() == 1);
+            auto* inner = deviceChain->getChildByName(k.chain);
+            REQUIRE(inner != nullptr);
+            CHECK(inner->getIntAttribute("Id", -1) == 0);
+            auto* devices = inner->getChildByName("Devices");
+            REQUIRE(devices != nullptr);
+            CHECK(devices->getNumChildElements() == 1);
+            CHECK(devices->getChildByName("StereoGain") != nullptr);
+            const bool midi = juce::String(k.rack) == "MidiEffectGroupDevice";
+            CHECK((branch->getChildByName("MixerDevice")->getChildByName("Volume") == nullptr) == midi);
+        }
+    }
+
+    // A set saved by 0.1.28: the repair runs on every save, a correct set is left alone.
+    auto broken = juce::XmlDocument::parse(
+        "<Ableton><Devices><DrumGroupDevice Id=\"1\"><Branches><DrumBranch Id=\"0\"><DeviceChain><Devices><OriginalSimpler Id=\"2\"/>"
+        "</Devices></DeviceChain></DrumBranch></Branches></DrumGroupDevice></Devices></Ableton>");
+    REQUIRE(broken != nullptr);
+    CHECK(io::rackBranchesNeedRepair(*broken));
+    io::repairRackBranches(*broken);
+    CHECK(! io::rackBranchesNeedRepair(*broken));
+    auto* inner = broken->getChildByName("Devices")->getChildByName("DrumGroupDevice")->getChildByName("Branches")
+                      ->getChildByName("DrumBranch")->getChildByName("DeviceChain")->getChildByName("MidiToAudioDeviceChain");
+    REQUIRE(inner != nullptr);
+    CHECK(inner->getChildByName("Devices")->getChildByName("OriginalSimpler") != nullptr);
+    auto loaded = io::loadAls(fixture("minimal_set.xml"));
+    REQUIRE(loaded);
+}

@@ -39,6 +39,13 @@ public:
     void reset() override;
     void setHostInfo(const devices::HostInfo& info) override { playing_ = info.playing; playHead_.info = info; }
     int latencySamples() const override;
+    // PLG-22: a plug-in with a second input bus takes a sidechain like in the reference. setSidechainRouted (before
+    // prepare(), from the model) enables that bus only when a track is routed: some plug-ins change behaviour when it is
+    // active. Each block it gets Mix x Gain x the routed track + (1 - Mix) x the plug-in's own input.
+    bool takesSidechain() const override { return sidechainCapable_; }
+    void setSidechainRouted(bool routed) { sidechainRouted_ = routed; }
+    void setSidechain(const juce::AudioBuffer<float>* audio, float gain) override { sidechain_ = audio; sidechainGain_ = gain; }
+    bool sidechainBusActive() const { return sidechainChannels_ > 0; }
 
     const std::vector<devices::ParameterInfo>& parameters() const override { return infos_; }
     int findParameterByHostId(int id, const std::string& name) const override;
@@ -75,6 +82,10 @@ private:
     std::vector<devices::ParameterInfo> infos_;
     bool instrument_ = false; // cached: getPluginDescription() allocates
     juce::AudioBuffer<float> io_; // plugin may want more than 2 channels
+    bool sidechainCapable_ = false, sidechainRouted_ = false;
+    int mainInputs_ = 2, sidechainChannels_ = 0; // after prepare(): the input layout the plug-in accepted
+    const juce::AudioBuffer<float>* sidechain_ = nullptr;
+    float sidechainGain_ = 1.0f;
     // ENG-14d: while playing, the engine's All Notes Off bursts reach the plugin as note-offs for its held notes.
     devices::MidiReleaseFilter releases_;
     bool playing_ = false; // audio thread, from setHostInfo()

@@ -54,6 +54,7 @@ set(SONORA_TEST_SOURCES
     test_stutter.cpp
     test_phase_align.cpp
     test_sweep.cpp
+    test_drum_fill.cpp
     test_hush_builtin.cpp
     test_midi.cpp
     test_midi_release.cpp
@@ -107,6 +108,8 @@ if(SONORA_WITH_UI)
     list(APPEND SONORA_TEST_SOURCES test_device_menu_swap.cpp) # PLG-16f: the device menu's replace actions (UI)
     list(APPEND SONORA_TEST_SOURCES test_hush_builtin_ui.cpp) # PLG-14g: the face in the device chain and its window
     list(APPEND SONORA_TEST_SOURCES test_sidechain_menu_ui.cpp) # PLG-14i: choosing the sidechain source
+    list(APPEND SONORA_TEST_SOURCES test_clip_menu_creative_ui.cpp) # PLG-19/20: Make Riser, Generate Drum Fill
+    list(APPEND SONORA_TEST_SOURCES test_sidechain_panel_ui.cpp) # PLG-22: hosted plug-in sidechain, the Sidechain panel
     set_source_files_properties(../src/plugin/HushPlugin.cpp PROPERTIES COMPILE_DEFINITIONS SONORA_PLUGIN_NO_ENTRY=1)
     set_source_files_properties(../src/plugin/HushPluginEditor.cpp PROPERTIES COMPILE_DEFINITIONS JucePlugin_VersionString="${PROJECT_VERSION}")
     # PLG-17: Kickstract's VST3 processor/editor and its face in the device chain.
@@ -135,3 +138,7 @@ target_compile_definitions(sonora_tests PRIVATE
     SONORA_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
 add_test(NAME sonora_tests COMMAND sonora_tests)
+
+if(APPLE AND TARGET SonoraPhaseAlign_VST3)
+    add_dependencies(sonora_tests SonoraPhaseAlign_VST3) # PLG-22: a real VST3 with a sidechain bus to host
+endif()

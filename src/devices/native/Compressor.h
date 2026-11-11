@@ -66,6 +66,7 @@ public:
     void reset() override;
     int latencySamples() const override { return lookaheadSamples_; }
     void setSidechain(const juce::AudioBuffer<float>* audio, float gain) override { sidechain_ = audio; sidechainGain_ = gain; }
+    bool takesSidechain() const override { return true; }
     // Current gain reduction in dB (<= 0), for a meter. Any thread.
     float gainReductionDb() const { return grMeter_.load(std::memory_order_relaxed); }
     // Peak of the last block before / after the device in dBFS (the face's activity view, UI-42). Any thread.
@@ -115,6 +116,7 @@ public:
     void process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi) override;
     void reset() override;
     void setSidechain(const juce::AudioBuffer<float>* audio, float gain) override { sidechain_ = audio; sidechainGain_ = gain; }
+    bool takesSidechain() const override { return true; }
     float gainReductionDb() const { return grMeter_.load(std::memory_order_relaxed); }
 
 private:
