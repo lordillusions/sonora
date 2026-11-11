@@ -40,6 +40,11 @@ public:
 private:
     void rebuild();
     void updateDeviceDropTarget();
+    // UI-84: browser drops on the chain land where they were let go.
+    bool takesChainDrop(const BrowserDrag&) const;
+    int chainGapAt(float x) const;    // top-level index a drop at local x goes before (the chain's length after the last box)
+    float chainGapX(int gap) const;   // local x of the insertion marker for that gap
+    int browserInsertIndex(const BrowserDrag&, int gap) const; // the gap after the MIDI effect / instrument / audio rule
     void cancelDeviceDrag();
 
     const void* builtSong_ = nullptr;

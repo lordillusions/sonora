@@ -436,6 +436,42 @@ TEST_CASE("device chain policy: FX version retains empty instrument slot and ins
     CHECK(! insertTrackDevice(song, 0, chainDevice(9, "MidiPitcher")).apply);
 }
 
+TEST_CASE("device chain policy (UI-84): a drop position is kept inside the device's own section")
+{
+    Song song; Track track; track.kind = TrackKind::Midi;
+    track.devices = {chainDevice(1, "MidiPitcher"), chainPlugin(2, true), chainDevice(3, "Delay"), chainDevice(4, "Reverb")};
+    song.tracks.push_back(track); EditHistory history;
+    const auto& t = song.tracks[0];
+    CHECK(trackDeviceInsertIndex(t, DeviceRole::AudioEffect, 3) == 3);
+    CHECK(trackDeviceInsertIndex(t, DeviceRole::AudioEffect, 0) == 2);  // never before the instrument
+    CHECK(trackDeviceInsertIndex(t, DeviceRole::AudioEffect, 99) == 4);
+    CHECK(trackDeviceInsertIndex(t, DeviceRole::AudioEffect, -1) == 4); // no place: the end, as before
+    CHECK(trackDeviceInsertIndex(t, DeviceRole::Unknown, 2) == 2);
+    CHECK(trackDeviceInsertIndex(t, DeviceRole::MidiEffect, 3) == 1);   // never after the instrument
+    CHECK(trackDeviceInsertIndex(t, DeviceRole::MidiEffect, 1) == 1);
+    CHECK(trackDeviceInsertIndex(t, DeviceRole::MidiEffect, -1) == 0);
+    CHECK(trackDeviceInsertIndex(t, DeviceRole::Instrument, 4) == 1);
+
+    // Between Delay and Reverb, then before the Delay, then a MIDI effect after the first one.
+    history.perform(song, insertTrackDevice(song, 0, chainDevice(5, "Chorus2"), 3));
+    CHECK(deviceIds(song.tracks[0]) == std::vector<int>({1, 2, 3, 5, 4}));
+    history.perform(song, insertTrackDevice(song, 0, chainPlugin(6, false), 0));
+    CHECK(deviceIds(song.tracks[0]) == std::vector<int>({1, 2, 6, 3, 5, 4}));
+    history.perform(song, insertTrackDevice(song, 0, chainDevice(7, "MidiArpeggiator"), 1));
+    CHECK(deviceIds(song.tracks[0]) == std::vector<int>({1, 7, 2, 6, 3, 5, 4}));
+    // An instrument dropped at the end still replaces the instrument in its slot.
+    history.perform(song, insertTrackDevice(song, 0, chainPlugin(8, true), 7));
+    CHECK(deviceIds(song.tracks[0]) == std::vector<int>({1, 7, 8, 6, 3, 5, 4}));
+    for (int i = 0; i < 4; ++i) REQUIRE(history.undo(song));
+    CHECK(deviceIds(song.tracks[0]) == std::vector<int>({1, 2, 3, 4}));
+
+    // Audio tracks have no section before the effects.
+    song.tracks[0].kind = TrackKind::Audio;
+    song.tracks[0].devices = {chainDevice(3, "Delay"), chainDevice(4, "Reverb")};
+    history.perform(song, insertTrackDevice(song, 0, chainDevice(5, "Chorus2"), 0));
+    CHECK(deviceIds(song.tracks[0]) == std::vector<int>({5, 3, 4}));
+}
+
 TEST_CASE("device chain policy: audio effect reorder preserves identity state and instrument boundary")
 {
     Song song; Track track; track.kind = TrackKind::Midi;

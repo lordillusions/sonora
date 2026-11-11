@@ -3555,7 +3555,7 @@ void AppController::dropBrowserItem(const ui::BrowserDrag& item, int trackIndex,
     const bool wavetable = device.type == "SonoraWavetable";
     const int insertedId = device.id;
     const auto trackId = track->id;
-    const bool inserted = applyEdit(model::insertTrackDevice(*song_, trackIndex, std::move(device))).ok;
+    const bool inserted = applyEdit(model::insertTrackDevice(*song_, trackIndex, std::move(device), item.chainPosition)).ok;
     if (inserted && wavetable) openInsertedWavetable(trackId, insertedId, -1);
     ui_.selectedTrack = trackIndex;
     ui_.detailTab = ui::DetailTab::Devices;

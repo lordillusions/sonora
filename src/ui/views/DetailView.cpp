@@ -17,6 +17,7 @@
 #include "ui/views/ResynthEditor.h"
 
 #include "core/DeviceCatalog.h"
+#include "core/Edit.h"
 #include "devices/native/Reverb.h"
 #include "ui/views/EffectPanels.h"
 #include "ui/views/PluginPanel.h"
@@ -56,10 +57,12 @@
 
 namespace sonora::ui
 {
-bool DetailView::browserDrop(const BrowserDrag& payload, const MouseEvent&)
+bool DetailView::browserDrop(const BrowserDrag& payload, const MouseEvent& e)
 {
     if (payload.kind == BrowserDrag::Kind::Sample) return false;
-    if (ctx().dropBrowserItem) ctx().dropBrowserItem(payload, ctx().selectedTrack, 0, -1);
+    auto placed = payload;
+    if (takesChainDrop(payload)) placed.chainPosition = chainGapAt(e.x); // UI-84: where it was let go, not the chain's end
+    if (ctx().dropBrowserItem) ctx().dropBrowserItem(placed, ctx().selectedTrack, 0, -1);
     return true;
 }
 
@@ -702,12 +705,16 @@ public:
 
     // LIB-2: a preset dropped on a top-level device replaces it in place when it is a preset of that device (the app
     // checks the type; any other preset is inserted like a drop on the track).
-    bool browserDrop(const BrowserDrag& payload, const MouseEvent&) override
+    bool browserDrop(const BrowserDrag& payload, const MouseEvent& e) override
     {
         if (payload.kind != BrowserDrag::Kind::DevicePreset || chain_ >= 0 || ! ctx().dropDeviceItem) return false;
-        ctx().dropDeviceItem(payload, trackIndex_, deviceIndex_, -1, -1, -1);
+        auto placed = payload; // UI-84: a preset of another device goes beside this one (the half it was dropped on)
+        placed.chainPosition = deviceIndex_ + (e.x >= width() * 0.5f ? 1 : 0);
+        ctx().dropDeviceItem(placed, trackIndex_, deviceIndex_, -1, -1, -1);
         return true;
     }
+    // UI-84: racks take browser drops into their chain list, so the chain's insertion marker is not drawn over them.
+    bool holdsChains() const { return ! model_.chains.empty() || model_.type.ends_with("GroupDevice"); }
 
     // UI-55: takes the device's output level for the meter in the gap after this box (DetailView paints it).
     bool tickMeter()
@@ -1502,6 +1509,22 @@ void DetailView::paint(SkCanvas& c, const Theme& t)
 
 void DetailView::paintOverChildren(SkCanvas& c, const Theme& t)
 {
+    // UI-84: a device dragged from the browser over the chain shows where it will be inserted.
+    if (const auto& drag = ctx().browserDrag; drag && ! deviceDragging_ && takesChainDrop(*drag))
+    {
+        const auto origin = boundsInRoot();
+        const float x = ctx().browserDragX - origin.x, y = ctx().browserDragY - origin.y;
+        const bool overRack = std::any_of(boxes_.begin(), boxes_.end(), [&](Widget* box) {
+            return box->bounds().contains(x, y) && static_cast<DeviceBox*>(box)->holdsChains();
+        });
+        if (localBounds().contains(x, y) && ! overRack)
+        {
+            const float at = chainGapX(browserInsertIndex(*drag, chainGapAt(x)));
+            const auto accent = t.color("ChosenAlternative");
+            paint::line(c, at, 4, at, height() - 6, accent, 2.5f);
+            ctl::triangle(c, at, 6, 7, 6, ctl::Dir::Down, accent);
+        }
+    }
     if (deviceDragging_ && ! outsideDrag_)
     {
         const auto accent = t.color(deviceDropAllowed_ ? "ChosenAlternative" : "ChosenRecord");
@@ -1642,23 +1665,67 @@ void DetailView::updateDeviceDrag(float x, float y)
     repaint();
 }
 
+bool DetailView::takesChainDrop(const BrowserDrag& payload) const
+{
+    using K = BrowserDrag::Kind;
+    return visible && ctx().detailTab == DetailTab::Devices && ctx().trackAt(ctx().selectedTrack) != nullptr
+        && (payload.kind == K::NativeDevice || payload.kind == K::Plugin || payload.kind == K::DevicePreset);
+}
+
+int DetailView::chainGapAt(float x) const
+{
+    // The top-level device whose box centre is right of x (rack chain children shown inline count as their rack's gap).
+    for (auto* widget : boxes_)
+    {
+        const auto* box = static_cast<DeviceBox*>(widget);
+        if (box->deviceIndex() >= 0 && x < box->bounds().centreX()) return box->deviceIndex();
+    }
+    const auto* track = ctx().trackAt(ctx().selectedTrack);
+    return track ? (int) track->devices.size() : 0;
+}
+
+float DetailView::chainGapX(int gap) const
+{
+    for (auto* widget : boxes_)
+    {
+        const auto* box = static_cast<DeviceBox*>(widget);
+        if (box->deviceIndex() >= gap) return box->bounds().x - kDeviceGap * 0.5f;
+    }
+    return kChainStart + chainWidth() - scrollX_ - kDeviceGap * 0.5f;
+}
+
+int DetailView::browserInsertIndex(const BrowserDrag& payload, int gap) const
+{
+    // The same section rule the app applies (model::trackDeviceInsertIndex); a preset goes by the device it is for.
+    const auto* track = ctx().trackAt(ctx().selectedTrack);
+    if (! track) return gap;
+    auto role = model::DeviceRole::Unknown;
+    if (payload.kind == BrowserDrag::Kind::NativeDevice)
+    {
+        if (const auto* entry = model::findCatalogEntry(payload.value)) role = entry->role;
+    }
+    else if (payload.kind == BrowserDrag::Kind::Plugin)
+    {
+        role = model::DeviceRole::AudioEffect;
+        for (const auto& plugin : ctx().browserPlugins)
+            if (plugin.identifier == payload.value && plugin.instrument) role = model::DeviceRole::Instrument;
+    }
+    else
+        for (const auto& preset : ctx().devicePresets)
+            if (preset.path == payload.value)
+                if (const auto* entry = model::findCatalogEntry(preset.deviceTag)) role = entry->role;
+    return model::trackDeviceInsertIndex(*track, role, gap);
+}
+
 void DetailView::updateDeviceDropTarget()
 {
     deviceDropAllowed_ = false;
     const auto* track = ctx().trackAt(ctx().selectedTrack);
     if (! track || ! ctx().song) return;
-    int source = -1, gap = (int) track->devices.size();
+    int source = -1;
     for (int i = 0; i < (int) track->devices.size(); ++i) if (track->devices[(size_t) i].id == dragDeviceId_) source = i;
-    insertionX_ = kChainStart + chainWidth() - scrollX_ - kDeviceGap * 0.5f;
-    for (auto* widget : boxes_)
-    {
-        const auto* box = static_cast<DeviceBox*>(widget);
-        if (box->deviceIndex() < 0) continue;
-        if (dragX_ < box->bounds().centreX())
-        {
-            gap = box->deviceIndex(); insertionX_ = box->bounds().x - kDeviceGap * 0.5f; break;
-        }
-    }
+    const int gap = chainGapAt(dragX_);
+    insertionX_ = chainGapX(gap);
     dragDestination_ = gap - (source < gap ? 1 : 0);
     if (source >= 0 && dragReorders_ && localBounds().contains(dragX_, dragY_))
         deviceDropAllowed_ = model::canMoveAudioEffect(*ctx().song, ctx().selectedTrack, dragDeviceId_, dragDestination_);

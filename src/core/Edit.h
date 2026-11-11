@@ -8,6 +8,7 @@
 // This layer has no engine and no UI dependency: the app applies a command, then tells the engine which
 // tracks changed (AudioEngine::updateTrackClips) and the UI to refresh.
 
+#include "core/DeviceCatalog.h"
 #include "core/Model.h"
 
 #include <functional>
@@ -234,7 +235,13 @@ EditCommand setSessionClip(const Song& song, int track, int scene, Clip clip);
 EditCommand insertDevice(int track, Device device, int position = -1);
 // Browser insertion policy: MIDI effects -> one instrument -> audio effects. A new instrument replaces
 // the existing instrument(s) in one undo step; imported unsupported chains are left alone until edited.
-EditCommand insertTrackDevice(const Song& song, int track, Device device);
+// `position` (UI-84) is the top-level index the device was dropped before (-1: MIDI effects go first, audio effects
+// last); it is moved into the device's own section of the chain (trackDeviceInsertIndex).
+EditCommand insertTrackDevice(const Song& song, int track, Device device, int position = -1);
+// UI-84: where insertTrackDevice puts a device of `role` asked for at top-level index `requested` (-1 = the default).
+// MIDI effects stay before the first other device, audio effects after the last instrument / MIDI effect, and an
+// instrument takes the slot right after the MIDI effects whatever was asked.
+int trackDeviceInsertIndex(const Track& track, DeviceRole role, int requested);
 // destination is the final zero-based model index after removing the source. Only audio effects move;
 // on MIDI tracks their destination must follow every MIDI effect and instrument.
 bool canMoveAudioEffect(const Song& song, int track, int deviceId, int destination);

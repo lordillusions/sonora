@@ -16,5 +16,8 @@ struct BrowserDrag
     bool oneTrackPerFile = false;   // Cmd held at the drop: each further file gets its own new audio track
     int sourceTrack = -1, deviceId = -1; // TrackDevice: where the device is now (UI track index, model device id)
     bool copy = false;                   // TrackDevice: Opt held (follows the latest drag event, then the drop)
+    // UI-84: a device or preset dropped on the device chain: the top-level index it was dropped before (the chain's
+    // length = after the last device). -1 = no place (track headers, clips, double-click): the insertion policy decides.
+    int chainPosition = -1;
 };
 } // namespace sonora::ui

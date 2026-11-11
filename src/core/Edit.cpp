@@ -907,26 +907,36 @@ EditCommand removeDevice(const Song& song, int track, int deviceId)
     return command;
 }
 
-EditCommand insertTrackDevice(const Song& song, int track, Device device)
+int trackDeviceInsertIndex(const Track& track, DeviceRole role, int requested)
+{
+    const int size = (int) track.devices.size();
+    int midiEnd = 0; // the leading MIDI effects
+    while (midiEnd < size && deviceRole(track.devices[(size_t) midiEnd]) == DeviceRole::MidiEffect) ++midiEnd;
+    if (role == DeviceRole::Instrument) return midiEnd;
+    if (role == DeviceRole::MidiEffect) return requested < 0 ? 0 : std::min(requested, midiEnd);
+    int audioStart = 0; // after the last instrument or MIDI effect
+    for (int i = 0; i < size; ++i)
+    {
+        const auto existing = deviceRole(track.devices[(size_t) i]);
+        if (existing == DeviceRole::Instrument || existing == DeviceRole::MidiEffect) audioStart = i + 1;
+    }
+    return requested < 0 ? size : std::clamp(requested, audioStart, size);
+}
+
+EditCommand insertTrackDevice(const Song& song, int track, Device device, int position)
 {
     const auto* target = trackAt(song, track);
     if (! target) return {};
     const auto role = deviceRole(device);
     if ((role == DeviceRole::Instrument || role == DeviceRole::MidiEffect) && target->kind != TrackKind::Midi) return {};
-    if (role == DeviceRole::MidiEffect) return insertDevice(track, std::move(device), 0);
-    if (role != DeviceRole::Instrument) return insertDevice(track, std::move(device));
+    if (role != DeviceRole::Instrument) return insertDevice(track, std::move(device), trackDeviceInsertIndex(*target, role, position));
 
-    int position = 0;
-    for (const auto& existing : target->devices)
-    {
-        if (deviceRole(existing) != DeviceRole::MidiEffect) break;
-        ++position;
-    }
+    const int at = trackDeviceInsertIndex(*target, role, position);
     std::vector<EditCommand> parts;
     for (const auto& existing : target->devices)
         if (deviceRole(existing) == DeviceRole::Instrument) parts.push_back(removeDevice(song, track, existing.id));
     const bool replacing = ! parts.empty();
-    parts.push_back(insertDevice(track, std::move(device), position));
+    parts.push_back(insertDevice(track, std::move(device), at));
     return replacing ? compose("Replace Instrument", std::move(parts)) : std::move(parts.front());
 }
 

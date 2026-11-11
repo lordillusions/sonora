@@ -68,7 +68,7 @@ void AppController::loadDevicePreset(const ui::BrowserDrag& item, int trackIndex
     const int newId = device.id;
     const auto name = device.displayName, trackName = track->name;
     auto command = hotSwap ? model::replaceDevice(*song_, trackIndex, replaceIndex, std::move(device), "Load " + item.label)
-                           : model::insertTrackDevice(*song_, trackIndex, std::move(device));
+                           : model::insertTrackDevice(*song_, trackIndex, std::move(device), item.chainPosition);
     if (! command.apply) return;
     command.label = "Load " + item.label;
     if (! applyEdit(std::move(command)).ok) return;
