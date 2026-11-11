@@ -681,12 +681,16 @@ void AudioEngine::copyTap(juce::AudioBuffer<float>& tap, const juce::AudioBuffer
 }
 
 // Points every sidechain-capable device of `node` at the tapped audio of the track it listens to.
-void AudioEngine::feedSidechains(EngineGraph& g, TrackNode& node, int)
+void AudioEngine::feedSidechains(EngineGraph& g, TrackNode& node, int numSamples)
 {
     for (const auto& link : node.sidechains)
     {
         const auto& source = g.nodes[(size_t) link.sourceNode];
-        link.device->setSidechain(source.needTap[(size_t) link.tap] ? &source.tap[(size_t) link.tap] : nullptr, link.device->sidechainGainLevel());
+        const auto* tap = source.needTap[(size_t) link.tap] ? &source.tap[(size_t) link.tap] : nullptr;
+        link.device->setSidechain(tap, link.device->sidechainGainLevel());
+        // PLG-22: what arrives, for the Sidechain panel's meter and the devices' displays.
+        if (tap != nullptr && tap->getNumSamples() >= numSamples && numSamples > 0)
+            link.device->noteSidechainPeak(tap->getMagnitude(0, numSamples) * link.device->sidechainGainLevel());
     }
 }
 

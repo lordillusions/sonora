@@ -52,7 +52,7 @@ public:
     float lastCoherence() const { return coherence_.load(std::memory_order_relaxed); }
     float lastGainDb() const { return gainDb_.load(std::memory_order_relaxed); }
     uint32_t hitCount() const { return hits_.load(std::memory_order_relaxed); }
-    bool sidechainPresent() const { return sidechainSeen_.load(std::memory_order_relaxed); }
+    bool sidechainPresent() const { return sidechainPresent_.load(std::memory_order_relaxed); }
 
     static constexpr int kHistory = 48;
     struct HitRecord { float angle = 0, coherence = 0, gainDb = 0; bool used = false; };
@@ -101,7 +101,7 @@ private:
 
     std::atomic<float> angleShown_{0}, target_{0}, coherence_{0}, gainDb_{0};
     std::atomic<uint32_t> hits_{0};
-    std::atomic<bool> sidechainSeen_{false};
+    std::atomic<bool> sidechainPresent_{false};
     std::array<std::atomic<float>, kHistory> histAngle_{}, histCoherence_{}, histGain_{};
     std::array<std::atomic<bool>, kHistory> histUsed_{};
     std::array<std::atomic<float>, kShapeBins> shapeKick_{}, shapeBefore_{}, shapeAfter_{};

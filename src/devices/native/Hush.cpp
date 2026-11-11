@@ -549,6 +549,13 @@ void Hush::computeReduction()
         }
         maxReduction_[(size_t) c].store(top, std::memory_order_relaxed);
     }
+    for (int p = 0; p < kDisplayPoints; ++p) // the detector's spectrum (power per bin, the louder channel)
+    {
+        float m = 1.0e-12f;
+        for (int k = displayLo_[(size_t) p]; k <= std::min(displayHi_[(size_t) p], nb - 1); ++k)
+            m = std::max({m, power_[0][(size_t) k], power_[1][(size_t) k]});
+        detectorDb_[(size_t) p].store(10.0f * std::log10(m), std::memory_order_relaxed);
+    }
     displayRevision_.fetch_add(1, std::memory_order_relaxed);
 }
 
@@ -765,6 +772,8 @@ void Hush::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
     const bool useSidechain = value(Sidechain) >= 0.5f && sidechain_ != nullptr && sidechain_->getNumChannels() > 0
                            && sidechain_->getNumSamples() >= n;
     const bool listenSidechain = value(SidechainListen) >= 0.5f && sidechain_ != nullptr && sidechain_->getNumSamples() >= n;
+    sidechainConnected_.store(sidechain_ != nullptr && sidechain_->getNumSamples() >= n, std::memory_order_relaxed);
+    detectingSidechain_.store(useSidechain, std::memory_order_relaxed);
     const float* sc[2] = {nullptr, nullptr};
     if (sidechain_ != nullptr && sidechain_->getNumChannels() > 0 && sidechain_->getNumSamples() >= n)
         for (int ch = 0; ch < 2; ++ch) sc[ch] = sidechain_->getReadPointer(std::min(ch, sidechain_->getNumChannels() - 1));

@@ -60,9 +60,9 @@ const model::Sidechain* SidechainPanel::sidechain() const
 void SidechainPanel::layout()
 {
     const float w = width();
-    const float knobH = std::clamp((height() - 60 - 24) / 2.0f, 30.0f, 46.0f);
-    gain_->setBounds({8, 58, w - 16, knobH});
-    mix_->setBounds({8, 58 + knobH + 2, w - 16, knobH});
+    const float knobH = std::clamp((height() - 68 - 24) / 2.0f, 30.0f, 46.0f);
+    gain_->setBounds({8, 66, w - 16, knobH});
+    mix_->setBounds({8, 66 + knobH + 2, w - 16, knobH});
 }
 
 std::string SidechainPanel::sourceLabel() const
@@ -163,6 +163,17 @@ void SidechainPanel::mouseDown(const MouseEvent& e)
     else if (muteBox().contains(e.x, e.y)) toggleMute();
 }
 
+void SidechainPanel::tick()
+{
+    if (processor_ == nullptr) return;
+    const double now = juce::Time::getMillisecondCounterHiRes() / 1000.0;
+    const double seconds = lastTick_ > 0 ? std::min(0.5, now - lastTick_) : 1.0 / 30.0;
+    lastTick_ = now;
+    const float peak = processor_->takeSidechainPeak();
+    const float level = std::max(peak, meter_ * (float) std::pow(0.02, seconds));
+    if (std::abs(level - meter_) > 1e-4f) { meter_ = level < 1e-4f ? 0.0f : level; repaint(); }
+}
+
 void SidechainPanel::paint(SkCanvas& c, const Theme& t)
 {
     const auto* sc = sidechain();
@@ -172,5 +183,14 @@ void SidechainPanel::paint(SkCanvas& c, const Theme& t)
     if (routed) ctl::dropdown(c, t, tapBox(), tapLabel());
     else ctl::emptyBox(c, t, tapBox());
     ctl::toggle(c, t, muteBox(), "Mute", routed && sc != nullptr && ! sc->on, t.color("ChosenDefault"), routed);
+    // What arrives: a level bar (-60..0 dB); red text when routed and nothing comes in.
+    const auto m = meterBox();
+    paint::fill(c, m, t.color("RetroDisplayBackground"));
+    const float db = 20.0f * std::log10(std::max(meter_, 1e-6f));
+    const float fill = std::clamp((db + 60.0f) / 60.0f, 0.0f, 1.0f);
+    if (fill > 0) paint::fill(c, {m.x, m.y, m.w * fill, m.h}, db > -1.0f ? 0xffff5050 : 0xff5cd65c);
+    if (routed && sc != nullptr && sc->on && meter_ <= 0.0f && height() > 140)
+        paint::text(c, processor_ && processor_->sidechainDelivered() ? "silent" : "no signal", {m.x, m.y + 5, m.w, 10},
+                    0xffd04040, t.metrics.smallFontSize - 2, Align::Right);
 }
 } // namespace sonora::ui

@@ -150,7 +150,7 @@ void PhaseAlign::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
     float* right = audio.getNumChannels() > 1 ? audio.getWritePointer(1) : left;
     const juce::AudioBuffer<float>* sc = sidechain_ != nullptr && sidechain_->getNumSamples() >= n && sidechain_->getNumChannels() > 0
                                              ? sidechain_ : nullptr;
-    sidechainSeen_.store(sc != nullptr, std::memory_order_relaxed);
+    sidechainPresent_.store(sc != nullptr, std::memory_order_relaxed);
     const float* kickL = sc != nullptr ? sc->getReadPointer(0) : nullptr;
     const float* kickR = sc != nullptr ? sc->getReadPointer(std::min(1, sc->getNumChannels() - 1)) : nullptr;
 

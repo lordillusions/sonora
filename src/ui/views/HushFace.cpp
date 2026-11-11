@@ -1176,6 +1176,32 @@ void HushFace::paintGraph(SkCanvas& c)
             c.drawPath(common.detach(), both);
         }
     }
+    // PLG-22: what the detector hears (above the 0 dB line): the sidechain in orange while it drives the reduction, the
+    // input in light grey otherwise; the label says which, or why the sidechain is not heard.
+    {
+        const bool sidechain = hush.detectingSidechain();
+        float loudest = -200.0f;
+        SkPathBuilder spectrum;
+        for (int p = 0; p < H::kDisplayPoints; ++p)
+        {
+            const float db = hush.displayDetector(p);
+            loudest = std::max(loudest, db);
+            const float y = z - std::clamp((db + 90.0f) / 90.0f, 0.0f, 1.0f) * (z - g.y - 24.0f);
+            if (p == 0) spectrum.moveTo(freqToX(H::displayFrequency(p)), y);
+            else spectrum.lineTo(freqToX(H::displayFrequency(p)), y);
+        }
+        c.drawPath(spectrum.detach(), strokePaint(sidechain ? 0xFFFF8A3D : 0x99FFFFFF, sidechain ? 1.8f : 1.2f));
+        std::string state;
+        SkColor colour = kText;
+        if (value(H::Sidechain) >= 0.5f)
+        {
+            if (! hush.sidechainConnected()) { state = "sidechain: no track routed (choose one: device menu > Sidechain)"; colour = 0xFFB0413E; }
+            else if (loudest < -85.0f) { state = "sidechain: the routed track is silent"; colour = 0xFFB0413E; }
+            else { state = "detecting on the SIDECHAIN"; colour = 0xFFD9661F; }
+        }
+        else state = hush.sidechainConnected() ? "detecting on the input (sc off)" : "detecting on the input";
+        text(c, state, {g.x + 10, g.y + 22, g.w - 60, 16}, colour, 12.0f, ui::Align::Left);
+    }
     // Max cut limit.
     const float maxCut = value(H::MaxCut);
     if (maxCut < H::kMaxCutOff && maxCut < range)

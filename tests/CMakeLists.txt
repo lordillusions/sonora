@@ -110,6 +110,7 @@ if(SONORA_WITH_UI)
     list(APPEND SONORA_TEST_SOURCES test_sidechain_menu_ui.cpp) # PLG-14i: choosing the sidechain source
     list(APPEND SONORA_TEST_SOURCES test_clip_menu_creative_ui.cpp) # PLG-19/20: Make Riser, Generate Drum Fill
     list(APPEND SONORA_TEST_SOURCES test_sidechain_panel_ui.cpp) # PLG-22: hosted plug-in sidechain, the Sidechain panel
+    list(APPEND SONORA_TEST_SOURCES test_hush_sidechain_engine.cpp) # PLG-22: Hush hears and shows its sidechain
     set_source_files_properties(../src/plugin/HushPlugin.cpp PROPERTIES COMPILE_DEFINITIONS SONORA_PLUGIN_NO_ENTRY=1)
     set_source_files_properties(../src/plugin/HushPluginEditor.cpp PROPERTIES COMPILE_DEFINITIONS JucePlugin_VersionString="${PROJECT_VERSION}")
     # PLG-17: Kickstract's VST3 processor/editor and its face in the device chain.

@@ -110,6 +110,11 @@ public:
     }
     float maxReduction(int channel) const { return maxReduction_[(size_t) (channel & 1)].load(std::memory_order_relaxed); }
     unsigned displayRevision() const { return displayRevision_.load(std::memory_order_relaxed); }
+    // PLG-22: what the detector hears, per display point (dB, the louder channel), and where from: the sidechain while
+    // the Sidechain switch is on and a track delivers audio, else the input. The face draws it under the reduction.
+    float displayDetector(int point) const { return detectorDb_[(size_t) point].load(std::memory_order_relaxed); }
+    bool detectingSidechain() const { return detectingSidechain_.load(std::memory_order_relaxed); }
+    bool sidechainConnected() const { return sidechainConnected_.load(std::memory_order_relaxed); }
 
     // Fitted constants (docs/HUSH.md "Calibration"). Public so tests and the calibration harness can read them.
     struct Tuning
@@ -188,6 +193,8 @@ private:
     std::array<std::array<std::atomic<float>, kDisplayPoints>, 2> display_{};
     std::array<std::atomic<float>, 2> maxReduction_{};
     std::atomic<unsigned> displayRevision_{0};
+    std::array<std::atomic<float>, kDisplayPoints> detectorDb_{};
+    std::atomic<bool> detectingSidechain_{false}, sidechainConnected_{false};
     std::atomic<int> latency_{2304};
     std::atomic<int> forceQuality_{-1};
     std::atomic<bool> forceLowLatency_{false};

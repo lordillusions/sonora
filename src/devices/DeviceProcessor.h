@@ -128,6 +128,15 @@ public:
     }
     float sidechainGainLevel() const { return sidechainGainLevel_.load(std::memory_order_relaxed); }
     float sidechainMixLevel() const { return sidechainMixLevel_.load(std::memory_order_relaxed); }
+    // The loudest sidechain sample delivered since the last take (audio thread notes, message thread takes), and
+    // whether any arrived since the device was built: the panel's meter tells "routed and hearing it" from "silent".
+    void noteSidechainPeak(float peak)
+    {
+        sidechainSeen_.store(true, std::memory_order_relaxed);
+        if (peak > sidechainPeak_.load(std::memory_order_relaxed)) sidechainPeak_.store(peak, std::memory_order_relaxed);
+    }
+    float takeSidechainPeak() { return sidechainPeak_.exchange(0.0f, std::memory_order_relaxed); }
+    bool sidechainDelivered() const { return sidechainSeen_.load(std::memory_order_relaxed); }
     virtual int latencySamples() const { return 0; }
 
     // ---- parameters (plain values, i.e. in the units of ParameterInfo)
@@ -189,7 +198,8 @@ public:
 
 protected:
     std::atomic<bool> bypassed{false};
-    std::atomic<float> sidechainGainLevel_{1.0f}, sidechainMixLevel_{1.0f};
+    std::atomic<float> sidechainGainLevel_{1.0f}, sidechainMixLevel_{1.0f}, sidechainPeak_{0.0f};
+    std::atomic<bool> sidechainSeen_{false};
 };
 
 } // namespace sonora::devices

@@ -24,6 +24,9 @@ public:
     void layout() override;
     void paint(SkCanvas&, const Theme&) override;
     void mouseDown(const MouseEvent&) override;
+    void tick() override;
+    Rect meterBox() const { return {4, 57, width() - 8, 5}; }
+    float meterLevel() const { return meter_; } // linear peak, decaying
 
     Rect sourceBox() const { return {4, 18, width() - 8, 16}; }
     Rect tapBox() const { return {4, 38, width() - 8, 16}; }
@@ -45,5 +48,7 @@ private:
     devices::DeviceProcessor* processor_;
     int track_, device_;
     Knob *gain_ = nullptr, *mix_ = nullptr;
+    float meter_ = 0;
+    double lastTick_ = 0;
 };
 } // namespace sonora::ui
