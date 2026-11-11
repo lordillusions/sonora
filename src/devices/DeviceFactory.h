@@ -21,6 +21,8 @@ namespace sonora::engine
 class SampleCache;
 }
 
+namespace juce { class AudioPluginInstance; }
+
 namespace sonora::devices
 {
 // Message thread: a fresh native device/rack with its editable parameter defaults. A "max:<patch>" key (DEV-23)
@@ -44,6 +46,10 @@ struct BuildContext
     engine::SampleCache* samples = nullptr; // sample-based devices (Simpler) request their files here
     const model::Song* song = nullptr;      // to resolve sample paths relative to the project
     std::vector<std::string>* log = nullptr; // human-readable notes, shown in the status bar
+    // A structural rebuild of the same set (AudioEngine::reloadSongKeepingPlugins): the running instance of the top-level
+    // plug-in device `deviceId` on track `trackId`, or null to create one. makeNode sets trackId for its track.
+    int trackId = -1;
+    std::function<std::unique_ptr<juce::AudioPluginInstance>(int trackId, int deviceId)> takeRunningPlugin;
 };
 
 // Returns nullptr when the device cannot run; the chain then just skips it (pass-through).

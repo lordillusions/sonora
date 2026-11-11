@@ -905,7 +905,7 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     ui_.recordingRequested = false;
     inputPermissionDenied_ = false;
     const auto start = juce::Time::getMillisecondCounterHiRes();
-    ui_.buildLog = engine_.loadSong(*song_);
+    ui_.buildLog = engine_.reloadSongKeepingPlugins(*song_); // running plug-ins carry over (no re-creation)
     for (const auto& w : song_->warnings)
         ui_.buildLog.push_back(w);
     const auto ms = juce::Time::getMillisecondCounterHiRes() - start;

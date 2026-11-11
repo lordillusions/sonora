@@ -187,3 +187,114 @@ TEST_CASE("sidechain panel: on Hush in the chain, pick the kick track, tap, Mute
     CHECK(context.sidechainPanelsClosed.count(40) == 1);
     CHECK(! panel.visible);
 }
+
+#include "plugins/PluginHost.h"
+#include "engine/AudioEngine.h"
+#include "midi/MidiManager.h"
+
+TEST_CASE("engine rebuild: a running plug-in instance is handed to the new graph instead of being created again")
+{
+    // Duplicate Tracks rebuilt the engine and created every plug-in again; SoundID Reference blocked forever in its
+    // initialise doing that. The running instance is now donated to the host and claimed by the next build.
+#if JUCE_MAC
+    juce::ScopedJuceInitialiser_GUI init;
+    const auto bundle = phaseAlignBundle();
+    if (! bundle.exists()) return;
+    juce::VST3PluginFormat format;
+    juce::OwnedArray<juce::PluginDescription> types;
+    format.findAllTypesForFile(types, bundle.getFullPathName());
+    REQUIRE(types.size() == 1);
+    juce::String error;
+    auto device = std::make_unique<plugins::PluginDevice>(format.createInstanceFromDescription(*types[0], 48000.0, 512, error));
+    device->prepare(48000.0, 512);
+    auto released = device->releaseInstance();
+    REQUIRE(released != nullptr);
+    auto* running = released.get();
+    device.reset(); // an emptied device is destroyed without touching the instance
+
+    plugins::PluginHost host;
+    model::PluginInfo info;
+    info.name = "Sonora Phase Align";
+    host.donate(*types[0], info, model::DeviceKind::PluginVst3, 48000.0, 512, std::move(released));
+    CHECK(host.preloadedCount() == 1);
+    auto claimed = host.instantiate(*types[0], info, model::DeviceKind::PluginVst3, 48000.0, 512, error);
+    CHECK(claimed.get() == running); // the same instance, not a new one
+    CHECK(host.preloadedCount() == 0);
+    // A different state (another device of the same plug-in) does not take it.
+    info.state = {1, 2, 3};
+    host.donate(*types[0], {}, model::DeviceKind::PluginVst3, 48000.0, 512, std::move(claimed));
+    auto other = host.instantiate(*types[0], info, model::DeviceKind::PluginVst3, 48000.0, 512, error);
+    CHECK(other.get() != running);
+    host.clearPreloaded();
+#endif
+}
+
+TEST_CASE("engine rebuild: Duplicate Tracks keeps the running plug-ins of the set (no new instances)")
+{
+#if JUCE_MAC
+    juce::ScopedJuceInitialiser_GUI init;
+    const auto bundle = phaseAlignBundle();
+    if (! bundle.exists()) return;
+    juce::VST3PluginFormat format;
+    juce::OwnedArray<juce::PluginDescription> types;
+    format.findAllTypesForFile(types, bundle.getFullPathName());
+    REQUIRE(types.size() == 1);
+    plugins::PluginHost host;
+    host.knownPlugins().addType(*types[0]);
+    midi::MidiManager midiManager;
+    engine::AudioEngine eng(host, midiManager);
+
+    model::Song song;
+    model::Track bass;
+    bass.id = 3;
+    bass.name = "Bass";
+    bass.kind = model::TrackKind::Audio;
+    model::Device plugin;
+    plugin.kind = model::DeviceKind::PluginVst3;
+    plugin.type = "PluginDevice";
+    plugin.id = 11;
+    plugin.displayName = "Sonora Phase Align";
+    model::PluginInfo info;
+    info.name = "Sonora Phase Align";
+    plugin.plugin = info;
+    bass.devices.push_back(plugin);
+    song.tracks.push_back(bass);
+    song.main.devices.push_back(plugin); // a plug-in on Main too (where SoundID sat)
+    song.main.devices.back().id = 12;
+    eng.loadSong(song);
+    auto* graph = eng.latestGraph();
+    REQUIRE(graph != nullptr);
+    auto* onBass = dynamic_cast<plugins::PluginDevice*>(graph->nodes[0].processorForModelDevice[0]);
+    auto* onMain = dynamic_cast<plugins::PluginDevice*>(graph->nodes[(size_t) graph->mainNode].processorForModelDevice[0]);
+    REQUIRE(onBass != nullptr);
+    REQUIRE(onMain != nullptr);
+    auto* bassInstance = &onBass->instance();
+    auto* mainInstance = &onMain->instance();
+
+    // Duplicate the bass track: the copy is a new device id (a new instance); the original and Main keep theirs.
+    auto duplicated = song;
+    auto copy = bass;
+    copy.id = 4;
+    copy.name = "Bass 2";
+    copy.devices[0].id = 13;
+    duplicated.tracks.push_back(copy);
+    eng.reloadSongKeepingPlugins(duplicated);
+    CHECK(eng.lastReusedPlugins() == 2);
+    graph = eng.latestGraph();
+    REQUIRE(graph != nullptr);
+    auto* bassAfter = dynamic_cast<plugins::PluginDevice*>(graph->nodes[0].processorForModelDevice[0]);
+    auto* copyAfter = dynamic_cast<plugins::PluginDevice*>(graph->nodes[1].processorForModelDevice[0]);
+    auto* mainAfter = dynamic_cast<plugins::PluginDevice*>(graph->nodes[(size_t) graph->mainNode].processorForModelDevice[0]);
+    REQUIRE(bassAfter != nullptr);
+    REQUIRE(copyAfter != nullptr);
+    REQUIRE(mainAfter != nullptr);
+    CHECK(&bassAfter->instance() == bassInstance);
+    CHECK(&mainAfter->instance() == mainInstance);
+    CHECK(&copyAfter->instance() != bassInstance);
+    // Audio still runs through them.
+    std::vector<float> l(512), r(512);
+    float* out[2] = {l.data(), r.data()};
+    eng.renderBlock(out, 2, 512);
+    CHECK(std::isfinite(l[100]));
+#endif
+}

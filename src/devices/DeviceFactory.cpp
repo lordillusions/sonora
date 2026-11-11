@@ -276,7 +276,8 @@ std::unique_ptr<DeviceProcessor> createPlugin(const model::Device& d, BuildConte
     }
 
     juce::String error;
-    auto instance = ctx.pluginHost->instantiate(*match, *d.plugin, d.kind, ctx.sampleRate, ctx.blockSize, error);
+    std::unique_ptr<juce::AudioPluginInstance> instance = ctx.takeRunningPlugin ? ctx.takeRunningPlugin(ctx.trackId, d.id) : nullptr;
+    if (instance == nullptr) instance = ctx.pluginHost->instantiate(*match, *d.plugin, d.kind, ctx.sampleRate, ctx.blockSize, error);
     if (error.isNotEmpty())
         note(ctx, error.toStdString());
     if (instance == nullptr)

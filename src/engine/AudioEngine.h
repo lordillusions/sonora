@@ -52,6 +52,8 @@ public:
 
     // Builds and installs a graph for the song. Message thread. Returns the build log.
     std::vector<std::string> loadSong(const model::Song& song);
+    std::vector<std::string> loadSong(const model::Song& song,
+                                      std::function<std::unique_ptr<juce::AudioPluginInstance>(int trackId, int deviceId)> takeRunningPlugin);
     // UI-51: starts `device`'s plug-in ahead of loadSong(), which then uses that instance (message thread). False when
     // nothing was started: not a plug-in, not installed, or it failed (loadSong() reports those).
     bool preloadPlugin(const model::Device& device);
@@ -68,6 +70,11 @@ public:
     // Message thread: prepare inserted processors, briefly pause the device callback to edit the
     // chain, retain existing instances/state, refresh bindings and latency, then resume.
     std::vector<std::string> updateTrackDevices(int trackIndex, const model::Song& song);
+    // loadSong for a structural edit of the same set (duplicate, group, delete tracks): the running top-level plug-ins whose
+    // device still exists with the same state are handed to the new graph instead of being created again. Creating them
+    // again was slow and could deadlock (SoundID Reference blocked forever in its initialise on Duplicate Tracks).
+    std::vector<std::string> reloadSongKeepingPlugins(const model::Song& song);
+    int lastReusedPlugins() const { return lastReused_; }
     bool changingDevices() const { return changingDevices_; } // message thread: a device update or reprepare is running
     void reprepareGraph(); // message thread; retains instances, controls and transport on device changes
     bool graphPreparedForDevice() const
@@ -158,6 +165,7 @@ private:
     std::shared_ptr<std::atomic<bool>> lifetime_ = std::make_shared<std::atomic<bool>>(true);
     void queueReprepare(); // device callbacks may outlive shutdown in the message queue
     bool changingDevices_ = false, reprepareQueued_ = false; // message thread only
+    int lastReused_ = 0;
     // juce::AudioIODeviceCallback
     void audioDeviceIOCallbackWithContext(const float* const* inputs, int numInputs, float* const* outputs,
                                           int numOutputs, int numSamples,

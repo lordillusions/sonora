@@ -71,6 +71,10 @@ public:
     bool preload(const juce::PluginDescription& desc, const model::PluginInfo& stateSource, model::DeviceKind kindInSet,
                  double sampleRate, int blockSize);
     void clearPreloaded() { preloaded_.clear(); } // drops instances no build used
+    // A running instance handed back for the next build (AudioEngine::reloadSongKeepingPlugins): claimed like a preloaded
+    // one when the build asks for the same plug-in with the same state and processing setup.
+    void donate(const juce::PluginDescription& desc, const model::PluginInfo& stateSource, model::DeviceKind kindInSet,
+                double sampleRate, int blockSize, std::unique_ptr<juce::AudioPluginInstance> instance);
     size_t preloadedCount() const { return preloaded_.size(); }
 
     // Milliseconds the last instantiate() spent creating the instance and restoring its state (diagnostics).

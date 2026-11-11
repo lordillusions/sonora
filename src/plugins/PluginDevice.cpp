@@ -126,9 +126,19 @@ PluginDevice::PluginDevice(std::unique_ptr<juce::AudioPluginInstance> instance) 
 
 PluginDevice::~PluginDevice()
 {
+    if (instance_ == nullptr) return; // handed to a rebuilt graph (releaseInstance)
     instance_->removeListener(this);
     instance_->setPlayHead(nullptr);
     instance_->releaseResources();
+}
+
+std::unique_ptr<juce::AudioPluginInstance> PluginDevice::releaseInstance()
+{
+    if (instance_ == nullptr) return nullptr;
+    instance_->removeListener(this);
+    instance_->setPlayHead(nullptr);
+    instance_->releaseResources();
+    return std::move(instance_);
 }
 
 juce::Optional<juce::AudioPlayHead::PositionInfo> PluginDevice::PlayHead::getPosition() const

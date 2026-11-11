@@ -252,6 +252,7 @@ void prepareTakes(ClipSet& set, const model::Track& t, const TrackNode& node, co
 TrackNode makeNode(const model::Track& t, int controlIndex, devices::BuildContext& ctx, SampleCache& samples,
                    const model::Song& song, std::vector<std::string>& log)
 {
+    ctx.trackId = t.id; // top-level devices of this track (rack children are built with their rack)
     if (t.deactivated)
     {
         // TRK-1: nothing is loaded; mixer controls (and their automation) stay bound so reactivation is seamless.

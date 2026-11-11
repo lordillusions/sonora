@@ -46,6 +46,9 @@ public:
     void setSidechainRouted(bool routed) { sidechainRouted_ = routed; }
     void setSidechain(const juce::AudioBuffer<float>* audio, float gain) override { sidechain_ = audio; sidechainGain_ = gain; }
     bool sidechainBusActive() const { return sidechainChannels_ > 0; }
+    // Hands the running instance back (detached from this device) so a rebuilt graph can keep it instead of creating a
+    // new one. The device must not be used afterwards except to be destroyed. Message thread, audio callback stopped.
+    std::unique_ptr<juce::AudioPluginInstance> releaseInstance();
 
     const std::vector<devices::ParameterInfo>& parameters() const override { return infos_; }
     int findParameterByHostId(int id, const std::string& name) const override;

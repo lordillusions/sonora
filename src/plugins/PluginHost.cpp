@@ -261,6 +261,16 @@ std::string PluginHost::preloadKey(const juce::PluginDescription& desc, const mo
     return key;
 }
 
+void PluginHost::donate(const juce::PluginDescription& desc, const model::PluginInfo& src, model::DeviceKind kindInSet, double sampleRate,
+                        int blockSize, std::unique_ptr<juce::AudioPluginInstance> instance)
+{
+    if (instance == nullptr) return;
+    Preloaded entry;
+    entry.key = preloadKey(desc, src, kindInSet, sampleRate, blockSize);
+    entry.instance = std::move(instance);
+    preloaded_.push_back(std::move(entry));
+}
+
 bool PluginHost::preload(const juce::PluginDescription& desc, const model::PluginInfo& src, model::DeviceKind kindInSet,
                          double sampleRate, int blockSize)
 {

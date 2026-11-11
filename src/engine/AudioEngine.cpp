@@ -1,6 +1,9 @@
 #include "engine/Quantisation.h"
 #include "engine/AudioEngine.h"
 
+#include <map>
+#include "plugins/PluginDevice.h"
+
 #include "engine/ClipLauncher.h"
 
 #include "core/TimeUtils.h"
@@ -72,6 +75,12 @@ juce::String AudioEngine::enableRecordingInputs(int requiredChannels)
 
 std::vector<std::string> AudioEngine::loadSong(const model::Song& song)
 {
+    return loadSong(song, {});
+}
+
+std::vector<std::string> AudioEngine::loadSong(const model::Song& song,
+                                               std::function<std::unique_ptr<juce::AudioPluginInstance>(int, int)> takeRunningPlugin)
+{
     if (lastSong_.get() != &song)
         lastSong_ = std::make_unique<model::Song>(song);
 
@@ -82,6 +91,7 @@ std::vector<std::string> AudioEngine::loadSong(const model::Song& song)
     ctx.sampleRate = sampleRate_;
     ctx.blockSize = blockSize_;
     ctx.placeholderForMissingInstruments = placeholderInstruments;
+    ctx.takeRunningPlugin = std::move(takeRunningPlugin);
 
     auto result = buildGraph(*lastSong_, ctx, samples_);
 
@@ -93,6 +103,62 @@ std::vector<std::string> AudioEngine::loadSong(const model::Song& song)
     installGraph(std::move(result.graph));
     host_.clearPreloaded(); // instances the build did not claim
     return result.log;
+}
+
+std::vector<std::string> AudioEngine::reloadSongKeepingPlugins(const model::Song& song)
+{
+    lastReused_ = 0;
+    if (latest_ == nullptr || lastSong_ == nullptr) return loadSong(song);
+    const bool running = deviceManager_.getCurrentAudioDevice() != nullptr;
+    if (running) deviceManager_.removeAudioCallback(this); // waits for a running callback; nothing processes below
+    if (auto* p = pending_.exchange(nullptr))
+    {
+        delete current_;
+        current_ = p;
+    }
+    // The running top-level plug-ins by (track id, device id), when the new song still has that device with the same
+    // plug-in: the instance (and its live state) carries over.
+    std::map<std::pair<int, int>, const model::Device*> fresh;
+    const auto index = [&](const model::Track& t) { for (const auto& d : t.devices) fresh[{t.id, d.id}] = &d; };
+    for (const auto& t : song.tracks) index(t);
+    for (const auto& t : song.returns) index(t);
+    index(song.main);
+    auto kept = std::make_shared<std::map<std::pair<int, int>, std::unique_ptr<juce::AudioPluginInstance>>>();
+    const auto harvest = [&](const model::Track& t, int nodeIndex) {
+        if (nodeIndex < 0 || (size_t) nodeIndex >= latest_->nodes.size()) return;
+        auto& node = latest_->nodes[(size_t) nodeIndex];
+        for (size_t di = 0; di < t.devices.size() && di < node.processorForModelDevice.size(); ++di)
+        {
+            auto* plugin = dynamic_cast<plugins::PluginDevice*>(node.processorForModelDevice[di]);
+            if (plugin == nullptr) continue;
+            const auto& before = t.devices[di];
+            const auto found = fresh.find({t.id, before.id});
+            if (found == fresh.end() || ! found->second->plugin || ! before.plugin || found->second->kind != before.kind
+                || found->second->plugin->name != before.plugin->name || found->second->plugin->vst3Uid != before.plugin->vst3Uid)
+                continue;
+            (*kept)[{t.id, before.id}] = plugin->releaseInstance();
+        }
+    };
+    const auto& old = *lastSong_;
+    for (size_t i = 0; i < old.tracks.size(); ++i) harvest(old.tracks[i], (int) i);
+    for (size_t i = 0; i < old.returns.size() && i < latest_->returnNodes.size(); ++i) harvest(old.returns[i], latest_->returnNodes[i]);
+    harvest(old.main, latest_->mainNode);
+
+    auto log = loadSong(song, [kept, this](int trackId, int deviceId) -> std::unique_ptr<juce::AudioPluginInstance> {
+        const auto it = kept->find({trackId, deviceId});
+        if (it == kept->end()) return nullptr;
+        ++lastReused_;
+        auto instance = std::move(it->second);
+        kept->erase(it);
+        return instance;
+    });
+    if (auto* p = pending_.exchange(nullptr)) // the old graph (with emptied plug-in devices) goes now, audio still off
+    {
+        delete current_;
+        current_ = p;
+    }
+    if (running) deviceManager_.addAudioCallback(this);
+    return log; // instances no device claimed are destroyed with `kept`
 }
 
 bool AudioEngine::preloadPlugin(const model::Device& device)
