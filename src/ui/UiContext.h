@@ -615,7 +615,7 @@ struct UiContext
     std::function<void(const std::string& path, const model::ClipLocation& clip)> findSimilarSamples;
     std::function<void()> cancelSimilarSamples; // also leaves the list
     // LIB-5: replacing a clip's sample. The scope is remembered (This Clip / All Clips on This Track / All Clips in the Set).
-    model::SampleScope sampleReplaceScope = model::SampleScope::Clip;
+    model::SampleScope sampleReplaceScope = model::SampleScope::Track; // LIB-5d: every clip of the file on the track
     std::function<void(const model::ClipLocation&, const std::string& path)> replaceClipSample; // decodes on a worker
     // The next (+1) / previous (-1) file of the similar list (searched first when needed) replaces the clip's file.
     std::function<void(const model::ClipLocation&, int direction)> swapSimilarSample;

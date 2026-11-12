@@ -271,6 +271,8 @@ TEST_CASE("sample editor: the scope switch, swap arrows and a dropped sample rep
     auto* view = findWidget<ui::SampleView>(*rig.root);
     REQUIRE(view);
     REQUIRE(! view->scopeBounds(1).isEmpty());
+    CHECK(rig.ctx.sampleReplaceScope == model::SampleScope::Track); // LIB-5d: every clip of the file on the track
+    rig.click(*view, view->scopeBounds(0));
     CHECK(rig.ctx.sampleReplaceScope == model::SampleScope::Clip);
     rig.click(*view, view->scopeBounds(1));
     CHECK(rig.ctx.sampleReplaceScope == model::SampleScope::Track);
@@ -312,6 +314,7 @@ TEST_CASE("replace sample (LIB-5c): the browser opens on the similar list under 
     CHECK(browser.similarList());
     CHECK(browser.similarChipBounds().y >= browser.swapBarBounds().bottom()); // the similar chip sits under the bar
     CHECK(browser.listRowBounds(0).y > browser.similarChipBounds().bottom());
+    CHECK(browser.swapScopeLabel().rfind("in Track (", 0) == 0); // LIB-5d: the track's clips of that file by default
     rig.png("sonora_replace_bar.png");
     // A similar match replaces the clip's file; the bar stays for the next try.
     rig.click(browser, browser.listRowBounds(0), 2);

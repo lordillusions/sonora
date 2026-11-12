@@ -216,6 +216,7 @@ folder, User Library, packs, the reference's Core Library sounds; set folders le
 Replace Sample... (LIB-5c) has no file chooser: it opens the browser on the clip's similar list under an orange
 "Replace: clip" bar (`swapBarBounds()`, scope menu `swapScopeBounds()`, x `swapCloseBounds()`); while the bar is up a
 double-click / Enter on any sample row in any folder replaces the clip's file, and Escape (with nothing else to clear) ends it.
+The scope starts at every clip of that file on the clip's track ("in Track (n)", LIB-5d); the menu picks Clip or Set.
 
 **All (UI-64)** is the first Library entry: every Library category in one list, a heading per category in sidebar order
 (Sounds is left out while it has nothing to list) over that category's own groups or, for Samples, the Samples folder's

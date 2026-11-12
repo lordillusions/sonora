@@ -79,6 +79,8 @@ public:
     void toggleTagFilter(BrowserTag tag);
     const BrowserTags::Tags& tagFilters() const { return filters_; }
 
+    std::string swapScopeLabel() const; // "in Track (3)": the replace bar's scope button (LIB-5c/d)
+
 private:
     void moveSelection(int delta);
     struct Category { const char* name; bool header; };
@@ -142,7 +144,6 @@ private:
     void syncSimilar();                // a new similar list: selection and scroll start over
     void revealPending();              // LIB-3
     float similarRowHeight() const; // the swap bar and the similar chip rows
-    std::string swapScopeLabel() const;
     void appendSimilar(std::vector<Item>& result) const;
     Rect sidebarArea() const;
     Rect listArea() const;
