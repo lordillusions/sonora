@@ -102,6 +102,7 @@ void AppController::closeHushWindows()
 {
     hushWindows_.clear();
     closeKickstractTimelines(); // same lifetime (PLG-17e)
+    closeProFaceWindows();      // and PLG-23
 }
 
 void AppController::syncHushWindows()
@@ -109,11 +110,13 @@ void AppController::syncHushWindows()
     for (auto* window : hushWindows_)
         if (window->isVisible()) static_cast<HushWindow*>(window)->sync();
     syncKickstractTimelines();
+    syncProFaceWindows();
 }
 
 void AppController::renameHushWindows(model::TrackId track, int oldId, int newId)
 {
     renameKickstractTimelines(track, oldId, newId);
+    renameProFaceWindows(track, oldId, newId);
     for (auto* window : hushWindows_)
         if (auto* w = static_cast<HushWindow*>(window); w->key().trackId == track && w->key().deviceId == oldId)
         {

@@ -22,7 +22,7 @@ std::vector<ParameterInfo> phaseParameters()
     p[P::Angle] = makeParam("Angle", "Angle", -180, 180, 0, "deg");
     p[P::Speed] = makeParam("Speed", "Speed", 5, 2000, 120, "ms");
     p[P::Threshold] = makeParam("Threshold", "Threshold", -60, 0, -30, "dB");
-    p[P::Window] = makeParam("Window", "Window", 20, 250, 90, "ms");
+    p[P::Window] = makeParam("Window", "Window", 20, 400, 150, "ms");
     p[P::MinCoherence] = makeParam("MinCoherence", "Min. Coherence", 0, 1, 0.25f, "%");
     p[P::Listen] = makeParam("Listen", "Listen", 0, 2, 0, "", false, {"Bass", "Sum", "Original Sum"});
     p[P::Output] = makeParam("Output", "Output", -24, 12, 0, "dB");
@@ -103,6 +103,9 @@ void PhaseAlign::reset()
     cosA_ = 1;
     sinA_ = 0;
     rotationCounter_ = 0;
+    mix_ = mixTarget_ = std::lround(value(ModeParam)) == Manual ? 1.0f : 0.0f;
+    recent_ = 0;
+    verdict_.store(NoKick);
 }
 
 void PhaseAlign::finishHit()
@@ -112,19 +115,43 @@ void PhaseAlign::finishHit()
     const double magnitude = std::sqrt(ca_ * ca_ + cb_ * cb_);
     const double coherence = kk_ > 1e-12 && bass > 1e-12 ? std::min(1.0, magnitude / std::sqrt(kk_ * bass)) : 0.0;
     const float best = (float) (std::atan2(-cb_, ca_) * 180.0 / kPi);
-    // Low-end energy of kick + bass over the window: the bass as it came in vs rotated to the best angle.
+    // Low-end energy of kick + bass over the window: the bass as it came in vs rotated to the best angle (potential) and
+    // vs rotated to the angle that plays now (applied).
     const double before = ll_, after = kl_ + bass + hh_ + 2.0 * (magnitude + kh_);
-    const float gainDb = before > 1e-12 && after > 1e-12 ? (float) (10.0 * std::log10(after / before)) : 0.0f;
+    const double applied = std::cos((double) angle_ * kPi / 180.0) * ca_ - std::sin((double) angle_ * kPi / 180.0) * cb_;
+    const double afterApplied = kl_ + bass + hh_ + 2.0 * (applied + kh_);
+    const auto db = [before](double e) { return before > 1e-12 && e > 1e-12 ? (float) (10.0 * std::log10(e / before)) : 0.0f; };
+    const float potentialDb = db(after);
+    const float appliedDb = mix_ > 0.5f ? db(afterApplied) : 0.0f;
+    const float bassUnderKick = kk_ > 1e-12 ? (float) (10.0 * std::log10(std::max(bass, 1e-30) / kk_)) : -120.0f;
     const bool used = coherence >= (double) value(MinCoherence) && kk_ > 1e-10;
     const int mode = (int) std::lround(value(ModeParam));
-    if (used && mode == Auto) learned_ = best;
+    const bool worth = used && potentialDb >= kWorthDb;
+    recent_ = ((recent_ << 1) | (worth ? 1u : 0u)) & 0xFFu;
+    int worthCount = 0;
+    for (uint32_t bits = recent_; bits != 0; bits >>= 1) worthCount += (int) (bits & 1u);
+    if (mode == Auto)
+    {
+        if (worth) learned_ = best;
+        if (worthCount >= 2) mixTarget_ = 1.0f;
+        else if (worthCount == 0) mixTarget_ = 0.0f;
+    }
+    Verdict v = Aligning;
+    if (mode == Manual) v = ManualAngle;
+    else if (! used) v = bassUnderKick < -40.0f ? Silent : Unrelated;
+    else if (potentialDb < kWorthDb) v = InPhase;
+    verdict_.store(v, std::memory_order_relaxed);
 
     coherence_.store((float) coherence, std::memory_order_relaxed);
-    gainDb_.store(gainDb, std::memory_order_relaxed);
+    gainDb_.store(appliedDb, std::memory_order_relaxed);
+    potentialDb_.store(potentialDb, std::memory_order_relaxed);
+    bassUnderKickDb_.store(bassUnderKick, std::memory_order_relaxed);
     const int slot = historyNext_.load(std::memory_order_relaxed);
     histAngle_[(size_t) slot].store(best, std::memory_order_relaxed);
     histCoherence_[(size_t) slot].store((float) coherence, std::memory_order_relaxed);
-    histGain_[(size_t) slot].store(gainDb, std::memory_order_relaxed);
+    histGain_[(size_t) slot].store(appliedDb, std::memory_order_relaxed);
+    histPotential_[(size_t) slot].store(potentialDb, std::memory_order_relaxed);
+    histBass_[(size_t) slot].store(bassUnderKick, std::memory_order_relaxed);
     histUsed_[(size_t) slot].store(used, std::memory_order_relaxed);
     historyNext_.store((slot + 1) % kHistory, std::memory_order_relaxed);
     hits_.fetch_add(1, std::memory_order_release);
@@ -172,6 +199,11 @@ void PhaseAlign::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
     const float slowAttack = coefficient(0.03), slowRelease = coefficient(0.3);
     const int refractory = (int) (0.06 * sampleRate_);
     const bool bypass = isBypassed();
+    if (mode == Manual) mixTarget_ = 1.0f;
+    if (kickL == nullptr && mode == Auto) mixTarget_ = 0.0f; // no kick: nothing to follow
+    if (kickL == nullptr) verdict_.store(mode == Manual ? ManualAngle : NoKick, std::memory_order_relaxed);
+    else if (hits_.load(std::memory_order_relaxed) == 0 && mode != Manual) verdict_.store(Waiting, std::memory_order_relaxed);
+    const float mixStep = 1.0f - (float) std::exp(-1.0 / (0.15 * sampleRate_));
 
     for (int i = 0; i < n; ++i)
     {
@@ -257,8 +289,11 @@ void PhaseAlign::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
             if (++hitSamples_ >= windowSamples_) finishHit();
         }
 
+        mix_ += (mixTarget_ - mix_) * mixStep;
         if (bypass) continue;
-        float outL = (rotL + highL) * output, outR = (rotR + highR) * output;
+        // Transparent until it helps: the untouched bass, or (fading in) the rotated low band with the matched high band.
+        const float procL = rotL + highL, procR = rotR + highR;
+        float outL = (inL + mix_ * (procL - inL)) * output, outR = (inR + mix_ * (procR - inR)) * output;
         if (listen == ListenOriginalSum) { outL = inL; outR = inR; }
         if (listen != ListenBass && kickL != nullptr)
         {
@@ -270,6 +305,7 @@ void PhaseAlign::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
     }
     angleShown_.store(angle_, std::memory_order_relaxed);
     target_.store(target, std::memory_order_relaxed);
+    mixShown_.store(mix_, std::memory_order_relaxed);
 }
 
 PhaseAlign::HitRecord PhaseAlign::history(int newestFirst) const
@@ -278,7 +314,8 @@ PhaseAlign::HitRecord PhaseAlign::history(int newestFirst) const
     if (newestFirst < 0 || newestFirst >= kHistory || (uint32_t) newestFirst >= count) return {};
     const int slot = ((historyNext_.load(std::memory_order_relaxed) - 1 - newestFirst) % kHistory + kHistory) % kHistory;
     return {histAngle_[(size_t) slot].load(std::memory_order_relaxed), histCoherence_[(size_t) slot].load(std::memory_order_relaxed),
-            histGain_[(size_t) slot].load(std::memory_order_relaxed), histUsed_[(size_t) slot].load(std::memory_order_relaxed)};
+            histGain_[(size_t) slot].load(std::memory_order_relaxed), histPotential_[(size_t) slot].load(std::memory_order_relaxed),
+            histBass_[(size_t) slot].load(std::memory_order_relaxed), histUsed_[(size_t) slot].load(std::memory_order_relaxed)};
 }
 
 bool PhaseAlign::takeShape(Shape& out, uint32_t serial) const

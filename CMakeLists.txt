@@ -10,7 +10,7 @@ if(CMAKE_HOST_APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET 13.0 CACHE STRING "")
 endif()
 
-project(Sonora VERSION 0.1.38 LANGUAGES C CXX)
+project(Sonora VERSION 0.1.39 LANGUAGES C CXX)
 if(APPLE)
     enable_language(OBJC OBJCXX)
 endif()

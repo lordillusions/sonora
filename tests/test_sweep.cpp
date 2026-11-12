@@ -250,3 +250,71 @@ TEST_CASE("sweep from clip: a riser lands on a new track under the clip, ending 
     CHECK(! engine::sweepFromClip(song, location, true, 32.0, audio, kRate, "chord", folder).error.empty());
     folder.deleteRecursively();
 }
+
+TEST_CASE("sweep: every generator sounds without a sample, stays finite; Chord and Air add to it")
+{
+    for (int source = 0; source < W::kSources; ++source)
+    {
+        if (source == W::Sample) continue;
+        W w;
+        setup(w);
+        w.setParameter(W::Source, (float) source);
+        w.setParameter(W::Chord, source == W::Tone || source == W::Sine ? 3.0f : 0.0f);
+        w.setParameter(W::Air, 0.4f);
+        devices::HostInfo host;
+        host.tempo = 120.0;
+        host.sampleRate = kRate;
+        w.setHostInfo(host);
+        juce::AudioBuffer<float> out(2, 96000);
+        out.clear();
+        for (int start = 0; start < 96000; start += 256)
+        {
+            juce::AudioBuffer<float> view(out.getArrayOfWritePointers(), 2, start, 256);
+            juce::MidiBuffer midi;
+            if (start == 0) midi.addEvent(juce::MidiMessage::noteOn(1, W::previewNote(source), 1.0f), 0);
+            w.process(view, midi);
+        }
+        float peak = 0;
+        bool finite = true;
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < 96000; ++i)
+            {
+                finite = finite && std::isfinite(out.getSample(ch, i));
+                peak = std::max(peak, std::abs(out.getSample(ch, i)));
+            }
+        CHECK(finite);
+        CHECK(peak > 0.02f);
+        CHECK(peak < 4.0f);
+    }
+}
+
+TEST_CASE("sweep: types set everything but Length and Output and are recognised; Preview plays one sweep and stops")
+{
+    W w;
+    setup(w);
+    w.setParameter(W::Output, -3.0f);
+    const auto& types = W::types();
+    REQUIRE(types.size() >= 8);
+    for (size_t t = 0; t < types.size(); ++t)
+    {
+        w.applyType((int) t);
+        CHECK(w.matchingType() == (int) t);
+        CHECK_NEAR(w.getParameter(W::LengthParam), 2.0f, 1e-6);
+        CHECK_NEAR(w.getParameter(W::Output), -3.0f, 1e-6);
+    }
+    w.setParameter(W::Resonance, 0.91f);
+    CHECK(w.matchingType() == -1);
+
+    w.applyType(0);
+    juce::AudioBuffer<float> block(2, 512);
+    juce::MidiBuffer midi;
+    w.preview();
+    block.clear();
+    w.process(block, midi);
+    CHECK(w.progress() >= 0.0f);
+    for (int i = 0; i < 20; ++i) { block.clear(); w.process(block, midi); }
+    CHECK(block.getMagnitude(0, 512) > 0.0f);
+    w.preview(); // a second click stops it (short fade)
+    for (int i = 0; i < 8; ++i) { block.clear(); w.process(block, midi); }
+    CHECK(w.progress() < 0.0f);
+}

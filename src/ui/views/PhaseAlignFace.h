@@ -1,64 +1,59 @@
 #pragma once
-// Face of Sonora Phase Align (PLG-21), shared by the device chain and the VST3 window. Sonora's own device (no reference
-// face to match), in the chain's dark display style:
+// Face of Sonora Phase Align (PLG-21, PLG-23), on the ProFace kit: the device chain (compact), its own window and the VST3
+// editor (full).
 //
-//   PHASE (a dial: the applied angle, the target, coherence as the ring, Auto / Hold / Manual) | LAST HIT (the kick, the
-//   bass before and after over the analysis window, the low-end gain) | HITS (one dot per hit: the angle it asked for,
-//   brighter when coherent; hollow = ignored) | ALIGN knobs (Angle, Speed, Crossover) | DETECT knobs (Threshold, Window,
-//   Min. Coherence) | OUT (Output, Listen Bass / Sum / Orig.)
+// Full layout: the wordmark and the kick's source on top; the VERDICT in words (how much low end it adds on every kick, or
+// why there is nothing to align and the bass passes untouched); the PHASE dial (applied angle, target, coherence) with
+// Auto / Hold / Manual; the LAST HIT (kick and bass, each scaled to be seen, and the kick + bass sum as it was against
+// aligned); HITS (per hit the gain the best angle could give and the one it gets); the ALIGN, DETECT and OUT knobs.
 //
-// The title row shows where the sidechain comes from; in the app a click opens the "Sidechain from" track chooser.
+// Compact layout: the dial, the verdict and the last hit, the modes, Listen and four knobs.
 
 #include "devices/native/PhaseAlign.h"
-#include "ui/Widget.h"
+#include "ui/views/ProFace.h"
 
 #include <functional>
 #include <string>
 
 namespace sonora::ui
 {
-class Knob;
-class TextButton;
-
-class PhaseAlignFace final : public Widget
+class PhaseAlignFace final : public ProFace
 {
 public:
-    static constexpr float kPreferredWidth = 900, kPreferredHeight = 176;
-    static constexpr SkColor kKick = 0xffff8a3d, kBefore = 0xff7d8590, kAfter = 0xff3dd2ff;
+    static constexpr SkColor kAccent = 0xFF3DD2FF, kKick = 0xFFFF8A3D, kBefore = 0xFF7D8590, kGood = 0xFF5BE38C,
+                             kWarn = 0xFFFFC14D, kBad = 0xFFFF6B6B;
+    static constexpr Size kFull{1100, 600}, kCompact{760, 170};
 
-    explicit PhaseAlignFace(devices::PhaseAlign* processor, std::function<void(Widget*, int)> tag = {});
-    void layout() override;
-    void paint(SkCanvas&, const Theme&) override;
-    void tick() override;
+    explicit PhaseAlignFace(devices::PhaseAlign& device);
+    devices::PhaseAlign& phase() { return phase_; }
 
-    // The sidechain source shown in the title row ("" = none routed) and what a click on it does (unset: not clickable).
+    // The sidechain source shown on top ("" = none routed) and what a click on it does (unset: the host routes it, VST3).
     std::function<std::string()> sidechainName;
     std::function<void()> onChooseSidechain;
-    TextButton* sidechainButton() const { return sidechain_; }
 
-    Rect dialArea() const;
-    Rect hitArea() const;
-    Rect historyArea() const;
+    std::string verdictTitle() const;
+    std::string verdictDetail() const;
+    SkColor verdictColour() const;
     const devices::PhaseAlign::Shape& shape() const { return shape_; }
 
-private:
-    struct Column { float x = 0, w = 0; };
-    Knob* knob(int parameter);
-    void paintDial(SkCanvas&, const Theme&);
-    void paintHit(SkCanvas&, const Theme&);
-    void paintHistory(SkCanvas&, const Theme&);
+protected:
+    void build(Layout) override;
+    void paintBack(SkCanvas&, Layout) override;
+    void paintFront(SkCanvas&, Layout) override;
+    std::string valueText(int param, float value) const override;
+    std::string idleHelp() const override;
+    bool animate() override;
 
-    devices::PhaseAlign* processor_;
-    std::function<void(Widget*, int)> tag_;
-    Column phase_, hit_, history_, align_, detect_, out_;
-    Knob *angle_ = nullptr, *speed_ = nullptr, *crossover_ = nullptr, *threshold_ = nullptr, *window_ = nullptr,
-         *coherence_ = nullptr, *output_ = nullptr;
-    TextButton* modes_[3]{};
-    TextButton* listen_[3]{};
-    TextButton* sidechain_ = nullptr;
+private:
+    std::string kickLabel() const;
+    void paintDial(SkCanvas&, float cx, float cy, float radius, bool compact);
+    void paintHit(SkCanvas&, const Rect& waves, const Rect& sum, bool compact);
+    void paintHistory(SkCanvas&, const Rect&);
+
+    devices::PhaseAlign& phase_;
     devices::PhaseAlign::Shape shape_;
     uint32_t hits_ = 0;
-    float shownAngle_ = 0;
-    std::string shownSource_;
+    float angle_ = 0, target_ = 0, mix_ = 0;
+    int verdict_ = -1;
 };
 } // namespace sonora::ui

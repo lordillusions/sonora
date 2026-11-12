@@ -1,39 +1,20 @@
-// PLG-18: the Sonora Stutter face, in the VST3 window and in the app's device chain, driven with real input.
-#include "TestFramework.h"
-#include "devices/DeviceFactory.h"
+// PLG-18 / PLG-23: the Sonora Stutter face (ProFace kit) in the VST3 window, the app's device chain and its own window,
+// driven with real input.
+#include "ProFaceTestKit.h"
 #include "devices/native/Stutter.h"
-#include "engine/EngineGraph.h"
-#include "engine/SampleCache.h"
-#include "gfx/SkiaCanvasComponent.h"
 #include "plugin/StutterPlugin.h"
 #include "plugin/StutterPluginEditor.h"
-#include "ui/views/MainLayout.h"
 #include "ui/views/StutterFace.h"
 #include "ui/widgets/Buttons.h"
 
 #include <cmath>
 
 using namespace sonora;
+using namespace sonora::testkit;
 namespace
 {
 using S = devices::Stutter;
 constexpr double kRate = 48000.0;
-
-template <typename T> void collect(ui::Widget& w, std::vector<T*>& found)
-{
-    if (auto* p = dynamic_cast<T*>(&w)) found.push_back(p);
-    for (const auto& child : w.children()) collect(*child, found);
-}
-
-ui::MouseEvent at(ui::Widget& widget, float x, float y, int clicks = 1)
-{
-    ui::MouseEvent e;
-    const auto origin = widget.boundsInRoot();
-    e.x = origin.x + x;
-    e.y = origin.y + y;
-    e.clicks = clicks;
-    return e;
-}
 
 // A "voice": a 220 Hz tone with a syllable envelope every 250 ms.
 juce::AudioBuffer<float> voice(int samples)
@@ -48,177 +29,109 @@ juce::AudioBuffer<float> voice(int samples)
     }
     return a;
 }
-
-template <typename Process> void play(ui::Widget& root, int samples, Process&& process)
-{
-    auto audio = voice(samples);
-    for (int start = 0, block = 0; start < audio.getNumSamples(); start += 512, ++block)
-    {
-        if (block % 4 == 0) root.tickTree();
-        const int n = std::min(512, audio.getNumSamples() - start);
-        juce::AudioBuffer<float> view(audio.getArrayOfWritePointers(), 2, start, n);
-        process(view);
-    }
-    root.tickTree();
-}
 } // namespace
 
-TEST_CASE("stutter plugin: host parameters, state, MIDI, pads and pattern with real input")
+TEST_CASE("stutter plugin: the full face; modes, Motion and the hold pad with real clicks; Macro hands over to the knobs")
 {
     juce::ScopedJuceInitialiser_GUI init;
     plugin::StutterPlugin p;
     CHECK(p.getParameters().size() == S::NumParams);
-    CHECK(p.acceptsMidi());
-    CHECK(p.getParameters()[S::Rate]->getCurrentValueAsText() == "1/16");
-    CHECK(p.getParameters()[S::ModeParam]->getCurrentValueAsText() == "Repeat");
-    auto* pitch = p.getParameters()[S::Pitch];
-    pitch->setValue(pitch->getValueForText("7"));
-    CHECK_NEAR(p.device().getParameter(S::Pitch), 7.0, 1e-4);
-    pitch->setValue(pitch->getValueForText("0"));
     p.prepareToPlay(kRate, 512);
-    CHECK(p.getLatencySamples() == 0);
-
-    juce::MemoryBlock state;
-    p.device().setParameter(S::Shrink, 0.4f);
-    p.device().setParameter(S::stepParam(2), 3.0f);
-    p.getStateInformation(state);
-    plugin::StutterPlugin restored;
-    restored.setStateInformation(state.getData(), (int) state.getSize());
-    CHECK(restored.buildLog.empty());
-    CHECK_NEAR(restored.device().getParameter(S::Shrink), 0.4, 1e-4);
-    CHECK_NEAR(restored.device().getParameter(S::stepParam(2)), 3.0, 1e-4);
-    p.device().setParameter(S::stepParam(2), 0.0f);
-
     std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
     auto* window = dynamic_cast<plugin::StutterPluginEditor*>(editor.get());
     REQUIRE(window != nullptr);
+    CHECK(window->getWidth() > 800);
     auto& view = window->view();
-    view.setBounds({0, 0, plugin::StutterView::kWidth, plugin::StutterView::kHeight});
+    const auto size = ui::StutterFace::kFull;
+    view.setBounds({0, 0, size.w, size.h});
     view.layout();
-    auto& face = view.face();
+    auto& face = window->face();
+    CHECK(face.layoutMode() == ui::ProFace::Layout::Full);
+    CHECK_NEAR(face.scale(), 1.0f, 1e-4);
 
-    // A MIDI note (E1 = Freeze) engages through processBlock and the notes do not pass on.
+    REQUIRE(click(view, face, "Freeze"));
+    CHECK(std::lround(p.device().getParameter(S::ModeParam)) == S::Freeze);
+    REQUIRE(click(view, face, "Sync to tempo"));
+    CHECK(p.device().getParameter(S::Sync) > 0.5f);
+    REQUIRE(click(view, face, "Free"));
+    REQUIRE(click(view, face, "4 Bars"));
+    CHECK(std::lround(p.device().getParameter(S::Capture)) == 3);
+    const float motion = p.device().getParameter(S::Motion);
+    REQUIRE(drag(view, face, "MOTION", -60));
+    CHECK(p.device().getParameter(S::Motion) > motion + 0.1f);
+    CHECK(p.device().getParameter(S::Macro) > 0.5f);
+
+    // Hold the pad while the voice plays: it stutters; the display shows the grains.
+    const auto pad = face.controlCentre("HOLD");
+    REQUIRE(pad.has_value());
+    auto audio = voice(96000);
+    for (int start = 0, block = 0; start < 96000; start += 512, ++block)
     {
-        juce::AudioBuffer<float> block(2, 512);
-        block.clear();
+        if (start == 48128) view.dispatchMouseDown(designAt(face, pad->first, pad->second));
+        if (block % 4 == 0) view.tickTree();
+        juce::AudioBuffer<float> chunk(audio.getArrayOfWritePointers(), 2, start, std::min(512, 96000 - start));
         juce::MidiBuffer midi;
-        midi.addEvent(juce::MidiMessage::noteOn(1, 40, 1.0f), 10);
-        p.processBlock(block, midi);
-        CHECK(midi.isEmpty());
-        view.tickTree();
-        CHECK(face.view().engaged);
-        CHECK(face.view().mode == S::Freeze);
-        juce::MidiBuffer off;
-        off.addEvent(juce::MidiMessage::noteOff(1, 40), 0);
-        juce::AudioBuffer<float> rest(2, 4096);
-        rest.clear();
-        p.processBlock(rest, off);
+        p.processBlock(chunk, midi);
     }
-
-    // Hold the Reverse pad with the mouse: it stutters while held and selects Reverse; releasing stops it.
-    juce::MidiBuffer midi;
-    play(view, 24000, [&](juce::AudioBuffer<float>& block) { p.processBlock(block, midi); });
-    const auto pad = face.padArea(S::Reverse);
-    view.dispatchMouseDown(at(face, pad.centreX(), pad.centreY()));
-    play(view, 12000, [&](juce::AudioBuffer<float>& block) { p.processBlock(block, midi); });
+    view.tickTree();
     CHECK(face.view().engaged);
-    CHECK(face.view().mode == S::Reverse);
-    CHECK(face.view().bins > 0);
-    CHECK(std::lround(p.device().getParameter(S::ModeParam)) == S::Reverse);
-    p.reportEditorChanges();
-    CHECK(p.getParameters()[S::ModeParam]->getCurrentValueAsText() == "Reverse");
-    const auto png = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_stutter_plugin.png");
-    CHECK(gfx::renderToPng(view, (int) plugin::StutterView::kWidth, (int) plugin::StutterView::kHeight, 2.0f,
-                           png.getFullPathName().toStdString()));
-    view.dispatchMouseUp(at(face, pad.centreX(), pad.centreY()));
-    play(view, 4800, [&](juce::AudioBuffer<float>& block) { p.processBlock(block, midi); });
+    CHECK(face.view().grains.size() > 4);
+    CHECK(face.statusLine().find("grains") != std::string::npos);
+    const auto png = testFile("sonora_stutter_plugin.png");
+    CHECK(gfx::renderToPng(view, (int) size.w, (int) size.h, 2.0f, png.getFullPathName().toStdString()));
+    view.dispatchMouseUp(designAt(face, pad->first, pad->second));
+    juce::AudioBuffer<float> chunk(2, 512);
+    juce::MidiBuffer midi;
+    p.processBlock(chunk, midi);
+    view.tickTree();
     CHECK(! face.view().engaged);
 
-    // Latch = the Hold control.
-    const auto latch = face.padArea(S::kModes);
-    view.dispatchMouseDown(at(face, latch.centreX(), latch.centreY()));
-    view.dispatchMouseUp(at(face, latch.centreX(), latch.centreY()));
-    CHECK(p.device().getParameter(S::Hold) > 0.5f);
-    view.dispatchMouseDown(at(face, latch.centreX(), latch.centreY()));
-    view.dispatchMouseUp(at(face, latch.centreX(), latch.centreY()));
-    CHECK(p.device().getParameter(S::Hold) < 0.5f);
-
-    // Pattern cells: a click sets the selected mode (Reverse), dragging paints, a second click clears, Alt clears.
-    const auto c0 = face.stepArea(0), c3 = face.stepArea(3);
-    view.dispatchMouseDown(at(face, c0.centreX(), c0.centreY()));
-    view.dispatchMouseDrag(at(face, c3.centreX(), c3.centreY()));
-    view.dispatchMouseUp(at(face, c3.centreX(), c3.centreY()));
-    for (int s = 0; s <= 3; ++s) CHECK(std::lround(p.device().getParameter(S::stepParam(s))) == 1 + S::Reverse);
-    view.dispatchMouseDown(at(face, c0.centreX(), c0.centreY()));
-    view.dispatchMouseUp(at(face, c0.centreX(), c0.centreY()));
-    CHECK(std::lround(p.device().getParameter(S::stepParam(0))) == 0);
-    auto alt = at(face, c3.centreX(), c3.centreY());
-    alt.alt = true;
-    view.dispatchMouseDown(alt);
-    view.dispatchMouseUp(alt);
-    CHECK(std::lround(p.device().getParameter(S::stepParam(3))) == 0);
-
-    // The Pattern and Sync buttons; Sync off swaps Rate for Length.
-    std::vector<ui::TextButton*> buttons;
-    collect(face, buttons);
-    auto press = [&](const std::string& label) {
-        for (auto* b : buttons)
-            if (b->label() == label)
-            {
-                const auto e = at(*b, b->width() / 2, b->height() / 2);
-                view.dispatchMouseDown(e);
-                view.dispatchMouseUp(e);
-                return true;
-            }
-        return false;
-    };
-    REQUIRE(press("Pattern"));
-    CHECK(p.device().getParameter(S::PatternOn) > 0.5f);
-    REQUIRE(press("Sync"));
-    CHECK(p.device().getParameter(S::Sync) < 0.5f);
-    view.tickTree();
-    REQUIRE(press("Sync"));
-    REQUIRE(press("Pattern"));
+    // A grain knob turned by hand takes over from Motion, from where Motion had it.
+    const float speedBefore = p.device().settings().speed;
+    REQUIRE(drag(view, face, "SPEED", -10));
+    CHECK(p.device().getParameter(S::Macro) < 0.5f);
+    CHECK(p.device().getParameter(S::Speed) > speedBefore);
+    // Hover help.
+    const auto every = face.controlCentre("EVERY");
+    REQUIRE(every.has_value());
+    view.dispatchMouseMove(designAt(face, every->first, every->second));
+    CHECK(face.helpLine().rfind("Every:", 0) == 0);
     p.editorBeingDeleted(editor.get());
     editor.reset();
 }
 
-TEST_CASE("stutter: the face in the app's device chain")
+TEST_CASE("stutter: the compact face in the app's chain, mapped, with a window button; the window shows the full face")
 {
-    model::Song song;
-    song.tracks.resize(1);
-    song.tracks[0].kind = model::TrackKind::Audio;
-    song.tracks[0].devices = {devices::nativeDeviceModel("SonoraStutter")};
-    engine::SampleCache samples;
-    devices::BuildContext build;
-    auto graph = engine::buildGraph(song, build, samples);
-    graph.graph->prepare(kRate, 512);
-    ui::UiContext context;
-    context.song = &song;
-    context.graph = graph.graph.get();
-    context.controls = graph.graph->controls;
-    context.browserVisible = false;
-    context.detailTab = ui::DetailTab::Devices;
-    ui::MainLayout root(context);
+    Chain chain(model::TrackKind::Audio, {devices::nativeDeviceModel("SonoraStutter")});
+    ui::MainLayout root(chain.context);
     root.setBounds({0, 0, 1400, 900});
     root.layout();
     std::vector<ui::StutterFace*> faces;
     collect(root, faces);
     REQUIRE(faces.size() == 1);
-    auto* stutter = dynamic_cast<S*>(graph.graph->nodes[0].processorForModelDevice[0]);
-    REQUIRE(stutter != nullptr);
-    CHECK(faces[0]->width() >= ui::StutterFace::kPreferredWidth - 1);
-    stutter->setParameter(S::Hold, 1.0f);
-    stutter->setParameter(S::Shrink, 0.5f);
-    juce::MidiBuffer midi;
-    play(root, 20000, [&](juce::AudioBuffer<float>& block) { stutter->process(block, midi); });
-    CHECK(faces[0]->view().engaged);
-    CHECK(faces[0]->view().repeat >= 2);
-    int mapped = 0;
-    std::vector<ui::Widget*> all;
-    collect(*faces[0], all);
-    for (auto* w : all) mapped += w->midiTarget.has_value() ? 1 : 0;
-    CHECK(mapped >= 14);
-    const auto png = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_stutter_chain.png");
-    CHECK(gfx::renderToPng(root, 1400, 900, 1.0f, png.getFullPathName().toStdString()));
+    auto& face = *faces[0];
+    CHECK(face.layoutMode() == ui::ProFace::Layout::Compact);
+    CHECK_NEAR(face.width() / face.height(), ui::StutterFace::kCompact.w / ui::StutterFace::kCompact.h, 0.01);
+    CHECK(face.mappingTarget != nullptr);
+    const auto motion = face.controlCentre("MOTION");
+    REQUIRE(motion.has_value());
+    const auto local = face.designToLocal(motion->first, motion->second);
+    const auto target = face.mappingTargetAt(local.x, local.y);
+    REQUIRE(target.has_value());
+    CHECK(target->param == "Motion");
+    std::vector<ui::IconButton*> icons;
+    collect(root, icons);
+    bool windowButton = false;
+    for (auto* b : icons) windowButton = windowButton || b->tooltip == "Open the editor in its own window";
+    CHECK(windowButton);
+    REQUIRE(click(root, face, "Shatter"));
+    CHECK(std::lround(chain.processor()->getParameter(S::ModeParam)) == S::Shatter);
+    CHECK(gfx::renderToPng(root, 1400, 900, 1.0f, testFile("sonora_stutter_chain.png").getFullPathName().toStdString()));
+
+    ui::ProFaceWindowView window(chain.context, {1, 10, -1, -1});
+    window.setBounds({0, 0, ui::StutterFace::kFull.w, ui::StutterFace::kFull.h});
+    window.sync();
+    REQUIRE(window.face() != nullptr);
+    CHECK(window.face()->layoutMode() == ui::ProFace::Layout::Full);
+    CHECK(window.title() == "Sonora Stutter/Bass");
 }

@@ -1,49 +1,61 @@
 #pragma once
-// Face of Sonora Sweep (PLG-19), shared by the device chain and the VST3 window. Sonora's own device (no reference face):
+// Face of Sonora Sweep (PLG-19, PLG-23), on the ProFace kit: the device chain (compact), its own window and the VST3
+// editor (full).
 //
-//   SOURCE (Noise / Tone / Sample, Up / Down, Length, Load Sample... and the sample's name) | SWEEP (the filter cutoff,
-//   pitch and level over the sweep, gate marks, the play head while it sounds) | FILTER (Low, High, Resonance) | MOTION
-//   (Pitch, Curve, Swell, Width) | SOUND (Detune, Rhythm, Tail, Reverse, Output)
+// Full layout: what it makes (riser or downlifter, length, seconds at the tempo) and the Preview button on top; TYPE (ready
+// made sweeps, one click) and SAMPLE (the loaded file; drop one from the Browser or the Finder anywhere on the face) on
+// the left; the display (the sweep itself, rendered, with the filter, pitch and level curves over the bars and the drop
+// marked); SOURCE and Up/Down; LENGTH; the FILTER, PITCH, SHAPE and OUT knobs; the help line.
+//
+// Compact layout: the display, the sources, Up/Down, Preview, Length, Swell, High and Level.
 
 #include "devices/native/Sweep.h"
-#include "ui/Widget.h"
+#include "ui/views/ProFace.h"
 
 #include <functional>
+#include <string>
+#include <vector>
 
 namespace sonora::ui
 {
-class Knob;
-class TextButton;
-
-class SweepFace final : public Widget
+class SweepFace final : public ProFace
 {
 public:
-    static constexpr float kPreferredWidth = 1000, kPreferredHeight = 176;
-    static constexpr SkColor kCutoff = 0xff3dd2ff, kPitch = 0xffffb03d, kLevel = 0xffeef1f4;
+    static constexpr SkColor kAccent = 0xFFFFB13B, kCutoff = 0xFF4FD1FF, kPitch = 0xFFB59BFF, kLevel = 0xFFEEF1F4;
+    static constexpr Size kFull{1100, 700}, kCompact{720, 170};
 
-    explicit SweepFace(devices::Sweep* processor, std::function<void(Widget*, int)> tag = {});
-    void layout() override;
-    void paint(SkCanvas&, const Theme&) override;
-    void tick() override;
+    explicit SweepFace(devices::Sweep& device);
+    devices::Sweep& sweep() { return sweep_; }
 
-    // "Load Sample...": whoever shows the face opens a file chooser and loads it (the app through an undoable device edit, the VST3
-    // directly). Unset: the button is disabled.
-    std::function<void()> onLoadSample;
-    Rect curveArea() const;
-    TextButton* loadButton() const { return load_; }
+    // A sample was dropped on the face (the app: an undoable device edit; the VST3 loads it directly).
+    std::function<void(const std::string& path)> onSampleDropped;
+    // "Choose..." in the SAMPLE panel: whoever shows the face opens a file chooser. Unset: the button is hidden.
+    std::function<void()> onChooseSample;
+
+    bool browserDrop(const BrowserDrag&, const MouseEvent&) override;
+    std::string headline() const; // "Riser · 4 Bars · 6.9 s at 139 BPM"
+    // The rendered sweep shown in the display (min/max bins); renders now when the settings changed.
+    const std::vector<float>& renderedMax();
+    void renderNow();
+
+protected:
+    void build(Layout) override;
+    void paintBack(SkCanvas&, Layout) override;
+    void paintFront(SkCanvas&, Layout) override;
+    std::string valueText(int param, float value) const override;
+    std::string idleHelp() const override;
+    bool animate() override;
 
 private:
-    struct Column { float x = 0, w = 0; };
-    Knob* knob(int parameter);
-    TextButton* choice(const char* label, int parameter, int value);
+    uint64_t signature() const;
+    void addSourceSegments(const Rect& row1, const Rect& row2, bool compact);
+    void paintDisplay(SkCanvas&, const Rect&, bool compact);
 
-    devices::Sweep* processor_;
-    std::function<void(Widget*, int)> tag_;
-    Column source_, curve_, filter_, motion_, sound_;
-    Knob *length_ = nullptr, *low_ = nullptr, *high_ = nullptr, *resonance_ = nullptr, *pitch_ = nullptr, *curveKnob_ = nullptr,
-         *swell_ = nullptr, *width_ = nullptr, *detune_ = nullptr, *rhythm_ = nullptr, *tail_ = nullptr, *output_ = nullptr;
-    TextButton *sources_[3]{}, *directions_[2]{}, *reverse_ = nullptr, *load_ = nullptr;
+    devices::Sweep& sweep_;
+    std::vector<float> renderLo_, renderHi_;
+    uint64_t renderedSignature_ = 0, pendingSignature_ = 0;
+    int pendingTicks_ = 0;
     float progress_ = -1;
-    std::string sampleShown_;
+    Rect display_;
 };
 } // namespace sonora::ui

@@ -1,51 +1,63 @@
-# Sonora Stutter (PLG-18) and Beat Repeat (PLG-18b)
+# Sonora Stutter (PLG-18, reworked by PLG-23) and Beat Repeat (PLG-18b)
 
-Vocal stutters and retriggers in time with the track. Built-in device (catalog `SonoraStutter`, Audio Effects > Delay &
-Reverb) and a VST3 (`cmake --build build --target SonoraStutter_VST3`, plug-in code `SnSt`, `Sonora Stutter.vst3`, MIDI
-input). Requested 2026-11-11, after a video of a vocal stutter plug-in. Stutter is Sonora's own design:
-nothing of that product (look, names, presets) was copied, and there is no reference device face to match (AGENTS rule 7
-does not apply).
+A granular voice stutter. Built-in device (catalog `SonoraStutter`, Audio Effects > Delay & Reverb) and a VST3
+(`cmake --build build --target SonoraStutter_VST3`, plug-in code `SnSt`, `Sonora Stutter.vst3`, MIDI input). Requested
+2026-11-11 after a video of a vocal plug-in; the first version (0.1.32: a slice repeater with five modes and a 16-step
+pattern) did not do what the video showed and was hard to use. PLG-23 (2026-11-12) rebuilt it as a granulator played by
+one knob. Sonora's own design: no look, names or presets of that product were copied, and there is no
+reference device face (AGENTS rule 7 does not apply).
 
 ## How it works (`src/devices/native/Stutter.cpp`)
 
-The input is recorded all the time into an 8 s stereo ring. While Stutter is engaged it plays a slice from the ring
-instead of the input:
+The input is recorded all the time into a 20 s stereo ring. While Stutter is engaged it plays **grains** read from the
+recording instead of the input:
 
-| Mode | What plays |
-|---|---|
-| Repeat | The slice that starts where it was engaged, again and again. The first pass is the live input being captured. |
-| Reverse | The slice that ended where it was engaged, backwards, again and again. |
-| Freeze | The sound at the engage point held by two overlapping 90 ms Hann grains (a little random jitter). |
-| Stop | Tape stop: the playback slows from normal speed to a halt over one slice, then silence. |
-| Gate | The live input chopped in time with the Rate (Spacing = the open part, 50 % when Spacing is 100 %). |
+- every **Every** ms (a note value with **Sync**, on the transport's grid while it plays) a grain of **Grain** ms starts;
+  **Shape** is its fade in/out (0 = a hard gate with 2 ms edges, 1 = it swells in and out); overlapping grains are scaled
+  by 1/sqrt(overlap);
+- each grain starts at the **read head**, which starts where Stutter was engaged and moves through the recording at
+  **Speed** (1 = real time, 0.25 = four times slower, 0 = frozen, negative = backwards) inside the **Capture** window (the
+  last beat, bar, 2 or 4 bars before the engage point, or All). It wraps at the window's edges and never reads what is not
+  recorded yet (nor before the first sample recorded);
+- **Pitch** transposes the grains (the speed stays), **Width** pans odd grains left and even ones right, **Jitter**
+  scatters their start (back into the window) and timing;
+- the wet sound goes through **Tone** (low-pass left, high-pass right), the mode's extras and **Space** (a 4-line
+  feedback-delay room that rings on after the stutter stops); **Mix** keeps the dry voice under it, **Level** sets the
+  stutter's volume. Engaging and releasing crossfade over 12 ms. Idle, the input passes untouched. No latency.
 
-Slice length: Rate (1 Bar, 1/2, 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 1/32, 1/32T, 1/64) at the host tempo, or Length in
-ms with Sync off. Per repeat: **Shrink** (each repeat up to half the one before, down to 4 ms: a roll that speeds up),
-**Pitch** + **Ramp** x repeat (semitones, read faster/slower inside the repeat), **Decay** (gain (1-Decay)^repeat),
-**Wide** (repeats alternate left/right). **Spacing**: the part of each repeat that sounds. **Smooth**: the fade at every
-edge and the dry/wet crossfade. **Tone**: low-pass (left) / high-pass (right) on the wet sound. **Mix**: wet over dry
-while engaged. **Output**: wet gain. Idle, the input passes untouched (bit-exact). No latency.
+### Motion and the modes
+
+**Motion** goes from Slow (long, swelling grains that barely move) to Fast (short, tight grains racing). With **Macro**
+on, Motion drives Grain, Every, Shape, Speed, Width, Jitter and Space (`Stutter::macroSettings`); the face shows those
+knobs moving. Turning one of them by hand calls `detachMacro`: the knobs take the values Motion had, Macro goes off, the
+sound does not jump. Each mode gives Motion its own character:
+
+| Mode (MIDI) | Slow | Fast | Extra |
+|---|---|---|---|
+| Swell (C) | 450 ms grains, 0.03x, every grain swells in | 55 ms grains racing at 1x | - |
+| Rewind (D) | long reversed swells drifting back (-0.08x) | rushes backwards (-2.2x) | every grain reversed |
+| Shatter (E) | scattered fragments with gaps | a dense spray of tiny glitches | random reversed / +-12 st grains |
+| Freeze (F) | stops dead, 600 ms grains: a soft pad | 45 ms grains every 95 ms: hard chops | speed 0 |
+| Spread (G) | a huge slow cloud left and right | a hard wide doubler | odd grains -detune, even +detune |
+| Tunnel (A) | sinks into a dark echoing tube (32 ms comb) | a metallic fluttering pipe (3.2 ms) | resonant comb per side, darker tone |
+| Retrigger (B) | repeats the last beat | a 1/64 roll | the slice before the engage point, repeated (grid-locked with Sync) |
 
 ## What engages it
 
-Priority: face pads > MIDI > Hold > pattern.
+- **HOLD** pad on the face (momentary) and **Latch** (= the **Hold** control, host-automatable).
+- **MIDI**: the white keys of any octave play their mode while held (C Swell, D Rewind, E Shatter, F Freeze, G Spread,
+  A Tunnel, B Retrigger), black keys the selected mode. Every new note re-anchors the read head at that moment.
+- Changing the mode while engaged keeps the anchor (the modes morph).
 
-- **Pads** (face): hold one with the mouse to stutter in that mode; it also selects the Mode. **Latch** = the Hold control.
-- **Hold** (host-automatable): engages the selected Mode. Waits for the **Quantize** grid (Off, 1/16, 1/8, 1/4, 1 Bar)
-  while the transport plays.
-- **MIDI**: C1 Repeat, D1 Reverse, E1 Freeze, F1 Stop, G1 Gate (36..47, white keys) while held. C2 (48) and up: Repeat
-  pitched by (note - C3) semitones, looping the slice that ended at the note so the pitch is heard at once. A new note
-  retriggers. Quantize applies too.
-- **Pattern**: 16 steps of 1/16 (one 4/4 bar, from the host's beat position) while the transport plays; each step Off or
-  a mode. Neighbouring steps with the same mode are one event (the repeat keeps going); **Chance** rolls once per event.
-  Defaults: the last four steps Repeat (the classic end-of-bar stutter), Pattern off.
+## Face (`src/ui/views/StutterFace.cpp`, ProFace kit: docs/PRO_FACES.md)
 
-## Face (`src/ui/views/StutterFace.cpp`)
-
-TRIGGER (five pads with their MIDI keys, Latch) | SLICE display (the captured slice in the mode's colour, play head,
-"Repeat x3") over the PATTERN strip (click: the selected mode or back to Off; drag paints; Alt/right-click clears) |
-TIME (Rate or Length, Shrink, Spacing, Quantize, Smooth, Sync) | PITCH (Pitch, Ramp, Decay, Wide, Chance) | OUT (Tone,
-Mix, Output). The VST3 window is a 24 px header above the same face.
+Full (its own window, the VST3; 1160 x 640): the wordmark and what plays now ("FREEZE  frozen . 120 ms grains every
+107 ms"), Free / Sync to tempo; the display: INPUT (the last 12 s recorded, the capture window shaded, the read head, where
+the grains read) and OUTPUT (the last 4 s out, every grain drawn as its envelope, pink = left, violet = right) with the
+Capture choice; the HOLD pad and Latch; MOTION & MODE (the Motion knob, Macro, the seven modes with their MIDI keys, what
+Slow and Fast do in the selected mode); GRAIN (driven by Motion while Macro is on); OUT (Tone, Mix, Level, meter); the
+help line. Compact (the device chain, 700 x 170): HOLD, Latch, the display, Motion, Macro, the modes, Speed, Mix; the title
+bar's window icon opens the full face.
 
 ## Beat Repeat (`src/devices/native/BeatRepeat.cpp`)
 
@@ -60,12 +72,14 @@ own presets (`Core Library/Devices/Audio Effects/Beat Repeat/*.adv` were read, n
 
 ## Verification
 
-- `sonora_tests stutter`: idle pass-through (bit-exact), Repeat / Reverse / Shrink / Decay / Pitch sample positions on a
-  ramp, tape stop lag and silence, Gate open/closed, the pattern firing on its step, Quantize waiting for the beat, MIDI
-  modes and pitched notes, every mode finite and bounded on noise, catalog/factory/state; the VST3 window with real
-  mouse input (pads momentary, Latch, pattern click/drag/clear, Pattern/Sync buttons), MIDI through `processBlock`, the
-  face in the app's device chain, PNG renders.
-- `sonora_tests "beat repeat"`: tables, a repeat at the interval point (Insert), Chance 0 never, Repeat button now.
-- `plugin_probe --inspect-file "Sonora Stutter.vst3" --stimulus sine --midi-event 24000:90247F`: loads, 0 latency,
-  state saved, finite render.
-- `fx_render "<path>/Sonora Stutter.vst3" --in vocal.wav --out stutter.wav --set "Hold=1"` for real material.
+- `sonora_tests stutter`: idle pass-through (bit-exact); Freeze keeps playing the 200 Hz from before the engage point while
+  the input went on at 1 kHz (zero crossings); Speed 0.25 / -0.5 moves the read head by that much in half a second and
+  the grains read later / earlier; Rewind grains reversed, Width alternates sides; Retrigger with Sync starts a grain on
+  every 1/16 of the grid from the same slice; Motion slow vs fast per mode, snapToNote, detachMacro keeps the settings;
+  MIDI white/black keys and the face's pad engage and release; catalog/factory/state; every mode at Motion 0 and 1 finite,
+  bounded and sounding on noise (also when engaged before anything was recorded).
+- `sonora_tests "stutter plugin"`: the VST3's full face with real clicks (modes, Sync, Capture, Motion drag, the HOLD pad
+  while a voice plays, a grain knob taking over from Macro, the help line), `sonora_stutter_plugin.png`; the compact face
+  in the chain (mapped, window icon, a mode click), the window's full face, `sonora_stutter_chain.png`.
+- `fx_render "<path>/Sonora Stutter.vst3" --in vocal.wav --out stutter.wav --set "Hold=1" --set "Mode=..."` for real
+  material.

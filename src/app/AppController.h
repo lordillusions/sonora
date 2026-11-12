@@ -253,6 +253,10 @@ private:
     void closeKickstractTimelines();
     void syncKickstractTimelines();
     void renameKickstractTimelines(model::TrackId track, int oldId, int newId);
+    void openProFaceWindow(const ui::UiContext::WavetableKey&); // PLG-23 (AppProFaceWindow.cpp)
+    void closeProFaceWindows();
+    void syncProFaceWindows();
+    void renameProFaceWindows(model::TrackId track, int oldId, int newId);
     void openInsertedWavetable(model::TrackId track, int deviceId, int childIdFrom);
     std::map<model::TrackId, std::vector<int>> deviceIdsBeforeEdit_; // ui::DeviceIdsByTrack
     void refreshPluginNames();
@@ -456,6 +460,7 @@ private:
     juce::OwnedArray<juce::DocumentWindow> wavetableWindows_; // UI-27, survive device edits (unlike pluginWindows_)
     juce::OwnedArray<juce::DocumentWindow> hushWindows_;      // PLG-14g, like wavetableWindows_
     juce::OwnedArray<juce::DocumentWindow> kickstractTimelines_; // PLG-17e, like hushWindows_
+    juce::OwnedArray<juce::DocumentWindow> proFaceWindows_;      // PLG-23, like hushWindows_
     // 16 MB stacks: offline renders (bounce, freeze, export) run whole devices on these threads; the default 512 KB overflowed.
     juce::ThreadPool pool_{juce::ThreadPoolOptions{}.withNumberOfThreads(2).withThreadStackSizeBytes(16u * 1024 * 1024)};
     // PRJ-4: autosave copies are written here, at background priority, so they never wait behind an open or a render.

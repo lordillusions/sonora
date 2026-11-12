@@ -1,44 +1,25 @@
-// PLG-19: the Sonora Sweep face, in the VST3 window and in the app's device chain.
-#include "TestFramework.h"
-#include "devices/DeviceFactory.h"
+// PLG-19 / PLG-23: the Sonora Sweep face (ProFace kit) in the VST3 window and in the app's device chain: types, sources,
+// Preview, and samples dropped from the Browser.
+#include "ProFaceTestKit.h"
 #include "devices/native/Sweep.h"
-#include "engine/EngineGraph.h"
-#include "engine/SampleCache.h"
-#include "gfx/SkiaCanvasComponent.h"
 #include "plugin/SweepPlugin.h"
 #include "plugin/SweepPluginEditor.h"
-#include "ui/views/MainLayout.h"
 #include "ui/views/SweepFace.h"
-#include "ui/widgets/Buttons.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <cmath>
 
 using namespace sonora;
+using namespace sonora::testkit;
 namespace
 {
 using W = devices::Sweep;
 constexpr double kRate = 48000.0;
 
-template <typename T> void collect(ui::Widget& w, std::vector<T*>& found)
-{
-    if (auto* p = dynamic_cast<T*>(&w)) found.push_back(p);
-    for (const auto& child : w.children()) collect(*child, found);
-}
-
-ui::MouseEvent at(ui::Widget& widget, float x, float y)
-{
-    ui::MouseEvent e;
-    const auto origin = widget.boundsInRoot();
-    e.x = origin.x + x;
-    e.y = origin.y + y;
-    return e;
-}
-
 juce::File writeCrash()
 {
-    const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_sweep_crash.wav");
+    const auto file = testFile("sonora_sweep_crash.wav");
     file.deleteFile();
     juce::AudioBuffer<float> crash(2, 48000);
     juce::Random random(3);
@@ -52,112 +33,111 @@ juce::File writeCrash()
 }
 } // namespace
 
-TEST_CASE("sweep plugin: an instrument that plays a sweep per note; Load Sample and its path in the state")
+TEST_CASE("sweep plugin: the full face; types, sources and Up/Down by click; a dropped sample; Preview sounds")
 {
     juce::ScopedJuceInitialiser_GUI init;
     plugin::SweepPlugin p;
     CHECK(p.getParameters().size() == W::NumParams);
     CHECK(p.acceptsMidi());
-    CHECK(p.getBusCount(true) == 0);
-    CHECK(p.getParameters()[W::LengthParam]->getCurrentValueAsText() == "4 Bars");
     p.prepareToPlay(kRate, 512);
-
     std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
     auto* window = dynamic_cast<plugin::SweepPluginEditor*>(editor.get());
     REQUIRE(window != nullptr);
     auto& view = window->view();
-    view.setBounds({0, 0, plugin::SweepView::kWidth, plugin::SweepView::kHeight});
+    const auto size = ui::SweepFace::kFull;
+    view.setBounds({0, 0, size.w, size.h});
     view.layout();
-    auto& face = view.face();
-    CHECK(face.onLoadSample != nullptr);
+    auto& face = window->face();
+    CHECK(face.onChooseSample != nullptr);
 
-    // A crash, loaded as the editor's button does after the file chooser.
-    const auto crash = writeCrash();
-    REQUIRE(p.loadSample(crash));
-    CHECK(p.device().hasSample());
-    CHECK(std::lround(p.device().getParameter(W::Source)) == W::Sample);
-    p.reportEditorChanges();
-    CHECK(p.getParameters()[W::Source]->getCurrentValueAsText() == "Sample");
-
-    // Down / Up buttons with real clicks.
-    std::vector<ui::TextButton*> buttons;
-    collect(face, buttons);
-    auto press = [&](const std::string& label) {
-        for (auto* b : buttons)
-            if (b->label() == label)
-            {
-                view.dispatchMouseDown(at(*b, 4, 4));
-                view.dispatchMouseUp(at(*b, 4, 4));
-                return true;
-            }
-        return false;
-    };
-    REQUIRE(press("Down"));
+    REQUIRE(click(view, face, "Reverse Crash"));
+    CHECK(std::lround(p.device().getParameter(W::Source)) == W::Metal);
+    CHECK(p.device().matchingType() == 5);
+    REQUIRE(click(view, face, "Pink"));
+    CHECK(std::lround(p.device().getParameter(W::Source)) == W::Pink);
+    CHECK(p.device().matchingType() == -1);
+    REQUIRE(click(view, face, "\xE2\x96\xBC  Down"));
     CHECK(std::lround(p.device().getParameter(W::Direction)) == W::Down);
-    REQUIRE(press("Up"));
-    p.device().setParameter(W::LengthParam, 2.0f); // 1 bar
+    REQUIRE(click(view, face, "\xE2\x96\xB2  Up"));
+    REQUIRE(click(view, face, "2 Bars"));
+    CHECK(std::lround(p.device().getParameter(W::LengthParam)) == 3);
+    REQUIRE(click(view, face, "Supersaw Rise"));
+    CHECK(std::lround(p.device().getParameter(W::Chord)) == 2);
+    CHECK(face.headline().rfind("Riser", 0) == 0);
+    CHECK(face.renderedMax().size() > 100);
 
+    // Preview: one sweep without MIDI.
+    view.dispatchMouseDown(designAt(face, 1014, 30));
+    view.dispatchMouseUp(designAt(face, 1014, 30));
     juce::AudioBuffer<float> block(2, 512);
     float peak = 0;
-    for (int i = 0; i < 200; ++i) // 2.1 s at the default 120 BPM
+    for (int i = 0; i < 40; ++i)
     {
         juce::MidiBuffer midi;
-        if (i == 0) midi.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0);
         block.clear();
         p.processBlock(block, midi);
         peak = std::max(peak, block.getMagnitude(0, 512));
-        if (i == 100) view.tickTree();
+        if (i % 4 == 0) view.tickTree();
     }
-    CHECK(peak > 0.05f);
-    const auto png = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_sweep_plugin.png");
-    view.tickTree();
-    CHECK(gfx::renderToPng(view, (int) plugin::SweepView::kWidth, (int) plugin::SweepView::kHeight, 2.0f, png.getFullPathName().toStdString()));
+    CHECK(peak > 0.01f);
+    CHECK(p.device().progress() >= 0.0f);
+    CHECK(gfx::renderToPng(view, (int) size.w, (int) size.h, 2.0f, testFile("sonora_sweep_plugin.png").getFullPathName().toStdString()));
 
+    // A sample dropped on the window (the Finder or the host's browser).
+    const auto crash = writeCrash();
+    window->filesDropped({crash.getFullPathName()}, 10, 10);
+    CHECK(p.device().hasSample());
+    CHECK(std::lround(p.device().getParameter(W::Source)) == W::Sample);
     juce::MemoryBlock state;
     p.getStateInformation(state);
     plugin::SweepPlugin restored;
     restored.setStateInformation(state.getData(), (int) state.getSize());
     CHECK(restored.buildLog.empty());
-    CHECK(restored.device().hasSample());
     CHECK(restored.device().samplePath() == crash.getFullPathName().toStdString());
-    CHECK(std::lround(restored.device().getParameter(W::LengthParam)) == 2);
     p.editorBeingDeleted(editor.get());
     editor.reset();
     crash.deleteFile();
 }
 
-TEST_CASE("sweep: the face in the app's chain on a MIDI track, Load Sample enabled")
+TEST_CASE("sweep: the compact face in the app's chain takes a sample dropped from the Browser as one undoable edit")
 {
-    model::Song song;
-    song.tracks.resize(1);
-    song.tracks[0].kind = model::TrackKind::Midi;
-    song.tracks[0].devices = {devices::nativeDeviceModel("SonoraSweep")};
-    engine::SampleCache samples;
-    devices::BuildContext build;
-    auto graph = engine::buildGraph(song, build, samples);
-    graph.graph->prepare(kRate, 512);
-    ui::UiContext context;
-    context.song = &song;
-    context.graph = graph.graph.get();
-    context.controls = graph.graph->controls;
-    context.browserVisible = false;
-    context.detailTab = ui::DetailTab::Devices;
-    context.editDevice = [](int, int, std::function<void(model::Device&)>, std::string) {};
-    ui::MainLayout root(context);
+    Chain chain(model::TrackKind::Midi, {devices::nativeDeviceModel("SonoraSweep")});
+    ui::MainLayout root(chain.context);
     root.setBounds({0, 0, 1500, 900});
     root.layout();
     std::vector<ui::SweepFace*> faces;
     collect(root, faces);
     REQUIRE(faces.size() == 1);
-    CHECK(faces[0]->onLoadSample != nullptr);
-    CHECK(faces[0]->width() >= ui::SweepFace::kPreferredWidth - 1);
-    auto* sweep = dynamic_cast<W*>(graph.graph->nodes[0].processorForModelDevice[0]);
-    REQUIRE(sweep != nullptr);
-    int mapped = 0;
-    std::vector<ui::Widget*> all;
-    collect(*faces[0], all);
-    for (auto* w : all) mapped += w->midiTarget.has_value() ? 1 : 0;
-    CHECK(mapped >= 12);
-    const auto png = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_sweep_chain.png");
-    CHECK(gfx::renderToPng(root, 1500, 900, 1.0f, png.getFullPathName().toStdString()));
+    auto& face = *faces[0];
+    CHECK(face.layoutMode() == ui::ProFace::Layout::Compact);
+    REQUIRE(face.onSampleDropped != nullptr);
+    REQUIRE(click(root, face, "Whoosh"));
+    CHECK(std::lround(chain.processor()->getParameter(W::Source)) == W::Whoosh);
+
+    ui::BrowserDrag drag;
+    drag.kind = ui::BrowserDrag::Kind::Sample;
+    drag.value = "/tmp/vocal.wav";
+    const auto e = designAt(face, 150, 80);
+    chain.context.browserDrag = drag; // a drag from the Browser, released over the face's display
+    root.dispatchMouseDrag(e);
+    root.dispatchMouseUp(e);
+    REQUIRE(chain.edits.size() == 1);
+    CHECK(chain.edits[0] == "Load Sample");
+    model::Device edited = chain.song.tracks[0].devices[0];
+    chain.editFns[0](edited);
+    REQUIRE(edited.nativeContent != nullptr);
+    CHECK(edited.nativeContent->format == "SonoraSweep/Sample");
+    CHECK(std::string(edited.nativeContent->data.begin(), edited.nativeContent->data.end()) == "/tmp/vocal.wav");
+    bool sample = false;
+    for (const auto& prm : edited.parameters) sample = sample || (prm.path == "Source" && std::lround(prm.value) == W::Sample);
+    CHECK(sample);
+    CHECK(gfx::renderToPng(root, 1500, 900, 1.0f, testFile("sonora_sweep_chain.png").getFullPathName().toStdString()));
+
+    ui::ProFaceWindowView window(chain.context, {1, 10, -1, -1});
+    window.setBounds({0, 0, ui::SweepFace::kFull.w, ui::SweepFace::kFull.h});
+    window.sync();
+    REQUIRE(window.face() != nullptr);
+    CHECK(window.face()->layoutMode() == ui::ProFace::Layout::Full);
+    CHECK(gfx::renderToPng(window, (int) ui::SweepFace::kFull.w, (int) ui::SweepFace::kFull.h, 1.0f,
+                           testFile("sonora_sweep_window.png").getFullPathName().toStdString()));
 }

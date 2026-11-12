@@ -8,44 +8,243 @@ namespace sonora::devices
 namespace
 {
 constexpr float kPi = 3.14159265f;
-constexpr double kGrainSeconds = 0.09;     // Freeze grain length
-constexpr double kMinRepeatSeconds = 0.004; // Shrink floor
 
 std::vector<ParameterInfo> stutterParameters()
 {
     using S = Stutter;
     std::vector<std::string> modes(S::kModeNames, S::kModeNames + S::kModes);
-    std::vector<std::string> rates(S::kRateNames, S::kRateNames + S::kRates);
-    std::vector<std::string> steps{"Off"};
-    steps.insert(steps.end(), modes.begin(), modes.end());
+    std::vector<std::string> captures(S::kCaptureNames, S::kCaptureNames + S::kCaptures);
     std::vector<ParameterInfo> p(S::NumParams);
     p[S::ModeParam] = makeParam("Mode", "Mode", 0, S::kModes - 1, 0, "", false, modes);
+    p[S::Motion] = makeParam("Motion", "Motion", 0, 1, 0.35f, "%");
+    p[S::Macro] = makeParam("Macro", "Macro", 0, 1, 1, "", true);
     p[S::Hold] = makeParam("Hold", "Hold", 0, 1, 0, "", true);
-    p[S::Rate] = makeParam("Rate", "Rate", 0, S::kRates - 1, 6, "", false, rates);
-    p[S::Sync] = makeParam("Sync", "Sync", 0, 1, 1, "", true);
-    p[S::LengthMs] = makeParam("Length", "Length", 10, 2000, 120, "ms");
-    p[S::Quantize] = makeParam("Quantize", "Quantize", 0, S::kQuantizes - 1, 1, "", false, {"Off", "1/16", "1/8", "1/4", "1 Bar"});
-    p[S::Shrink] = makeParam("Shrink", "Shrink", 0, 1, 0, "%");
+    p[S::Capture] = makeParam("Capture", "Capture", 0, S::kCaptures - 1, 1, "", false, captures);
+    p[S::Sync] = makeParam("Sync", "Sync", 0, 1, 0, "", true);
+    p[S::Grain] = makeParam("Grain", "Grain", 10, 1000, 120, "ms");
+    p[S::Shape] = makeParam("Shape", "Shape", 0, 1, 0.6f, "%");
+    p[S::Every] = makeParam("Every", "Every", 8, 1000, 60, "ms");
+    p[S::Speed] = makeParam("Speed", "Speed", -4, 4, 0.25f, "x");
     p[S::Pitch] = makeParam("Pitch", "Pitch", -24, 24, 0, "st");
-    p[S::Ramp] = makeParam("Ramp", "Ramp", -12, 12, 0, "st");
-    p[S::Decay] = makeParam("Decay", "Decay", 0, 1, 0, "%");
-    p[S::Spacing] = makeParam("Spacing", "Spacing", 0.05f, 1, 1, "%");
-    p[S::Smooth] = makeParam("Smooth", "Smooth", 0.5f, 30, 3, "ms");
-    p[S::Wide] = makeParam("Wide", "Wide", 0, 1, 0, "%");
+    p[S::Width] = makeParam("Width", "Width", 0, 1, 0.3f, "%");
+    p[S::Jitter] = makeParam("Jitter", "Jitter", 0, 1, 0.1f, "%");
     p[S::Tone] = makeParam("Tone", "Tone", -1, 1, 0);
+    p[S::Space] = makeParam("Space", "Space", 0, 1, 0.15f, "%");
     p[S::Mix] = makeParam("Mix", "Mix", 0, 1, 1, "%");
-    p[S::Output] = makeParam("Output", "Output", -24, 12, 0, "dB");
-    p[S::PatternOn] = makeParam("Pattern", "Pattern", 0, 1, 0, "", true);
-    p[S::Chance] = makeParam("Chance", "Chance", 0, 1, 1, "%");
-    for (int s = 0; s < S::kSteps; ++s)
-        p[(size_t) S::stepParam(s)] = makeParam("Step" + std::to_string(s), "Step " + std::to_string(s + 1), 0, S::kModes,
-                                                s >= 12 ? 1.0f : 0.0f, "", false, steps); // last beat: Repeat
+    p[S::Output] = makeParam("Output", "Level", -24, 12, 0, "dB");
     return p;
 }
+
+float logLerp(float a, float b, float t) { return a * std::pow(b / a, t); }
+float lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+constexpr int kNotes = 11;
+constexpr double kNoteBeats[kNotes] = {1.0 / 16, 1.0 / 12, 1.0 / 8, 1.0 / 6, 1.0 / 4, 1.0 / 3, 1.0 / 2, 2.0 / 3, 1.0, 2.0, 4.0};
+constexpr const char* kNoteNames[kNotes] = {"1/64", "1/32T", "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4T", "1/4", "1/2", "1 Bar"};
 } // namespace
 
 Stutter::Stutter() : NativeDevice(stutterParameters()) {}
 
+double Stutter::snapToNote(double ms, double tempo)
+{
+    tempo = std::clamp(tempo, 20.0, 999.0);
+    const double beats = std::max(1.0e-4, ms * 0.001 * tempo / 60.0);
+    double best = kNoteBeats[0], distance = 1e9;
+    for (double note : kNoteBeats)
+        if (const double d = std::abs(std::log(beats / note)); d < distance) { distance = d; best = note; }
+    return best;
+}
+
+const char* Stutter::noteName(double beats)
+{
+    for (int i = 0; i < kNotes; ++i)
+        if (std::abs(kNoteBeats[i] - beats) < 1e-6) return kNoteNames[i];
+    return "";
+}
+
+Stutter::Settings Stutter::macroSettings(int mode, float m, double tempo, bool sync)
+{
+    m = std::clamp(m, 0.0f, 1.0f);
+    Settings s;
+    switch (mode)
+    {
+        case Swell:
+            s.grainMs = logLerp(450, 55, m); s.everyMs = logLerp(120, 28, m); s.shape = lerp(1.0f, 0.55f, m);
+            s.speed = logLerp(0.03f, 1.0f, m); s.width = lerp(0.25f, 0.15f, m); s.jitter = lerp(0.12f, 0.03f, m);
+            s.space = lerp(0.35f, 0.08f, m);
+            break;
+        case Rewind:
+            s.grainMs = logLerp(320, 45, m); s.everyMs = logLerp(110, 22, m); s.shape = lerp(0.9f, 0.35f, m);
+            s.speed = -logLerp(0.08f, 2.2f, m); s.width = 0.2f; s.jitter = 0.05f; s.space = lerp(0.25f, 0.05f, m);
+            s.reverseGrains = true;
+            break;
+        case Shatter:
+            s.grainMs = logLerp(140, 18, m); s.everyMs = logLerp(190, 24, m); s.shape = lerp(0.35f, 0.08f, m);
+            s.speed = logLerp(0.25f, 1.0f, m); s.width = lerp(0.7f, 1.0f, m); s.jitter = lerp(0.9f, 0.55f, m);
+            s.scatter = lerp(0.45f, 0.25f, m); s.space = lerp(0.15f, 0.0f, m);
+            break;
+        case Freeze:
+            s.grainMs = logLerp(600, 45, m); s.everyMs = logLerp(130, 95, m); s.shape = lerp(1.0f, 0.12f, m);
+            s.speed = 0; s.width = lerp(0.45f, 0.6f, m); s.jitter = lerp(0.2f, 0.0f, m); s.space = lerp(0.55f, 0.0f, m);
+            break;
+        case Spread:
+            s.grainMs = logLerp(700, 40, m); s.everyMs = logLerp(140, 20, m); s.shape = lerp(1.0f, 0.4f, m);
+            s.speed = logLerp(0.06f, 1.0f, m); s.width = 1.0f; s.jitter = lerp(0.55f, 0.08f, m);
+            s.space = lerp(0.4f, 0.05f, m); s.detune = lerp(0.18f, 0.1f, m);
+            break;
+        case Tunnel:
+            s.grainMs = logLerp(380, 50, m); s.everyMs = logLerp(110, 25, m); s.shape = lerp(0.9f, 0.4f, m);
+            s.speed = logLerp(0.12f, 1.0f, m); s.width = 0.3f; s.jitter = 0.06f; s.space = lerp(0.4f, 0.1f, m);
+            s.tunnelMs = logLerp(32.0f, 3.2f, m); s.tunnelFeedback = lerp(0.84f, 0.72f, m); s.toneShift = lerp(-0.45f, 0.0f, m);
+            break;
+        case Retrigger:
+        default:
+        {
+            static constexpr double kRolls[7] = {1.0, 0.5, 1.0 / 3, 0.25, 1.0 / 6, 0.125, 1.0 / 16};
+            s.shape = 0.08f; s.speed = 0; s.width = 0; s.jitter = 0; s.space = 0; s.fixedSlice = true;
+            if (sync)
+            {
+                s.everyBeats = kRolls[std::clamp((int) std::lround(m * 6.0f), 0, 6)];
+                s.everyMs = (float) (s.everyBeats * 60000.0 / std::clamp(tempo, 20.0, 999.0));
+            }
+            else s.everyMs = logLerp(250, 15, m);
+            s.grainMs = s.everyMs;
+            return s;
+        }
+    }
+    if (sync)
+    {
+        const float ratio = s.grainMs / s.everyMs;
+        s.everyBeats = snapToNote(s.everyMs, tempo);
+        s.everyMs = (float) (s.everyBeats * 60000.0 / std::clamp(tempo, 20.0, 999.0));
+        s.grainMs = std::clamp(s.everyMs * ratio, 10.0f, 2000.0f);
+    }
+    return s;
+}
+
+Stutter::Settings Stutter::settings() const
+{
+    const int mode = engagedShown_.load(std::memory_order_relaxed) ? modeShown_.load(std::memory_order_relaxed)
+                                                                   : std::clamp((int) std::lround(value(ModeParam)), 0, kModes - 1);
+    const double tempo = host_.tempo > 0 ? host_.tempo : 120.0;
+    const bool sync = value(Sync) > 0.5f;
+    Settings s = macroSettings(mode, value(Motion), tempo, sync);
+    if (value(Macro) < 0.5f && mode != Retrigger)
+    {
+        // The knobs play; the mode keeps its character (reverse, scatter, tube, detune).
+        s.grainMs = value(Grain); s.shape = value(Shape); s.everyMs = value(Every); s.speed = value(Speed);
+        s.width = value(Width); s.jitter = value(Jitter); s.space = value(Space);
+        s.everyBeats = 0;
+        if (sync)
+        {
+            s.everyBeats = snapToNote(s.everyMs, tempo);
+            s.everyMs = (float) (s.everyBeats * 60000.0 / std::clamp(tempo, 20.0, 999.0));
+        }
+    }
+    else if (value(Macro) < 0.5f) // Retrigger by hand: Every sets the roll, Shape the edges, Width the ping-pong
+    {
+        s.everyMs = s.grainMs = value(Every);
+        s.shape = value(Shape); s.width = value(Width); s.space = value(Space);
+        s.everyBeats = 0;
+        if (sync)
+        {
+            s.everyBeats = snapToNote(s.everyMs, tempo);
+            s.everyMs = s.grainMs = (float) (s.everyBeats * 60000.0 / std::clamp(tempo, 20.0, 999.0));
+        }
+    }
+    s.pitch += value(Pitch);
+    return s;
+}
+
+void Stutter::detachMacro()
+{
+    if (value(Macro) < 0.5f) return;
+    const auto s = settings();
+    setParameter(Grain, std::clamp(s.grainMs, 10.0f, 1000.0f));
+    setParameter(Shape, s.shape);
+    setParameter(Every, std::clamp(s.everyMs, 8.0f, 1000.0f));
+    setParameter(Speed, s.speed);
+    setParameter(Width, s.width);
+    setParameter(Jitter, s.jitter);
+    setParameter(Space, s.space);
+    setParameter(Macro, 0.0f);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+void Stutter::Room::prepare(double sampleRate)
+{
+    static constexpr double kMs[4] = {31.7, 37.9, 43.3, 49.1};
+    for (size_t i = 0; i < 4; ++i)
+    {
+        length[i] = std::max(8, (int) (kMs[i] * 0.001 * sampleRate));
+        lines[i].assign((size_t) length[i], 0.0f);
+    }
+    clear();
+}
+
+void Stutter::Room::clear()
+{
+    for (auto& l : lines) std::fill(l.begin(), l.end(), 0.0f);
+    index.fill(0);
+    damp.fill(0.0f);
+}
+
+void Stutter::Room::process(float inL, float inR, float& outL, float& outR)
+{
+    float d[4];
+    for (size_t i = 0; i < 4; ++i)
+    {
+        const float y = lines[i][(size_t) index[i]];
+        damp[i] += 0.42f * (y - damp[i]);
+        d[i] = damp[i];
+    }
+    const float sum = (d[0] + d[1] + d[2] + d[3]) * 0.5f;
+    const float in[4] = {inL, inR, inL, inR};
+    constexpr float kFeedback = 0.8f;
+    for (size_t i = 0; i < 4; ++i)
+    {
+        lines[i][(size_t) index[i]] = in[i] * 0.5f + kFeedback * (d[i] - sum);
+        if (++index[i] >= length[i]) index[i] = 0;
+    }
+    outL = (d[0] + d[2] * 0.7f) * 0.7f;
+    outR = (d[1] + d[3] * 0.7f) * 0.7f;
+}
+
+void Stutter::Tube::prepare(double sampleRate)
+{
+    int size = 1;
+    while (size < (int) (0.07 * sampleRate) + 4) size <<= 1;
+    for (auto& l : line) l.assign((size_t) size, 0.0f);
+    clear();
+}
+
+void Stutter::Tube::clear()
+{
+    for (auto& l : line) std::fill(l.begin(), l.end(), 0.0f);
+    index = 0;
+    damp[0] = damp[1] = 0;
+}
+
+void Stutter::Tube::process(float& l, float& r, float delaySamples, float feedback)
+{
+    const int mask = (int) line[0].size() - 1;
+    float* io[2] = {&l, &r};
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        const float delay = std::clamp(delaySamples * (ch == 0 ? 1.0f : 1.07f), 2.0f, (float) mask - 2.0f);
+        const float at = (float) index - delay;
+        const int i0 = (int) std::floor(at);
+        const float frac = at - (float) i0;
+        const float a = line[ch][(size_t) (i0 & mask)], b = line[ch][(size_t) ((i0 + 1) & mask)];
+        const float y = a + (b - a) * frac;
+        damp[ch] += 0.55f * (y - damp[ch]);
+        line[ch][(size_t) index] = *io[ch] + feedback * damp[ch];
+        *io[ch] = (*io[ch] + y) * 0.55f;
+    }
+    index = (index + 1) & mask;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 void Stutter::prepare(double sampleRate, int)
 {
     sampleRate_ = sampleRate > 0 ? sampleRate : 44100.0;
@@ -53,6 +252,10 @@ void Stutter::prepare(double sampleRate, int)
     while (size < (int) (kHistorySeconds * sampleRate_)) size <<= 1;
     for (auto& h : history_) h.assign((size_t) size, 0.0f);
     historyMask_ = size - 1;
+    room_.prepare(sampleRate_);
+    tube_.prepare(sampleRate_);
+    inBinSamples_ = std::max(1, (int) (kInputSeconds * sampleRate_ / kBins));
+    outBinSamples_ = std::max(1, (int) (kOutputSeconds * sampleRate_ / kBins));
     reset();
 }
 
@@ -60,36 +263,36 @@ void Stutter::reset()
 {
     for (auto& h : history_) std::fill(h.begin(), h.end(), 0.0f);
     written_ = 0;
-    event_ = {};
     for (auto& g : grains_) g = {};
+    engaged_ = false;
     engage_ = 0;
+    head_ = 0;
+    untilGrain_ = 0;
+    lastGridIndex_ = -1;
     for (auto& ch : toneState_) ch[0] = ch[1] = 0;
-    midiMode_ = midiNote_ = -1;
-    midiPitch_ = 0;
-    manualSeen_ = manualActive_ = pendingMode_ = -1;
-    manualSeenPitch_ = manualPitch_ = pendingPitch_ = 0;
-    pendingBeat_ = -1;
-    midiFresh_ = midiPitched_ = manualPast_ = pendingPast_ = false;
-    lastStep_ = stepMode_ = -1;
-    stepFires_ = true;
-    viewEngaged_.store(false);
-    viewStep_.store(-1);
+    room_.clear();
+    tube_.clear();
+    midiNote_ = midiMode_ = -1;
+    midiFresh_ = false;
+    lastPressed_ = -1;
+    inCount_ = outCount_ = 0;
+    inLo_ = inHi_ = outLo_ = outHi_ = 0;
+    inWrite_.store(0);
+    outWrite_.store(0);
+    inFilled_.store(0);
+    outFilled_.store(0);
+    engagedShown_.store(false);
+    level_.store(0);
 }
 
-double Stutter::sliceSamples() const
+float Stutter::random01()
 {
-    if (value(Sync) > 0.5f)
-    {
-        const int rate = std::clamp((int) std::lround(value(Rate)), 0, kRates - 1);
-        const double tempo = std::clamp(host_.tempo, 20.0, 999.0);
-        return std::max(16.0, kRateBeats[rate] * 60.0 / tempo * sampleRate_);
-    }
-    return std::max(16.0, (double) value(LengthMs) * 0.001 * sampleRate_);
+    noise_ = noise_ * 1664525u + 1013904223u;
+    return (float) (noise_ >> 8) * (1.0f / 16777216.0f);
 }
 
-void Stutter::readHistory(double index, float& l, float& r) const
+void Stutter::readRecording(double index, float& l, float& r) const
 {
-    // Never read what is not written yet or what the ring already overwrote.
     const double newest = (double) (written_ - 1), oldest = (double) (written_ - historyMask_);
     index = std::clamp(index, std::max(0.0, oldest), std::max(0.0, newest));
     const auto i0 = (int64_t) std::floor(index);
@@ -100,373 +303,350 @@ void Stutter::readHistory(double index, float& l, float& r) const
     r = history_[1][a] + (history_[1][b] - history_[1][a]) * frac;
 }
 
-float Stutter::fadeAt(double pos, double length, double smooth) const
+int64_t Stutter::captureSamples() const
 {
-    if (pos < 0 || pos >= length) return 0.0f;
-    smooth = std::max(1.0, std::min(smooth, length * 0.5));
-    return (float) std::min({1.0, (pos + 1.0) / smooth, (length - pos) / smooth});
+    const double beats = kCaptureBeats[std::clamp((int) std::lround(value(Capture)), 0, kCaptures - 1)];
+    if (beats <= 0) return historyMask_;
+    return (int64_t) (beats * 60.0 / std::clamp(host_.tempo, 20.0, 999.0) * sampleRate_);
 }
 
-void Stutter::begin(int mode, float pitch, bool fromPast, int64_t at)
+void Stutter::engage(int64_t at)
 {
-    event_ = {};
-    event_.active = true;
-    event_.mode = mode;
-    event_.start = at;
-    event_.slice = sliceSamples();
-    event_.pitch = pitch;
-    event_.fromPast = fromPast; // a pitched note repeats what came just before it, so it sounds pitched at once
-    event_.read = (double) at;
-    event_.speed = 1;
-    startRepeat();
-    grainNext_ = 0;
-    for (auto& g : grains_) g = {};
-    publishSlice();
+    engaged_ = true;
+    anchor_ = at;
+    windowStart_ = at - captureSamples();
+    untilGrain_ = 0; // the first grain starts at once
+    lastGridIndex_ = -1;
+    grainParity_ = 0;
+    const auto s = settings();
+    const double rate = std::pow(2.0, (double) s.pitch / 12.0);
+    const double span = std::max(32.0, s.grainMs * 0.001 * sampleRate_) * rate;
+    head_ = (double) at - span;
 }
 
-void Stutter::startRepeat()
+void Stutter::spawnGrain(const Settings& s, int64_t now)
 {
-    const double shrink = 1.0 - 0.5 * (double) value(Shrink);
-    const double floor = kMinRepeatSeconds * sampleRate_;
-    event_.current = std::max(std::min(floor, event_.slice), event_.slice * std::pow(shrink, (double) event_.repeat));
-    event_.gain = std::pow(1.0f - value(Decay), (float) event_.repeat);
-    event_.pan = event_.repeat == 0 ? 0.0f : value(Wide) * (event_.repeat % 2 == 1 ? -1.0f : 1.0f);
-}
-
-void Stutter::publishSlice()
-{
-    // The audio shown for the event: what Repeat loops, what Reverse plays backwards, what Freeze holds.
-    double from = (double) event_.start, length = event_.slice;
-    if (event_.mode == Reverse || event_.fromPast || event_.mode == Stop || event_.mode == Gate) from -= length;
-    if (event_.mode == Freeze)
+    int slot = -1;
+    float oldest = -1;
+    for (int i = 0; i < kMaxGrains; ++i)
     {
-        length = kGrainSeconds * sampleRate_ * 1.5;
-        from = (double) event_.start - length;
+        if (! grains_[(size_t) i].active) { slot = i; break; }
+        const float age = (float) grains_[(size_t) i].pos / (float) std::max(1, grains_[(size_t) i].length);
+        if (age > oldest) { oldest = age; slot = i; }
     }
-    if (event_.mode == Repeat && ! event_.fromPast && event_.repeat == 0) return; // not captured yet: at the first repeat
-    const double step = length / kViewBins;
-    for (int b = 0; b < kViewBins; ++b)
+    auto& v = grains_[(size_t) slot];
+    const int length = std::max(32, (int) (s.grainMs * 0.001 * sampleRate_));
+    const double everySamples = std::max(16.0, (double) s.everyMs * 0.001 * sampleRate_);
+    float pitch = s.pitch;
+    const bool odd = (grainParity_++ & 1) != 0;
+    if (s.detune > 0) pitch += odd ? -s.detune : s.detune;
+    bool reversed = s.reverseGrains;
+    if (s.scatter > 0)
     {
-        float lo = 0, hi = 0;
-        const int count = std::max(1, std::min(64, (int) step)); // sparse reads for long slices
-        for (int k = 0; k < count; ++k)
-        {
-            float l = 0, r = 0;
-            readHistory(from + step * ((double) b + (double) k / count), l, r);
-            const float m = 0.5f * (l + r);
-            lo = std::min(lo, m);
-            hi = std::max(hi, m);
-        }
-        viewMin_[(size_t) b].store(lo, std::memory_order_relaxed);
-        viewMax_[(size_t) b].store(hi, std::memory_order_relaxed);
+        if (random01() < s.scatter * 0.5f) pitch += random01() < 0.5f ? -12.0f : 12.0f;
+        if (random01() < s.scatter * 0.6f) reversed = ! reversed;
     }
-    viewBins_.store(kViewBins, std::memory_order_relaxed);
-    viewSerial_.fetch_add(1, std::memory_order_release);
+    const double rate = std::clamp(std::pow(2.0, (double) pitch / 12.0), 0.125, 4.0);
+    const double span = (double) length * rate;
+    const double oldestValid = (double) (written_ - historyMask_ + 8);
+    const double lo = std::max({(double) windowStart_, oldestValid, 0.0});
+    const double hi = (double) now - 2.0 - span; // a grain never reads what is not recorded yet
+    double left = head_;
+    if (s.jitter > 0)
+    {
+        const double range = std::min(std::max(0.0, hi - lo), 0.75 * sampleRate_) * (double) s.jitter;
+        left -= random01() * range;
+    }
+    left = std::clamp(left, std::min(lo, hi), std::max(lo, hi));
+    v.active = true;
+    v.pos = 0;
+    v.length = length;
+    v.fade = std::clamp((int) (s.shape * (float) length * 0.5f), std::max(1, (int) (0.002 * sampleRate_)), std::max(1, length / 2));
+    v.step = reversed ? -rate : rate;
+    v.read = reversed ? left + span - 1.0 : left;
+    const float overlap = (float) ((double) length / everySamples);
+    v.amp = 1.0f / std::pow(std::max(1.0f, overlap), 0.5f);
+    const float pan = s.width * (odd ? -1.0f : 1.0f);
+    v.gainL = pan > 0 ? 1.0f - pan : 1.0f;
+    v.gainR = pan < 0 ? 1.0f + pan : 1.0f;
+
+    auto& log = grainLog_[(size_t) (grainLogNext_.load(std::memory_order_relaxed) % kGrainLog)];
+    log.at.store(now, std::memory_order_relaxed);
+    log.read.store((int64_t) left, std::memory_order_relaxed);
+    log.length.store(length, std::memory_order_relaxed);
+    log.pan.store(pan, std::memory_order_relaxed);
+    log.reversed.store(reversed, std::memory_order_relaxed);
+    grainLogNext_.fetch_add(1, std::memory_order_release);
 }
 
-void Stutter::wetSample(float inL, float inR, float& outL, float& outR)
+void Stutter::publishBins(float inL, float inR, float outL, float outR)
 {
-    auto& e = event_;
-    outL = outR = 0;
-    const double smooth = (double) value(Smooth) * 0.001 * sampleRate_;
-    const float spacing = value(Spacing);
-    const auto speedFor = [&](int repeat) {
-        const float semis = value(Pitch) + value(Ramp) * (float) repeat + e.pitch;
-        return std::clamp(std::pow(2.0, (double) semis / 12.0), 0.25, 4.0);
-    };
-    switch (e.mode)
+    const float in = 0.5f * (inL + inR), out = 0.5f * (outL + outR);
+    if (inCount_ == 0) inLo_ = inHi_ = in;
+    inLo_ = std::min(inLo_, in);
+    inHi_ = std::max(inHi_, in);
+    if (++inCount_ >= inBinSamples_)
     {
-        case Repeat:
-        case Reverse:
-        {
-            if (e.pos >= e.current)
-            {
-                e.pos -= e.current;
-                ++e.repeat;
-                startRepeat();
-                if (e.repeat == 1 && e.mode == Repeat && ! e.fromPast) publishSlice();
-            }
-            const double sounding = e.current * spacing;
-            const float env = fadeAt(e.pos, sounding, smooth) * e.gain;
-            if (env > 0)
-            {
-                float l = 0, r = 0;
-                if (e.mode == Repeat && e.repeat == 0 && ! e.fromPast) { l = inL; r = inR; } // capturing: the live input
-                else
-                {
-                    // Pitched repeats read the slice faster or slower inside the repeat's length.
-                    const double offset = std::fmod(e.pos * speedFor(e.repeat), e.current);
-                    const double base = e.mode == Reverse ? (double) e.start - 1.0 - offset
-                                                          : (double) e.start - (e.fromPast ? e.slice : 0.0) + offset;
-                    readHistory(base, l, r);
-                }
-                outL = l * env * std::min(1.0f, 1.0f - e.pan);
-                outR = r * env * std::min(1.0f, 1.0f + e.pan);
-            }
-            break;
-        }
-        case Freeze:
-        {
-            // Two Hann grains half a grain apart (they sum to one), each reading a little before the engage point.
-            const double grain = kGrainSeconds * sampleRate_;
-            if (e.pos >= e.read) // time for the next grain
-            {
-                auto& g = grains_[grainNext_];
-                grainNext_ ^= 1;
-                noise_ = noise_ * 1664525u + 1013904223u;
-                const double jitter = (double) (noise_ >> 8) / 16777216.0 * grain * 0.4;
-                g = {(double) e.start - grain * 1.2 - jitter, 0.0, grain, true};
-                e.read = e.pos + grain * 0.5;
-            }
-            const double speed = speedFor(0);
-            for (auto& g : grains_)
-            {
-                if (! g.active) continue;
-                const float w = std::sin(kPi * (float) (g.pos / g.length));
-                float l = 0, r = 0;
-                readHistory(g.read + g.pos * speed, l, r);
-                outL += l * w * w;
-                outR += r * w * w;
-                g.pos += 1.0;
-                if (g.pos >= g.length) g.active = false;
-            }
-            const float fade = (float) std::min(1.0, (e.pos + 1.0) / std::max(1.0, smooth));
-            outL *= fade;
-            outR *= fade;
-            break;
-        }
-        case Stop:
-        {
-            // Tape stop over one slice: the speed falls from 1 to 0 (a little faster at the end, like a platter).
-            const double t = std::min(1.0, e.pos / e.slice);
-            e.speed = std::pow(1.0 - t, 1.6);
-            if (t < 1.0)
-            {
-                float l = 0, r = 0;
-                readHistory(e.read, l, r);
-                const float tail = (float) std::min(1.0, (e.slice - e.pos) / std::max(1.0, smooth));
-                outL = l * tail;
-                outR = r * tail;
-                e.read += e.speed;
-            }
-            break;
-        }
-        case Gate:
-        default:
-        {
-            const double phase = std::fmod(e.pos, e.slice);
-            const float env = fadeAt(phase, e.slice * std::min(0.95f, spacing < 1.0f ? spacing : 0.5f), smooth);
-            outL = inL * env;
-            outR = inR * env;
-            break;
-        }
+        const int w = inWrite_.load(std::memory_order_relaxed);
+        inMin_[(size_t) w].store(inLo_, std::memory_order_relaxed);
+        inMax_[(size_t) w].store(inHi_, std::memory_order_relaxed);
+        inWrite_.store((w + 1) % kBins, std::memory_order_relaxed);
+        inFilled_.store(std::min(kBins, inFilled_.load(std::memory_order_relaxed) + 1), std::memory_order_relaxed);
+        inNewest_.store(written_, std::memory_order_release);
+        inCount_ = 0;
     }
-    e.pos += 1.0;
+    if (outCount_ == 0) outLo_ = outHi_ = out;
+    outLo_ = std::min(outLo_, out);
+    outHi_ = std::max(outHi_, out);
+    if (++outCount_ >= outBinSamples_)
+    {
+        const int w = outWrite_.load(std::memory_order_relaxed);
+        outMin_[(size_t) w].store(outLo_, std::memory_order_relaxed);
+        outMax_[(size_t) w].store(outHi_, std::memory_order_relaxed);
+        outWrite_.store((w + 1) % kBins, std::memory_order_relaxed);
+        outFilled_.store(std::min(kBins, outFilled_.load(std::memory_order_relaxed) + 1), std::memory_order_relaxed);
+        outNewest_.store(written_, std::memory_order_release);
+        outCount_ = 0;
+    }
 }
 
-int Stutter::patternMode(double beat, bool& fresh)
+void Stutter::process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
-    if (value(PatternOn) < 0.5f) { lastStep_ = stepMode_ = -1; return -1; }
-    const int step = (int) (std::fmod(std::floor(beat * 4.0 + 1e-6), (double) kSteps) + kSteps) % kSteps;
-    if (step != lastStep_)
-    {
-        const int v = (int) std::lround(value(stepParam(step))) - 1;
-        const bool continues = v >= 0 && v == stepMode_ && lastStep_ >= 0
-                               && (int) std::lround(value(stepParam(lastStep_))) - 1 == v && (lastStep_ + 1) % kSteps == step;
-        if (v >= 0 && ! continues)
-        {
-            noise_ = noise_ * 1664525u + 1013904223u;
-            stepFires_ = (float) (noise_ >> 8) / 16777216.0f < value(Chance) || value(Chance) >= 1.0f;
-            fresh = stepFires_;
-        }
-        stepMode_ = v;
-        lastStep_ = step;
-    }
-    return stepMode_ >= 0 && stepFires_ ? stepMode_ : -1;
-}
+    const int n = buffer.getNumSamples();
+    const int channels = buffer.getNumChannels();
+    if (n <= 0 || channels <= 0 || history_[0].empty()) return;
+    float* left = buffer.getWritePointer(0);
+    float* right = channels > 1 ? buffer.getWritePointer(1) : nullptr;
 
-void Stutter::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi)
-{
-    const int n = audio.getNumSamples();
-    if (n <= 0 || audio.getNumChannels() < 1 || history_[0].empty()) return;
-    float* left = audio.getWritePointer(0);
-    float* right = audio.getNumChannels() > 1 ? audio.getWritePointer(1) : left;
-    const bool bypass = isBypassed();
-
-    // Tone: one state-variable filter per channel, low-pass to the left of centre, high-pass to the right.
-    const float tone = value(Tone);
-    const bool toneOn = std::abs(tone) > 0.01f;
-    const float cutoff = tone < 0 ? 20000.0f * std::pow(200.0f / 20000.0f, -tone) : 20.0f * std::pow(4000.0f / 20.0f, tone);
-    const float g = std::tan(kPi * std::min(cutoff, (float) sampleRate_ * 0.45f) / (float) sampleRate_);
-    const float k = 1.2f, a1 = 1.0f / (1.0f + g * (g + k)), a2 = g * a1, a3 = g * a2;
-    const float wetGain = juce::Decibels::decibelsToGain(value(Output)), mix = value(Mix);
-    const double smoothSamples = std::max(1.0, (double) value(Smooth) * 0.001 * sampleRate_);
-    const float engageStep = (float) (1.0 / smoothSamples);
-    const int mode = std::clamp((int) std::lround(value(ModeParam)), 0, kModes - 1);
+    const int paramMode = std::clamp((int) std::lround(value(ModeParam)), 0, kModes - 1);
     const bool hold = value(Hold) > 0.5f;
-    const double q = kQuantizeBeats[std::clamp((int) std::lround(value(Quantize)), 0, kQuantizes - 1)];
+    const int pressed = pressed_.load(std::memory_order_relaxed);
+    const bool pressedNew = pressed >= 0 && pressed != lastPressed_;
+    lastPressed_ = pressed;
+    const float mix = value(Mix);
+    const float level = juce::Decibels::decibelsToGain(value(Output));
     const double beatsPerSample = std::clamp(host_.tempo, 20.0, 999.0) / 60.0 / sampleRate_;
-    const bool playing = host_.playing;
+    const float engageStep = (float) (1.0 / (0.012 * sampleRate_));
+
+    Settings s = settings();
+    int settingsMode = engaged_ ? playingMode_ : paramMode;
+    auto refresh = [&](int mode) {
+        modeShown_.store(mode, std::memory_order_relaxed);
+        engagedShown_.store(true, std::memory_order_relaxed);
+        s = settings();
+        settingsMode = mode;
+    };
+    float toneA1 = 0, toneA2 = 0, toneA3 = 0;
+    int toneKind = 0; // 0 none, 1 low-pass, 2 high-pass
+    auto setTone = [&] {
+        const float tone = std::clamp(value(Tone) + s.toneShift, -1.0f, 1.0f);
+        toneKind = tone < -0.01f ? 1 : tone > 0.01f ? 2 : 0;
+        const float cutoff = toneKind == 1 ? 18000.0f * std::pow(250.0f / 18000.0f, -tone) : 30.0f * std::pow(4000.0f / 30.0f, tone);
+        const float g = std::tan(kPi * std::min(cutoff, (float) sampleRate_ * 0.45f) / (float) sampleRate_);
+        const float k = 1.1f;
+        toneA1 = 1.0f / (1.0f + g * (g + k));
+        toneA2 = g * toneA1;
+        toneA3 = g * toneA2;
+    };
+    setTone();
+    float peak = 0;
 
     auto midiIt = midi.cbegin();
-    int stepShown = -1;
     for (int i = 0; i < n; ++i)
     {
-        // ---- MIDI at this sample: C1..B1 pick a mode while held, C2 and up play Repeat pitched from C3.
         for (; midiIt != midi.cend() && (*midiIt).samplePosition <= i; ++midiIt)
         {
             const auto m = (*midiIt).getMessage();
             if (m.isNoteOn())
             {
-                const int note = m.getNoteNumber();
-                int noteMode = -1;
-                float notePitch = 0;
-                if (note >= 36 && note < 48)
-                {
-                    static constexpr int kWhite[12] = {Repeat, -1, Reverse, -1, Freeze, Stop, -1, Gate, -1, -1, -1, -1};
-                    noteMode = kWhite[note - 36];
-                }
-                else if (note >= 48) { noteMode = Repeat; notePitch = (float) (note - 60); }
-                if (noteMode >= 0) { midiMode_ = noteMode; midiPitch_ = notePitch; midiNote_ = note; midiFresh_ = true; midiPitched_ = note >= 48; }
+                static constexpr int kWhite[12] = {Swell, -1, Rewind, -1, Shatter, Freeze, -1, Spread, -1, Tunnel, -1, Retrigger};
+                midiNote_ = m.getNoteNumber();
+                midiMode_ = kWhite[midiNote_ % 12];
+                midiFresh_ = true;
             }
-            else if (m.isNoteOff() && m.getNoteNumber() == midiNote_) { midiMode_ = midiNote_ = -1; midiPitch_ = 0; }
-            else if (m.isAllNotesOff() || m.isAllSoundOff()) { midiMode_ = midiNote_ = -1; midiPitch_ = 0; }
+            else if (m.isNoteOff() && m.getNoteNumber() == midiNote_) midiNote_ = midiMode_ = -1;
+            else if (m.isAllNotesOff() || m.isAllSoundOff()) midiNote_ = midiMode_ = -1;
         }
 
-        const double beat = host_.beats + (double) i * beatsPerSample;
-        bool fresh = false;
-
-        // ---- manual sources (face pads > MIDI > Hold), waiting for the quantize grid while the transport plays
-        const int pressed = pressed_.load(std::memory_order_relaxed);
-        const int manual = pressed >= 0 ? std::min(pressed, kModes - 1) : midiMode_ >= 0 ? midiMode_ : hold ? mode : -1;
-        const float manualPitch = pressed < 0 && midiMode_ >= 0 ? midiPitch_ : 0.0f;
-        const bool manualPast = pressed < 0 && midiMode_ >= 0 && midiPitched_;
-        if (manual < 0) { manualActive_ = -1; pendingBeat_ = -1; }
-        else if (manual != manualSeen_ || std::abs(manualPitch - manualSeenPitch_) > 1e-3f || midiFresh_)
-        {
-            if (playing && q > 0)
-            {
-                pendingBeat_ = std::ceil(beat / q - 1e-6) * q;
-                pendingMode_ = manual;
-                pendingPitch_ = manualPitch;
-                pendingPast_ = manualPast;
-                if (manualActive_ >= 0 && manualActive_ != manual) manualActive_ = -1;
-            }
-            else { manualActive_ = manual; manualPitch_ = manualPitch; manualPast_ = manualPast; pendingBeat_ = -1; fresh = true; }
-        }
-        midiFresh_ = false;
-        manualSeen_ = manual;
-        manualSeenPitch_ = manualPitch;
-        if (pendingBeat_ >= 0 && (! playing || beat >= pendingBeat_ - 1e-9))
-        {
-            manualActive_ = pendingMode_;
-            manualPitch_ = pendingPitch_;
-            manualPast_ = pendingPast_;
-            pendingBeat_ = -1;
-            fresh = true;
-        }
-
-        // ---- the pattern, while the transport plays
-        int want = -1;
-        float wantPitch = 0;
-        bool wantPast = false;
-        bool patternFresh = false;
-        const int fromPattern = playing ? patternMode(beat, patternFresh) : (lastStep_ = stepMode_ = -1);
-        if (playing && value(PatternOn) > 0.5f) stepShown = lastStep_;
-        if (manualActive_ >= 0) { want = manualActive_; wantPitch = manualPitch_; wantPast = manualPast_; }
-        else if (fromPattern >= 0) { want = fromPattern; fresh = fresh || patternFresh; }
-
-        if (want >= 0 && (fresh || ! event_.active || event_.mode != want || std::abs(event_.pitch - wantPitch) > 1e-3f))
-            begin(want, wantPitch, wantPast, written_);
-
-        // ---- record, play
-        const float inL = left[i], inR = right[i];
-        const auto w = (size_t) (written_ & historyMask_);
-        history_[0][w] = inL;
-        history_[1][w] = inR;
+        const float inL = left[i], inR = right != nullptr ? right[i] : left[i];
+        const auto slot = (size_t) (written_ & historyMask_);
+        history_[0][slot] = inL;
+        history_[1][slot] = inR;
         ++written_;
 
-        engage_ = want >= 0 ? std::min(1.0f, engage_ + engageStep) : std::max(0.0f, engage_ - engageStep);
-        if (engage_ <= 0.0f && want < 0) event_.active = false;
-        if (bypass || ! event_.active) continue; // the input passes untouched
-
-        float wl = 0, wr = 0;
-        wetSample(inL, inR, wl, wr);
-        if (toneOn)
+        // ---- engage / release (MIDI > face pad > Hold)
+        const bool midiHeld = midiNote_ >= 0;
+        const int wantMode = midiHeld && midiMode_ >= 0 ? midiMode_
+                           : (pressed >= 0 && pressed < kModes) ? pressed
+                                                                 : paramMode;
+        const bool want = midiHeld || pressed >= 0 || hold;
+        if (want && (! engaged_ || midiFresh_ || (pressedNew && i == 0)))
         {
-            float* outs[2] = {&wl, &wr};
+            playingMode_ = wantMode;
+            refresh(wantMode);
+            setTone();
+            engage(written_);
+        }
+        else if (want && wantMode != playingMode_)
+        {
+            playingMode_ = wantMode;
+            refresh(wantMode);
+            setTone();
+        }
+        else if (! want && engaged_)
+        {
+            engaged_ = false;
+            engagedShown_.store(false, std::memory_order_relaxed);
+        }
+        midiFresh_ = false;
+        if (! engaged_ && settingsMode != paramMode) // idle: the face shows the selected mode's settings
+        {
+            settingsMode = paramMode;
+            s = settings();
+            setTone();
+        }
+
+        engage_ = engaged_ ? std::min(1.0f, engage_ + engageStep) : std::max(0.0f, engage_ - engageStep);
+
+        // ---- the read head and the grain clock
+        if (engaged_)
+        {
+            const double rate = std::pow(2.0, (double) s.pitch / 12.0);
+            const double span = std::max(32.0, s.grainMs * 0.001 * sampleRate_) * rate;
+            const double oldestValid = (double) (written_ - historyMask_ + 8);
+            const double lo = std::max({(double) windowStart_, oldestValid, 0.0}); // never before the first sample recorded
+            const double liveEdge = (double) written_ - 2.0 - span;
+            if (s.fixedSlice) head_ = std::max(lo, (double) anchor_ - std::max(32.0, s.everyMs * 0.001 * sampleRate_));
+            else
+            {
+                head_ += s.speed;
+                if (head_ > liveEdge) head_ = s.speed > 1.0f ? lo : liveEdge;
+                if (head_ < lo) head_ = (double) anchor_ - span >= lo ? std::min((double) anchor_ - span, liveEdge) : liveEdge;
+            }
+            bool fire = false;
+            if (s.everyBeats > 0 && host_.playing)
+            {
+                const double beat = host_.beats + (double) i * beatsPerSample;
+                const double index = std::floor(beat / s.everyBeats + 1e-9);
+                fire = lastGridIndex_ < 0 || std::abs(index - lastGridIndex_) > 0.5; // the first grain at once, then on the grid
+                lastGridIndex_ = index;
+            }
+            else
+            {
+                untilGrain_ -= 1.0;
+                fire = untilGrain_ <= 0;
+                if (fire)
+                {
+                    const double every = std::max(16.0, (double) s.everyMs * 0.001 * sampleRate_);
+                    untilGrain_ += every * (1.0 + (double) s.jitter * ((double) random01() - 0.5) * 0.8);
+                    if (untilGrain_ < 1.0) untilGrain_ = every;
+                }
+            }
+            if (fire) spawnGrain(s, written_);
+        }
+
+        // ---- the grains
+        float wetL = 0, wetR = 0;
+        if (engage_ > 0.0f)
+            for (auto& v : grains_)
+            {
+                if (! v.active) continue;
+                float env = 1.0f;
+                if (v.pos < v.fade) env = 0.5f - 0.5f * std::cos(kPi * (float) v.pos / (float) v.fade);
+                else if (v.length - v.pos < v.fade) env = 0.5f - 0.5f * std::cos(kPi * (float) (v.length - v.pos) / (float) v.fade);
+                float l = 0, r = 0;
+                readRecording(v.read, l, r);
+                const float g = env * v.amp;
+                wetL += l * g * v.gainL;
+                wetR += r * g * v.gainR;
+                v.read += v.step;
+                if (++v.pos >= v.length) v.active = false;
+            }
+        else
+            for (auto& v : grains_) v.active = false;
+
+        if (toneKind != 0)
+        {
+            float* io[2] = {&wetL, &wetR};
             for (int ch = 0; ch < 2; ++ch)
             {
-                auto& s = toneState_[ch];
-                const float x = *outs[ch];
-                const float v3 = x - s[1], v1 = a1 * s[0] + a2 * v3, v2 = s[1] + a2 * s[0] + a3 * v3;
-                s[0] = 2 * v1 - s[0];
-                s[1] = 2 * v2 - s[1];
-                *outs[ch] = tone < 0 ? v2 : x - k * v1 - v2;
+                auto& st = toneState_[ch];
+                const float v3 = *io[ch] - st[1];
+                const float v1 = toneA1 * st[0] + toneA2 * v3;
+                const float v2 = st[1] + toneA2 * st[0] + toneA3 * v3;
+                st[0] = 2.0f * v1 - st[0];
+                st[1] = 2.0f * v2 - st[1];
+                *io[ch] = toneKind == 1 ? v2 : *io[ch] - 1.1f * v1 - v2;
             }
         }
-        const float wet = engage_ * mix;
-        left[i] = inL * (1.0f - wet) + wl * wetGain * wet;
-        if (right != left) right[i] = inR * (1.0f - wet) + wr * wetGain * wet;
-    }
-    if (! event_.active) for (auto& ch : toneState_) ch[0] = ch[1] = 0;
+        if (s.tunnelMs > 0) tube_.process(wetL, wetR, s.tunnelMs * 0.001f * (float) sampleRate_, s.tunnelFeedback);
 
-    // ---- face
-    viewEngaged_.store(event_.active && ! bypass, std::memory_order_relaxed);
-    viewMode_.store(event_.mode, std::memory_order_relaxed);
-    viewRepeat_.store(event_.repeat, std::memory_order_relaxed);
-    viewStep_.store(stepShown, std::memory_order_relaxed);
-    float position = 0;
-    if (event_.active)
-    {
-        const auto& e = event_;
-        if (e.mode == Repeat || e.mode == Reverse)
-        {
-            const double offset = std::fmod(e.pos * std::pow(2.0, (double) (value(Pitch) + value(Ramp) * (float) e.repeat + e.pitch) / 12.0), e.current);
-            position = (float) (offset / e.slice);
-            if (e.mode == Reverse) position = 1.0f - position;
-        }
-        else if (e.mode == Stop) position = (float) std::clamp((e.read - (double) e.start) / e.slice, 0.0, 1.0);
-        else if (e.mode == Gate) position = (float) (std::fmod(e.pos, e.slice) / e.slice);
-        else position = 0.8f;
+        float roomL = 0, roomR = 0;
+        room_.process(wetL * engage_ * s.space, wetR * engage_ * s.space, roomL, roomR);
+
+        const float dryGain = 1.0f - mix * engage_;
+        const float outL = inL * dryGain + (wetL * engage_ + roomL) * level;
+        const float outR = inR * dryGain + (wetR * engage_ + roomR) * level;
+        left[i] = outL;
+        if (right != nullptr) right[i] = outR;
+        peak = std::max(peak, std::max(std::abs(outL), std::abs(outR)));
+        publishBins(inL, inR, outL, outR);
     }
-    viewPos_.store(position, std::memory_order_relaxed);
+
+    now_.store(written_, std::memory_order_relaxed);
+    anchorShown_.store(anchor_, std::memory_order_relaxed);
+    headShown_.store((int64_t) head_, std::memory_order_relaxed);
+    windowShown_.store(std::max(windowStart_, written_ - historyMask_), std::memory_order_relaxed);
+    if (! engaged_) modeShown_.store(paramMode, std::memory_order_relaxed);
+    level_.store(std::max(peak, level_.load(std::memory_order_relaxed) * 0.85f), std::memory_order_relaxed);
 }
 
-void Stutter::readView(View& out) const
+void Stutter::readView(View& v) const
 {
-    out.engaged = viewEngaged_.load(std::memory_order_relaxed);
-    out.mode = viewMode_.load(std::memory_order_relaxed);
-    out.repeat = viewRepeat_.load(std::memory_order_relaxed);
-    out.step = viewStep_.load(std::memory_order_relaxed);
-    out.position = viewPos_.load(std::memory_order_relaxed);
-    const uint32_t serial = viewSerial_.load(std::memory_order_acquire);
-    if (serial == out.serial) return;
-    out.bins = viewBins_.load(std::memory_order_relaxed);
-    for (int b = 0; b < kViewBins; ++b)
+    v.engaged = engagedShown_.load(std::memory_order_relaxed);
+    v.mode = modeShown_.load(std::memory_order_relaxed);
+    v.now = now_.load(std::memory_order_relaxed);
+    v.anchor = anchorShown_.load(std::memory_order_relaxed);
+    v.head = headShown_.load(std::memory_order_relaxed);
+    v.windowStart = windowShown_.load(std::memory_order_relaxed);
+    v.sampleRate = sampleRate_;
+    v.playing = settings();
+    v.level = level_.load(std::memory_order_relaxed);
+    const auto copy = [](const std::array<std::atomic<float>, kBins>& lo, const std::array<std::atomic<float>, kBins>& hi, int write,
+                         int filled, std::array<float, kBins>& outLo, std::array<float, kBins>& outHi) {
+        for (int i = 0; i < filled; ++i)
+        {
+            const auto slot = (size_t) ((write - filled + i + kBins) % kBins);
+            outLo[(size_t) i] = lo[slot].load(std::memory_order_relaxed);
+            outHi[(size_t) i] = hi[slot].load(std::memory_order_relaxed);
+        }
+    };
+    v.inputBins = inFilled_.load(std::memory_order_relaxed);
+    v.outputBins = outFilled_.load(std::memory_order_relaxed);
+    v.inputNewest = inNewest_.load(std::memory_order_acquire);
+    v.outputNewest = outNewest_.load(std::memory_order_acquire);
+    copy(inMin_, inMax_, inWrite_.load(std::memory_order_relaxed), v.inputBins, v.inMin, v.inMax);
+    copy(outMin_, outMax_, outWrite_.load(std::memory_order_relaxed), v.outputBins, v.outMin, v.outMax);
+    v.grains.clear();
+    const uint32_t next = grainLogNext_.load(std::memory_order_acquire);
+    const uint32_t count = std::min<uint32_t>(next, kGrainLog);
+    for (uint32_t i = next - count; i != next; ++i)
     {
-        out.min[(size_t) b] = viewMin_[(size_t) b].load(std::memory_order_relaxed);
-        out.max[(size_t) b] = viewMax_[(size_t) b].load(std::memory_order_relaxed);
+        const auto& e = grainLog_[(size_t) (i % kGrainLog)];
+        GrainMark g;
+        g.at = e.at.load(std::memory_order_relaxed);
+        g.read = e.read.load(std::memory_order_relaxed);
+        g.length = e.length.load(std::memory_order_relaxed);
+        g.pan = e.pan.load(std::memory_order_relaxed);
+        g.reversed = e.reversed.load(std::memory_order_relaxed);
+        v.grains.push_back(g);
     }
-    out.serial = serial;
 }
 
 std::vector<DeviceProcessor::UiGroup> Stutter::uiGroups() const
 {
-    std::vector<UiGroup> groups{{"Trigger", {ModeParam, Hold, Quantize, PatternOn, Chance}, 2},
-                                {"Slice", {Rate, Sync, LengthMs, Shrink, Spacing, Smooth}, 3},
-                                {"Pitch", {Pitch, Ramp, Decay, Wide}, 2},
-                                {"Out", {Tone, Mix, Output}, 2}};
-    UiGroup pattern{"Pattern", {}, 8};
-    for (int s = 0; s < kSteps; ++s) pattern.params.push_back(stepParam(s));
-    groups.push_back(pattern);
-    return groups;
-}
-
-bool Stutter::parameterShown(int index) const
-{
-    if (index == LengthMs) return value(Sync) < 0.5f;
-    if (index == Rate) return value(Sync) >= 0.5f;
-    return true;
+    return {{"Play", {ModeParam, Motion, Macro, Hold, Capture, Sync}, 3},
+            {"Grain", {Grain, Shape, Every, Speed}, 2},
+            {"Sound", {Pitch, Width, Jitter, Tone, Space, Mix, Output}, 4}};
 }
 } // namespace sonora::devices

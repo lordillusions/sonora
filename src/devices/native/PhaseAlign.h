@@ -36,6 +36,9 @@ public:
     enum Param { Crossover, ModeParam, Angle, Speed, Threshold, Window, MinCoherence, Listen, Output, NumParams };
     enum Mode { Auto, Hold, Manual };
     enum ListenMode { ListenBass, ListenSum, ListenOriginalSum };
+    // What the device can tell about the kick and the bass right now.
+    enum Verdict { NoKick, Waiting, Silent, Unrelated, InPhase, Aligning, ManualAngle };
+    static constexpr float kWorthDb = 0.25f; // a hit whose best angle adds less is "already in phase"
 
     PhaseAlign();
     std::string name() const override { return "Sonora Phase Align"; }
@@ -50,12 +53,16 @@ public:
     float currentAngle() const { return angleShown_.load(std::memory_order_relaxed); } // degrees, -180..180
     float targetAngle() const { return target_.load(std::memory_order_relaxed); }
     float lastCoherence() const { return coherence_.load(std::memory_order_relaxed); }
-    float lastGainDb() const { return gainDb_.load(std::memory_order_relaxed); }
+    float lastGainDb() const { return gainDb_.load(std::memory_order_relaxed); }         // the applied angle vs the bass as is
+    float lastPotentialDb() const { return potentialDb_.load(std::memory_order_relaxed); } // the best angle vs the bass as is
+    float lastBassUnderKickDb() const { return bassUnderKickDb_.load(std::memory_order_relaxed); } // bass vs kick low energy
+    float processedAmount() const { return mixShown_.load(std::memory_order_relaxed); } // 0 = untouched bass, 1 = rotated
+    Verdict verdict() const { return (Verdict) verdict_.load(std::memory_order_relaxed); }
     uint32_t hitCount() const { return hits_.load(std::memory_order_relaxed); }
     bool sidechainPresent() const { return sidechainPresent_.load(std::memory_order_relaxed); }
 
     static constexpr int kHistory = 48;
-    struct HitRecord { float angle = 0, coherence = 0, gainDb = 0; bool used = false; };
+    struct HitRecord { float angle = 0, coherence = 0, gainDb = 0, potentialDb = 0, bassUnderKickDb = -120; bool used = false; };
     HitRecord history(int newestFirst) const; // 0 = the last hit
 
     static constexpr int kShapeBins = 160;
@@ -97,12 +104,15 @@ private:
     float binKick_ = 0, binLow_ = 0, binA_ = 0, binB_ = 0;
     std::array<float, kShapeBins> capKick_{}, capLow_{}, capA_{}, capB_{};
     int rotationCounter_ = 0;
+    float mix_ = 0, mixTarget_ = 0; // processed amount (transparent until it helps)
+    uint32_t recent_ = 0;           // the last hits that had something to gain (bit 0 = the newest)
     std::atomic<int> historyNext_{0};
 
-    std::atomic<float> angleShown_{0}, target_{0}, coherence_{0}, gainDb_{0};
+    std::atomic<float> angleShown_{0}, target_{0}, coherence_{0}, gainDb_{0}, potentialDb_{0}, bassUnderKickDb_{-120}, mixShown_{0};
+    std::atomic<int> verdict_{NoKick};
     std::atomic<uint32_t> hits_{0};
     std::atomic<bool> sidechainPresent_{false};
-    std::array<std::atomic<float>, kHistory> histAngle_{}, histCoherence_{}, histGain_{};
+    std::array<std::atomic<float>, kHistory> histAngle_{}, histCoherence_{}, histGain_{}, histPotential_{}, histBass_{};
     std::array<std::atomic<bool>, kHistory> histUsed_{};
     std::array<std::atomic<float>, kShapeBins> shapeKick_{}, shapeBefore_{}, shapeAfter_{};
     std::atomic<int> shapeBins_{0};

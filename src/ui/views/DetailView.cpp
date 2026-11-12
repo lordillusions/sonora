@@ -29,9 +29,7 @@
 #include "devices/native/Delay.h"
 #include "ui/views/CurveLfoEditor.h"
 #include "ui/views/KickstractFace.h"
-#include "ui/views/StutterFace.h"
-#include "ui/views/PhaseAlignFace.h"
-#include "ui/views/SweepFace.h"
+#include "ui/views/ProFaceWindow.h"
 #include "ui/views/SidechainPanel.h"
 #include "ui/views/HushFace.h"
 #include "devices/native/HushSession.h"
@@ -289,55 +287,14 @@ public:
             foldButton_->onClick = [this, compact] { setCurveLfoMinimized(! compact); };
             return;
         }
-        if (auto* sweep = dynamic_cast<devices::Sweep*>(proc_)) // PLG-19
+        if (auto* pro = addProFace(*this, proc_)) // PLG-23: Stutter, Sweep, Phase Align (scaled to the chain like Hush)
         {
-            sweep_ = add<SweepFace>(sweep, [this](Widget* widget, int parameter) { tag(widget, parameter); });
-            if (chain_ < 0)
-                sweep_->onLoadSample = [this] {
-                    // The path goes into the device's native content (saved with the set), one undoable edit; the rebuilt
-                    // device loads it.
-                    auto chooser = std::make_shared<juce::FileChooser>("Load a sample into Sonora Sweep", juce::File(),
-                                                                       "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
-                    const int track = trackIndex_, device = deviceIndex_;
-                    chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-                                         [this, chooser, track, device](const juce::FileChooser& fc) {
-                        const auto file = fc.getResult();
-                        if (file == juce::File() || ! Widget::isAlive(this) || ! ctx().editDevice) return;
-                        const std::string path = file.getFullPathName().toStdString();
-                        ctx().editDevice(track, device, [path](model::Device& d) {
-                            auto content = std::make_shared<model::NativeContent>();
-                            content->format = "SonoraSweep/Sample";
-                            content->data.assign(path.begin(), path.end());
-                            d.nativeContent = std::move(content);
-                            d.nativeContentEdited = true;
-                            for (auto& p : d.parameters) if (p.path == "Source") p.value = devices::Sweep::Sample;
-                        }, "Load Sample");
-                    });
-                };
-            return;
-        }
-        if (auto* phase = dynamic_cast<devices::PhaseAlign*>(proc_)) // PLG-21
-        {
-            phaseAlign_ = add<PhaseAlignFace>(phase, [this](Widget* widget, int parameter) { tag(widget, parameter); });
-            if (chain_ < 0)
-            {
-                phaseAlign_->sidechainName = [this]() -> std::string {
-                    auto& x = ctx();
-                    const auto* track = x.trackAt(trackIndex_);
-                    if (track == nullptr || deviceIndex_ < 0 || (size_t) deviceIndex_ >= track->devices.size()) return {};
-                    const auto& sc = track->devices[(size_t) deviceIndex_].sidechain;
-                    if (! sc.routed() || x.song == nullptr) return {};
-                    for (const auto& t : x.song->tracks)
-                        if (t.id == sc.sourceTrackId) return t.name.empty() ? "Track " + std::to_string(t.id) : t.name;
-                    return {};
-                };
-                phaseAlign_->onChooseSidechain = [this] { showSidechainMenu(ctx(), trackIndex_, deviceIndex_); };
-            }
-            return;
-        }
-        if (auto* stutter = dynamic_cast<devices::Stutter*>(proc_)) // PLG-18
-        {
-            stutter_ = add<StutterFace>(stutter, [this](Widget* widget, int parameter) { tag(widget, parameter); });
+            proFace_ = pro;
+            if (chain_ < 0) wireProFace(*pro, [this] { return &ctx(); }, trackIndex_, deviceIndex_);
+            proFace_->onOpenWindow = [this] { openProFaceWindow(); };
+            proWindow_ = add<IconButton>(IconButton::Icon::FloatWindow);
+            proWindow_->tooltip = "Open the editor in its own window";
+            proWindow_->onClick = [this] { openProFaceWindow(); };
             return;
         }
         if (auto* kick = dynamic_cast<devices::Kickstract*>(proc_)) // PLG-17
@@ -778,6 +735,12 @@ public:
         return true;
     }
 
+    void openProFaceWindow()
+    {
+        auto& x = ctx();
+        if (const auto key = x.wavetableKey(trackIndex_, deviceIndex_, chain_, child_); key && x.openProFaceWindow) x.openProFaceWindow(*key);
+    }
+
     void openHushWindow()
     {
         auto& x = ctx();
@@ -801,9 +764,7 @@ public:
         if (curveLfo_) return CurveLfoEditor::kPreferredWidth + 12;
         if (curveLfoMini_) return CurveLfoMini::kWidth + 12;
         if (kickstract_) return KickstractFace::kPreferredWidth + 12;
-        if (stutter_) return StutterFace::kPreferredWidth + 12;
-        if (phaseAlign_) return PhaseAlignFace::kPreferredWidth + 12;
-        if (sweep_) return SweepFace::kPreferredWidth + 12;
+        if (proFace_) return proFace_->compactWidthFor(std::max(40.0f, (height() > kTitle ? height() - kTitle : ReferenceFace::kDefaultBody) - 12)) + 12;
         if (hush_) return (std::max(40.0f, (height() > kTitle ? height() - kTitle : ReferenceFace::kDefaultBody) - 12)) * HushFace::kWidth / HushFace::kHeight + 12;
         if (wavetableMini_) return WavetableMiniView::kWidth + 12;
         if (wavetable_) return WavetableEditor::kPreferredWidth + 12;
@@ -861,9 +822,12 @@ public:
         if (curveLfo_) { curveLfo_->setBounds(r); return; }
         if (curveLfoMini_) { curveLfoMini_->setBounds(r); return; }
         if (kickstract_) { kickstract_->setBounds(r); return; }
-        if (stutter_) { stutter_->setBounds(r); return; }
-        if (phaseAlign_) { phaseAlign_->setBounds(r); return; }
-        if (sweep_) { sweep_->setBounds(r); return; }
+        if (proFace_)
+        {
+            proWindow_->setBounds({width() - kTitleIcons - 21, 1, 17, 16});
+            proFace_->setBounds({r.x, r.y, proFace_->compactWidthFor(r.h), r.h}); // the face keeps its aspect
+            return;
+        }
         if (hush_)
         {
             hushWindow_->setBounds({width() - kTitleIcons - 21, 1, 17, 16});
@@ -1099,9 +1063,8 @@ private:
     CurveLfoMini* curveLfoMini_ = nullptr; // UI-83: folded to its graph
     IconButton* foldButton_ = nullptr;     // UI-83: the title arrow (Curve LFO, Prism)
     KickstractFace* kickstract_ = nullptr;
-    StutterFace* stutter_ = nullptr;
-    PhaseAlignFace* phaseAlign_ = nullptr;
-    SweepFace* sweep_ = nullptr;
+    ProFace* proFace_ = nullptr; // PLG-23
+    IconButton* proWindow_ = nullptr;
     SidechainPanel* sidechainPanel_ = nullptr;
     TextButton* sidechainArrow_ = nullptr;
     HushFace* hush_ = nullptr;

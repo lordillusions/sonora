@@ -283,6 +283,8 @@ add_library(sonora_ui STATIC
     ui/views/CurveLfoEditor.cpp
     ui/views/HushFace.cpp
     ui/views/KickstractFace.cpp
+    ui/views/ProFace.cpp
+    ui/views/ProFaceWindow.cpp
     ui/views/StutterFace.cpp
     ui/views/PhaseAlignFace.cpp
     ui/views/SweepFace.cpp
@@ -561,6 +563,7 @@ target_sources(Sonora PRIVATE
     app/AppResynth.cpp
     app/AppNativeSwap.cpp
     app/AppHushWindow.cpp
+    app/AppProFaceWindow.cpp
     app/AppKickstractWindow.cpp
     app/AppSamplePacks.cpp
     app/AppSampleFiles.cpp

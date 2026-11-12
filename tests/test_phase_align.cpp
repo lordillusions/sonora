@@ -105,7 +105,7 @@ TEST_CASE("phase align: Hold keeps the angle, Manual uses the Angle control, no 
     run(p, material(2, 0.0));
     CHECK_NEAR(p.currentAngle(), 33.0, 0.5);
 
-    // No sidechain: no hits, the angle stays where it was, the audio passes (allpassed low band, same level).
+    // No sidechain: no hits, nothing to follow: the bass passes untouched (PLG-23).
     P q;
     q.prepare(kRate, 256);
     const auto m = material(4, 0.0);
@@ -118,9 +118,60 @@ TEST_CASE("phase align: Hold keeps the angle, Manual uses the Angle control, no 
     }
     CHECK(q.hitCount() == 0u);
     CHECK(! q.sidechainPresent());
-    double inE = 0, outE = 0;
-    for (int s = 24000; s < 96000; ++s) { inE += m.bass.getSample(0, s) * m.bass.getSample(0, s); outE += out.getSample(0, s) * out.getSample(0, s); }
-    CHECK_NEAR(10.0 * std::log10(outE / inE), 0.0, 0.5); // the rotated low band against the high band near the crossover
+    CHECK(q.verdict() == P::NoKick);
+    for (int s = 0; s < 96000; s += 97) CHECK_NEAR(out.getSample(0, s), m.bass.getSample(0, s), 1e-6);
+}
+
+TEST_CASE("phase align: transparent until it helps; the verdict says why there is nothing to align")
+{
+    const auto untouched = [](const juce::AudioBuffer<float>& out, const juce::AudioBuffer<float>& in) {
+        double worst = 0;
+        for (int s = 0; s < out.getNumSamples(); ++s) worst = std::max(worst, (double) std::abs(out.getSample(0, s) - in.getSample(0, s)));
+        return worst < 1e-5;
+    };
+    { // already in phase: nothing to gain
+        P p;
+        p.prepare(kRate, 256);
+        const auto m = material(6, 0.0);
+        const auto out = run(p, m);
+        CHECK(p.verdict() == P::InPhase);
+        CHECK(p.lastPotentialDb() < P::kWorthDb);
+        CHECK(p.processedAmount() < 0.01f);
+        CHECK(untouched(out, m.bass));
+    }
+    { // an off-beat bass, ducked: silent from just before the kick until its tail is gone
+        auto m = material(6, 180.0);
+        const int period = (int) (0.5 * kRate);
+        for (int s = 0; s < m.bass.getNumSamples(); ++s)
+            if (const int at = s % period; at < (int) (0.22 * kRate) || at > period - (int) (0.06 * kRate))
+                for (int ch = 0; ch < 2; ++ch) m.bass.setSample(ch, s, 0.0f);
+        P p;
+        p.prepare(kRate, 256);
+        const auto out = run(p, m);
+        CHECK(p.verdict() == P::Silent);
+        CHECK(p.lastBassUnderKickDb() < -40.0f);
+        CHECK(untouched(out, m.bass));
+    }
+    { // together but at another pitch: no shared frequency
+        Material m = material(6, 0.0);
+        for (int s = 0; s < m.bass.getNumSamples(); ++s)
+            for (int ch = 0; ch < 2; ++ch) m.bass.setSample(ch, s, (float) (0.4 * std::sin(2 * kPi * 97.0 * (double) s / kRate)));
+        P p;
+        p.prepare(kRate, 256);
+        const auto out = run(p, m);
+        CHECK(p.verdict() == P::Unrelated);
+        CHECK(untouched(out, m.bass));
+    }
+    { // a polarity problem: it processes, and says how much it adds
+        P p;
+        p.prepare(kRate, 256);
+        p.setParameter(P::Speed, 20.0f);
+        run(p, material(6, 180.0));
+        CHECK(p.verdict() == P::Aligning);
+        CHECK(p.processedAmount() > 0.95f);
+        CHECK(p.lastPotentialDb() > 3.0f);
+        CHECK(p.history(0).potentialDb > 3.0f);
+    }
 }
 
 TEST_CASE("phase align: Listen Sum adds the kick; a hit's picture and history are published; catalog and state")

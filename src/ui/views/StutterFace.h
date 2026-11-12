@@ -1,63 +1,53 @@
 #pragma once
-// Face of Sonora Stutter (PLG-18), shared by the device chain and the VST3 window. Stutter is Sonora's own device (no
-// reference device to match, AGENTS rule 7 does not apply), drawn in the chain's dark display style:
+// Face of Sonora Stutter (PLG-18, PLG-23), on the ProFace kit. Shared by the device chain (compact), its own window and
+// the VST3 editor (full).
 //
-//   TRIGGER (five mode pads, momentary: hold one to stutter; Latch keeps the chosen mode on = the Hold control)
-//   | SLICE display (the captured slice, the play head, the repeat count) over the 16-step PATTERN strip
-//   | SLICE knobs (Rate or Length, Shrink, Spacing, Sync, Quantize, Smooth) | PITCH (Pitch, Ramp, Decay, Wide, Chance)
-//   | OUT (Tone, Mix, Output)
+// Full layout: the wordmark and what it is doing now (mode, speed, grains) on top; the display (INPUT: the last seconds
+// recorded with the capture window, the read head and where the grains read; OUTPUT: what comes out with every grain
+// drawn as its envelope, odd grains left and even ones right); then the HOLD pad and Latch, the MOTION knob with the seven
+// modes and what Slow and Fast do in the selected one, the GRAIN knobs (driven by Motion while Macro is on) and the OUT
+// knobs; a help line at the bottom explains the control under the pointer.
 //
-// Pattern cells: a click sets the step to the selected mode (or back to Off), dragging paints, Alt/right-click clears.
+// Compact layout (the chain): the hold pad, the display, Motion, the modes and Speed/Mix.
 
 #include "devices/native/Stutter.h"
-#include "ui/Widget.h"
-
-#include <functional>
+#include "ui/views/ProFace.h"
 
 namespace sonora::ui
 {
-class Knob;
-class TextButton;
-
-class StutterFace final : public Widget
+class StutterFace final : public ProFace
 {
 public:
-    static constexpr float kPreferredWidth = 960, kPreferredHeight = 176;
-    static constexpr SkColor kModeColour[devices::Stutter::kModes] = {0xff3dd2ff, 0xffff6a9a, 0xff9b8cff, 0xffffb03d, 0xff5cff7a};
+    static constexpr SkColor kAccent = 0xFFFF4F8B, kAccent2 = 0xFF8F7BFF;
+    static constexpr Size kFull{1160, 640}, kCompact{700, 170};
 
-    explicit StutterFace(devices::Stutter* processor, std::function<void(Widget*, int)> tag = {});
-    void layout() override;
-    void paint(SkCanvas&, const Theme&) override;
-    void mouseDown(const MouseEvent&) override;
-    void mouseDrag(const MouseEvent&) override;
-    void mouseUp(const MouseEvent&) override;
-    void tick() override;
-
-    // Geometry (local coordinates), exposed for tests.
-    Rect padArea(int index) const; // 0..kModes-1 the mode pads, kModes = Latch
-    Rect displayArea() const;
-    Rect stepArea(int step) const;
+    explicit StutterFace(devices::Stutter& device);
+    devices::Stutter& stutter() { return stutter_; }
     const devices::Stutter::View& view() const { return view_; }
 
-private:
-    struct Column { float x = 0, w = 0; };
-    Knob* knob(int parameter);
-    void setParameter(int parameter, float value);
-    int padAt(float x, float y) const;
-    int stepAt(float x, float y) const;
-    void paintPads(SkCanvas&, const Theme&);
-    void paintDisplay(SkCanvas&, const Theme&);
-    void paintPattern(SkCanvas&, const Theme&);
+    // Words for the settings (shared with tests).
+    static std::string speedWords(float speed);
+    static std::string slowLine(int mode);
+    static std::string fastLine(int mode);
+    std::string statusLine() const;
 
-    devices::Stutter* processor_;
-    std::function<void(Widget*, int)> tag_;
-    Column pads_, display_, slice_, pitch_, out_;
-    Knob *rate_ = nullptr, *length_ = nullptr, *shrink_ = nullptr, *spacing_ = nullptr, *quantize_ = nullptr, *smooth_ = nullptr;
-    Knob *pitchKnob_ = nullptr, *ramp_ = nullptr, *decay_ = nullptr, *wide_ = nullptr, *chance_ = nullptr;
-    Knob *tone_ = nullptr, *mix_ = nullptr, *output_ = nullptr;
-    TextButton *sync_ = nullptr, *pattern_ = nullptr;
+protected:
+    void build(Layout) override;
+    void paintBack(SkCanvas&, Layout) override;
+    void paintFront(SkCanvas&, Layout) override;
+    std::string valueText(int param, float value) const override;
+    std::string idleHelp() const override;
+    void willEdit(int param) override;
+    bool animate() override;
+
+private:
+    bool driven(int param) const;
+    float shownValue(int param) const;
+    void addGrainKnob(const Rect&, int param, std::string label, std::string tip);
+    void paintDisplay(SkCanvas&, const Rect& input, const Rect& output, bool compact);
+
+    devices::Stutter& stutter_;
     devices::Stutter::View view_;
-    int pressedPad_ = -1, paintValue_ = -1, lastPainted_ = -1;
-    bool lastEngaged_ = false;
+    Rect display_, input_, output_;
 };
 } // namespace sonora::ui
