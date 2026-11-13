@@ -42,7 +42,35 @@ const char* const kModeTips[S::kModes] = {
     "Spread: a stereo cloud of detuned grains, left and right in turn. White key G.",
     "Tunnel: grains through a resonant tube, dark and echoing. White key A.",
     "Retrigger: the classic stutter, repeating the slice before you pressed (in time with Sync). White key B."};
+
+std::string beatsText(double beats)
+{
+    if (beats < 0.99) return format("%.2g beat", beats);
+    return format(std::abs(beats - std::round(beats)) < 0.01 ? "%.0f beats" : "%.1f beats", beats);
+}
 } // namespace
+
+SkColor StutterFace::modeColour(int mode)
+{
+    static constexpr SkColor kColours[S::kModes] = {0xFFFF4F8B, 0xFF9B87FF, 0xFFFF9F43, 0xFF6FD3FF, 0xFF4FE3B0, 0xFF5B7CFF, 0xFFFFD34F};
+    return kColours[std::clamp(mode, 0, S::kModes - 1)];
+}
+
+std::string StutterFace::autoLine() const
+{
+    const auto& p = S::preset(view_.autoPreset);
+    std::string line = std::string("AUTO  \xC2\xB7  ") + p.name;
+    if (view_.autoEngaged && view_.autoMove >= 0 && view_.autoMove < p.count)
+        return line + "  \xC2\xB7  " + p.moves[(size_t) view_.autoMove].label + "  \xC2\xB7  " + statusLine();
+    if (view_.autoPosition < 0) return line + "  \xC2\xB7  waiting for the voice";
+    const int bars = std::max(1, (int) std::lround(p.cycleBeats / 4.0));
+    line += "  \xC2\xB7  bar " + std::to_string(std::min(bars, (int) (view_.autoPosition / 4.0) + 1)) + " of " + std::to_string(bars);
+    if (view_.autoResting) return line + "  \xC2\xB7  no voice, resting";
+    double away = 0;
+    const int next = S::nextMove(p, view_.autoPosition, S::tierFor(value(S::AutoAmount)), away);
+    if (next >= 0) line += std::string("  \xC2\xB7  next: ") + p.moves[(size_t) next].label + " in " + beatsText(away);
+    return line;
+}
 
 StutterFace::StutterFace(devices::Stutter& device) : ProFace(device, kFull, kCompact, kAccent), stutter_(device)
 {
@@ -76,7 +104,7 @@ std::string StutterFace::statusLine() const
 
 bool StutterFace::driven(int param) const
 {
-    if (value(S::Macro) < 0.5f) return false;
+    if (value(S::Macro) < 0.5f && view_.autoMove < 0) return false;
     switch (param)
     {
         case S::Grain: case S::Shape: case S::Every: case S::Speed: case S::Width: case S::Jitter: case S::Space: return true;
@@ -123,12 +151,14 @@ std::string StutterFace::valueText(int param, float v) const
         case S::Tone:
             if (std::abs(v) < 0.02f) return "Open";
             return format(v < 0 ? "Dark %.0f" : "Thin %.0f", std::abs(v) * 100.0);
+        case S::AutoAmount: return v < 0.34f ? "LIGHT" : v < 0.67f ? "MEDIUM" : "WILD";
         default: return ProFace::valueText(param, v);
     }
 }
 
 std::string StutterFace::idleHelp() const
 {
+    if (value(S::Auto) > 0.5f) return S::preset(view_.autoPreset).blurb;
     const int mode = std::clamp((int) std::lround(value(S::ModeParam)), 0, S::kModes - 1);
     return kModeTips[mode];
 }
@@ -137,8 +167,9 @@ bool StutterFace::animate()
 {
     const bool wasEngaged = view_.engaged;
     const auto newest = view_.inputNewest;
+    const double position = view_.autoPosition;
     stutter_.readView(view_);
-    return view_.engaged || wasEngaged || newest != view_.inputNewest;
+    return view_.engaged || wasEngaged || newest != view_.inputNewest || std::abs(position - view_.autoPosition) > 1e-9;
 }
 
 void StutterFace::addGrainKnob(const Rect& r, int param, std::string label, std::string tip)
@@ -204,48 +235,56 @@ void StutterFace::build(Layout layout)
     {
         addSegment({920, 18, 80, 28}, S::Sync, 0, "Free", "Free: grain times in milliseconds.");
         addSegment({1004, 18, 140, 28}, S::Sync, 1, "Sync to tempo", "Sync: grains on the song's grid (note values).");
-        input_ = {28, 96, 1104, 72};
-        output_ = {28, 186, 1104, 160};
-        display_ = {16, 64, 1128, 290};
+        input_ = {28, 96, 1104, 64};
+        output_ = {28, 170, 1104, 136};
+        display_ = {16, 64, 1128, 250};
         std::vector<std::string> captures(S::kCaptureNames, S::kCaptureNames + S::kCaptures);
         addSegments({820, 70, 312, 20}, S::Capture, captures, false, 4,
                     "Capture: how far back the grains may read (the last beat, bar, 2 or 4 bars, or all 20 s recorded).");
-        addArea(input_, "Input: the last 12 s recorded. Shaded: where the grains may read. The line: the read head.");
+        addArea(input_, "Input: the last 12 s recorded. Shaded: where the grains may read. The line: the read head. Green: where the voice was heard.");
         addArea(output_, "Output: what comes out. Each grain is drawn on top as its envelope: pink left, violet right.");
 
-        addPad({16, 444, 170, 108}, "HOLD", [this](bool down) { stutter_.press(down ? S::kPressCurrent : -1); },
-               "Hold to stutter (or play a MIDI note: white keys pick the mode, black keys play the selected one).")
-            .lit = [this] { return view_.engaged; };
-        addToggle({16, 562, 170, 30}, S::Hold, "Latch", "Latch: keeps it stuttering until you click again (automatable).");
-
-        // AUTO: one click and it plays itself from the voice.
-        auto& autoButton = addButton({28, 372, 150, 50}, "AUTO", [this] { setValue(S::Auto, value(S::Auto) > 0.5f ? 0.0f : 1.0f); },
-                                     "Auto: Stutter listens for the voice and plays itself (in each pause by default). One click turns it on or off.");
+        // AUTO: one click, a preset plays a choreography of stutters on the bars while the voice is there.
+        auto& autoButton = addButton({28, 334, 150, 58}, "AUTO", [this] { setValue(S::Auto, value(S::Auto) > 0.5f ? 0.0f : 1.0f); },
+                                     "Auto: one click and the preset plays by itself on the song's bars, only while the voice is there.");
         autoButton.lit = [this] { return value(S::Auto) > 0.5f; };
-        autoButton.textSize = 18;
-        addArea({190, 368, 140, 58}, "Voice: lights while the voice speaks; the bar is its level, the tick the threshold (Sensitivity).");
-        addSegments({342, 388, 344, 30}, S::AutoWhen, {"Each pause", "Phrase start", "End of bar", "End of 2 bars"}, false, 4,
-                    "When: in each pause (on the last syllable), at each phrase start, or on the last beats of every bar or two (transport playing).");
-        addSegments({700, 388, 280, 30}, S::AutoLength, {}, false, 3,
-                    "Length of each automatic stutter. Whole: the whole pause (until the voice comes back), or the whole phrase.");
-        auto& variation = addKnob({988, 364, 74, 62}, S::Variation, "VARIATION",
-                                  "Variation: a different mode and Motion for each automatic stutter (0: always the selected ones).");
-        variation.small = true;
-        auto& sensitivity = addKnob({1064, 364, 76, 62}, S::Sensitivity, "SENSITIVITY",
+        autoButton.textSize = 20;
+        addArea({28, 400, 150, 58}, "Voice: lights while the voice (or any sound) comes in; the bar is its level, the tick the threshold (Sensitivity).");
+        for (int k = 0; k < S::kPresets; ++k)
+        {
+            auto& chip = addSegment({192 + (float) (k % 4) * 146, 342 + (float) (k / 4) * 38, 140, 32}, S::AutoPreset, (float) k,
+                                    S::preset(k).name, S::preset(k).blurb);
+            chip.textSize = 12.5f;
+        }
+        addSegments({786, 342, 190, 32}, S::AutoFollow, {"Bars", "Voice"}, false, 4,
+                    "Follow: Bars = the preset sits on the song's bars. Voice = it starts when the voice comes in (always when the transport is stopped).");
+        auto& amount = addKnob({988, 334, 74, 78}, S::AutoAmount, "AMOUNT",
+                               "Amount: how many of the preset's moves play. Light: the main ones. Wild: all of them (the dim blocks light up).");
+        amount.small = true;
+        auto& sensitivity = addKnob({1064, 334, 76, 78}, S::Sensitivity, "SENSITIVITY",
                                     "Sensitivity: how quiet a voice still counts (raise it for soft vocals, lower it for noisy recordings).");
         sensitivity.small = true;
+        timeline_ = {192, 420, 940, 40};
+        addArea(timeline_, "The preset's cycle, bar by bar: each block is a move (colour = mode). Dim blocks play at a higher Amount. "
+                           "The white line is where the song is.");
 
-        auto& motion = addKnob({206, 470, 156, 168}, S::Motion, "MOTION",
+        addPad({16, 484, 170, 108}, "HOLD", [this](bool down) { stutter_.press(down ? S::kPressCurrent : -1); },
+               "Hold to stutter (or play a MIDI note: white keys pick the mode, black keys play the selected one).")
+            .lit = [this] { return view_.engaged && ! view_.autoEngaged; };
+        addToggle({16, 602, 170, 30}, S::Hold, "Latch", "Latch: keeps it stuttering until you click again (automatable).");
+
+        auto& motion = addKnob({206, 510, 156, 168}, S::Motion, "MOTION",
                                "Motion: from Slow (long grains that barely move) to Fast (short grains racing). Each mode reads it its own way.");
         motion.caption = [] { return std::string("\xE2\x97\x80 slow \xC2\xB7 fast \xE2\x96\xB6"); };
-        addToggle({214, 644, 140, 26}, S::Macro, "Macro", "Macro: Motion drives the grain knobs. Turn a grain knob to take over by hand.");
+        addToggle({214, 684, 140, 26}, S::Macro, "Link",
+                  "Link: Motion turns the grain knobs for you. Turn a grain knob to take over by hand. (Automatic effects in a sequence: AUTO and a preset.)");
         for (int m = 0; m < S::kModes; ++m)
         {
-            const float x = 374 + (float) (m % 2) * 132, y = 470 + (float) (m / 2) * 34;
+            const float x = 374 + (float) (m % 2) * 132, y = 510 + (float) (m / 2) * 34;
             addSegment({x, y, 124, 28}, S::ModeParam, (float) m, modeLabel(m), kModeTips[m]);
         }
 
-        const float gx = 660, row1 = 468, row2 = 574, kw = 82, kh = 104;
+        const float gx = 660, row1 = 508, row2 = 614, kw = 82, kh = 104;
         addGrainKnob({gx, row1, kw, kh}, S::Grain, "GRAIN", "Grain: how long each grain plays.");
         addGrainKnob({gx + kw, row1, kw, kh}, S::Every, "EVERY", "Every: how often a new grain starts (a note value with Sync).");
         addGrainKnob({gx + 2 * kw, row1, kw, kh}, S::Shape, "SHAPE", "Shape: 0 = hard-gated grains, 100 = every grain swells in and out.");
@@ -270,21 +309,24 @@ void StutterFace::build(Layout layout)
     }
 
     // Compact: the device chain.
-    input_ = {114, 24, 252, 40};
-    output_ = {114, 70, 252, 90};
+    input_ = {114, 22, 252, 38};
+    output_ = {114, 64, 252, 80};
     display_ = {108, 6, 264, 158};
-    addArea(display_, "Input above, output below: the grains are drawn on top. Open the window for every control.");
-    addPad({8, 8, 92, 84}, "HOLD", [this](bool down) { stutter_.press(down ? S::kPressCurrent : -1); },
+    timeline_ = {114, 149, 252, 11};
+    addArea(display_, "Input above, output below: the grains are drawn on top; with AUTO on, the preset's cycle under them.");
+    addPad({8, 8, 92, 62}, "HOLD", [this](bool down) { stutter_.press(down ? S::kPressCurrent : -1); },
            "Hold to stutter (or play a MIDI note).")
-        .lit = [this] { return view_.engaged; };
-    auto& autoButton = addButton({8, 98, 92, 30}, "AUTO", [this] { setValue(S::Auto, value(S::Auto) > 0.5f ? 0.0f : 1.0f); },
-                                 "Auto: it listens for the voice and plays itself in each pause. Open the window for When, Length, Variation.");
+        .lit = [this] { return view_.engaged && ! view_.autoEngaged; };
+    auto& autoButton = addButton({8, 76, 92, 26}, "AUTO", [this] { setValue(S::Auto, value(S::Auto) > 0.5f ? 0.0f : 1.0f); },
+                                 "Auto: one click and the preset plays by itself on the song's bars while the voice is there.");
     autoButton.lit = [this] { return value(S::Auto) > 0.5f; };
     autoButton.textSize = 12;
-    addToggle({8, 134, 92, 28}, S::Hold, "Latch", "Latch: keeps it stuttering until you click again.");
+    addButton({8, 106, 92, 26}, "", [this] { setValue(S::AutoPreset, (float) ((view_.autoPreset + 1) % S::kPresets)); },
+              "Preset: click for the next one. Open the window to see them all, with Amount and Follow.");
+    addToggle({8, 138, 92, 24}, S::Hold, "Latch", "Latch: keeps it stuttering until you click again.");
     auto& motion = addKnob({378, 6, 90, 128}, S::Motion, "MOTION", "Motion: Slow (long grains, barely moving) to Fast (short, racing).");
     motion.caption = [] { return std::string("slow \xC2\xB7 fast"); };
-    addToggle({382, 138, 82, 24}, S::Macro, "Macro", "Macro: Motion drives the grain controls.");
+    addToggle({382, 138, 82, 24}, S::Macro, "Link", "Link: Motion turns the grain controls for you.");
     for (int m = 0; m < S::kModes; ++m)
     {
         const float x = 476 + (float) (m % 2) * 62, y = 8 + (float) (m / 2) * 39;
@@ -396,8 +438,64 @@ void StutterFace::paintDisplay(SkCanvas& c, const Rect& in, const Rect& out, boo
     c.restore();
     pro::text(c, "OUTPUT", {out.x + 6, out.y + out.h - label - 6, 80, label + 4}, pro::kFaint, label, Align::Left, true);
     if (! view_.engaged && ! compact)
-        pro::text(c, "hold the pad, play a MIDI note or automate Hold",
+        pro::text(c, view_.autoOn ? "AUTO is on: the preset plays when the voice is there" : "hold the pad, play a MIDI note, or click AUTO and pick a preset",
                   {out.x, out.y + out.h * 0.5f - 10, out.w, 20}, paint::withAlpha(pro::kDim, 170), 13.0f);
+}
+
+void StutterFace::paintTimeline(SkCanvas& c, const Rect& r, bool compact)
+{
+    const auto& p = S::preset(view_.autoPreset);
+    const int tier = S::tierFor(value(S::AutoAmount));
+    const bool on = view_.autoOn;
+    const float cycle = (float) p.cycleBeats;
+    const auto xAt = [&](double beat) { return r.x + r.w * (float) (beat / p.cycleBeats); };
+    pro::rounded(c, r, compact ? 2.0f : 4.0f, 0xFF0E1115);
+    const float lane = compact ? r.y : r.y + 14, laneH = compact ? r.h : r.h - 16;
+    // bars and beats
+    for (int beat = 0; beat < (int) cycle; ++beat)
+    {
+        const float x = xAt(beat);
+        const bool bar = beat % 4 == 0;
+        if (beat > 0) c.drawLine(x, bar ? r.y : lane + laneH - 5, x, r.y + r.h, pro::stroke(bar ? pro::kLine : pro::kLineSoft, 1.0f));
+        if (bar && ! compact)
+            pro::text(c, std::to_string(beat / 4 + 1), {x + 4, r.y + 1, 30, 12}, pro::kFaint, 9.5f, Align::Left, true);
+    }
+    // the moves
+    for (int i = 0; i < p.count; ++i)
+    {
+        const auto& m = p.moves[(size_t) i];
+        const bool plays = m.tier <= tier;
+        const bool now = on && view_.autoMove == i;
+        const SkColor colour = modeColour(m.mode);
+        const Rect block{xAt(m.at) + 1, lane + 1, std::max(2.0f, xAt(m.at + m.length) - xAt(m.at) - 2), laneH - 2};
+        const float radius = compact ? 1.5f : 3.0f;
+        if (now)
+            for (int g = 2; g >= 1; --g)
+                pro::rounded(c, {block.x - (float) g * 2, block.y - (float) g * 2, block.w + (float) g * 4, block.h + (float) g * 4},
+                             radius + (float) g * 2, paint::withAlpha(colour, (uint8_t) (40 * (3 - g))));
+        if (plays) pro::rounded(c, block, radius, paint::withAlpha(colour, now ? 255 : on ? 185 : 110));
+        else pro::roundedStroke(c, block, radius, paint::withAlpha(colour, 90), 1.0f);
+        if (now) // progress
+            pro::rounded(c, {block.x, block.y + block.h - 3, block.w * std::clamp(view_.autoProgress, 0.0f, 1.0f), 3}, 1,
+                         paint::withAlpha(0xFFFFFFFF, 200));
+        if (! compact)
+        {
+            float size = 10.5f;
+            while (size > 8.0f && pro::textWidth(m.label, size, true) > block.w - 4) size -= 0.5f;
+            if (pro::textWidth(m.label, size, true) <= block.w - 4) // too narrow: the colour says the mode
+                pro::text(c, m.label, block, plays ? paint::withAlpha(0xFF000000, now ? 230 : 190) : paint::withAlpha(colour, 150), size,
+                          Align::Centre, true);
+        }
+    }
+    // where the song is
+    if (on && view_.autoPosition >= 0)
+    {
+        const float x = std::clamp(xAt(view_.autoPosition), r.x, r.x + r.w);
+        c.drawLine(x, r.y - (compact ? 1.0f : 2.0f), x, r.y + r.h + (compact ? 1.0f : 2.0f), pro::stroke(0xFFFFFFFF, compact ? 1.5f : 2.0f));
+    }
+    if (! compact)
+        pro::text(c, view_.autoResting ? "no voice: resting" : (on ? "" : "AUTO off"), {r.x + r.w - 160, r.y + 1, 156, 12},
+                  pro::kFaint, 9.5f, Align::Right, true);
 }
 
 void StutterFace::paintBack(SkCanvas& c, Layout layout)
@@ -406,6 +504,7 @@ void StutterFace::paintBack(SkCanvas& c, Layout layout)
     {
         pro::well(c, display_, 6);
         paintDisplay(c, input_, output_, true);
+        if (view_.autoOn) paintTimeline(c, timeline_, true);
         return;
     }
     pro::wordmark(c, "stutter", 24, 10, 28, kAccent, version);
@@ -416,13 +515,7 @@ void StutterFace::paintBack(SkCanvas& c, Layout layout)
     pro::rounded(c, {sx, 22, 10, 10}, 5, view_.engaged ? kAccent : 0xFF3A404B);
     pro::text(c, name, {sx + 18, 14, nameW + 4, 26}, view_.engaged ? kAccent : pro::kText, 16, Align::Left, true);
     std::string status = view_.engaged ? statusLine() : "ready  \xC2\xB7  recording  \xC2\xB7  " + statusLine();
-    if (view_.autoEngaged) status = "AUTO  \xC2\xB7  " + statusLine();
-    else if (view_.autoOn && ! view_.engaged)
-    {
-        static const char* const kWaiting[S::kAutoWhens] = {"waiting for a pause in the voice", "waiting for the voice to start a phrase",
-                                                            "waiting for the end of the bar", "waiting for the end of the 2 bars"};
-        status = std::string("AUTO  \xC2\xB7  ") + kWaiting[std::clamp((int) std::lround(value(S::AutoWhen)), 0, S::kAutoWhens - 1)];
-    }
+    if (view_.autoOn && (view_.autoEngaged || ! view_.engaged)) status = autoLine();
     pro::text(c, status,
               {sx + 26 + nameW, 14, 900 - sx - nameW - 30, 26}, pro::kDim, 13, Align::Left);
 
@@ -430,39 +523,56 @@ void StutterFace::paintBack(SkCanvas& c, Layout layout)
     paintDisplay(c, input_, output_, false);
     pro::text(c, "CAPTURE", {752, 70, 64, 20}, pro::kFaint, 10, Align::Right, true);
 
-    pro::panel(c, {16, 362, 1128, 70});
-    pro::text(c, "WHEN", {342, 368, 80, 16}, pro::kFaint, 9.5f, Align::Left, true);
-    pro::text(c, "LENGTH", {700, 368, 80, 16}, pro::kFaint, 9.5f, Align::Left, true);
+    pro::panel(c, {16, 322, 1128, 148});
+    pro::text(c, "PRESET", {192, 325, 120, 15}, pro::kFaint, 9.5f, Align::Left, true);
+    pro::text(c, "FOLLOW", {786, 325, 120, 15}, pro::kFaint, 9.5f, Align::Left, true);
+    const bool followVoice = std::lround(value(S::AutoFollow)) == S::FollowVoice;
+    pro::text(c, followVoice ? "starts when the voice comes in" : "sits on the song's bars", {786, 380, 190, 18}, pro::kDim, 11, Align::Left);
+    pro::text(c, followVoice ? "(after a bar of silence)" : "(stopped: from the voice)", {786, 396, 190, 16}, pro::kFaint, 10, Align::Left);
+    paintTimeline(c, timeline_, false);
 
-    pro::panel(c, {198, 440, 444, 238});
-    pro::sectionTitle(c, "MOTION & MODE", 210, 446, kAccent);
-    pro::panel(c, {652, 440, 346, 238});
-    pro::sectionTitle(c, "GRAIN", 664, 446, kAccent);
-    if (value(S::Macro) > 0.5f)
-        pro::text(c, "driven by Motion", {760, 446, 226, 18}, paint::withAlpha(kAccent, 200), 10.5f, Align::Right, true);
-    pro::panel(c, {1006, 440, 138, 238});
-    pro::sectionTitle(c, "OUT", 1018, 446, kAccent);
+    pro::panel(c, {198, 480, 444, 238});
+    pro::sectionTitle(c, "MOTION & MODE", 210, 486, kAccent);
+    pro::panel(c, {652, 480, 346, 238});
+    pro::sectionTitle(c, "GRAIN", 664, 486, kAccent);
+    if (view_.autoMove >= 0)
+        pro::text(c, "driven by AUTO", {760, 486, 226, 18}, paint::withAlpha(kAccent, 200), 10.5f, Align::Right, true);
+    else if (value(S::Macro) > 0.5f)
+        pro::text(c, "linked to Motion", {760, 486, 226, 18}, paint::withAlpha(kAccent, 200), 10.5f, Align::Right, true);
+    pro::panel(c, {1006, 480, 138, 238});
+    pro::sectionTitle(c, "OUT", 1018, 486, kAccent);
 
-    c.drawLine(16, 686, 1144, 686, pro::stroke(pro::kLineSoft, 1.0f));
+    c.drawLine(16, 726, 1144, 726, pro::stroke(pro::kLineSoft, 1.0f));
 }
 
 void StutterFace::paintFront(SkCanvas& c, Layout layout)
 {
-    // The white key that plays each mode.
+    // The white key that plays each mode; a ring around the mode playing when it is not the selected one (AUTO, MIDI).
     for (const auto& control : controls())
         if (control.kind == Kind::Segment && control.param == S::ModeParam)
         {
             const int m = (int) control.value;
+            if (view_.engaged && view_.mode == m && std::lround(value(S::ModeParam)) != m)
+                pro::roundedStroke(c, control.r, std::min(6.0f, control.r.h * 0.3f), modeColour(m), 2.0f);
             const bool on = std::lround(value(S::ModeParam)) == m;
             const float size = layout == Layout::Full ? 10.0f : 8.0f;
             pro::text(c, S::kModeKeys[m], {control.r.x + control.r.w - size - 6, control.r.y + 2, size + 4, size + 2},
                       on ? paint::withAlpha(0xFF000000, 120) : pro::kFaint, size, Align::Right, true);
         }
-    if (layout == Layout::Compact) return;
+    if (layout == Layout::Compact)
+    {
+        // The preset button shows the preset's name.
+        const auto& name = std::string(S::preset(view_.autoPreset).name);
+        const Rect r{8, 106, 92, 26};
+        float size = 10.5f;
+        while (size > 7.5f && pro::textWidth(name, size, true) > r.w - 6) size -= 0.5f;
+        pro::text(c, name, r, value(S::Auto) > 0.5f ? pro::kText : pro::kDim, size, Align::Centre, true);
+        return;
+    }
 
     // Voice: the detector's light, level and threshold.
     {
-        const Rect r{190, 372, 140, 50};
+        const Rect r{28, 404, 150, 50};
         const SkColor voice = 0xFF5BE38C;
         c.drawCircle(r.x + 10, r.y + 12, 6, pro::fill(view_.voiced ? voice : 0xFF2A2F38));
         if (view_.voiced) c.drawCircle(r.x + 10, r.y + 12, 10, pro::fill(paint::withAlpha(voice, 50)));
@@ -477,22 +587,22 @@ void StutterFace::paintFront(SkCanvas& c, Layout layout)
     }
 
     // Hold pad hint.
-    pro::text(c, "or play a MIDI note", {16, 524, 170, 18}, view_.engaged ? paint::withAlpha(0xFF000000, 150) : pro::kFaint, 11);
+    pro::text(c, "or play a MIDI note", {16, 564, 170, 18}, view_.engaged && ! view_.autoEngaged ? paint::withAlpha(0xFF000000, 150) : pro::kFaint, 11);
 
     // What Slow and Fast do in this mode.
     const int mode = std::clamp((int) std::lround(value(S::ModeParam)), 0, S::kModes - 1);
-    pro::text(c, "SLOW", {374, 612, 44, 18}, kAccent, 10, Align::Left, true);
-    pro::text(c, slowLine(mode), {416, 612, 220, 18}, pro::kDim, 11.5f, Align::Left);
-    pro::text(c, "FAST", {374, 636, 44, 18}, kAccent, 10, Align::Left, true);
-    pro::text(c, fastLine(mode), {416, 636, 220, 18}, pro::kDim, 11.5f, Align::Left);
+    pro::text(c, "SLOW", {374, 652, 44, 18}, kAccent, 10, Align::Left, true);
+    pro::text(c, slowLine(mode), {416, 652, 220, 18}, pro::kDim, 11.5f, Align::Left);
+    pro::text(c, "FAST", {374, 676, 44, 18}, kAccent, 10, Align::Left, true);
+    pro::text(c, fastLine(mode), {416, 676, 220, 18}, pro::kDim, 11.5f, Align::Left);
 
     // Output level.
     const float db = view_.level > 1.0e-5f ? 20.0f * std::log10(view_.level) : -100.0f;
     const float t = std::clamp((db + 48.0f) / 54.0f, 0.0f, 1.0f);
-    const Rect meter{1132, 578, 5, 92};
+    const Rect meter{1132, 618, 5, 92};
     pro::rounded(c, meter, 2, 0xFF0E1115);
     if (t > 0) pro::rounded(c, {meter.x, meter.y + meter.h * (1 - t), meter.w, meter.h * t}, 2, db > -1.0f ? 0xFFFF5A5A : kAccent);
 
-    paintHelp(c, {20, 690, 1120, 22});
+    paintHelp(c, {20, 730, 1120, 22});
 }
 } // namespace sonora::ui

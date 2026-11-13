@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 using namespace sonora;
@@ -265,20 +266,19 @@ TEST_CASE("stutter: MIDI white keys play a mode while held, black keys the selec
 
 namespace
 {
-// Speech-like: phrases of syllables (a 180 Hz voice with a 4 Hz syllable envelope) and pauses, over a -70 dBFS floor.
-juce::AudioBuffer<float> speech(int samples, double phraseSeconds, double pauseSeconds, double startPause = 0.4)
+// A sung line: a 180 Hz voice with a 4 Hz syllable envelope that never pauses, from `from` to `to` seconds, over a
+// -70 dBFS floor (a real vocal stem has no gaps the detector could call a pause).
+juce::AudioBuffer<float> sung(int samples, double from, double to)
 {
     juce::AudioBuffer<float> a(2, samples);
     juce::Random random(11);
-    const double cycle = phraseSeconds + pauseSeconds;
     for (int s = 0; s < samples; ++s)
     {
-        const double t = (double) s / kRate - startPause;
-        const double inCycle = t - std::floor(t / cycle) * cycle;
+        const double t = (double) s / kRate;
         float v = (random.nextFloat() * 2.0f - 1.0f) * 0.0003f;
-        if (t >= 0 && inCycle < phraseSeconds)
+        if (t >= from && t < to)
         {
-            const double syllable = 0.55 + 0.45 * std::sin(2 * kPi * 4.0 * inCycle);
+            const double syllable = 0.55 + 0.45 * std::sin(2 * kPi * 4.0 * (t - from));
             v += (float) (0.4 * syllable * std::sin(2 * kPi * 180.0 * t) + 0.15 * syllable * std::sin(2 * kPi * 540.0 * t));
         }
         a.setSample(0, s, v);
@@ -287,20 +287,30 @@ juce::AudioBuffer<float> speech(int samples, double phraseSeconds, double pauseS
     return a;
 }
 
-// Runs in blocks and records, per block, whether the stutter was engaged by Auto and the voice detector's state.
+devices::HostInfo playing(double tempo = 120.0)
+{
+    auto h = stopped(tempo);
+    h.playing = true;
+    return h;
+}
+
+// Runs in blocks (the transport advancing when it plays) and records, per block, what Auto did.
 struct AutoTrace
 {
-    std::vector<bool> engaged, voiced;
-    std::vector<int> modes;
+    std::vector<bool> engaged, resting;
+    std::vector<int> modes, moves;
+    std::vector<double> position;
+    std::vector<S::View> views; // every 10th block
+    size_t at(double seconds) const { return (size_t) (seconds * kRate / 480.0); }
 };
 AutoTrace runTraced(S& s, juce::AudioBuffer<float>& audio, devices::HostInfo host, int block = 480)
 {
     AutoTrace trace;
     const double beatsPerSample = host.tempo / 60.0 / kRate;
-    for (int start = 0; start < audio.getNumSamples(); start += block)
+    for (int start = 0, index = 0; start < audio.getNumSamples(); start += block, ++index)
     {
         const int n = std::min(block, audio.getNumSamples() - start);
-        host.beats = (double) start * beatsPerSample;
+        if (host.playing) host.beats = (double) start * beatsPerSample;
         s.setHostInfo(host);
         juce::AudioBuffer<float> view(audio.getArrayOfWritePointers(), 2, start, n);
         juce::MidiBuffer midi;
@@ -308,88 +318,213 @@ AutoTrace runTraced(S& s, juce::AudioBuffer<float>& audio, devices::HostInfo hos
         devices::Stutter::View v;
         s.readView(v);
         trace.engaged.push_back(v.autoEngaged);
-        trace.voiced.push_back(v.voiced);
+        trace.resting.push_back(v.autoResting);
         trace.modes.push_back(v.mode);
+        trace.moves.push_back(v.autoMove);
+        trace.position.push_back(v.autoPosition);
+        if (index % 10 == 0) trace.views.push_back(v);
     }
     return trace;
 }
+
+double rmsOf(const juce::AudioBuffer<float>& a, double from, double to)
+{
+    double sum = 0;
+    const int a0 = (int) (from * kRate), a1 = (int) (to * kRate);
+    for (int i = a0; i < a1; ++i) sum += (double) a.getSample(0, i) * a.getSample(0, i);
+    return std::sqrt(sum / std::max(1, a1 - a0));
+}
+
+int moveNamed(const S::Preset& p, const std::string& label)
+{
+    for (int i = 0; i < p.count; ++i)
+        if (label == p.moves[(size_t) i].label) return i;
+    return -1;
+}
 } // namespace
 
-TEST_CASE("stutter Auto: in each pause it stutters the last syllable until the voice comes back")
+TEST_CASE("stutter Auto presets: the tables are sound and the moves ramp")
+{
+    for (int k = 0; k < S::kPresets; ++k)
+    {
+        const auto& p = S::preset(k);
+        CHECK(std::string(p.name).size() > 2);
+        CHECK(std::string(p.blurb).rfind(p.name, 0) == 0); // the help line starts with the name
+        CHECK(p.count > 0);
+        CHECK(p.cycleBeats >= 8.0);
+        bool tierOne = false;
+        for (int i = 0; i < p.count; ++i)
+        {
+            const auto& m = p.moves[(size_t) i];
+            CHECK(m.at >= 0.0f);
+            CHECK(m.length > 0.0f);
+            CHECK((double) (m.at + m.length) <= p.cycleBeats + 1e-6);
+            CHECK(m.tier >= 1);
+            CHECK(m.tier <= 3);
+            CHECK(std::string(m.label).size() > 0);
+            if (i > 0) CHECK(m.at >= p.moves[(size_t) i - 1].at); // sorted
+            tierOne = tierOne || m.tier == 1;
+        }
+        CHECK(tierOne); // something plays at the lowest Amount
+    }
+    const S probe;
+    const auto names = probe.parameters()[S::AutoPreset].choices;
+    REQUIRE(names.size() == (size_t) S::kPresets);
+    CHECK(names[0] == "Vocal Chop");
+    CHECK(probe.parameters()[S::AutoPreset].defaultValue < 0.5f); // Vocal Chop by default
+
+    // Tape Stop winds down: real time and in tune at the start, stopped two octaves down at the end.
+    const auto& tape = S::preset(3);
+    const int stop = moveNamed(tape, "TAPE STOP");
+    REQUIRE(stop >= 0);
+    auto a = S::moveSettings(tape.moves[(size_t) stop], 0.0f, 120.0);
+    auto b = S::moveSettings(tape.moves[(size_t) stop], 1.0f, 120.0);
+    CHECK_NEAR(a.speed, 1.0f, 1e-5);
+    CHECK_NEAR(a.pitch, 0.0f, 1e-5);
+    CHECK_NEAR(b.speed, 0.0f, 1e-5);
+    CHECK_NEAR(b.pitch, -24.0f, 1e-5);
+    // Build-Up rolls faster every bar.
+    const auto& build = S::preset(2);
+    CHECK_NEAR(S::moveSettings(build.moves[(size_t) moveNamed(build, "1/8")], 0.5f, 120.0).everyBeats, 0.5, 1e-9);
+    CHECK_NEAR(S::moveSettings(build.moves[(size_t) moveNamed(build, "1/16")], 0.5f, 120.0).everyBeats, 0.25, 1e-9);
+    CHECK_NEAR(S::moveSettings(build.moves[(size_t) moveNamed(build, "1/32")], 0.5f, 120.0).everyBeats, 0.125, 1e-9);
+    CHECK_NEAR(S::moveSettings(build.moves[(size_t) moveNamed(build, "1/64")], 0.5f, 120.0).everyBeats, 1.0 / 16, 1e-9);
+    // moveAt / nextMove: Vocal Chop at Amount 50 %.
+    const auto& chop = S::preset(0);
+    CHECK(S::moveAt(chop, 1.0, 2) == -1);
+    CHECK(S::moveAt(chop, 7.5, 2) == moveNamed(chop, "ROLL"));
+    CHECK(S::moveAt(chop, 10.2, 2) == -1);                       // GLITCH is tier 3
+    CHECK(S::moveAt(chop, 10.2, 3) == moveNamed(chop, "GLITCH"));
+    double away = 0;
+    CHECK(S::nextMove(chop, 4.0, 2, away) == moveNamed(chop, "ROLL"));
+    CHECK_NEAR(away, 3.0, 1e-9);
+    CHECK(S::nextMove(chop, 15.5, 1, away) == moveNamed(chop, "ROLL")); // wraps to the next cycle
+    CHECK_NEAR(away, 7.5, 1e-9);
+}
+
+TEST_CASE("stutter Auto presets: a sung line with no pauses plays the moves on the bars, dry in between")
 {
     S s;
     s.prepare(kRate, 256);
-    s.setParameter(S::Auto, 1.0f); // one click: Each pause, Whole
-    s.setParameter(S::Variation, 0.0f);
-    s.setParameter(S::ModeParam, (float) S::Freeze);
-    auto audio = speech(6 * 48000, 1.2, 0.6); // phrases at 0.4-1.6, 2.2-3.4, 4.0-5.2 s
+    s.setParameter(S::Auto, 1.0f); // one click: Vocal Chop, Bars, Amount 50 %
+    auto audio = sung(17 * 48000, 0.0, 17.0);
     const auto in = audio;
-    const auto trace = runTraced(s, audio, stopped());
-    const auto at = [&](double seconds) { return (size_t) (seconds * kRate / 480.0); };
-    CHECK(trace.voiced[at(1.0)]);
-    CHECK(! trace.voiced[at(1.95)]);
-    CHECK(! trace.engaged[at(1.0)]);  // the voice speaks: dry
-    CHECK(trace.engaged[at(1.9)]);    // the pause: stuttering
-    CHECK(trace.engaged[at(2.15)]);
-    CHECK(! trace.engaged[at(2.6)]);  // the voice came back: released
-    CHECK(trace.engaged[at(3.8)]);    // the next pause
-    CHECK(trace.modes[at(1.9)] == S::Freeze);
-    // In the pause the input is near silence but the stutter plays the last syllable; while speaking it is the voice.
-    const auto rms = [](const juce::AudioBuffer<float>& a, double from, double to) {
-        double sum = 0;
-        const int a0 = (int) (from * kRate), a1 = (int) (to * kRate);
-        for (int i = a0; i < a1; ++i) sum += (double) a.getSample(0, i) * a.getSample(0, i);
-        return std::sqrt(sum / (a1 - a0));
-    };
-    CHECK(rms(in, 1.85, 2.15) < 0.001);
-    CHECK(rms(audio, 1.85, 2.15) > 0.03);
-    for (int i = (int) (0.9 * kRate); i < (int) (1.1 * kRate); i += 97) CHECK_NEAR(audio.getSample(0, i), in.getSample(0, i), 1e-6);
+    const auto trace = runTraced(s, audio, playing()); // 120 BPM: a beat is 0.5 s, the 4-bar cycle 8 s
+    const auto& chop = S::preset(0);
+    const auto engagedAt = [&](double seconds) { return (bool) trace.engaged[trace.at(seconds)]; };
+    const auto moveAtTime = [&](double seconds) { return trace.moves[trace.at(seconds)]; };
+    for (double cycle : {0.0, 8.0})
+    {
+        CHECK(! engagedAt(cycle + 1.0));                                    // bar 1: dry
+        CHECK(engagedAt(cycle + 1.85));                                     // 1/16 at beat 3.5 (tier 2)
+        CHECK(moveAtTime(cycle + 1.85) == moveNamed(chop, "1/16"));
+        CHECK(! engagedAt(cycle + 2.5));
+        CHECK(engagedAt(cycle + 3.75));                                     // ROLL on beat 4 of bar 2
+        CHECK(trace.modes[trace.at(cycle + 3.75)] == S::Retrigger);
+        CHECK(! engagedAt(cycle + 5.1));                                    // GLITCH is tier 3: not at 50 %
+        CHECK(engagedAt(cycle + 6.5));                                      // STRETCH
+        CHECK(trace.modes[trace.at(cycle + 6.5)] == S::Swell);
+        CHECK(engagedAt(cycle + 7.25));                                     // REWIND
+        CHECK(trace.modes[trace.at(cycle + 7.25)] == S::Rewind);
+        CHECK(engagedAt(cycle + 7.75));                                     // BUILD
+        CHECK(moveAtTime(cycle + 7.75) == moveNamed(chop, "BUILD"));
+    }
+    CHECK_NEAR(trace.position[trace.at(9.0)], 2.0, 0.05); // 9 s = beat 18 = beat 2 of the second cycle
+    // Between the moves the voice passes untouched.
+    for (int i = (int) (0.6 * kRate); i < (int) (1.6 * kRate); i += 97) CHECK_NEAR(audio.getSample(0, i), in.getSample(0, i), 1e-6);
+    for (int i = (int) (4.2 * kRate); i < (int) (5.9 * kRate); i += 97) CHECK_NEAR(audio.getSample(0, i), in.getSample(0, i), 1e-6);
+    // The moves change the sound.
+    double difference = 0;
+    for (int i = (int) (3.55 * kRate); i < (int) (3.95 * kRate); ++i) difference += std::abs(audio.getSample(0, i) - in.getSample(0, i));
+    CHECK(difference / (0.4 * kRate) > 0.02);
 }
 
-TEST_CASE("stutter Auto: phrase starts, bar ends while the voice is there, Variation, and the hand wins")
+TEST_CASE("stutter Auto presets: only while the voice is there, grabbing the last syllable")
 {
-    { // Phrase start, 1/4: a beat (0.5 s at 120 BPM) from the onset
-        S s;
-        s.prepare(kRate, 256);
-        s.setParameter(S::Auto, 1.0f);
-        s.setParameter(S::AutoWhen, (float) S::PhraseStart);
-        s.setParameter(S::AutoLength, 1.0f);
-        auto audio = speech(4 * 48000, 1.4, 0.8);
-        const auto trace = runTraced(s, audio, stopped());
-        const auto at = [&](double seconds) { return (size_t) (seconds * kRate / 480.0); };
-        CHECK(! trace.engaged[at(0.3)]);
-        CHECK(trace.engaged[at(0.6)]);
-        CHECK(! trace.engaged[at(1.1)]); // the beat is over
-        CHECK(trace.engaged[at(2.8)]);   // the next phrase (2.6 s)
+    S s;
+    s.prepare(kRate, 256);
+    s.setParameter(S::Auto, 1.0f);
+    auto audio = sung(9 * 48000, 0.0, 3.0); // the voice stops at 3.0 s (beat 6)
+    const auto in = audio;
+    const auto trace = runTraced(s, audio, playing());
+    CHECK(trace.engaged[trace.at(3.75)]);    // ROLL at beat 7: the voice stopped a beat ago, it still plays
+    CHECK(! trace.engaged[trace.at(6.5)]);   // STRETCH at beat 12: three seconds of silence, skipped
+    CHECK(trace.resting[trace.at(6.5)]);
+    CHECK(! trace.engaged[trace.at(7.75)]);
+    // The roll repeats the end of the line (read just before the voice stopped) over the silence.
+    CHECK(rmsOf(in, 3.55, 3.95) < 0.001);
+    CHECK(rmsOf(audio, 3.55, 3.95) > 0.03);
+    bool readTheLine = false;
+    for (const auto& v : trace.views)
+        if (v.autoEngaged)
+            for (const auto& g : v.grains)
+                if (g.at > (int64_t) (3.5 * kRate)) readTheLine = readTheLine || g.read < (int64_t) (3.04 * kRate);
+    CHECK(readTheLine);
+
+    { // A long move starts late when the voice comes in during it (Cloud: the whole 4 bars).
+        S late;
+        late.prepare(kRate, 256);
+        late.setParameter(S::Auto, 1.0f);
+        late.setParameter(S::AutoPreset, 7.0f); // Cloud
+        late.setParameter(S::AutoAmount, 0.0f);
+        auto a = sung(8 * 48000, 1.2, 8.0);
+        const auto t = runTraced(late, a, playing());
+        CHECK(! t.engaged[t.at(1.0)]);
+        CHECK(t.engaged[t.at(1.6)]);
+        CHECK(t.modes[t.at(1.6)] == S::Spread);
     }
-    { // End of bar, 1/4, transport playing: the last beat of each bar, only while the voice is there
-        S s;
-        s.prepare(kRate, 256);
-        s.setParameter(S::Auto, 1.0f);
-        s.setParameter(S::AutoWhen, (float) S::BarEnd);
-        s.setParameter(S::AutoLength, 1.0f);
-        auto host = stopped();
-        host.playing = true;
-        auto audio = speech(8 * 48000, 4.0, 4.0, 0.0); // voice for the first 2 bars only (2 s per bar at 120 BPM)
-        const auto trace = runTraced(s, audio, host);
-        const auto at = [&](double seconds) { return (size_t) (seconds * kRate / 480.0); };
-        CHECK(! trace.engaged[at(0.8)]);
-        CHECK(trace.engaged[at(1.7)]);   // beat 4 of bar 1
-        CHECK(! trace.engaged[at(2.2)]); // bar line: released
-        CHECK(trace.engaged[at(3.7)]);
-        CHECK(! trace.engaged[at(7.7)]); // two seconds of silence: nothing to stutter
+    { // No voice at all: never engages.
+        S quiet;
+        quiet.prepare(kRate, 256);
+        quiet.setParameter(S::Auto, 1.0f);
+        auto silence = sung(9 * 48000, 100.0, 101.0);
+        const auto t = runTraced(quiet, silence, playing());
+        CHECK(std::none_of(t.engaged.begin(), t.engaged.end(), [](bool e) { return e; }));
     }
-    { // Variation: different modes for different pauses
+}
+
+TEST_CASE("stutter Auto presets: Amount, Follow Voice, a stopped transport, and the hand wins")
+{
+    { // Amount: light plays only the main moves; wild plays them all.
+        S light;
+        light.prepare(kRate, 256);
+        light.setParameter(S::Auto, 1.0f);
+        light.setParameter(S::AutoAmount, 0.0f);
+        auto a = sung(8 * 48000, 0.0, 8.0);
+        auto t = runTraced(light, a, playing());
+        CHECK(! t.engaged[t.at(1.85)]); // 1/16 (tier 2)
+        CHECK(t.engaged[t.at(3.75)]);   // ROLL (tier 1)
+        CHECK(! t.engaged[t.at(7.25)]); // REWIND (tier 2)
+        S wild;
+        wild.prepare(kRate, 256);
+        wild.setParameter(S::Auto, 1.0f);
+        wild.setParameter(S::AutoAmount, 1.0f);
+        auto b = sung(8 * 48000, 0.0, 8.0);
+        t = runTraced(wild, b, playing());
+        CHECK(t.engaged[t.at(5.1)]);    // GLITCH (tier 3)
+        CHECK(t.modes[t.at(5.1)] == S::Shatter);
+    }
+    { // Transport stopped: the cycle starts when the voice comes in.
         S s;
         s.prepare(kRate, 256);
         s.setParameter(S::Auto, 1.0f);
-        s.setParameter(S::Variation, 1.0f);
-        auto audio = speech(20 * 48000, 0.8, 0.6);
-        const auto trace = runTraced(s, audio, stopped());
-        std::vector<int> seen;
-        for (size_t b = 0; b < trace.engaged.size(); ++b)
-            if (trace.engaged[b] && std::find(seen.begin(), seen.end(), trace.modes[b]) == seen.end()) seen.push_back(trace.modes[b]);
-        CHECK(seen.size() >= 3);
+        auto a = sung(7 * 48000, 1.3, 7.0);
+        const auto t = runTraced(s, a, stopped());
+        CHECK(t.position[t.at(1.0)] < 0);         // no voice yet: no clock
+        CHECK_NEAR(t.position[t.at(2.3)], 2.0, 0.05); // a second after the voice came in = 2 beats
+        CHECK(! t.engaged[t.at(4.6)]);
+        CHECK(t.engaged[t.at(5.05)]);             // ROLL: beat 7 after the voice came in (1.3 + 3.5 s)
+    }
+    { // Follow Voice with the transport playing: the cycle starts on the beat nearest to the voice coming in.
+        S s;
+        s.prepare(kRate, 256);
+        s.setParameter(S::Auto, 1.0f);
+        s.setParameter(S::AutoFollow, (float) S::FollowVoice);
+        auto a = sung(7 * 48000, 1.3, 7.0); // comes in at beat 2.6: the cycle starts on beat 3 (1.5 s)
+        const auto t = runTraced(s, a, playing());
+        CHECK(! t.engaged[t.at(3.75)]);           // where Bars would have rolled
+        CHECK(! t.engaged[t.at(4.9)]);
+        CHECK(t.engaged[t.at(5.25)]);             // ROLL at 1.5 + 3.5 s
     }
     { // Hold wins over Auto
         S s;
@@ -397,13 +532,70 @@ TEST_CASE("stutter Auto: phrase starts, bar ends while the voice is there, Varia
         s.setParameter(S::Auto, 1.0f);
         s.setParameter(S::Hold, 1.0f);
         s.setParameter(S::ModeParam, (float) S::Rewind);
-        auto audio = speech(3 * 48000, 1.2, 0.6);
-        const auto trace = runTraced(s, audio, stopped());
-        for (size_t b = 0; b < trace.engaged.size(); b += 7) CHECK(! trace.engaged[b]);
+        auto a = sung(5 * 48000, 0.0, 5.0);
+        const auto t = runTraced(s, a, playing());
+        for (size_t b = 0; b < t.engaged.size(); b += 7) CHECK(! t.engaged[b]);
         devices::Stutter::View v;
         s.readView(v);
         CHECK(v.engaged);
         CHECK(v.mode == S::Rewind);
+    }
+}
+
+TEST_CASE("stutter: a NaN from the host counts as silence and does not stop Auto")
+{
+    S s;
+    s.prepare(kRate, 256);
+    s.setParameter(S::Auto, 1.0f);
+    juce::AudioBuffer<float> bad(2, 512);
+    for (int i = 0; i < 512; ++i) bad.setSample(0, i, std::numeric_limits<float>::quiet_NaN());
+    bad.clear(1, 0, 512);
+    juce::MidiBuffer midi;
+    s.setHostInfo(playing());
+    s.process(bad, midi);
+    auto audio = sung(5 * 48000, 0.0, 5.0);
+    const auto t = runTraced(s, audio, playing());
+    CHECK(t.engaged[t.at(3.75)]);
+    bool finite = true;
+    for (int i = 0; i < audio.getNumSamples(); ++i) finite = finite && std::isfinite(audio.getSample(0, i));
+    CHECK(finite);
+}
+
+TEST_CASE("stutter Auto presets: every preset plays every move, finite and bounded")
+{
+    for (int k = 0; k < S::kPresets; ++k)
+    {
+        const auto& p = S::preset(k);
+        S s;
+        s.prepare(kRate, 256);
+        s.setParameter(S::Auto, 1.0f);
+        s.setParameter(S::AutoPreset, (float) k);
+        s.setParameter(S::AutoAmount, 1.0f);
+        const double seconds = p.cycleBeats * 0.5 + 0.5;
+        auto audio = sung((int) (seconds * kRate), 0.0, seconds);
+        const auto t = runTraced(s, audio, playing());
+        for (int i = 0; i < p.count; ++i)
+        {
+            const auto& m = p.moves[(size_t) i];
+            const double middle = (double) (m.at + m.length * 0.5f);
+            if (S::moveAt(p, middle, 3) != i) continue; // covered by a later move
+            const double at = middle * 0.5;
+            CHECK(t.engaged[t.at(at)]);
+            CHECK(t.moves[t.at(at)] == i);
+            CHECK(t.modes[t.at(at)] == m.mode);
+        }
+        float peak = 0;
+        bool finite = true;
+        for (int i = 0; i < audio.getNumSamples(); ++i)
+        {
+            const float v = audio.getSample(0, i);
+            finite = finite && std::isfinite(v);
+            peak = std::max(peak, std::abs(v));
+        }
+        CHECK(finite);
+        CHECK(peak > 0.05f);
+        // Never louder than the voice (0.55 peak), give or take the dry voice kept under a move (Mix < 100 %).
+        CHECK(peak < 0.55f * (k == 7 || k == 1 ? 1.6f : 1.15f));
     }
 }
 

@@ -22,11 +22,14 @@
 // of any octave play a mode while held (C Swell, D Rewind, E Shatter, F Freeze, G Spread, A Tunnel, B Retrigger), black
 // keys the selected mode. Every new note re-anchors the read head at that moment. No latency.
 //
-// Auto (PLG-23c) plays it by itself: a voice detector (an envelope against a self-tuning noise floor, Sensitivity) finds
-// where the voice speaks and pauses, and Stutter engages at AutoWhen: in each pause (on the last syllable, until the
-// voice comes back or for AutoLength), at each phrase start, or on the last beat(s) of every bar or two while the voice
-// is there. Variation picks a mode and a Motion for each one (0: always the selected mode and Motion). The hand (pad,
-// MIDI, Hold) still wins over Auto.
+// Auto (PLG-23c, presets PLG-23d) plays it by itself: one click and a preset plays a choreography of stutters (rolls,
+// stretches, backspins, freezes, a tape stop...) on the song's bars while the voice is there. Each preset is a cycle of 2,
+// 4 or 8 bars with moves at fixed beats; every move engages one mode for its length with Motion, Pitch, Speed and Tone
+// ramps of its own. A move only starts when the voice was heard in the last beat and a half, and it grabs the last thing
+// sung (if the voice just stopped, the read point goes back to the last syllable). Follow: the cycle sits on the
+// transport's bars (Bars), or starts when the voice comes in after a bar of silence (Voice, and always when the
+// transport is stopped). Amount: how many of the preset's moves play (1/3: the main ones; all of them at the top). The
+// voice detector: an envelope against a self-tuning noise floor (Sensitivity). The hand (pad, MIDI, Hold) still wins.
 //
 // Display data (the face): the input and output waveforms of the last seconds, the grains (when, where they read, which
 // side), the read head, the capture window and the settings that play, written by the audio thread into atomics.
@@ -47,13 +50,10 @@ public:
     enum Param
     {
         ModeParam, Motion, Macro, Hold, Capture, Sync, Grain, Shape, Every, Speed, Pitch, Width, Jitter, Tone, Space, Mix,
-        Output, Auto, AutoWhen, AutoLength, Variation, Sensitivity, NumParams
+        Output, Auto, AutoPreset, AutoFollow, AutoAmount, Sensitivity, NumParams
     };
-    enum AutoWhenKind { EachPause, PhraseStart, BarEnd, TwoBarEnd, kAutoWhens };
-    static constexpr const char* kAutoWhenNames[kAutoWhens] = {"Each pause", "Phrase start", "End of bar", "End of 2 bars"};
-    static constexpr int kAutoLengths = 6;
-    static constexpr const char* kAutoLengthNames[kAutoLengths] = {"1/8", "1/4", "1/2", "1 Bar", "2 Bars", "Whole"};
-    static constexpr double kAutoLengthBeats[kAutoLengths] = {0.5, 1.0, 2.0, 4.0, 8.0, 0.0}; // 0: the whole pause / phrase
+    enum Follow { FollowBars, FollowVoice, kFollows };
+    static constexpr const char* kFollowNames[kFollows] = {"Bars", "Voice"};
     static constexpr const char* kModeNames[kModes] = {"Swell", "Rewind", "Shatter", "Freeze", "Spread", "Tunnel", "Retrigger"};
     static constexpr const char* kModeKeys[kModes] = {"C", "D", "E", "F", "G", "A", "B"};
     static constexpr int kCaptures = 5;
@@ -81,6 +81,40 @@ public:
     // Snaps a time to the nearest note value at a tempo (1/64 .. 1 bar, triplets too); returns its length in beats.
     static double snapToNote(double ms, double tempo);
     static const char* noteName(double beats);
+
+    // ---- Auto presets (PLG-23d)
+    static constexpr float kModeSpeed = -99.0f; // Move::speed: the mode's own
+    struct Move
+    {
+        float at = 0, length = 1;                       // beats from the cycle's start (4/4)
+        int mode = Swell;
+        float motion0 = 0.5f, motion1 = 0.5f;           // Motion at the start and at the end (a ramp)
+        float pitch0 = 0, pitch1 = 0;                   // semitones, a ramp (added to the Pitch control)
+        float speed0 = kModeSpeed, speed1 = kModeSpeed; // read speed, a ramp
+        float tone0 = 0, tone1 = 0;                     // added to Tone, a ramp
+        float mix = 1;                                  // 1 replaces the voice; less keeps the dry voice under it
+        float space = -1;                               // -1: the mode's own
+        int tier = 1;                                   // 1 always; 2 from Amount 34 %; 3 from Amount 67 %
+        const char* label = "";                         // short, on the face's timeline
+    };
+    static constexpr int kMaxMoves = 10;
+    struct Preset
+    {
+        const char* name = "";
+        const char* blurb = "";  // what it does, in words
+        double cycleBeats = 16;  // the choreography's length
+        int count = 0;
+        std::array<Move, kMaxMoves> moves{};
+    };
+    static constexpr int kPresets = 8;
+    static const Preset& preset(int index);
+    static int tierFor(float amount) { return amount < 0.34f ? 1 : amount < 0.67f ? 2 : 3; }
+    // The move playing at a position of a preset's cycle at a tier (-1: none). The latest-starting one wins.
+    static int moveAt(const Preset&, double position, int tier);
+    // The next move to start after a position (wrapping around the cycle; -1: none) and how many beats away.
+    static int nextMove(const Preset&, double position, int tier, double& beatsAway);
+    // What a move plays at progress t (0..1) of its length. Pure; for the face and tests.
+    static Settings moveSettings(const Move&, float t, double tempo);
 
     Stutter();
     std::string name() const override { return "Sonora Stutter"; }
@@ -115,6 +149,10 @@ public:
     {
         bool engaged = false;
         bool autoOn = false, autoEngaged = false, voiced = false; // Auto: on, engaged by itself, the voice speaking now
+        int autoPreset = 0, autoMove = -1;                        // the preset, the move playing (-1: none)
+        double autoPosition = -1;                                 // beats into the preset's cycle (-1: no clock yet)
+        float autoProgress = 0;                                   // of the move playing
+        bool autoResting = false;                                 // the clock runs but no voice: moves are skipped
         float envDb = -100, thresholdDb = -60;                    // the voice detector's level and threshold
         std::array<uint8_t, kBins> voice{};                       // per input bin: 1 where the voice was detected
         int mode = 0;
@@ -158,7 +196,7 @@ private:
 
     void engage(int64_t at);
     void detectVoice(float inL, float inR);
-    void startAuto(int64_t anchor, int when);
+    void runAuto(int sampleInBlock, bool manual);
     void spawnGrain(const Settings&, int64_t now);
     float random01();
     void readRecording(double index, float& l, float& r) const;
@@ -179,6 +217,7 @@ private:
     double lastGridIndex_ = -1;
     float engage_ = 0;
     float toneState_[2][2]{};
+    float inPeak_ = 0, peakDecay_ = 0.9999f, wetGain_ = 1, guardRelease_ = 0.0003f; // the peak guard
     Room room_;
     Tube tube_;
     uint32_t noise_ = 0x9e3779b9u;
@@ -186,19 +225,23 @@ private:
     bool midiFresh_ = false;
     int lastPressed_ = -1;
     std::atomic<int> pressed_{-1};
-    std::atomic<float> motionOverride_{-1.0f}; // Auto's Motion for the stutter playing (-1: the Motion control)
 
-    // Auto: the voice detector and the stutter it plays
+    // Auto: the voice detector and the preset it plays
     float env_ = 0, envDb_ = -100, floorDb_ = -80, thresholdDb_ = -60, envAttack_ = 0.01f, envRelease_ = 0.0003f;
     int detectCounter_ = 0;
     bool voiced_ = false;
-    int64_t silent_ = 1 << 30, lastVoiced_ = -1, phraseStart_ = 0, lastPhraseEnd_ = -1;
-    bool phraseStarted_ = false, phraseEnded_ = false; // events this sample
-    bool autoActive_ = false, autoFresh_ = false, autoUntilVoice_ = false, autoUntilPause_ = false;
-    int autoMode_ = 0;
-    int64_t autoAnchor_ = 0, autoUntil_ = -1;
-    double lastAutoGrid_ = -1;
-    std::atomic<bool> voicedShown_{false}, autoShown_{false};
+    int64_t silent_ = 1 << 30, lastVoiced_ = -1, onsetGap_ = 0;
+    bool phraseStarted_ = false; // this sample (onsetGap_: how long it was silent before)
+    bool autoActive_ = false, autoFresh_ = false;
+    int autoMode_ = 0, autoMoveIndex_ = -1, autoPresetIndex_ = 0;
+    float autoMix_ = 1, mixScale_ = 1; // the move's Mix; the one the stutter playing uses (1 by hand)
+    int64_t autoAnchor_ = 0, autoKey_ = -1;
+    double freeBeat_ = 0, zeroBeat_ = 0, autoPosition_ = -1;
+    bool zeroValid_ = false, clockPlaying_ = false, autoResting_ = false, autoStarted_ = false;
+    std::atomic<int> autoMoveShown_{-1}, autoPresetShown_{0};
+    std::atomic<float> autoProgress_{0};
+    std::atomic<double> autoPositionShown_{-1};
+    std::atomic<bool> voicedShown_{false}, autoShown_{false}, autoRestingShown_{false};
     std::atomic<float> envShown_{-100}, thresholdShown_{-60};
     bool binVoiced_ = false;
     std::array<std::atomic<uint8_t>, kBins> inVoice_{};

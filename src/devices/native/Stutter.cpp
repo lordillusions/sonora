@@ -2,12 +2,92 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 
 namespace sonora::devices
 {
 namespace
 {
 constexpr float kPi = 3.14159265f;
+
+// ---- Auto presets (PLG-23d). Beats are 4/4 quarter notes from the cycle's start; Retrigger's Motion picks the roll
+// (0: 1/4 note, 0.17: 1/8, 0.33: 1/8T, 0.5: 1/16, 0.67: 1/16T, 0.83: 1/32, 1: 1/64).
+struct MoveBuilder
+{
+    Stutter::Move m;
+    MoveBuilder(float at, float length, int mode, float motion0, float motion1, const char* label, int tier = 1)
+    {
+        m.at = at; m.length = length; m.mode = mode; m.motion0 = motion0; m.motion1 = motion1; m.label = label; m.tier = tier;
+    }
+    MoveBuilder& pitch(float from, float to) { m.pitch0 = from; m.pitch1 = to; return *this; }
+    MoveBuilder& speed(float from, float to) { m.speed0 = from; m.speed1 = to; return *this; }
+    MoveBuilder& tone(float from, float to) { m.tone0 = from; m.tone1 = to; return *this; }
+    MoveBuilder& mix(float v) { m.mix = v; return *this; }
+    MoveBuilder& space(float v) { m.space = v; return *this; }
+    operator Stutter::Move() const { return m; }
+};
+
+Stutter::Preset makePreset(const char* name, const char* blurb, double cycleBeats, std::initializer_list<Stutter::Move> moves)
+{
+    Stutter::Preset p;
+    p.name = name;
+    p.blurb = blurb;
+    p.cycleBeats = cycleBeats;
+    for (const auto& m : moves)
+        if (p.count < Stutter::kMaxMoves) p.moves[(size_t) p.count++] = m;
+    std::sort(p.moves.begin(), p.moves.begin() + p.count, [](const Stutter::Move& a, const Stutter::Move& b) { return a.at < b.at; });
+    return p;
+}
+
+const std::array<Stutter::Preset, Stutter::kPresets>& presetTable()
+{
+    using S = Stutter;
+    static const std::array<S::Preset, S::kPresets> table = {
+        makePreset("Vocal Chop", "Vocal Chop: a roll at the end of every 2nd bar; bar 4 stretches the word, spins it back and builds up.", 16,
+                   {MoveBuilder(3.5f, 0.5f, S::Retrigger, 0.5f, 0.5f, "1/16", 2),
+                    MoveBuilder(7.0f, 1.0f, S::Retrigger, 0.17f, 0.5f, "ROLL"),
+                    MoveBuilder(10.0f, 0.5f, S::Shatter, 0.7f, 0.7f, "GLITCH", 3),
+                    MoveBuilder(12.0f, 2.0f, S::Swell, 0.12f, 0.3f, "STRETCH"),
+                    MoveBuilder(14.0f, 1.0f, S::Rewind, 0.75f, 0.75f, "REWIND", 2),
+                    MoveBuilder(15.0f, 1.0f, S::Retrigger, 0.5f, 1.0f, "BUILD").pitch(0.0f, 7.0f)}),
+        makePreset("Stretch & Freeze", "Stretch & Freeze: bar 2 slows the voice down to a standstill; bar 4 freezes it into a pad under the singing.", 16,
+                   {MoveBuilder(2.0f, 2.0f, S::Spread, 0.15f, 0.3f, "CLOUD", 3).mix(0.5f),
+                    MoveBuilder(6.0f, 2.0f, S::Swell, 0.05f, 0.2f, "STRETCH").space(0.45f),
+                    MoveBuilder(10.0f, 2.0f, S::Spread, 0.1f, 0.2f, "WIDE", 2).mix(0.6f),
+                    MoveBuilder(12.0f, 4.0f, S::Freeze, 0.04f, 0.12f, "FREEZE").mix(0.55f).space(0.6f)}),
+        makePreset("Build-Up", "Build-Up: 8 bars; from bar 5 a roll that gets faster every bar (1/4, 1/8, 1/16, 1/32, 1/64) and rises an octave.", 32,
+                   {MoveBuilder(16.0f, 4.0f, S::Retrigger, 0.0f, 0.0f, "1/4", 2),
+                    MoveBuilder(20.0f, 4.0f, S::Retrigger, 0.17f, 0.17f, "1/8"),
+                    MoveBuilder(24.0f, 4.0f, S::Retrigger, 0.5f, 0.5f, "1/16").pitch(0.0f, 5.0f),
+                    MoveBuilder(28.0f, 3.0f, S::Retrigger, 0.83f, 0.83f, "1/32").pitch(5.0f, 11.0f).tone(0.0f, 0.35f),
+                    MoveBuilder(31.0f, 1.0f, S::Retrigger, 1.0f, 1.0f, "1/64").pitch(11.0f, 12.0f).tone(0.35f, 0.5f)}),
+        makePreset("Tape Stop", "Tape Stop: every 4 bars the voice winds down like a tape machine switched off; a backspin at the end of bar 2.", 16,
+                   {MoveBuilder(3.0f, 1.0f, S::Retrigger, 0.17f, 0.17f, "1/8", 3),
+                    MoveBuilder(6.5f, 1.5f, S::Rewind, 0.8f, 0.8f, "SPIN", 2),
+                    MoveBuilder(13.5f, 2.5f, S::Swell, 0.9f, 0.9f, "TAPE STOP").speed(1.0f, 0.0f).pitch(0.0f, -24.0f).tone(0.0f, -0.5f)}),
+        makePreset("Backspin", "Backspin: a DJ backspin at the end of every 2 bars, short rolls and glitches in between.", 8,
+                   {MoveBuilder(3.5f, 0.5f, S::Retrigger, 0.5f, 0.5f, "1/16", 2),
+                    MoveBuilder(5.0f, 0.5f, S::Shatter, 0.75f, 0.75f, "GLITCH", 3),
+                    MoveBuilder(7.0f, 1.0f, S::Rewind, 0.85f, 0.95f, "BACKSPIN")}),
+        makePreset("Glitch", "Glitch: busy broken edits on the off-beats: shattered fragments, 1/32 rolls and hard chops, every 2 bars.", 8,
+                   {MoveBuilder(1.5f, 0.5f, S::Shatter, 0.8f, 0.8f, "SHATTER", 2),
+                    MoveBuilder(2.75f, 0.25f, S::Retrigger, 0.83f, 0.83f, "1/32"),
+                    MoveBuilder(3.5f, 0.5f, S::Retrigger, 0.5f, 0.5f, "LOW", 3).pitch(-12.0f, -12.0f),
+                    MoveBuilder(5.0f, 0.5f, S::Freeze, 0.92f, 0.92f, "CHOP", 2),
+                    MoveBuilder(6.5f, 0.5f, S::Retrigger, 0.5f, 0.67f, "ROLL"),
+                    MoveBuilder(7.0f, 1.0f, S::Shatter, 0.6f, 1.0f, "SHATTER")}),
+        makePreset("Dub Tunnel", "Dub Tunnel: the last beat of the lines falls into a dark, echoing tube that rings on; bar 4 dives in.", 16,
+                   {MoveBuilder(3.0f, 1.0f, S::Tunnel, 0.2f, 0.2f, "ECHO", 2).space(0.6f).mix(0.7f),
+                    MoveBuilder(7.0f, 1.0f, S::Tunnel, 0.3f, 0.3f, "TUNNEL").space(0.7f),
+                    MoveBuilder(11.0f, 1.0f, S::Tunnel, 0.2f, 0.2f, "ECHO", 3).space(0.6f).mix(0.7f),
+                    MoveBuilder(14.0f, 2.0f, S::Tunnel, 0.1f, 0.55f, "DIVE").space(0.8f)}),
+        makePreset("Cloud", "Cloud: a slow, wide cloud of the voice always under it, frozen at the end of every 4 bars.", 16,
+                   {MoveBuilder(0.0f, 16.0f, S::Spread, 0.12f, 0.35f, "CLOUD").mix(0.3f),
+                    MoveBuilder(6.0f, 2.0f, S::Swell, 0.05f, 0.15f, "STRETCH", 3).mix(0.6f),
+                    MoveBuilder(12.0f, 4.0f, S::Freeze, 0.05f, 0.1f, "FREEZE", 2).mix(0.6f).space(0.6f)}),
+    };
+    return table;
+}
 
 std::vector<ParameterInfo> stutterParameters()
 {
@@ -33,11 +113,12 @@ std::vector<ParameterInfo> stutterParameters()
     p[S::Mix] = makeParam("Mix", "Mix", 0, 1, 1, "%");
     p[S::Output] = makeParam("Output", "Level", -24, 12, 0, "dB");
     p[S::Auto] = makeParam("Auto", "Auto", 0, 1, 0, "", true);
-    p[S::AutoWhen] = makeParam("AutoWhen", "Auto When", 0, S::kAutoWhens - 1, 0, "", false,
-                               std::vector<std::string>(S::kAutoWhenNames, S::kAutoWhenNames + S::kAutoWhens));
-    p[S::AutoLength] = makeParam("AutoLength", "Auto Length", 0, S::kAutoLengths - 1, S::kAutoLengths - 1, "", false,
-                                 std::vector<std::string>(S::kAutoLengthNames, S::kAutoLengthNames + S::kAutoLengths));
-    p[S::Variation] = makeParam("Variation", "Variation", 0, 1, 0.6f, "%");
+    std::vector<std::string> presets;
+    for (const auto& preset : presetTable()) presets.emplace_back(preset.name);
+    p[S::AutoPreset] = makeParam("AutoPreset", "Auto Preset", 0, S::kPresets - 1, 0, "", false, presets);
+    p[S::AutoFollow] = makeParam("AutoFollow", "Auto Follow", 0, S::kFollows - 1, 0, "", false,
+                                 std::vector<std::string>(S::kFollowNames, S::kFollowNames + S::kFollows));
+    p[S::AutoAmount] = makeParam("AutoAmount", "Auto Amount", 0, 1, 0.5f, "%");
     p[S::Sensitivity] = makeParam("Sensitivity", "Sensitivity", 0, 1, 0.5f, "%");
     return p;
 }
@@ -67,6 +148,46 @@ const char* Stutter::noteName(double beats)
     for (int i = 0; i < kNotes; ++i)
         if (std::abs(kNoteBeats[i] - beats) < 1e-6) return kNoteNames[i];
     return "";
+}
+
+const Stutter::Preset& Stutter::preset(int index) { return presetTable()[(size_t) std::clamp(index, 0, kPresets - 1)]; }
+
+int Stutter::moveAt(const Preset& p, double position, int tier)
+{
+    int best = -1;
+    for (int i = 0; i < p.count; ++i)
+    {
+        const auto& m = p.moves[(size_t) i];
+        if (m.tier > tier || position < (double) m.at || position >= (double) (m.at + m.length)) continue;
+        if (best < 0 || m.at >= p.moves[(size_t) best].at) best = i;
+    }
+    return best;
+}
+
+int Stutter::nextMove(const Preset& p, double position, int tier, double& beatsAway)
+{
+    int best = -1;
+    beatsAway = 0;
+    for (int i = 0; i < p.count; ++i)
+    {
+        const auto& m = p.moves[(size_t) i];
+        if (m.tier > tier) continue;
+        double away = (double) m.at - position;
+        if (away <= 1e-9) away += p.cycleBeats;
+        if (best < 0 || away < beatsAway) { best = i; beatsAway = away; }
+    }
+    return best;
+}
+
+Stutter::Settings Stutter::moveSettings(const Move& m, float t, double tempo)
+{
+    t = std::clamp(t, 0.0f, 1.0f);
+    Settings s = macroSettings(m.mode, m.motion0 + (m.motion1 - m.motion0) * t, tempo, true);
+    s.pitch += m.pitch0 + (m.pitch1 - m.pitch0) * t;
+    if (m.speed0 > kModeSpeed + 1.0f) s.speed = m.speed0 + (m.speed1 - m.speed0) * t;
+    s.toneShift += m.tone0 + (m.tone1 - m.tone0) * t;
+    if (m.space >= 0.0f) s.space = m.space;
+    return s;
 }
 
 Stutter::Settings Stutter::macroSettings(int mode, float m, double tempo, bool sync)
@@ -131,12 +252,21 @@ Stutter::Settings Stutter::macroSettings(int mode, float m, double tempo, bool s
 
 Stutter::Settings Stutter::settings() const
 {
+    const double tempo = host_.tempo > 0 ? host_.tempo : 120.0;
+    if (const int move = autoMoveShown_.load(std::memory_order_relaxed); move >= 0) // a preset's move plays
+    {
+        const auto& p = preset(autoPresetShown_.load(std::memory_order_relaxed));
+        if (move < p.count)
+        {
+            Settings s = moveSettings(p.moves[(size_t) move], autoProgress_.load(std::memory_order_relaxed), tempo);
+            s.pitch += value(Pitch);
+            return s;
+        }
+    }
     const int mode = engagedShown_.load(std::memory_order_relaxed) ? modeShown_.load(std::memory_order_relaxed)
                                                                    : std::clamp((int) std::lround(value(ModeParam)), 0, kModes - 1);
-    const double tempo = host_.tempo > 0 ? host_.tempo : 120.0;
     const bool sync = value(Sync) > 0.5f;
-    const float override = motionOverride_.load(std::memory_order_relaxed);
-    Settings s = macroSettings(mode, override >= 0.0f ? override : value(Motion), tempo, sync);
+    Settings s = macroSettings(mode, value(Motion), tempo, sync);
     if (value(Macro) < 0.5f && mode != Retrigger)
     {
         // The knobs play; the mode keeps its character (reverse, scatter, tube, detune).
@@ -264,6 +394,8 @@ void Stutter::prepare(double sampleRate, int)
     tube_.prepare(sampleRate_);
     envAttack_ = (float) (1.0 - std::exp(-1.0 / (0.003 * sampleRate_)));
     envRelease_ = (float) (1.0 - std::exp(-1.0 / (0.025 * sampleRate_)));
+    peakDecay_ = (float) std::exp(-1.0 / (3.0 * sampleRate_));
+    guardRelease_ = (float) (1.0 - std::exp(-1.0 / (0.08 * sampleRate_)));
     inBinSamples_ = std::max(1, (int) (kInputSeconds * sampleRate_ / kBins));
     outBinSamples_ = std::max(1, (int) (kOutputSeconds * sampleRate_ / kBins));
     reset();
@@ -300,16 +432,25 @@ void Stutter::reset()
     detectCounter_ = 0;
     voiced_ = false;
     silent_ = 1 << 30;
-    lastVoiced_ = lastPhraseEnd_ = -1;
-    phraseStart_ = 0;
-    phraseStarted_ = phraseEnded_ = false;
-    autoActive_ = autoFresh_ = autoUntilVoice_ = autoUntilPause_ = false;
-    autoUntil_ = -1;
-    lastAutoGrid_ = -1;
+    lastVoiced_ = -1;
+    onsetGap_ = 0;
+    phraseStarted_ = false;
+    autoActive_ = autoFresh_ = false;
+    autoMoveIndex_ = -1;
+    autoKey_ = -1;
+    autoMix_ = mixScale_ = 1.0f;
+    freeBeat_ = zeroBeat_ = 0;
+    autoPosition_ = -1;
+    zeroValid_ = clockPlaying_ = autoResting_ = autoStarted_ = false;
     binVoiced_ = false;
-    motionOverride_.store(-1.0f);
+    inPeak_ = 0;
+    wetGain_ = 1;
+    autoMoveShown_.store(-1);
+    autoProgress_.store(0);
+    autoPositionShown_.store(-1);
     voicedShown_.store(false);
     autoShown_.store(false);
+    autoRestingShown_.store(false);
 }
 
 float Stutter::random01()
@@ -353,6 +494,16 @@ void Stutter::engage(int64_t at)
 
 void Stutter::spawnGrain(const Settings& s, int64_t now)
 {
+    if (s.fixedSlice) // Retrigger is one repeat at a time: the new one cuts the last with a 2 ms fade (no doubled slices)
+    {
+        const int cut = std::max(1, (int) (0.002 * sampleRate_));
+        for (auto& g : grains_)
+            if (g.active && g.length - g.pos > cut)
+            {
+                g.fade = cut;
+                g.length = g.pos + cut;
+            }
+    }
     int slot = -1;
     float oldest = -1;
     for (int i = 0; i < kMaxGrains; ++i)
@@ -418,60 +569,107 @@ void Stutter::detectVoice(float inL, float inR)
         envDb_ = 20.0f * std::log10(env_ + 1.0e-9f);
         if (envDb_ < floorDb_) floorDb_ += 0.3f * (envDb_ - floorDb_);
         else floorDb_ += 1.5f * 32.0f / (float) sampleRate_;
-        floorDb_ = std::clamp(floorDb_, -100.0f, -20.0f);
+        floorDb_ = std::clamp(floorDb_, -100.0f, -45.0f); // a long sung line must not lift the floor up to the voice
         const float sensitivity = value(Sensitivity);
         thresholdDb_ = std::max(floorDb_ + 6.0f + (1.0f - sensitivity) * 18.0f, -62.0f + (1.0f - sensitivity) * 24.0f);
     }
-    phraseStarted_ = phraseEnded_ = false;
-    const int64_t pause = (int64_t) (0.15 * sampleRate_), minimumPhrase = (int64_t) (0.2 * sampleRate_);
+    phraseStarted_ = false;
+    const int64_t pause = (int64_t) (0.15 * sampleRate_);
     if (envDb_ > thresholdDb_)
     {
         if (! voiced_)
         {
             voiced_ = true;
-            phraseStart_ = written_;
             phraseStarted_ = true;
+            onsetGap_ = silent_;
         }
         silent_ = 0;
         lastVoiced_ = written_;
     }
-    else if (++silent_ >= pause && voiced_)
-    {
-        voiced_ = false;
-        if (lastVoiced_ - phraseStart_ >= minimumPhrase)
-        {
-            phraseEnded_ = true;
-            lastPhraseEnd_ = lastVoiced_;
-        }
-    }
+    else if (++silent_ >= pause && voiced_) voiced_ = false;
     binVoiced_ = binVoiced_ || voiced_;
 }
 
-void Stutter::startAuto(int64_t anchor, int when)
+void Stutter::runAuto(int i, bool manual)
 {
-    const double samplesPerBeat = 60.0 / std::clamp(host_.tempo, 20.0, 999.0) * sampleRate_;
-    const double beats = kAutoLengthBeats[std::clamp((int) std::lround(value(AutoLength)), 0, kAutoLengths - 1)];
-    autoActive_ = true;
-    autoFresh_ = true;
-    autoAnchor_ = std::min(anchor, written_);
-    autoUntilVoice_ = when == EachPause && beats <= 0;
-    autoUntilPause_ = when == PhraseStart && beats <= 0;
-    autoUntil_ = written_ + (int64_t) ((beats > 0 ? beats : 16.0) * samplesPerBeat); // "Whole": at most 4 bars
-    // Variation: a mode from the pool that suits the moment, and a Motion around the knob's.
-    static constexpr int kPause[] = {Swell, Freeze, Rewind, Spread, Tunnel};
-    static constexpr int kStart[] = {Swell, Spread, Shatter, Tunnel};
-    static constexpr int kBar[] = {Retrigger, Shatter, Rewind, Freeze, Swell};
-    const float variation = value(Variation);
-    const int paramMode = std::clamp((int) std::lround(value(ModeParam)), 0, kModes - 1);
-    autoMode_ = paramMode;
-    if (random01() < variation)
+    // The clock: the transport's beats while it plays, else a free clock at the tempo.
+    const double beatsPerSample = std::clamp(host_.tempo, 20.0, 999.0) / 60.0 / sampleRate_;
+    const double samplesPerBeat = 1.0 / beatsPerSample;
+    freeBeat_ += beatsPerSample;
+    const bool playing = host_.playing;
+    const double clock = playing ? host_.beats + (double) i * beatsPerSample : freeBeat_;
+    if (playing != clockPlaying_)
     {
-        const int* pool = when == EachPause ? kPause : when == PhraseStart ? kStart : kBar;
-        const int size = when == PhraseStart ? 4 : 5;
-        autoMode_ = pool[std::min(size - 1, (int) (random01() * (float) size))];
+        clockPlaying_ = playing;
+        zeroValid_ = false;
+        autoKey_ = -1;
     }
-    const float motion = std::clamp(value(Motion) + (random01() - 0.5f) * variation * 0.9f, 0.03f, 0.97f);
-    motionOverride_.store(variation > 0.0f ? motion : -1.0f, std::memory_order_relaxed);
+    // Where the cycle starts: the song's bars, or the voice coming in after a bar of silence (on the nearest beat).
+    const int follow = std::clamp((int) std::lround(value(AutoFollow)), 0, kFollows - 1);
+    if (playing && follow == FollowBars)
+    {
+        zeroBeat_ = 0;
+        zeroValid_ = true;
+    }
+    else if (phraseStarted_ && (! zeroValid_ || onsetGap_ >= (int64_t) (4.0 * samplesPerBeat)))
+    {
+        zeroBeat_ = playing ? std::floor(clock + 0.5) : clock;
+        zeroValid_ = true;
+    }
+
+    const int presetIndex = std::clamp((int) std::lround(value(AutoPreset)), 0, kPresets - 1);
+    const auto& p = preset(presetIndex);
+    const int tier = tierFor(value(AutoAmount));
+    int move = -1;
+    int64_t key = -1;
+    autoPosition_ = -1;
+    if (zeroValid_ && clock >= zeroBeat_)
+    {
+        const double rel = clock - zeroBeat_;
+        const double cycle = std::floor(rel / p.cycleBeats + 1e-9);
+        autoPosition_ = std::max(0.0, rel - cycle * p.cycleBeats);
+        move = moveAt(p, autoPosition_, tier);
+        if (move >= 0) key = (((int64_t) cycle * kPresets + presetIndex) * kMaxMoves + move) * 3 + tier;
+    }
+    // A move needs the voice: heard in the last beat and a half.
+    const bool voiceNear = lastVoiced_ >= 0 && (double) (written_ - lastVoiced_) <= 1.5 * samplesPerBeat;
+    autoResting_ = autoPosition_ >= 0 && ! voiceNear;
+    const bool fresh = key != autoKey_;
+    if (fresh)
+    {
+        autoKey_ = key;
+        autoActive_ = false;
+        autoStarted_ = false;
+    }
+    // A move starts on its beat; a long one also starts late when the voice comes in with a beat or more of it left.
+    const bool late = ! fresh && move >= 0 && ! autoStarted_ && voiced_
+                      && (double) (p.moves[(size_t) move].at + p.moves[(size_t) move].length) - autoPosition_ >= 1.0;
+    if (fresh || late)
+    {
+        if (move >= 0 && ! manual && voiceNear)
+        {
+            autoStarted_ = true;
+            const auto& m = p.moves[(size_t) move];
+            autoActive_ = true;
+            autoFresh_ = true;
+            autoMode_ = m.mode;
+            autoMoveIndex_ = move;
+            autoPresetIndex_ = presetIndex;
+            autoMix_ = m.mix;
+            // The last thing sung: now while the voice sounds, else just after its last syllable.
+            autoAnchor_ = voiced_ ? written_ : std::min(written_, lastVoiced_ + (int64_t) (0.03 * sampleRate_));
+        }
+    }
+    if (manual) autoActive_ = false;
+    if (autoActive_)
+    {
+        const auto& m = p.moves[(size_t) autoMoveIndex_];
+        autoPresetShown_.store(autoPresetIndex_, std::memory_order_relaxed);
+        autoProgress_.store((float) std::clamp((autoPosition_ - (double) m.at) / (double) std::max(0.01f, m.length), 0.0, 1.0),
+                            std::memory_order_relaxed);
+        autoMoveShown_.store(autoMoveIndex_, std::memory_order_relaxed);
+    }
+    else autoMoveShown_.store(-1, std::memory_order_relaxed);
 }
 
 void Stutter::publishBins(float inL, float inR, float outL, float outR)
@@ -524,12 +722,6 @@ void Stutter::process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
     const float level = juce::Decibels::decibelsToGain(value(Output));
     const double beatsPerSample = std::clamp(host_.tempo, 20.0, 999.0) / 60.0 / sampleRate_;
     const bool autoOn = value(Auto) > 0.5f;
-    const int autoWhen = std::clamp((int) std::lround(value(AutoWhen)), 0, kAutoWhens - 1);
-    if (! autoOn && autoActive_)
-    {
-        autoActive_ = false;
-        motionOverride_.store(-1.0f, std::memory_order_relaxed);
-    }
     const float engageStep = (float) (1.0 / (0.012 * sampleRate_));
 
     Settings s = settings();
@@ -572,50 +764,26 @@ void Stutter::process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
             else if (m.isAllNotesOff() || m.isAllSoundOff()) midiNote_ = midiMode_ = -1;
         }
 
-        const float inL = left[i], inR = right != nullptr ? right[i] : left[i];
+        // A non-finite sample from the host would poison the recording, the detector and the guard: it counts as silence.
+        const float rawL = left[i], rawR = right != nullptr ? right[i] : left[i];
+        const float inL = std::isfinite(rawL) ? rawL : 0.0f, inR = std::isfinite(rawR) ? rawR : 0.0f;
         const auto slot = (size_t) (written_ & historyMask_);
         history_[0][slot] = inL;
         history_[1][slot] = inR;
         ++written_;
 
-        // ---- Auto: the voice detector decides (the hand always wins)
+        // ---- Auto: a preset plays while the voice is there (the hand always wins)
         detectVoice(inL, inR);
         const bool midiHeld = midiNote_ >= 0;
         const bool manual = midiHeld || pressed >= 0 || hold;
-        if (manual && autoActive_)
+        if (autoOn) runAuto(i, manual);
+        else if (autoActive_ || autoKey_ >= 0 || autoPosition_ >= 0)
         {
             autoActive_ = false;
-            motionOverride_.store(-1.0f, std::memory_order_relaxed);
-        }
-        if (autoOn && ! manual)
-        {
-            if (autoActive_ && ((autoUntil_ >= 0 && written_ >= autoUntil_) || (autoUntilVoice_ && phraseStarted_)
-                                || (autoUntilPause_ && phraseEnded_)))
-            {
-                autoActive_ = false;
-                motionOverride_.store(-1.0f, std::memory_order_relaxed);
-            }
-            if (autoWhen == EachPause && phraseEnded_)
-                startAuto(lastPhraseEnd_ + (int64_t) (0.03 * sampleRate_), EachPause); // on the last syllable
-            else if (autoWhen == PhraseStart && phraseStarted_)
-                startAuto(phraseStart_, PhraseStart);
-            else if ((autoWhen == BarEnd || autoWhen == TwoBarEnd) && host_.playing)
-            {
-                const double barBeats = 4.0 * (double) std::max(1, host_.timeSigNumerator) / (double) std::max(1, host_.timeSigDenominator);
-                const double period = barBeats * (autoWhen == TwoBarEnd ? 2.0 : 1.0);
-                double length = kAutoLengthBeats[std::clamp((int) std::lround(value(AutoLength)), 0, kAutoLengths - 1)];
-                if (length <= 0) length = 1.0;
-                length = std::min(length, period);
-                const double beat = host_.beats + (double) i * beatsPerSample;
-                const double index = std::floor(beat / period + 1e-9), position = beat - index * period;
-                const bool voiceNear = lastVoiced_ >= 0 && written_ - lastVoiced_ < (int64_t) (2.0 * sampleRate_);
-                if (position >= period - length && std::abs(index - lastAutoGrid_) > 0.5 && voiceNear)
-                {
-                    lastAutoGrid_ = index;
-                    startAuto(written_, autoWhen);
-                    autoUntil_ = written_ + (int64_t) ((period - position) / beatsPerSample); // to the bar line
-                }
-            }
+            autoKey_ = -1;
+            autoPosition_ = -1;
+            autoResting_ = false;
+            autoMoveShown_.store(-1, std::memory_order_relaxed);
         }
         autoShown_.store(autoActive_ && ! manual, std::memory_order_relaxed);
 
@@ -632,6 +800,7 @@ void Stutter::process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
             playingMode_ = wantMode;
             refresh(wantMode);
             setTone();
+            mixScale_ = autoNew ? autoMix_ : 1.0f;
             engage(autoNew ? autoAnchor_ : written_);
         }
         else if (want && wantMode != playingMode_)
@@ -646,6 +815,11 @@ void Stutter::process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
             engagedShown_.store(false, std::memory_order_relaxed);
         }
         midiFresh_ = false;
+        if (engaged_ && autoActive_ && ! manual && (i & 31) == 0) // a move's ramps (Motion, Pitch, Speed, Tone)
+        {
+            s = settings();
+            setTone();
+        }
         if (! engaged_ && settingsMode != paramMode) // idle: the face shows the selected mode's settings
         {
             settingsMode = paramMode;
@@ -728,10 +902,20 @@ void Stutter::process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
         }
         if (s.tunnelMs > 0) tube_.process(wetL, wetR, s.tunnelMs * 0.001f * (float) sampleRate_, s.tunnelFeedback);
 
+        // Peak guard: the stutter is never louder than the voice's own recent peak (overlapping grains of one loud
+        // syllable, pitched rolls). Instant down, 80 ms back up.
+        inPeak_ = std::max(std::max(std::abs(inL), std::abs(inR)), inPeak_ * peakDecay_);
+        {
+            const float peakWet = std::max(std::abs(wetL), std::abs(wetR)), reference = std::max(inPeak_, 1.0e-4f);
+            wetGain_ = std::min(peakWet > reference ? reference / peakWet : 1.0f, wetGain_ + (1.0f - wetGain_) * guardRelease_);
+            wetL *= wetGain_;
+            wetR *= wetGain_;
+        }
+
         float roomL = 0, roomR = 0;
         room_.process(wetL * engage_ * s.space, wetR * engage_ * s.space, roomL, roomR);
 
-        const float dryGain = 1.0f - mix * engage_;
+        const float dryGain = 1.0f - mix * mixScale_ * engage_;
         const float outL = inL * dryGain + (wetL * engage_ + roomL) * level;
         const float outR = inR * dryGain + (wetR * engage_ + roomR) * level;
         left[i] = outL;
@@ -742,6 +926,8 @@ void Stutter::process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 
     now_.store(written_, std::memory_order_relaxed);
     voicedShown_.store(voiced_, std::memory_order_relaxed);
+    autoPositionShown_.store(autoPosition_, std::memory_order_relaxed);
+    autoRestingShown_.store(autoResting_, std::memory_order_relaxed);
     envShown_.store(envDb_, std::memory_order_relaxed);
     thresholdShown_.store(thresholdDb_, std::memory_order_relaxed);
     anchorShown_.store(anchor_, std::memory_order_relaxed);
@@ -756,6 +942,11 @@ void Stutter::readView(View& v) const
     v.engaged = engagedShown_.load(std::memory_order_relaxed);
     v.autoOn = value(Auto) > 0.5f;
     v.autoEngaged = autoShown_.load(std::memory_order_relaxed);
+    v.autoPreset = std::clamp((int) std::lround(value(AutoPreset)), 0, kPresets - 1);
+    v.autoMove = v.autoEngaged ? autoMoveShown_.load(std::memory_order_relaxed) : -1;
+    v.autoProgress = autoProgress_.load(std::memory_order_relaxed);
+    v.autoPosition = v.autoOn ? autoPositionShown_.load(std::memory_order_relaxed) : -1.0;
+    v.autoResting = autoRestingShown_.load(std::memory_order_relaxed);
     v.voiced = voicedShown_.load(std::memory_order_relaxed);
     v.envDb = envShown_.load(std::memory_order_relaxed);
     v.thresholdDb = thresholdShown_.load(std::memory_order_relaxed);
@@ -806,7 +997,7 @@ void Stutter::readView(View& v) const
 std::vector<DeviceProcessor::UiGroup> Stutter::uiGroups() const
 {
     return {{"Play", {ModeParam, Motion, Macro, Hold, Capture, Sync}, 3},
-            {"Auto", {Auto, AutoWhen, AutoLength, Variation, Sensitivity}, 3},
+            {"Auto", {Auto, AutoPreset, AutoFollow, AutoAmount, Sensitivity}, 3},
             {"Grain", {Grain, Shape, Every, Speed}, 2},
             {"Sound", {Pitch, Width, Jitter, Tone, Space, Mix, Output}, 4}};
 }

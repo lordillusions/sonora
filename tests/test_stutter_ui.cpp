@@ -81,6 +81,7 @@ TEST_CASE("stutter plugin: the full face; modes, Motion and the hold pad with re
     CHECK(gfx::renderToPng(view, (int) size.w, (int) size.h, 2.0f, png.getFullPathName().toStdString()));
     view.dispatchMouseUp(designAt(face, pad->first, pad->second));
     juce::AudioBuffer<float> chunk(2, 512);
+    chunk.clear();
     juce::MidiBuffer midi;
     p.processBlock(chunk, midi);
     view.tickTree();
@@ -91,9 +92,22 @@ TEST_CASE("stutter plugin: the full face; modes, Motion and the hold pad with re
     REQUIRE(drag(view, face, "SPEED", -10));
     CHECK(p.device().getParameter(S::Macro) < 0.5f);
     CHECK(p.device().getParameter(S::Speed) > speedBefore);
-    // AUTO: one click, then a voice with pauses plays it by itself.
+    // AUTO: the presets are chips; Follow; one click on AUTO, then a voice plays the preset by itself.
+    REQUIRE(click(view, face, "Tape Stop"));
+    CHECK(std::lround(p.device().getParameter(S::AutoPreset)) == 3);
+    const auto chip = face.controlCentre("Tape Stop");
+    REQUIRE(chip.has_value());
+    view.dispatchMouseMove(designAt(face, chip->first, chip->second));
+    CHECK(face.helpLine().rfind("Tape Stop:", 0) == 0);
+    REQUIRE(click(view, face, "Voice"));
+    CHECK(std::lround(p.device().getParameter(S::AutoFollow)) == S::FollowVoice);
+    REQUIRE(click(view, face, "Bars"));
+    REQUIRE(click(view, face, "Vocal Chop"));
+    CHECK(std::lround(p.device().getParameter(S::AutoPreset)) == 0);
     REQUIRE(click(view, face, "AUTO"));
     CHECK(p.device().getParameter(S::Auto) > 0.5f);
+    view.tickTree();
+    CHECK(face.autoLine().find("waiting for the voice") != std::string::npos);
     {
         juce::AudioBuffer<float> speech(2, 4 * 48000);
         for (int s = 0; s < speech.getNumSamples(); ++s)
@@ -103,18 +117,25 @@ TEST_CASE("stutter plugin: the full face; modes, Motion and the hold pad with re
             speech.setSample(0, s, v);
             speech.setSample(1, s, v);
         }
-        bool autoSeen = false;
+        // The transport is stopped (no host): the cycle starts when the voice comes in (1.6 s); the 1/16 move plays
+        // 3.5 beats later.
+        int autoBlocks = 0;
+        bool nextShown = false;
         for (int start = 0, block = 0; start < speech.getNumSamples(); start += 512, ++block)
         {
             juce::AudioBuffer<float> part(speech.getArrayOfWritePointers(), 2, start, std::min(512, speech.getNumSamples() - start));
             juce::MidiBuffer none;
             p.processBlock(part, none);
-            if (block % 4 == 0) view.tickTree();
-            autoSeen = autoSeen || face.view().autoEngaged;
-            if (start >= (int) (1.45 * kRate) && start < (int) (1.45 * kRate) + 512)
+            view.tickTree();
+            nextShown = nextShown || face.autoLine().find("next: 1/16 in") != std::string::npos;
+            if (face.view().autoEngaged && ++autoBlocks == 14)
+            {
+                CHECK(face.autoLine().find("1/16") != std::string::npos);
                 CHECK(gfx::renderToPng(view, (int) size.w, (int) size.h, 2.0f, testFile("sonora_stutter_auto.png").getFullPathName().toStdString()));
+            }
         }
-        CHECK(autoSeen);
+        CHECK(autoBlocks >= 14);
+        CHECK(nextShown);
     }
 
     // Hover help.
@@ -152,6 +173,13 @@ TEST_CASE("stutter: the compact face in the app's chain, mapped, with a window b
     CHECK(windowButton);
     REQUIRE(click(root, face, "Shatter"));
     CHECK(std::lround(chain.processor()->getParameter(S::ModeParam)) == S::Shatter);
+    // AUTO and the preset button (it shows the preset's name; a click picks the next one).
+    REQUIRE(click(root, face, "AUTO"));
+    CHECK(chain.processor()->getParameter(S::Auto) > 0.5f);
+    root.dispatchMouseDown(designAt(face, 54, 119));
+    root.dispatchMouseUp(designAt(face, 54, 119));
+    CHECK(std::lround(chain.processor()->getParameter(S::AutoPreset)) == 1);
+    root.tickTree();
     CHECK(gfx::renderToPng(root, 1400, 900, 1.0f, testFile("sonora_stutter_chain.png").getFullPathName().toStdString()));
 
     ui::ProFaceWindowView window(chain.context, {1, 10, -1, -1});
