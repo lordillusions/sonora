@@ -42,6 +42,26 @@ sound does not jump. Each mode gives Motion its own character:
 | Tunnel (A) | sinks into a dark echoing tube (32 ms comb) | a metallic fluttering pipe (3.2 ms) | resonant comb per side, darker tone |
 | Retrigger (B) | repeats the last beat | a 1/64 roll | the slice before the engage point, repeated (grid-locked with Sync) |
 
+## Auto (PLG-23c): it plays itself from the voice
+
+One click on **AUTO** and Stutter listens for the voice: an envelope (3 ms up, 25 ms down) against a noise floor that
+follows the quiet parts down at once and creeps up 1.5 dB/s; the threshold is the floor + 6..24 dB with an absolute gate
+(**Sensitivity**). The voice "speaks" while the envelope is over the threshold; a pause starts after 150 ms under it
+(a phrase must have lasted 200 ms). **When**:
+
+| When | Engages | Length "Whole" |
+|---|---|---|
+| Each pause (default) | 150 ms into each pause, anchored 30 ms after the last syllable, so the grains read that syllable | until the voice comes back |
+| Phrase start | at each phrase's first sound | until the phrase ends |
+| End of bar / End of 2 bars | on the last beats of every bar (or two) while the transport plays and the voice was heard in the last 2 s; releases on the bar line | 1 beat |
+
+**Length** otherwise: 1/8, 1/4, 1/2, 1 bar, 2 bars (at the tempo; "Whole" stops after 4 bars at most). **Variation**
+picks a mode and a Motion for each one: with chance Variation a mode from a pool that suits the moment (pauses: Swell,
+Freeze, Rewind, Spread, Tunnel; phrase starts: Swell, Spread, Shatter, Tunnel; bar ends: Retrigger, Shatter, Rewind,
+Freeze, Swell), and Motion = the knob + up to +-45 % x Variation; 0 = always the selected mode and Motion. The hand (pad,
+MIDI, Hold/Latch) always wins over Auto. The face shows the voice light, its level against the threshold, and where the
+voice was heard (a green line under the input).
+
 ## What engages it
 
 - **HOLD** pad on the face (momentary) and **Latch** (= the **Hold** control, host-automatable).
@@ -51,12 +71,13 @@ sound does not jump. Each mode gives Motion its own character:
 
 ## Face (`src/ui/views/StutterFace.cpp`, ProFace kit: docs/PRO_FACES.md)
 
-Full (its own window, the VST3; 1160 x 640): the wordmark and what plays now ("FREEZE  frozen . 120 ms grains every
-107 ms"), Free / Sync to tempo; the display: INPUT (the last 12 s recorded, the capture window shaded, the read head, where
+Full (its own window, the VST3; 1160 x 718): the wordmark and what plays now ("FREEZE  frozen . 120 ms grains every
+107 ms", "AUTO . waiting for a pause in the voice"), Free / Sync to tempo; the display: INPUT (the last 12 s recorded, the capture window shaded, the read head, where
 the grains read) and OUTPUT (the last 4 s out, every grain drawn as its envelope, pink = left, violet = right) with the
-Capture choice; the HOLD pad and Latch; MOTION & MODE (the Motion knob, Macro, the seven modes with their MIDI keys, what
+Capture choice; the AUTO strip (AUTO, the voice light and level, When, Length, Variation, Sensitivity); the HOLD pad and
+Latch; MOTION & MODE (the Motion knob, Macro, the seven modes with their MIDI keys, what
 Slow and Fast do in the selected mode); GRAIN (driven by Motion while Macro is on); OUT (Tone, Mix, Level, meter); the
-help line. Compact (the device chain, 700 x 170): HOLD, Latch, the display, Motion, Macro, the modes, Speed, Mix; the title
+help line. Compact (the device chain, 700 x 170): HOLD, AUTO, Latch, the display, Motion, Macro, the modes, Speed, Mix; the title
 bar's window icon opens the full face.
 
 ## Beat Repeat (`src/devices/native/BeatRepeat.cpp`)
@@ -78,6 +99,9 @@ own presets (`Core Library/Devices/Audio Effects/Beat Repeat/*.adv` were read, n
   every 1/16 of the grid from the same slice; Motion slow vs fast per mode, snapToNote, detachMacro keeps the settings;
   MIDI white/black keys and the face's pad engage and release; catalog/factory/state; every mode at Motion 0 and 1 finite,
   bounded and sounding on noise (also when engaged before anything was recorded).
+- `sonora_tests "stutter Auto"`: on a speech-like signal (phrases and pauses over a -70 dBFS floor): it stutters in
+  each pause (the output plays while the input is silent) and the voice passes dry while it speaks, bit-exact; phrase
+  starts for a beat; bar ends only while the voice is there; Variation gives three or more modes; Hold wins.
 - `sonora_tests "stutter plugin"`: the VST3's full face with real clicks (modes, Sync, Capture, Motion drag, the HOLD pad
   while a voice plays, a grain knob taking over from Macro, the help line), `sonora_stutter_plugin.png`; the compact face
   in the chain (mapped, window icon, a mode click), the window's full face, `sonora_stutter_chain.png`.

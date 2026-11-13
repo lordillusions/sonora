@@ -22,6 +22,12 @@
 // of any octave play a mode while held (C Swell, D Rewind, E Shatter, F Freeze, G Spread, A Tunnel, B Retrigger), black
 // keys the selected mode. Every new note re-anchors the read head at that moment. No latency.
 //
+// Auto (PLG-23c) plays it by itself: a voice detector (an envelope against a self-tuning noise floor, Sensitivity) finds
+// where the voice speaks and pauses, and Stutter engages at AutoWhen: in each pause (on the last syllable, until the
+// voice comes back or for AutoLength), at each phrase start, or on the last beat(s) of every bar or two while the voice
+// is there. Variation picks a mode and a Motion for each one (0: always the selected mode and Motion). The hand (pad,
+// MIDI, Hold) still wins over Auto.
+//
 // Display data (the face): the input and output waveforms of the last seconds, the grains (when, where they read, which
 // side), the read head, the capture window and the settings that play, written by the audio thread into atomics.
 
@@ -41,8 +47,13 @@ public:
     enum Param
     {
         ModeParam, Motion, Macro, Hold, Capture, Sync, Grain, Shape, Every, Speed, Pitch, Width, Jitter, Tone, Space, Mix,
-        Output, NumParams
+        Output, Auto, AutoWhen, AutoLength, Variation, Sensitivity, NumParams
     };
+    enum AutoWhenKind { EachPause, PhraseStart, BarEnd, TwoBarEnd, kAutoWhens };
+    static constexpr const char* kAutoWhenNames[kAutoWhens] = {"Each pause", "Phrase start", "End of bar", "End of 2 bars"};
+    static constexpr int kAutoLengths = 6;
+    static constexpr const char* kAutoLengthNames[kAutoLengths] = {"1/8", "1/4", "1/2", "1 Bar", "2 Bars", "Whole"};
+    static constexpr double kAutoLengthBeats[kAutoLengths] = {0.5, 1.0, 2.0, 4.0, 8.0, 0.0}; // 0: the whole pause / phrase
     static constexpr const char* kModeNames[kModes] = {"Swell", "Rewind", "Shatter", "Freeze", "Spread", "Tunnel", "Retrigger"};
     static constexpr const char* kModeKeys[kModes] = {"C", "D", "E", "F", "G", "A", "B"};
     static constexpr int kCaptures = 5;
@@ -103,6 +114,9 @@ public:
     struct View
     {
         bool engaged = false;
+        bool autoOn = false, autoEngaged = false, voiced = false; // Auto: on, engaged by itself, the voice speaking now
+        float envDb = -100, thresholdDb = -60;                    // the voice detector's level and threshold
+        std::array<uint8_t, kBins> voice{};                       // per input bin: 1 where the voice was detected
         int mode = 0;
         int64_t now = 0, anchor = 0, head = 0, windowStart = 0;
         double sampleRate = 44100;
@@ -143,6 +157,8 @@ private:
     };
 
     void engage(int64_t at);
+    void detectVoice(float inL, float inR);
+    void startAuto(int64_t anchor, int when);
     void spawnGrain(const Settings&, int64_t now);
     float random01();
     void readRecording(double index, float& l, float& r) const;
@@ -170,6 +186,22 @@ private:
     bool midiFresh_ = false;
     int lastPressed_ = -1;
     std::atomic<int> pressed_{-1};
+    std::atomic<float> motionOverride_{-1.0f}; // Auto's Motion for the stutter playing (-1: the Motion control)
+
+    // Auto: the voice detector and the stutter it plays
+    float env_ = 0, envDb_ = -100, floorDb_ = -80, thresholdDb_ = -60, envAttack_ = 0.01f, envRelease_ = 0.0003f;
+    int detectCounter_ = 0;
+    bool voiced_ = false;
+    int64_t silent_ = 1 << 30, lastVoiced_ = -1, phraseStart_ = 0, lastPhraseEnd_ = -1;
+    bool phraseStarted_ = false, phraseEnded_ = false; // events this sample
+    bool autoActive_ = false, autoFresh_ = false, autoUntilVoice_ = false, autoUntilPause_ = false;
+    int autoMode_ = 0;
+    int64_t autoAnchor_ = 0, autoUntil_ = -1;
+    double lastAutoGrid_ = -1;
+    std::atomic<bool> voicedShown_{false}, autoShown_{false};
+    std::atomic<float> envShown_{-100}, thresholdShown_{-60};
+    bool binVoiced_ = false;
+    std::array<std::atomic<uint8_t>, kBins> inVoice_{};
 
     // display
     int inBinSamples_ = 1, outBinSamples_ = 1, inCount_ = 0, outCount_ = 0;

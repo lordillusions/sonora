@@ -91,6 +91,32 @@ TEST_CASE("stutter plugin: the full face; modes, Motion and the hold pad with re
     REQUIRE(drag(view, face, "SPEED", -10));
     CHECK(p.device().getParameter(S::Macro) < 0.5f);
     CHECK(p.device().getParameter(S::Speed) > speedBefore);
+    // AUTO: one click, then a voice with pauses plays it by itself.
+    REQUIRE(click(view, face, "AUTO"));
+    CHECK(p.device().getParameter(S::Auto) > 0.5f);
+    {
+        juce::AudioBuffer<float> speech(2, 4 * 48000);
+        for (int s = 0; s < speech.getNumSamples(); ++s)
+        {
+            const double t = (double) s / kRate, inCycle = std::fmod(t, 1.6);
+            const float v = inCycle < 1.0 ? (float) (0.4 * (0.55 + 0.45 * std::sin(6.2831853 * 4.0 * inCycle)) * std::sin(6.2831853 * 180.0 * t)) : 0.0f;
+            speech.setSample(0, s, v);
+            speech.setSample(1, s, v);
+        }
+        bool autoSeen = false;
+        for (int start = 0, block = 0; start < speech.getNumSamples(); start += 512, ++block)
+        {
+            juce::AudioBuffer<float> part(speech.getArrayOfWritePointers(), 2, start, std::min(512, speech.getNumSamples() - start));
+            juce::MidiBuffer none;
+            p.processBlock(part, none);
+            if (block % 4 == 0) view.tickTree();
+            autoSeen = autoSeen || face.view().autoEngaged;
+            if (start >= (int) (1.45 * kRate) && start < (int) (1.45 * kRate) + 512)
+                CHECK(gfx::renderToPng(view, (int) size.w, (int) size.h, 2.0f, testFile("sonora_stutter_auto.png").getFullPathName().toStdString()));
+        }
+        CHECK(autoSeen);
+    }
+
     // Hover help.
     const auto every = face.controlCentre("EVERY");
     REQUIRE(every.has_value());

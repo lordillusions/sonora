@@ -594,7 +594,8 @@ void ProFace::paintSegment(SkCanvas& c, const Control& s)
         pro::rounded(c, s.r, radius, hot ? 0xFF2B303A : pro::kRaised);
         pro::roundedStroke(c, s.r, radius, pro::kLine, 1.0f);
     }
-    const float size = s.textSize > 0 ? s.textSize : std::clamp(s.r.h * 0.42f, 9.0f, 13.0f);
+    float size = s.textSize > 0 ? s.textSize : std::clamp(s.r.h * 0.42f, 9.0f, 13.0f);
+    while (size > 8.5f && pro::textWidth(s.label, size, true) > s.r.w - 6.0f) size -= 0.5f; // shrink to fit before truncating
     pro::text(c, s.label, s.r, on ? paint::contrastText(accent) : (hot ? pro::kText : pro::kDim), size, Align::Centre, true);
 }
 

@@ -32,6 +32,13 @@ std::vector<ParameterInfo> stutterParameters()
     p[S::Space] = makeParam("Space", "Space", 0, 1, 0.15f, "%");
     p[S::Mix] = makeParam("Mix", "Mix", 0, 1, 1, "%");
     p[S::Output] = makeParam("Output", "Level", -24, 12, 0, "dB");
+    p[S::Auto] = makeParam("Auto", "Auto", 0, 1, 0, "", true);
+    p[S::AutoWhen] = makeParam("AutoWhen", "Auto When", 0, S::kAutoWhens - 1, 0, "", false,
+                               std::vector<std::string>(S::kAutoWhenNames, S::kAutoWhenNames + S::kAutoWhens));
+    p[S::AutoLength] = makeParam("AutoLength", "Auto Length", 0, S::kAutoLengths - 1, S::kAutoLengths - 1, "", false,
+                                 std::vector<std::string>(S::kAutoLengthNames, S::kAutoLengthNames + S::kAutoLengths));
+    p[S::Variation] = makeParam("Variation", "Variation", 0, 1, 0.6f, "%");
+    p[S::Sensitivity] = makeParam("Sensitivity", "Sensitivity", 0, 1, 0.5f, "%");
     return p;
 }
 
@@ -128,7 +135,8 @@ Stutter::Settings Stutter::settings() const
                                                                    : std::clamp((int) std::lround(value(ModeParam)), 0, kModes - 1);
     const double tempo = host_.tempo > 0 ? host_.tempo : 120.0;
     const bool sync = value(Sync) > 0.5f;
-    Settings s = macroSettings(mode, value(Motion), tempo, sync);
+    const float override = motionOverride_.load(std::memory_order_relaxed);
+    Settings s = macroSettings(mode, override >= 0.0f ? override : value(Motion), tempo, sync);
     if (value(Macro) < 0.5f && mode != Retrigger)
     {
         // The knobs play; the mode keeps its character (reverse, scatter, tube, detune).
@@ -254,6 +262,8 @@ void Stutter::prepare(double sampleRate, int)
     historyMask_ = size - 1;
     room_.prepare(sampleRate_);
     tube_.prepare(sampleRate_);
+    envAttack_ = (float) (1.0 - std::exp(-1.0 / (0.003 * sampleRate_)));
+    envRelease_ = (float) (1.0 - std::exp(-1.0 / (0.025 * sampleRate_)));
     inBinSamples_ = std::max(1, (int) (kInputSeconds * sampleRate_ / kBins));
     outBinSamples_ = std::max(1, (int) (kOutputSeconds * sampleRate_ / kBins));
     reset();
@@ -283,6 +293,23 @@ void Stutter::reset()
     outFilled_.store(0);
     engagedShown_.store(false);
     level_.store(0);
+    env_ = 0;
+    envDb_ = -100;
+    floorDb_ = -80;
+    thresholdDb_ = -60;
+    detectCounter_ = 0;
+    voiced_ = false;
+    silent_ = 1 << 30;
+    lastVoiced_ = lastPhraseEnd_ = -1;
+    phraseStart_ = 0;
+    phraseStarted_ = phraseEnded_ = false;
+    autoActive_ = autoFresh_ = autoUntilVoice_ = autoUntilPause_ = false;
+    autoUntil_ = -1;
+    lastAutoGrid_ = -1;
+    binVoiced_ = false;
+    motionOverride_.store(-1.0f);
+    voicedShown_.store(false);
+    autoShown_.store(false);
 }
 
 float Stutter::random01()
@@ -379,6 +406,74 @@ void Stutter::spawnGrain(const Settings& s, int64_t now)
     grainLogNext_.fetch_add(1, std::memory_order_release);
 }
 
+void Stutter::detectVoice(float inL, float inR)
+{
+    // An envelope (3 ms up, 25 ms down) against a noise floor that follows the quiet parts down at once and creeps up
+    // 1.5 dB/s, so the threshold tunes itself to the recording; Sensitivity moves the margin and an absolute gate.
+    const float m = 0.5f * (std::abs(inL) + std::abs(inR));
+    env_ += (m > env_ ? envAttack_ : envRelease_) * (m - env_);
+    if (++detectCounter_ >= 32)
+    {
+        detectCounter_ = 0;
+        envDb_ = 20.0f * std::log10(env_ + 1.0e-9f);
+        if (envDb_ < floorDb_) floorDb_ += 0.3f * (envDb_ - floorDb_);
+        else floorDb_ += 1.5f * 32.0f / (float) sampleRate_;
+        floorDb_ = std::clamp(floorDb_, -100.0f, -20.0f);
+        const float sensitivity = value(Sensitivity);
+        thresholdDb_ = std::max(floorDb_ + 6.0f + (1.0f - sensitivity) * 18.0f, -62.0f + (1.0f - sensitivity) * 24.0f);
+    }
+    phraseStarted_ = phraseEnded_ = false;
+    const int64_t pause = (int64_t) (0.15 * sampleRate_), minimumPhrase = (int64_t) (0.2 * sampleRate_);
+    if (envDb_ > thresholdDb_)
+    {
+        if (! voiced_)
+        {
+            voiced_ = true;
+            phraseStart_ = written_;
+            phraseStarted_ = true;
+        }
+        silent_ = 0;
+        lastVoiced_ = written_;
+    }
+    else if (++silent_ >= pause && voiced_)
+    {
+        voiced_ = false;
+        if (lastVoiced_ - phraseStart_ >= minimumPhrase)
+        {
+            phraseEnded_ = true;
+            lastPhraseEnd_ = lastVoiced_;
+        }
+    }
+    binVoiced_ = binVoiced_ || voiced_;
+}
+
+void Stutter::startAuto(int64_t anchor, int when)
+{
+    const double samplesPerBeat = 60.0 / std::clamp(host_.tempo, 20.0, 999.0) * sampleRate_;
+    const double beats = kAutoLengthBeats[std::clamp((int) std::lround(value(AutoLength)), 0, kAutoLengths - 1)];
+    autoActive_ = true;
+    autoFresh_ = true;
+    autoAnchor_ = std::min(anchor, written_);
+    autoUntilVoice_ = when == EachPause && beats <= 0;
+    autoUntilPause_ = when == PhraseStart && beats <= 0;
+    autoUntil_ = written_ + (int64_t) ((beats > 0 ? beats : 16.0) * samplesPerBeat); // "Whole": at most 4 bars
+    // Variation: a mode from the pool that suits the moment, and a Motion around the knob's.
+    static constexpr int kPause[] = {Swell, Freeze, Rewind, Spread, Tunnel};
+    static constexpr int kStart[] = {Swell, Spread, Shatter, Tunnel};
+    static constexpr int kBar[] = {Retrigger, Shatter, Rewind, Freeze, Swell};
+    const float variation = value(Variation);
+    const int paramMode = std::clamp((int) std::lround(value(ModeParam)), 0, kModes - 1);
+    autoMode_ = paramMode;
+    if (random01() < variation)
+    {
+        const int* pool = when == EachPause ? kPause : when == PhraseStart ? kStart : kBar;
+        const int size = when == PhraseStart ? 4 : 5;
+        autoMode_ = pool[std::min(size - 1, (int) (random01() * (float) size))];
+    }
+    const float motion = std::clamp(value(Motion) + (random01() - 0.5f) * variation * 0.9f, 0.03f, 0.97f);
+    motionOverride_.store(variation > 0.0f ? motion : -1.0f, std::memory_order_relaxed);
+}
+
 void Stutter::publishBins(float inL, float inR, float outL, float outR)
 {
     const float in = 0.5f * (inL + inR), out = 0.5f * (outL + outR);
@@ -390,6 +485,8 @@ void Stutter::publishBins(float inL, float inR, float outL, float outR)
         const int w = inWrite_.load(std::memory_order_relaxed);
         inMin_[(size_t) w].store(inLo_, std::memory_order_relaxed);
         inMax_[(size_t) w].store(inHi_, std::memory_order_relaxed);
+        inVoice_[(size_t) w].store(binVoiced_ ? 1 : 0, std::memory_order_relaxed);
+        binVoiced_ = false;
         inWrite_.store((w + 1) % kBins, std::memory_order_relaxed);
         inFilled_.store(std::min(kBins, inFilled_.load(std::memory_order_relaxed) + 1), std::memory_order_relaxed);
         inNewest_.store(written_, std::memory_order_release);
@@ -426,6 +523,13 @@ void Stutter::process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
     const float mix = value(Mix);
     const float level = juce::Decibels::decibelsToGain(value(Output));
     const double beatsPerSample = std::clamp(host_.tempo, 20.0, 999.0) / 60.0 / sampleRate_;
+    const bool autoOn = value(Auto) > 0.5f;
+    const int autoWhen = std::clamp((int) std::lround(value(AutoWhen)), 0, kAutoWhens - 1);
+    if (! autoOn && autoActive_)
+    {
+        autoActive_ = false;
+        motionOverride_.store(-1.0f, std::memory_order_relaxed);
+    }
     const float engageStep = (float) (1.0 / (0.012 * sampleRate_));
 
     Settings s = settings();
@@ -474,18 +578,61 @@ void Stutter::process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
         history_[1][slot] = inR;
         ++written_;
 
-        // ---- engage / release (MIDI > face pad > Hold)
+        // ---- Auto: the voice detector decides (the hand always wins)
+        detectVoice(inL, inR);
         const bool midiHeld = midiNote_ >= 0;
+        const bool manual = midiHeld || pressed >= 0 || hold;
+        if (manual && autoActive_)
+        {
+            autoActive_ = false;
+            motionOverride_.store(-1.0f, std::memory_order_relaxed);
+        }
+        if (autoOn && ! manual)
+        {
+            if (autoActive_ && ((autoUntil_ >= 0 && written_ >= autoUntil_) || (autoUntilVoice_ && phraseStarted_)
+                                || (autoUntilPause_ && phraseEnded_)))
+            {
+                autoActive_ = false;
+                motionOverride_.store(-1.0f, std::memory_order_relaxed);
+            }
+            if (autoWhen == EachPause && phraseEnded_)
+                startAuto(lastPhraseEnd_ + (int64_t) (0.03 * sampleRate_), EachPause); // on the last syllable
+            else if (autoWhen == PhraseStart && phraseStarted_)
+                startAuto(phraseStart_, PhraseStart);
+            else if ((autoWhen == BarEnd || autoWhen == TwoBarEnd) && host_.playing)
+            {
+                const double barBeats = 4.0 * (double) std::max(1, host_.timeSigNumerator) / (double) std::max(1, host_.timeSigDenominator);
+                const double period = barBeats * (autoWhen == TwoBarEnd ? 2.0 : 1.0);
+                double length = kAutoLengthBeats[std::clamp((int) std::lround(value(AutoLength)), 0, kAutoLengths - 1)];
+                if (length <= 0) length = 1.0;
+                length = std::min(length, period);
+                const double beat = host_.beats + (double) i * beatsPerSample;
+                const double index = std::floor(beat / period + 1e-9), position = beat - index * period;
+                const bool voiceNear = lastVoiced_ >= 0 && written_ - lastVoiced_ < (int64_t) (2.0 * sampleRate_);
+                if (position >= period - length && std::abs(index - lastAutoGrid_) > 0.5 && voiceNear)
+                {
+                    lastAutoGrid_ = index;
+                    startAuto(written_, autoWhen);
+                    autoUntil_ = written_ + (int64_t) ((period - position) / beatsPerSample); // to the bar line
+                }
+            }
+        }
+        autoShown_.store(autoActive_ && ! manual, std::memory_order_relaxed);
+
+        // ---- engage / release (MIDI > face pad > Hold > Auto)
         const int wantMode = midiHeld && midiMode_ >= 0 ? midiMode_
                            : (pressed >= 0 && pressed < kModes) ? pressed
+                           : (autoActive_ && ! manual)          ? autoMode_
                                                                  : paramMode;
-        const bool want = midiHeld || pressed >= 0 || hold;
-        if (want && (! engaged_ || midiFresh_ || (pressedNew && i == 0)))
+        const bool want = manual || autoActive_;
+        const bool autoNew = autoFresh_ && ! manual;
+        autoFresh_ = false;
+        if (want && (! engaged_ || midiFresh_ || (pressedNew && i == 0) || autoNew))
         {
             playingMode_ = wantMode;
             refresh(wantMode);
             setTone();
-            engage(written_);
+            engage(autoNew ? autoAnchor_ : written_);
         }
         else if (want && wantMode != playingMode_)
         {
@@ -594,6 +741,9 @@ void Stutter::process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
     }
 
     now_.store(written_, std::memory_order_relaxed);
+    voicedShown_.store(voiced_, std::memory_order_relaxed);
+    envShown_.store(envDb_, std::memory_order_relaxed);
+    thresholdShown_.store(thresholdDb_, std::memory_order_relaxed);
     anchorShown_.store(anchor_, std::memory_order_relaxed);
     headShown_.store((int64_t) head_, std::memory_order_relaxed);
     windowShown_.store(std::max(windowStart_, written_ - historyMask_), std::memory_order_relaxed);
@@ -604,6 +754,11 @@ void Stutter::process(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 void Stutter::readView(View& v) const
 {
     v.engaged = engagedShown_.load(std::memory_order_relaxed);
+    v.autoOn = value(Auto) > 0.5f;
+    v.autoEngaged = autoShown_.load(std::memory_order_relaxed);
+    v.voiced = voicedShown_.load(std::memory_order_relaxed);
+    v.envDb = envShown_.load(std::memory_order_relaxed);
+    v.thresholdDb = thresholdShown_.load(std::memory_order_relaxed);
     v.mode = modeShown_.load(std::memory_order_relaxed);
     v.now = now_.load(std::memory_order_relaxed);
     v.anchor = anchorShown_.load(std::memory_order_relaxed);
@@ -626,6 +781,11 @@ void Stutter::readView(View& v) const
     v.inputNewest = inNewest_.load(std::memory_order_acquire);
     v.outputNewest = outNewest_.load(std::memory_order_acquire);
     copy(inMin_, inMax_, inWrite_.load(std::memory_order_relaxed), v.inputBins, v.inMin, v.inMax);
+    {
+        const int write = inWrite_.load(std::memory_order_relaxed);
+        for (int i = 0; i < v.inputBins; ++i)
+            v.voice[(size_t) i] = inVoice_[(size_t) ((write - v.inputBins + i + kBins) % kBins)].load(std::memory_order_relaxed);
+    }
     copy(outMin_, outMax_, outWrite_.load(std::memory_order_relaxed), v.outputBins, v.outMin, v.outMax);
     v.grains.clear();
     const uint32_t next = grainLogNext_.load(std::memory_order_acquire);
@@ -646,6 +806,7 @@ void Stutter::readView(View& v) const
 std::vector<DeviceProcessor::UiGroup> Stutter::uiGroups() const
 {
     return {{"Play", {ModeParam, Motion, Macro, Hold, Capture, Sync}, 3},
+            {"Auto", {Auto, AutoWhen, AutoLength, Variation, Sensitivity}, 3},
             {"Grain", {Grain, Shape, Every, Speed}, 2},
             {"Sound", {Pitch, Width, Jitter, Tone, Space, Mix, Output}, 4}};
 }

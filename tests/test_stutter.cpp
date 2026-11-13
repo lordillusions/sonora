@@ -6,6 +6,7 @@
 #include "devices/native/Stutter.h"
 #include "plugins/SonoraPluginState.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -260,6 +261,150 @@ TEST_CASE("stutter: MIDI white keys play a mode while held, black keys the selec
     run(s, out, 36000, 40000, stopped());
     s.readView(v);
     CHECK(! v.engaged);
+}
+
+namespace
+{
+// Speech-like: phrases of syllables (a 180 Hz voice with a 4 Hz syllable envelope) and pauses, over a -70 dBFS floor.
+juce::AudioBuffer<float> speech(int samples, double phraseSeconds, double pauseSeconds, double startPause = 0.4)
+{
+    juce::AudioBuffer<float> a(2, samples);
+    juce::Random random(11);
+    const double cycle = phraseSeconds + pauseSeconds;
+    for (int s = 0; s < samples; ++s)
+    {
+        const double t = (double) s / kRate - startPause;
+        const double inCycle = t - std::floor(t / cycle) * cycle;
+        float v = (random.nextFloat() * 2.0f - 1.0f) * 0.0003f;
+        if (t >= 0 && inCycle < phraseSeconds)
+        {
+            const double syllable = 0.55 + 0.45 * std::sin(2 * kPi * 4.0 * inCycle);
+            v += (float) (0.4 * syllable * std::sin(2 * kPi * 180.0 * t) + 0.15 * syllable * std::sin(2 * kPi * 540.0 * t));
+        }
+        a.setSample(0, s, v);
+        a.setSample(1, s, v);
+    }
+    return a;
+}
+
+// Runs in blocks and records, per block, whether the stutter was engaged by Auto and the voice detector's state.
+struct AutoTrace
+{
+    std::vector<bool> engaged, voiced;
+    std::vector<int> modes;
+};
+AutoTrace runTraced(S& s, juce::AudioBuffer<float>& audio, devices::HostInfo host, int block = 480)
+{
+    AutoTrace trace;
+    const double beatsPerSample = host.tempo / 60.0 / kRate;
+    for (int start = 0; start < audio.getNumSamples(); start += block)
+    {
+        const int n = std::min(block, audio.getNumSamples() - start);
+        host.beats = (double) start * beatsPerSample;
+        s.setHostInfo(host);
+        juce::AudioBuffer<float> view(audio.getArrayOfWritePointers(), 2, start, n);
+        juce::MidiBuffer midi;
+        s.process(view, midi);
+        devices::Stutter::View v;
+        s.readView(v);
+        trace.engaged.push_back(v.autoEngaged);
+        trace.voiced.push_back(v.voiced);
+        trace.modes.push_back(v.mode);
+    }
+    return trace;
+}
+} // namespace
+
+TEST_CASE("stutter Auto: in each pause it stutters the last syllable until the voice comes back")
+{
+    S s;
+    s.prepare(kRate, 256);
+    s.setParameter(S::Auto, 1.0f); // one click: Each pause, Whole
+    s.setParameter(S::Variation, 0.0f);
+    s.setParameter(S::ModeParam, (float) S::Freeze);
+    auto audio = speech(6 * 48000, 1.2, 0.6); // phrases at 0.4-1.6, 2.2-3.4, 4.0-5.2 s
+    const auto in = audio;
+    const auto trace = runTraced(s, audio, stopped());
+    const auto at = [&](double seconds) { return (size_t) (seconds * kRate / 480.0); };
+    CHECK(trace.voiced[at(1.0)]);
+    CHECK(! trace.voiced[at(1.95)]);
+    CHECK(! trace.engaged[at(1.0)]);  // the voice speaks: dry
+    CHECK(trace.engaged[at(1.9)]);    // the pause: stuttering
+    CHECK(trace.engaged[at(2.15)]);
+    CHECK(! trace.engaged[at(2.6)]);  // the voice came back: released
+    CHECK(trace.engaged[at(3.8)]);    // the next pause
+    CHECK(trace.modes[at(1.9)] == S::Freeze);
+    // In the pause the input is near silence but the stutter plays the last syllable; while speaking it is the voice.
+    const auto rms = [](const juce::AudioBuffer<float>& a, double from, double to) {
+        double sum = 0;
+        const int a0 = (int) (from * kRate), a1 = (int) (to * kRate);
+        for (int i = a0; i < a1; ++i) sum += (double) a.getSample(0, i) * a.getSample(0, i);
+        return std::sqrt(sum / (a1 - a0));
+    };
+    CHECK(rms(in, 1.85, 2.15) < 0.001);
+    CHECK(rms(audio, 1.85, 2.15) > 0.03);
+    for (int i = (int) (0.9 * kRate); i < (int) (1.1 * kRate); i += 97) CHECK_NEAR(audio.getSample(0, i), in.getSample(0, i), 1e-6);
+}
+
+TEST_CASE("stutter Auto: phrase starts, bar ends while the voice is there, Variation, and the hand wins")
+{
+    { // Phrase start, 1/4: a beat (0.5 s at 120 BPM) from the onset
+        S s;
+        s.prepare(kRate, 256);
+        s.setParameter(S::Auto, 1.0f);
+        s.setParameter(S::AutoWhen, (float) S::PhraseStart);
+        s.setParameter(S::AutoLength, 1.0f);
+        auto audio = speech(4 * 48000, 1.4, 0.8);
+        const auto trace = runTraced(s, audio, stopped());
+        const auto at = [&](double seconds) { return (size_t) (seconds * kRate / 480.0); };
+        CHECK(! trace.engaged[at(0.3)]);
+        CHECK(trace.engaged[at(0.6)]);
+        CHECK(! trace.engaged[at(1.1)]); // the beat is over
+        CHECK(trace.engaged[at(2.8)]);   // the next phrase (2.6 s)
+    }
+    { // End of bar, 1/4, transport playing: the last beat of each bar, only while the voice is there
+        S s;
+        s.prepare(kRate, 256);
+        s.setParameter(S::Auto, 1.0f);
+        s.setParameter(S::AutoWhen, (float) S::BarEnd);
+        s.setParameter(S::AutoLength, 1.0f);
+        auto host = stopped();
+        host.playing = true;
+        auto audio = speech(8 * 48000, 4.0, 4.0, 0.0); // voice for the first 2 bars only (2 s per bar at 120 BPM)
+        const auto trace = runTraced(s, audio, host);
+        const auto at = [&](double seconds) { return (size_t) (seconds * kRate / 480.0); };
+        CHECK(! trace.engaged[at(0.8)]);
+        CHECK(trace.engaged[at(1.7)]);   // beat 4 of bar 1
+        CHECK(! trace.engaged[at(2.2)]); // bar line: released
+        CHECK(trace.engaged[at(3.7)]);
+        CHECK(! trace.engaged[at(7.7)]); // two seconds of silence: nothing to stutter
+    }
+    { // Variation: different modes for different pauses
+        S s;
+        s.prepare(kRate, 256);
+        s.setParameter(S::Auto, 1.0f);
+        s.setParameter(S::Variation, 1.0f);
+        auto audio = speech(20 * 48000, 0.8, 0.6);
+        const auto trace = runTraced(s, audio, stopped());
+        std::vector<int> seen;
+        for (size_t b = 0; b < trace.engaged.size(); ++b)
+            if (trace.engaged[b] && std::find(seen.begin(), seen.end(), trace.modes[b]) == seen.end()) seen.push_back(trace.modes[b]);
+        CHECK(seen.size() >= 3);
+    }
+    { // Hold wins over Auto
+        S s;
+        s.prepare(kRate, 256);
+        s.setParameter(S::Auto, 1.0f);
+        s.setParameter(S::Hold, 1.0f);
+        s.setParameter(S::ModeParam, (float) S::Rewind);
+        auto audio = speech(3 * 48000, 1.2, 0.6);
+        const auto trace = runTraced(s, audio, stopped());
+        for (size_t b = 0; b < trace.engaged.size(); b += 7) CHECK(! trace.engaged[b]);
+        devices::Stutter::View v;
+        s.readView(v);
+        CHECK(v.engaged);
+        CHECK(v.mode == S::Rewind);
+    }
 }
 
 TEST_CASE("stutter: catalog, factory and state round trip")

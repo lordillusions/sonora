@@ -19,7 +19,7 @@ class StutterFace final : public ProFace
 {
 public:
     static constexpr SkColor kAccent = 0xFFFF4F8B, kAccent2 = 0xFF8F7BFF;
-    static constexpr Size kFull{1160, 640}, kCompact{700, 170};
+    static constexpr Size kFull{1160, 718}, kCompact{700, 170};
 
     explicit StutterFace(devices::Stutter& device);
     devices::Stutter& stutter() { return stutter_; }
