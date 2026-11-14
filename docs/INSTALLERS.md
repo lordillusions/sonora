@@ -14,6 +14,7 @@ tagged CI release builds and signs every update and writes the three feeds).
 | macOS arm64 | `Sonora-Stutter-VST3-<v>.pkg` | `Sonora Stutter.vst3` (vocal stutter / retrigger effect), same folders | `packaging/macos/make_vst3_pkg.sh` (PLG-18) |
 | macOS arm64 | `Sonora-Phase-Align-VST3-<v>.pkg` | `Sonora Phase Align.vst3` (kick / bass phase aligner, sidechain input), same folders | `packaging/macos/make_vst3_pkg.sh` (PLG-21) |
 | macOS arm64 | `Sonora-Sweep-VST3-<v>.pkg` | `Sonora Sweep.vst3` (riser / downlifter instrument), same folders | `packaging/macos/make_vst3_pkg.sh` (PLG-19) |
+| macOS arm64 | `Sonora-Correlation-VST3-<v>.pkg` | `Sonora Correlation.vst3` (stereo correlation meter), same folders | `packaging/macos/make_vst3_pkg.sh` (PLG-24) |
 | Windows x64 | `Sonora-<v>-windows-x64-setup.exe` | `Program Files\Sonora` (or per user), Start menu entry, `.als` "Open with" entry | `packaging/windows/sonora.iss` (Inno Setup 6) |
 | Linux x64 | `Sonora-<v>-x86_64.AppImage` | nothing: one self-contained file (`chmod +x`, run) | `packaging/linux/make_packages.sh` |
 | Linux x64 | `sonora_<v>_amd64.deb` | `/opt/sonora`, `/usr/bin/sonora`, desktop entry, icon, `.als` MIME type | `packaging/linux/make_packages.sh` |

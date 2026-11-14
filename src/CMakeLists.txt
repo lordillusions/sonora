@@ -146,6 +146,7 @@ add_library(sonora_engine STATIC
     devices/native/Stutter.cpp
     devices/native/BeatRepeat.cpp
     devices/native/PhaseAlign.cpp
+    devices/native/Correlation.cpp
     devices/native/Sweep.cpp
     devices/native/Compressor.cpp
     devices/native/Limiter.cpp
@@ -287,6 +288,7 @@ add_library(sonora_ui STATIC
     ui/views/ProFaceWindow.cpp
     ui/views/StutterFace.cpp
     ui/views/PhaseAlignFace.cpp
+    ui/views/CorrelationFace.cpp
     ui/views/SweepFace.cpp
     ui/views/SidechainPanel.cpp
     ui/views/KickstractTimeline.cpp
@@ -385,8 +387,10 @@ option(SONORA_BUILD_KICKSTRACT_VST3 "Build Sonora Kickstract (kick extractor) as
 option(SONORA_BUILD_STUTTER_VST3 "Build Sonora Stutter (vocal stutter / retrigger) as a VST3 effect" ${APPLE})
 option(SONORA_BUILD_PHASE_ALIGN_VST3 "Build Sonora Phase Align (kick / bass phase aligner) as a VST3 effect" ${APPLE})
 option(SONORA_BUILD_SWEEP_VST3 "Build Sonora Sweep (risers / downlifters) as a VST3 instrument" ${APPLE})
+option(SONORA_BUILD_CORRELATION_VST3 "Build Sonora Correlation (stereo correlation meter) as a VST3 effect" ${APPLE})
 if (APPLE AND (SONORA_BUILD_PRISM_VST3 OR SONORA_BUILD_CURVE_LFO_VST3 OR SONORA_BUILD_HUSH_VST3 OR SONORA_BUILD_KICKSTRACT_VST3
-               OR SONORA_BUILD_STUTTER_VST3 OR SONORA_BUILD_PHASE_ALIGN_VST3 OR SONORA_BUILD_SWEEP_VST3))
+               OR SONORA_BUILD_STUTTER_VST3 OR SONORA_BUILD_PHASE_ALIGN_VST3 OR SONORA_BUILD_SWEEP_VST3
+               OR SONORA_BUILD_CORRELATION_VST3))
     set_property(SOURCE gfx/MetalLayerView.mm APPEND PROPERTY COMPILE_OPTIONS -fobjc-arc) # not JUCE's own .mm files
 endif()
 if (SONORA_BUILD_PRISM_VST3)
@@ -466,6 +470,17 @@ if (SONORA_BUILD_SWEEP_VST3) # PLG-19
         NEEDS_MIDI_INPUT TRUE
         VST3_CATEGORIES Instrument Synth
         SOURCES plugin/SweepPlugin.cpp plugin/SweepPluginEditor.cpp)
+endif()
+if (SONORA_BUILD_CORRELATION_VST3) # PLG-24
+    sonora_add_native_vst3(SonoraCorrelation
+        METAL_VIEW SonoraCorrelationMetalView
+        PRODUCT_NAME "Sonora Correlation"
+        BUNDLE_ID "org.sonora.correlation"
+        PLUGIN_CODE SnCo
+        IS_SYNTH FALSE
+        NEEDS_MIDI_INPUT FALSE
+        VST3_CATEGORIES Fx Analyzer
+        SOURCES plugin/CorrelationPlugin.cpp plugin/CorrelationPluginEditor.cpp)
 endif()
 
 # ------------------------------------------------------------------ app

@@ -39,6 +39,7 @@
 #include "devices/native/Stutter.h"
 #include "devices/native/BeatRepeat.h"
 #include "devices/native/PhaseAlign.h"
+#include "devices/native/Correlation.h"
 #include "devices/native/Sweep.h"
 #include "devices/native/MidiVelocity.h"
 #include "devices/native/MidiNoteEffects.h"
@@ -249,6 +250,13 @@ std::unique_ptr<DeviceProcessor> createSonoraStandIn(const model::Device& d, Bui
             note(ctx, d.plugin->name + ": the saved settings could not be read (" + error + "), using the defaults");
         dev = std::move(phase);
     }
+    else if (which == SonoraPlugin::Correlation) // PLG-24
+    {
+        auto meter = std::make_unique<Correlation>();
+        if (! body.empty() && ! plugins::decodeParameterState(body.data(), body.size(), *meter, "SonoraCorrelation", "Sonora Correlation", error))
+            note(ctx, d.plugin->name + ": the saved settings could not be read (" + error + "), using the defaults");
+        dev = std::move(meter);
+    }
     else // COL-4e: the VST3's state body is the built-in device's session state
     {
         auto hush = std::make_unique<HushDevice>();
@@ -413,6 +421,8 @@ std::unique_ptr<DeviceProcessor> createNative(const model::Device& d, std::vecto
         dev = std::make_unique<BeatRepeat>();
     else if (d.type == "SonoraPhaseAlign") // PLG-21
         dev = std::make_unique<PhaseAlign>();
+    else if (d.type == "SonoraCorrelation") // PLG-24
+        dev = std::make_unique<Correlation>();
     else if (d.type == "SonoraSweep") // PLG-19: the Sample source's file is native content "SonoraSweep/Sample" (a path)
     {
         auto sweep = std::make_unique<Sweep>();
@@ -452,13 +462,16 @@ namespace
 std::vector<uint8_t> sonoraVst3State(const model::Device& d)
 {
     if (d.type == "SonoraWavetable") return plugins::encodePrismPreset(d);
-    if (d.type != "SonoraCurveLfo" && d.type != "SonoraHush" && d.type != "SonoraKickstract" && d.type != "SonoraStutter" && d.type != "SonoraPhaseAlign" && d.type != "SonoraSweep") return {};
+    if (d.type != "SonoraCurveLfo" && d.type != "SonoraHush" && d.type != "SonoraKickstract" && d.type != "SonoraStutter" && d.type != "SonoraPhaseAlign" && d.type != "SonoraSweep"
+        && d.type != "SonoraCorrelation")
+        return {};
     const auto dev = createNative(d);
     if (const auto* lfo = dynamic_cast<const CurveLfo*>(dev.get())) return plugins::encodeCurveLfoState(*lfo);
     if (auto* hush = dynamic_cast<HushDevice*>(dev.get())) return hush->session().encodeState();
     if (const auto* kick = dynamic_cast<const Kickstract*>(dev.get())) return plugins::encodeKickstractState(*kick);
     if (const auto* stutter = dynamic_cast<const Stutter*>(dev.get())) return plugins::encodeStutterState(*stutter);
     if (const auto* phase = dynamic_cast<const PhaseAlign*>(dev.get())) return plugins::encodeParameterState(*phase, "SonoraPhaseAlign");
+    if (const auto* meter = dynamic_cast<const Correlation*>(dev.get())) return plugins::encodeParameterState(*meter, "SonoraCorrelation");
     if (const auto* sweep = dynamic_cast<const Sweep*>(dev.get()))
         return plugins::encodeParameterState(*sweep, "SonoraSweep", {{"samplePath", sweep->samplePath()}});
     return {};

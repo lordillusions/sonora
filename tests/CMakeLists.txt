@@ -53,6 +53,7 @@ set(SONORA_TEST_SOURCES
     test_kickstract.cpp
     test_stutter.cpp
     test_phase_align.cpp
+    test_correlation.cpp
     test_sweep.cpp
     test_drum_fill.cpp
     test_hush_builtin.cpp
@@ -124,6 +125,10 @@ if(SONORA_WITH_UI)
     list(APPEND SONORA_TEST_SOURCES test_phase_align_ui.cpp ../src/plugin/PhaseAlignPlugin.cpp ../src/plugin/PhaseAlignPluginEditor.cpp)
     set_source_files_properties(../src/plugin/PhaseAlignPlugin.cpp PROPERTIES COMPILE_DEFINITIONS SONORA_PLUGIN_NO_ENTRY=1)
     set_source_files_properties(../src/plugin/PhaseAlignPluginEditor.cpp PROPERTIES COMPILE_DEFINITIONS JucePlugin_VersionString="${PROJECT_VERSION}")
+    # PLG-24: Correlation's VST3 processor/editor and its face in the device chain.
+    list(APPEND SONORA_TEST_SOURCES test_correlation_ui.cpp ../src/plugin/CorrelationPlugin.cpp ../src/plugin/CorrelationPluginEditor.cpp)
+    set_source_files_properties(../src/plugin/CorrelationPlugin.cpp PROPERTIES COMPILE_DEFINITIONS SONORA_PLUGIN_NO_ENTRY=1)
+    set_source_files_properties(../src/plugin/CorrelationPluginEditor.cpp PROPERTIES COMPILE_DEFINITIONS JucePlugin_VersionString="${PROJECT_VERSION}")
     # PLG-19: Sweep's VST3 processor/editor and its face in the device chain.
     list(APPEND SONORA_TEST_SOURCES test_sweep_ui.cpp ../src/plugin/SweepPlugin.cpp ../src/plugin/SweepPluginEditor.cpp)
     set_source_files_properties(../src/plugin/SweepPlugin.cpp PROPERTIES COMPILE_DEFINITIONS SONORA_PLUGIN_NO_ENTRY=1)

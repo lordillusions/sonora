@@ -41,6 +41,7 @@ SonoraPlugin sonoraPluginFor(const model::PluginInfo& info, model::DeviceKind ki
         case fourCC("SnSt"): return SonoraPlugin::Stutter;
         case fourCC("SnPa"): return SonoraPlugin::PhaseAlign;
         case fourCC("SnSw"): return SonoraPlugin::Sweep;
+        case fourCC("SnCo"): return SonoraPlugin::Correlation;
         default: return SonoraPlugin::None;
     }
 }

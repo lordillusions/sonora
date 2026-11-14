@@ -15,7 +15,7 @@
 namespace sonora::devices { class CurveLfo; class Kickstract; class NativeDevice; class Stutter; }
 namespace sonora::plugins
 {
-enum class SonoraPlugin { None, Prism, CurveLfo, Hush, Kickstract, Stutter, PhaseAlign, Sweep };
+enum class SonoraPlugin { None, Prism, CurveLfo, Hush, Kickstract, Stutter, PhaseAlign, Sweep, Correlation };
 
 // Which Sonora VST3 this plug-in reference is, by class id only.
 SonoraPlugin sonoraPluginFor(const model::PluginInfo& info, model::DeviceKind kind);

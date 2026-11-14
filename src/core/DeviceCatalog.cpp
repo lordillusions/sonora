@@ -54,6 +54,7 @@ constexpr std::array kCatalog{
     CatalogEntry{"SonoraKickstract", "Sonora Kickstract", R::AudioEffect, true},
     CatalogEntry{"SonoraStutter", "Sonora Stutter", R::AudioEffect, true},
     CatalogEntry{"SonoraPhaseAlign", "Sonora Phase Align", R::AudioEffect, true},
+    CatalogEntry{"SonoraCorrelation", "Sonora Correlation", R::AudioEffect, true},
     CatalogEntry{"SonoraSweep", "Sonora Sweep", R::Instrument, true},
     CatalogEntry{"SonoraVelocity", "Sonora Velocity", R::MidiEffect, true},
     CatalogEntry{"InstrumentGroupDevice", "Sonora Instrument Rack", R::Instrument, true},

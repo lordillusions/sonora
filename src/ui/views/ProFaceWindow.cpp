@@ -1,12 +1,15 @@
 #include "ui/views/ProFaceWindow.h"
 
+#include "core/DeviceCatalog.h"
 #include "devices/RackProcessor.h"
+#include "devices/native/Correlation.h"
 #include "devices/native/PhaseAlign.h"
 #include "devices/native/Stutter.h"
 #include "devices/native/Sweep.h"
 #include "engine/EngineGraph.h"
 #include "ui/DeviceMenu.h"
 #include "ui/Painter.h"
+#include "ui/views/CorrelationFace.h"
 #include "ui/views/PhaseAlignFace.h"
 #include "ui/views/StutterFace.h"
 #include "ui/views/SweepFace.h"
@@ -24,6 +27,7 @@ ProFace* addProFace(Widget& parent, devices::DeviceProcessor* processor)
     if (auto* stutter = dynamic_cast<devices::Stutter*>(processor)) return parent.add<StutterFace>(*stutter);
     if (auto* sweep = dynamic_cast<devices::Sweep*>(processor)) return parent.add<SweepFace>(*sweep);
     if (auto* phase = dynamic_cast<devices::PhaseAlign*>(processor)) return parent.add<PhaseAlignFace>(*phase);
+    if (auto* meter = dynamic_cast<devices::Correlation*>(processor)) return parent.add<CorrelationFace>(*meter);
     return nullptr;
 }
 
@@ -95,7 +99,7 @@ void wireProFace(ProFace& face, std::function<UiContext*()> context, int trackIn
 // ---------------------------------------------------------------------------------------------------------------------
 bool ProFaceWindowView::isProFaceDevice(const std::string& type)
 {
-    return type == "SonoraStutter" || type == "SonoraSweep" || type == "SonoraPhaseAlign";
+    return type == "SonoraStutter" || type == "SonoraSweep" || type == "SonoraPhaseAlign" || type == "SonoraCorrelation";
 }
 
 std::optional<ProFaceWindowView::Site> ProFaceWindowView::find(const UiContext& x, const UiContext::WavetableKey& key)
@@ -180,7 +184,10 @@ void ProFaceWindowView::rebuild()
     }
     std::string title = site->model->displayName;
     if (title.empty())
-        title = site->model->type == "SonoraStutter" ? "Sonora Stutter" : site->model->type == "SonoraSweep" ? "Sonora Sweep" : "Sonora Phase Align";
+    {
+        const auto* entry = model::findCatalogEntry(site->model->type);
+        title = entry != nullptr ? std::string(entry->displayName) : site->model->type;
+    }
     if (const auto* track = x.trackAt(site->track); track && ! track->name.empty()) title += "/" + track->name;
     if (title != title_)
     {
