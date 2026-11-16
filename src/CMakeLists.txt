@@ -28,13 +28,17 @@ message(STATUS "Sonora version ${SONORA_APP_VERSION}")
 # ------------------------------------------------------------------ platform
 if(APPLE)
     add_library(sonora_platform STATIC platform/HttpClientMac.mm platform/HttpDownload.cpp platform/SecretStoreMac.mm
-                platform/MediaAccessMac.mm platform/VideoMac.mm)
+                platform/MediaAccessMac.mm platform/VideoMac.mm
+                platform/splice/SpliceDescramble.cpp platform/splice/SpliceKey.cpp
+                platform/splice/SpliceApi.cpp platform/splice/SpliceAuth.cpp platform/splice/SpliceStore.cpp) # SPL-1/2
     target_compile_options(sonora_platform PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
     target_link_libraries(sonora_platform PUBLIC "-framework Security" "-framework Foundation" "-framework LocalAuthentication"
                           "-framework AVFoundation" "-framework VideoToolbox" "-framework CoreMedia" "-framework CoreVideo")
 else()
     add_library(sonora_platform STATIC platform/HttpClientJuce.cpp platform/HttpDownload.cpp platform/SecretStoreFile.cpp
-                platform/MediaAccessPortable.cpp platform/VideoPortable.cpp)
+                platform/MediaAccessPortable.cpp platform/VideoPortable.cpp
+                platform/splice/SpliceDescramble.cpp platform/splice/SpliceKey.cpp
+                platform/splice/SpliceApi.cpp platform/splice/SpliceAuth.cpp platform/splice/SpliceStore.cpp) # SPL-1/2
 endif()
 target_include_directories(sonora_platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(sonora_platform PUBLIC sonora::juce sonora_core) # Paths.h -> core/AppDataFolder (COM-4c folder name)
@@ -59,6 +63,7 @@ add_library(sonora_core STATIC
     core/DeviceCatalog.cpp
     core/LiveColors.cpp
     core/AppDataFolder.cpp
+    core/Privacy.cpp
     core/Supporters.cpp
     io/als/AlsReader.cpp
     io/als/AlsWriter.cpp
@@ -532,9 +537,11 @@ set(_sonoraPlist "<plist><dict>
     <key>SUScheduledCheckInterval</key><integer>86400</integer>
     <key>SUAutomaticallyUpdate</key><false/>
     <key>SUVerifyUpdateBeforeExtraction</key><true/>
-    <key>NSLocalNetworkUsageDescription</key><string>Sonora connects to collaborators on your local network during a shared session.</string>
+    <key>NSLocalNetworkUsageDescription</key><string>Sonora uses the local network only for shared sessions: to connect to collaborators and to list sessions nearby.</string>
     <key>NSBonjourServices</key><array><string>_sonora-collab._tcp</string></array>")
 # ^ COL-3 collab: macOS 15+ local network privacy prompt text, and the Bonjour type LAN sessions advertise/browse (Apple TN3179).
+# COM-15: these and the microphone/camera texts below are the only privacy keys. Sonora explains each one in its own
+# prompt before macOS asks (app/AppPrivacy.cpp); docs/PLATFORMS.md "Privacy prompts" lists what asks for what.
 if (SONORA_UPDATE_ALLOW_LOCAL_HTTP)
     # Local update tests (docs/UPDATES.md): plain HTTP to 127.0.0.1 and the SONORA_UPDATE_AUTOTEST background install.
     string(APPEND _sonoraPlist "
@@ -560,7 +567,7 @@ juce_add_gui_app(Sonora
     BUILD_VERSION ${SONORA_APP_BUILD}
     PLIST_TO_MERGE "${_sonoraPlist}"
     MICROPHONE_PERMISSION_ENABLED TRUE
-    MICROPHONE_PERMISSION_TEXT "Sonora records audio from your inputs, and sends your voice in a shared session when you turn your mic on."
+    MICROPHONE_PERMISSION_TEXT "Sonora opens an audio input only when you record, monitor an input or turn your mic on in a shared session."
     CAMERA_PERMISSION_ENABLED TRUE
     CAMERA_PERMISSION_TEXT "Sonora shows your camera to the people in a shared session when you turn it on."
     DOCUMENT_EXTENSIONS als
@@ -585,11 +592,13 @@ target_sources(Sonora PRIVATE
     app/AppProFaceWindow.cpp
     app/AppKickstractWindow.cpp
     app/AppSamplePacks.cpp
+    app/AppSplice.cpp
     app/AppSampleFiles.cpp
     app/AppDevicePresets.cpp
     app/AppDeviceGroups.cpp
     app/AppStems.cpp
     app/AppRecovery.cpp
+    app/AppPrivacy.cpp
 )
 if (SONORA_UPDATE_ALLOW_LOCAL_HTTP)
     set(_sonoraLocalTest 1)

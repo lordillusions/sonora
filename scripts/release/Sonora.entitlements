@@ -8,5 +8,6 @@
     <key>com.apple.security.cs.allow-jit</key><true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
     <key>com.apple.security.device.audio-input</key><true/>
+    <key>com.apple.security.device.camera</key><true/> <!-- COM-15: collab video (COL-8); without it a hardened app gets no camera -->
 </dict>
 </plist>

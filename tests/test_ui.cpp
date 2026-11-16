@@ -604,7 +604,7 @@ TEST_CASE("browser: filtering keeps file identities, folder navigation, preview 
     back.keyCode = juce::KeyPress::backspaceKey;
     for (int i = 0; i < 4; ++i) root.dispatchKey(back);
     ui::MouseEvent place;
-    place.x = sidebarRow(ui::BrowserPanel::Packs + 1).first; place.y = sidebarRow(ui::BrowserPanel::Packs + 1).second; // the first custom Place
+    place.x = sidebarRow(ui::BrowserPanel::Splice + 1).first; place.y = sidebarRow(ui::BrowserPanel::Splice + 1).second; // the first custom Place
     root.dispatchMouseDown(place); root.dispatchMouseUp(place);
     CHECK(folder == "/tmp/Samples");
     first.clicks = 1;
@@ -647,7 +647,7 @@ TEST_CASE("browser: a folder search finds files in subfolders and shows a caret 
     REQUIRE(browser);
     auto at = [&](ui::Rect r) { ui::MouseEvent e; e.x = browser->boundsInRoot().x + r.centreX(); e.y = browser->boundsInRoot().y + r.centreY(); return e; };
     auto click = [&](ui::MouseEvent e) { root.dispatchMouseDown(e); root.dispatchMouseUp(e); };
-    click(at(browser->sidebarRowBounds(ui::BrowserPanel::Packs + 1)));
+    click(at(browser->sidebarRowBounds(ui::BrowserPanel::Splice + 1)));
     REQUIRE(ctx.browserFolder == "/tmp/Samples");
     ui::KeyEvent find;
     find.cmd = true; find.textChar = 'f';
@@ -715,7 +715,7 @@ TEST_CASE("browser: real drag events route stable filtered items and Escape canc
     REQUIRE(browser);
     auto sidebarRow = [&](int index) { const auto r = browser->sidebarRowBounds(index); return std::pair<float, float>{browser->boundsInRoot().x + r.centreX(), browser->boundsInRoot().y + r.centreY()}; };
     auto listRow = [&](int index) { const auto r = browser->listRowBounds(index); return std::pair<float, float>{browser->boundsInRoot().x + r.centreX(), browser->boundsInRoot().y + r.centreY()}; };
-    place.x = sidebarRow(ui::BrowserPanel::Packs + 1).first; place.y = sidebarRow(ui::BrowserPanel::Packs + 1).second;
+    place.x = sidebarRow(ui::BrowserPanel::Splice + 1).first; place.y = sidebarRow(ui::BrowserPanel::Splice + 1).second;
     root.dispatchMouseDown(place); root.dispatchMouseUp(place);
     ui::KeyEvent find;
     find.cmd = true; find.textChar = 'f'; root.dispatchKey(find);

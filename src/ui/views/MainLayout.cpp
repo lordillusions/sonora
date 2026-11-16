@@ -7,6 +7,7 @@
 #include "ui/Painter.h"
 #include "ui/TrackMenu.h"
 #include "ui/views/ArrangementView.h"
+#include "ui/views/AutomationEditor.h"
 #include "ui/views/BrowserPanel.h"
 #include "ui/views/DetailView.h"
 #include "ui/views/ResynthEditor.h"
@@ -397,6 +398,9 @@ bool MainLayout::keyPressed(const KeyEvent& k)
     // UI-77: Option+Cmd+A toggles Automation Write mode (macOS turns Option+A into "å"); Escape leaves it.
     if (k.cmd && k.alt && ! k.ctrl && ! k.shift && (ch == 'a' || k.keyCode == 'A' || k.keyCode == 'a' || k.textChar == 0xE5))
     { if (x.setAutomationWriteMode) x.setAutomationWriteMode(! x.automationWriteMode); else x.automationWriteMode = ! x.automationWriteMode; markDirty(); return true; }
+    // UI-88: Option+Shift+A shows the selected track's automation only, again restores the lanes (macOS types "Å").
+    if (! k.cmd && k.alt && k.shift && ! k.ctrl && (ch == 'a' || k.keyCode == 'A' || k.keyCode == 'a' || k.textChar == 0xC5) && x.song)
+    { AutomationEditor::toggleTrackAutomationOnly(x, x.selectedTrack); layout(); markDirty(); return true; }
     if (x.automationWriteMode && k.keyCode == juce::KeyPress::escapeKey && ! k.cmd && ! k.alt)
     { if (x.setAutomationWriteMode) x.setAutomationWriteMode(false); else x.automationWriteMode = false; markDirty(); return true; }
     if (k.cmd && ! k.ctrl && ! k.alt && ! k.shift && ch == 'e' && x.mainView == MainView::Arrangement && ! x.clipEditorFocused)

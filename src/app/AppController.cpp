@@ -3,6 +3,7 @@
 #include "ui/SetView.h"
 #include "app/CollabPort.h"
 #include "app/PromptWindow.h"
+#include "platform/FolderList.h"
 #include "engine/TempoAnalysis.h"
 #include "app/SaveChanges.h"
 
@@ -57,9 +58,10 @@ model::Device* wavetableTarget(model::Device& parent, int chain, int child)
 class PluginWindow : public juce::DocumentWindow
 {
 public:
-    PluginWindow(juce::AudioPluginInstance& plugin, std::function<void(PluginWindow*)> onClose)
+    PluginWindow(juce::AudioPluginInstance& plugin, std::function<void(PluginWindow*)> onClose,
+                 std::function<bool(const juce::KeyPress&)> forwardKey)
         : DocumentWindow(plugin.getName(), juce::Colours::darkgrey, juce::DocumentWindow::closeButton),
-          plugin_(&plugin), onClose_(std::move(onClose))
+          plugin_(&plugin), onClose_(std::move(onClose)), forwardKey_(std::move(forwardKey))
     {
         setUsingNativeTitleBar(true);
         // Not plugin.hasEditor(): for a VST3 that builds and drops a view first, which silences some plugins (PLG-13).
@@ -73,11 +75,15 @@ public:
     }
 
     void closeButtonPressed() override { onClose_(this); }
+    // DEV-15d: keys the plug-in's editor leaves unused reach the main window, like the Prism / Hush windows: with a
+    // plug-in window in front, Cmd+G still groups the devices selected in the Device View (and Space still plays).
+    bool keyPressed(const juce::KeyPress& key) override { return forwardKey_ && forwardKey_(key); }
     const juce::AudioPluginInstance* plugin() const { return plugin_; }
 
 private:
     const juce::AudioPluginInstance* plugin_;
     std::function<void(PluginWindow*)> onClose_;
+    std::function<bool(const juce::KeyPress&)> forwardKey_;
 };
 
 // UI-27: the Sonora Prism dashboard in its own window, like PluginWindow: a second Skia canvas over the shared
@@ -297,7 +303,7 @@ AppController::AppController() : engine_(host_, midi_)
         { ui_.statusText = "Finish this track's recording before changing its arm state"; return; }
         inputPermissionDenied_ = false;
         if (const auto& controls = engine_.controls(); controls && track >= 0 && (size_t) track < controls->size())
-        { (*controls)[(size_t) track].armed.store(armed); ensureAudioInputs(); }
+        { (*controls)[(size_t) track].armed.store(armed); ensureAudioInputs(false, armed ? core::AccessRequest::UserAction : core::AccessRequest::Automatic); }
     };
     ui_.applyEdit = [this](model::EditCommand c) { applyEdit(std::move(c)); };
     ui_.capturePluginStates = [this] { syncModelFromEngine(); }; // PLG-16f: live plug-in states before a swap
@@ -462,7 +468,7 @@ AppController::AppController() : engine_(host_, midi_)
             && (! engine_.recorder().sessionRecording() || engine_.recorder().capturesTrack(t.track))) return;
         if (engine::applyControl(t, change, engine_.latestGraph(), engine_.transport()) && ui_.requestRepaint)
             ui_.requestRepaint();
-        if (t.kind == midi::ControlTarget::Kind::TrackArm) { inputPermissionDenied_ = false; ensureAudioInputs(); }
+        if (t.kind == midi::ControlTarget::Kind::TrackArm) { inputPermissionDenied_ = false; ensureAudioInputs(false, core::AccessRequest::UserAction); }
     };
     midi_.onControl = ui_.mappedControl;
     midi_.onMappingsChanged = [this] {
@@ -583,7 +589,7 @@ void AppController::loadLayout()
 
 void AppController::saveSettings()
 {
-    if (auto state = engine_.deviceManager().createStateXml())
+    if (auto state = engine_.audioStateForSettings())
         settings().setValue("audioDevice", state.get());
     if (song_ && ! isUntitled() && ! collabGuest())
         settings().setValue("lastFile", juce::String::fromUTF8(song_->sourcePath.c_str()));
@@ -956,7 +962,9 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     for (const auto& line : ui_.buildLog)
         logf("  note: %s", line.c_str());
     recoveryDocumentInstalled();
-    ensureAudioInputs();
+    ensureAudioInputs(); // COM-15: opens inputs only if already allowed; never asks while a set loads
+    if (! isUntitled() && ! collabGuest())
+        addProjectFolder(juce::File(juce::String::fromUTF8(song_->sourcePath.c_str())).getParentDirectory());
     offerNativeReplacements();
     runAutosaveAutotest();
     runPlayAutotest();
@@ -992,6 +1000,7 @@ void AppController::wirePreferences()
                                                                  .getChildFile("Ableton/User Library").getFullPathName()).toStdString();
     ui_.packsPath = settings().getValue("packsPath", "/Users/Shared/Ableton/Factory Packs").toStdString();
     setUpSamplePacks();
+    setUpSplice();
     setUpSampleFiles();
     ui_.temporaryProjectPath = untitledRoot().getFullPathName().toStdString();
     ui_.settingsPath = settings().getFile().getParentDirectory().getFullPathName().toStdString();
@@ -1137,7 +1146,8 @@ control::ApplyResult AppController::applyEdit(model::EditCommand cmd)
     const bool takesOnly = cmd.takeLanesOnly;
     if (cmd.inputChanged && ui_.recording) { ui_.statusText = "Finish recording before changing inputs"; return control::ApplyResult::failure("recording_conflict", ui_.statusText); }
     if (cmd.recordingRangeChanged && ui_.recording) { ui_.statusText = "Finish recording before changing the punch/loop region"; return control::ApplyResult::failure("recording_conflict", ui_.statusText); }
-    if (cmd.inputSettingsChanged) inputPermissionDenied_ = false;
+    const bool inputSettingsChanged = cmd.inputSettingsChanged;
+    if (inputSettingsChanged) inputPermissionDenied_ = false;
     if (ui_.recording && engine_.recorder().sessionRecording() && ! cmd.inputSettingsChanged)
         for (int track : cmd.tracks) if (engine_.recorder().capturesTrack(track))
         { ui_.statusText = "Finish Session recording before editing its target track"; return control::ApplyResult::failure("recording_conflict", ui_.statusText); }
@@ -1161,6 +1171,12 @@ control::ApplyResult AppController::applyEdit(model::EditCommand cmd)
                 history_.amendLast(*song_, std::move(sync)); // one undo step with the edit that caused it
             }
         afterEdit(changed, songLevel, devicesChanged, takesOnly, structure, gainTracks);
+        if (inputSettingsChanged)
+        {
+            // COM-15: an input or monitoring choice is the person's own: it may explain the microphone access.
+            inputPermissionDenied_ = false;
+            ensureAudioInputs(false, core::AccessRequest::UserAction);
+        }
     }
     catch (const std::exception& error)
     {
@@ -1416,6 +1432,17 @@ void AppController::remapTrackUi(const std::vector<model::TrackId>& before)
     std::map<int, std::vector<int>> lanes; // UI-65
     for (auto& [index, targets] : ui_.automationLaneTargets) if (const int j = mapIndex(index); j >= 0) lanes[j] = std::move(targets);
     ui_.automationLaneTargets = std::move(lanes);
+    if (auto& only = ui_.automationOnlyTrack) // UI-88: the lanes to restore follow the tracks too
+    {
+        only->track = mapIndex(only->track);
+        const bool everyTrack = only->tracks.empty();
+        remapList(only->tracks);
+        if (! everyTrack && only->tracks.empty()) only->visible = false;
+        std::map<int, std::vector<int>> saved;
+        for (auto& [index, targets] : only->laneTargets) if (const int j = mapIndex(index); j >= 0) saved[j] = std::move(targets);
+        only->laneTargets = std::move(saved);
+        if (only->track < 0) only.reset();
+    }
     auto remapFloats = [&](std::vector<float>& values) {
         if (values.empty()) return;
         std::vector<float> mapped((size_t) song_->tracks.size() + song_->returns.size() + 1, 0.0f);
@@ -1946,15 +1973,13 @@ void AppController::indexBrowserFolder(const std::string& path)
         struct Found { juce::String name; ui::UiContext::BrowserFile file; };
         std::vector<Found> found;
         const juce::File folder(juce::String::fromUTF8(path.c_str()));
-        for (const auto& entry : juce::RangedDirectoryIterator(folder, true, "*",
-                 juce::File::findFilesAndDirectories | juce::File::ignoreHiddenFiles, juce::File::FollowSymlinks::noCycles))
-        {
-            if (current->load() != generation) return;
-            const auto& file = entry.getFile();
-            if (entry.isDirectory() || file.hasFileExtension("als") || engine::isAudioFile(file))
-                found.push_back({file.getFileName(), {file.getFullPathName().toStdString(), entry.isDirectory()}});
-            if (found.size() >= kMaxEntries) break;
-        }
+        // COM-15: searching ~/Music must not open the Apple Music library (a privacy prompt), nor a link to Documents.
+        core::walkFolder(folder, juce::File::getSpecialLocation(juce::File::userHomeDirectory), [&](const juce::File& file, bool directory) {
+            if (directory || file.hasFileExtension("als") || engine::isAudioFile(file))
+                found.push_back({file.getFileName(), {file.getFullPathName().toStdString(), directory}});
+            return found.size() < kMaxEntries;
+        }, [&] { return current->load() != generation; });
+        if (current->load() != generation) return;
         std::sort(found.begin(), found.end(), [](const Found& a, const Found& b) {
             if (a.file.directory != b.file.directory) return a.file.directory;
             const int names = a.name.compareNatural(b.name);
@@ -1980,10 +2005,12 @@ void AppController::readBrowserFolder(const std::string& path, bool root)
     const int generation = browserGeneration_;
     pool_.addJob([this, folder, path, root, generation, alive = std::weak_ptr<bool>(alive_)] {
         std::vector<ui::UiContext::BrowserFile> files;
-        for (const auto& file : folder.findChildFiles(juce::File::findFilesAndDirectories, false))
+        // COM-15: listFolder reads names and types only; JUCE's findChildFiles asked Foundation about each child, and
+        // asking about ~/Music/Music makes macOS prompt for the Apple Music library when the Samples category opens.
+        for (const auto& entry : platform::listFolder(folder))
         {
-            if (file.isHidden()) continue;
-            const bool directory = file.isDirectory();
+            const auto& file = entry.file;
+            const bool directory = entry.directory || (entry.link && file.isDirectory());
             if (directory || file.hasFileExtension("als") || engine::isAudioFile(file))
                 files.push_back({file.getFullPathName().toStdString(), directory});
         }
@@ -2040,7 +2067,7 @@ int AppController::requiredInputChannels(bool record) const
     return required;
 }
 
-void AppController::ensureAudioInputs(bool record)
+void AppController::ensureAudioInputs(bool record, core::AccessRequest request)
 {
     if (record) ui_.recordingRequested = true;
     if (inputPermissionPending_ || editingDevices_ || syncingModel_ || ! song_) return;
@@ -2069,17 +2096,22 @@ void AppController::ensureAudioInputs(bool record)
     if (inputPermissionDenied_ && ! record) return;
     inputPermissionPending_ = true;
     const int generation = documentGeneration_;
-    juce::RuntimePermissions::request(juce::RuntimePermissions::recordAudio,
-        [this, generation, alive = std::weak_ptr<bool>(alive_)](bool granted) {
+    // COM-15: JUCE's RuntimePermissions grants at once on macOS and the system prompt came with the opened input; now
+    // Sonora explains first (a person's action only) and asks AVFoundation before any input opens.
+    withAccess(core::Access::Microphone, record ? core::AccessRequest::UserAction : request,
+        [this, generation, alive = std::weak_ptr<bool>(alive_)](AccessResult result) {
             const auto lifetime = alive.lock();
             if (! lifetime || ! *lifetime) return;
             inputPermissionPending_ = false;
             if (generation != documentGeneration_) { ensureAudioInputs(); return; }
+            const bool granted = result == AccessResult::Granted;
             inputPermissionDenied_ = ! granted;
             if (! granted)
             {
                 ui_.recordingRequested = false;
-                ui_.statusText = "Microphone permission was denied";
+                ui_.statusText = result == AccessResult::Denied ? core::accessExplanation(core::Access::Microphone).deniedText
+                                                                : "Audio inputs are off: arm a track or press Record to turn them on";
+                if (ui_.requestRepaint) ui_.requestRepaint();
                 return;
             }
             const int channels = requiredInputChannels(ui_.recordingRequested);
@@ -2843,32 +2875,60 @@ void AppController::saveMappings()
     midi::saveMappings(midi::globalMappingsFile(), global);
 }
 
+namespace
+{
+// The sets under `roots` for the Projects list (backups and Library folders left out), about 2000 per root at most.
+// The walk visits every file (sample libraries too), so it checks for quit on each one: removeAllJobs in
+// ~AppController signals the job before alive_ expires.
+std::vector<std::string> findSets(const std::vector<juce::File>& roots, const std::weak_ptr<bool>& alive)
+{
+    std::vector<std::string> found;
+    const auto home = juce::File::getSpecialLocation(juce::File::userHomeDirectory);
+    auto* job = juce::ThreadPoolJob::getCurrentThreadPoolJob();
+    const auto stop = [&] { return alive.expired() || (job != nullptr && job->shouldExit()); };
+    for (const auto& root : roots)
+    {
+        size_t fromRoot = 0;
+        // COM-15: walkFolder never steps into the Apple Music/Photos libraries or another guarded place.
+        core::walkFolder(root, home, [&](const juce::File& file, bool directory) {
+            if (directory || ! file.hasFileExtension("als")) return true;
+            const auto path = file.getFullPathName();
+            if (! path.contains("/Backup/") && ! path.contains("/Library/")) { found.push_back(path.toStdString()); ++fromRoot; }
+            return fromRoot <= 2000;
+        }, stop);
+        if (stop()) return {};
+    }
+    return found;
+}
+} // namespace
+
+// COM-15: the Projects list walks ~/Music, Places, the User Library and the folders of recent sets outside the places
+// macOS guards with a prompt (Desktop, Documents, Downloads, iCloud Drive, other volumes). Recent sets there are listed
+// as they are, unread; an opened set's folder joins later (addProjectFolder). Before COM-15 the walk covered all of
+// Music, Documents and Desktop at every launch, which asked for those folders (and, through links, for more).
 void AppController::findProjectsInBackground()
 {
     std::weak_ptr<bool> alive = alive_;
-    pool_.addJob([this, alive] {
-        std::vector<std::string> found;
-        for (auto loc : {juce::File::userMusicDirectory, juce::File::userDocumentsDirectory, juce::File::userDesktopDirectory})
-        {
-            const auto dir = juce::File::getSpecialLocation(loc);
-            // The walk visits every file under the folder (sample libraries too), so it takes every file and checks
-            // for quit on each one (a "*.als" wildcard would only return between matches): removeAllJobs in
-            // ~AppController signals the job before alive_ expires.
-            auto* job = juce::ThreadPoolJob::getCurrentThreadPoolJob();
-            for (const auto& entry : juce::RangedDirectoryIterator(dir, true, "*", juce::File::findFiles))
-            {
-                if (alive.expired() || (job != nullptr && job->shouldExit()))
-                    return;
-                if (! entry.getFile().hasFileExtension("als"))
-                    continue;
-                const auto path = entry.getFile().getFullPathName();
-                if (! path.contains("/Backup/") && ! path.contains("/Library/"))
-                    found.push_back(path.toStdString());
-                if (found.size() > 2000)
-                    break;
-            }
-        }
+    const auto home = juce::File::getSpecialLocation(juce::File::userHomeDirectory);
+    std::vector<juce::File> chosen, recent;
+    for (const auto& place : ui_.browserPlaces) chosen.emplace_back(juce::String::fromUTF8(place.c_str()));
+    if (! ui_.userLibraryPath.empty()) chosen.emplace_back(juce::String::fromUTF8(ui_.userLibraryPath.c_str()));
+    chosen.push_back(projectsRoot());
+    std::vector<std::string> unread; // recent sets in guarded places: listed without touching the folder
+    for (int i = 0; i < recentSets_.getNumFiles(); ++i)
+    {
+        const auto set = recentSets_.getFile(i);
+        recent.push_back(set);
+        if (core::isPromptGuarded(set, home)) unread.push_back(set.getFullPathName().toStdString());
+    }
+    const auto roots = core::projectScanRoots(home, chosen, recent);
+    for (const auto& root : roots) logf("projects: scanning %s", root.getFullPathName().toRawUTF8());
+    pool_.addJob([this, alive, roots, unread] {
+        auto found = findSets(roots, alive);
+        if (alive.expired()) return;
+        found.insert(found.end(), unread.begin(), unread.end());
         std::sort(found.begin(), found.end());
+        found.erase(std::unique(found.begin(), found.end()), found.end());
         juce::MessageManager::callAsync([this, alive, files = std::move(found)]() mutable {
             if (alive.expired())
                 return;
@@ -2876,6 +2936,26 @@ void AppController::findProjectsInBackground()
             ++ui_.browserContentRevision;
             if (ui_.requestRepaint)
                 ui_.requestRepaint();
+        });
+    });
+}
+
+void AppController::addProjectFolder(const juce::File& folder)
+{
+    if (! folder.isDirectory()) return;
+    const auto path = folder.getFullPathName().toStdString();
+    if (! projectFolders_.insert(path).second) return; // walked once per run
+    std::weak_ptr<bool> alive = alive_;
+    pool_.addJob([this, alive, folder] {
+        auto found = findSets({folder}, alive);
+        juce::MessageManager::callAsync([this, alive, files = std::move(found)] {
+            if (alive.expired() || files.empty()) return;
+            auto& list = ui_.projectFiles;
+            list.insert(list.end(), files.begin(), files.end());
+            std::sort(list.begin(), list.end());
+            list.erase(std::unique(list.begin(), list.end()), list.end());
+            ++ui_.browserContentRevision;
+            if (ui_.requestRepaint) ui_.requestRepaint();
         });
     });
 }
@@ -3418,6 +3498,7 @@ void AppController::dropBrowserItem(const ui::BrowserDrag& item, int trackIndex,
 {
     if (item.kind == ui::BrowserDrag::Kind::TrackDevice) { dropTrackDevice(item, trackIndex); return; }
     if (item.kind == ui::BrowserDrag::Kind::DevicePreset) { loadDevicePreset(item, trackIndex, -1); return; } // LIB-2
+    if (item.kind == ui::BrowserDrag::Kind::SpliceSample) { dropSpliceSample(item, trackIndex, beat, scene); return; } // SPL-5
     if (const auto tag = model::insertedDeviceTag(item.value, song_ ? song_->schemaVersion : std::string());
         item.kind == ui::BrowserDrag::Kind::NativeDevice && tag != item.value)
     {
@@ -3743,7 +3824,8 @@ void AppController::openPluginEditor(int track, int device)
             existing->toFront(true);
             return;
         }
-    pluginWindows_.add(new PluginWindow(dev->instance(), [this](PluginWindow* w) { pluginWindows_.removeObject(w); }));
+    pluginWindows_.add(new PluginWindow(dev->instance(), [this](PluginWindow* w) { pluginWindows_.removeObject(w); },
+                                        [this](const juce::KeyPress& k) { return forwardKeyToMainWindow && forwardKeyToMainWindow(k); }));
 }
 
 // ------------------------------------------------------------------------- settings dialogs
@@ -3752,7 +3834,8 @@ void AppController::showAudioSettings()
 {
     if (ui_.recording || ui_.recordingRequested || exporting_ || editingDevices_ || syncingModel_) return;
     if (audioSettingsWindow_) { audioSettingsWindow_->toFront(true); return; }
-    auto show = [this, alive = std::weak_ptr<bool>(alive_)](bool inputAllowed) {
+    auto show = [this, alive = std::weak_ptr<bool>(alive_)](AccessResult access) {
+        const bool inputAllowed = access == AccessResult::Granted; // COM-15: outputs only until the microphone is allowed
         const auto lifetime = alive.lock();
         if (! lifetime || ! *lifetime || ui_.recording || ui_.recordingRequested || exporting_ || editingDevices_ || syncingModel_) return;
         if (audioSettingsWindow_) { audioSettingsWindow_->toFront(true); return; }
@@ -3765,7 +3848,7 @@ void AppController::showAudioSettings()
         options.resizable = false;
         audioSettingsWindow_ = options.launchAsync();
     };
-    juce::RuntimePermissions::request(juce::RuntimePermissions::recordAudio, std::move(show));
+    withAccess(core::Access::Microphone, core::AccessRequest::Browsing, std::move(show));
 }
 
 void AppController::loadThemeDialog()

@@ -46,10 +46,40 @@ AudioEngine::~AudioEngine()
 
 juce::String AudioEngine::initialiseAudio(const juce::XmlElement* savedState)
 {
-    // Open inputs only when audio recording is requested.
-    auto error = deviceManager_.initialise(0, 2, savedState, true);
+    // Open inputs only when audio recording is requested (COM-15: not even the saved one).
+    std::unique_ptr<juce::XmlElement> outputOnly;
+    if (savedState != nullptr) outputOnly = withoutInputs(*savedState, savedInputDevice_, savedInputChannels_);
+    auto error = deviceManager_.initialise(0, 2, outputOnly.get(), true);
     deviceManager_.addAudioCallback(this);
     return error;
+}
+
+std::unique_ptr<juce::XmlElement> AudioEngine::withoutInputs(const juce::XmlElement& saved, juce::String& inputDevice, juce::String& inputChannels)
+{
+    auto copy = std::make_unique<juce::XmlElement>(saved);
+    inputDevice = copy->getStringAttribute("audioInputDeviceName");
+    if (const auto combined = copy->getStringAttribute("audioDeviceName"); combined.isNotEmpty())
+    {
+        // One device for both directions (older JUCE state): keep it as the output.
+        inputDevice = combined;
+        copy->setAttribute("audioOutputDeviceName", combined);
+    }
+    copy->removeAttribute("audioDeviceName");
+    inputChannels = copy->getStringAttribute("audioDeviceInChans");
+    copy->setAttribute("audioInputDeviceName", juce::String());
+    copy->removeAttribute("audioDeviceInChans");
+    return copy;
+}
+
+std::unique_ptr<juce::XmlElement> AudioEngine::audioStateForSettings() const
+{
+    auto state = deviceManager_.createStateXml();
+    if (state != nullptr && savedInputDevice_.isNotEmpty() && state->getStringAttribute("audioInputDeviceName").isEmpty())
+    {
+        state->setAttribute("audioInputDeviceName", savedInputDevice_);
+        if (savedInputChannels_.isNotEmpty()) state->setAttribute("audioDeviceInChans", savedInputChannels_);
+    }
+    return state;
 }
 
 int AudioEngine::inputChannelCount() const
@@ -65,7 +95,8 @@ juce::String AudioEngine::enableRecordingInputs(int requiredChannels)
         if (auto* type = deviceManager_.getCurrentDeviceTypeObject())
         {
             const auto names = type->getDeviceNames(true);
-            if (! names.isEmpty()) setup.inputDeviceName = names[0];
+            if (names.contains(savedInputDevice_)) setup.inputDeviceName = savedInputDevice_; // the one chosen last time
+            else if (! names.isEmpty()) setup.inputDeviceName = names[0];
         }
     if (setup.inputDeviceName.isEmpty()) return "No audio input device is available";
     setup.useDefaultInputChannels = false;
@@ -402,13 +433,45 @@ void AudioEngine::reprepareGraph()
 
 void AudioEngine::previewSample(const std::string& path)
 {
+    previewSample(PreviewRequest{path, 0, 0, false});
+}
+
+void AudioEngine::previewSample(const PreviewRequest& request)
+{
     auto preview = std::make_unique<Preview>();
-    if (! path.empty()) preview->sample = samples_.request(path);
+    previewPaused_.store(false, std::memory_order_relaxed); // a new audition always starts playing
+    preview->pitchRatio = std::pow(2.0, request.semitones / 12.0);
+    if (! request.path.empty()) preview->sample = samples_.request(request.path);
+    // SPL-4: build the warped, pitched, looping clip for the synced preview up front (off the audio thread). A blocking
+    // decode of the short preview file is fine on the message thread; the stretcher's buffers are allocated here too.
+    if (! request.path.empty() && request.syncToProject && request.sourceBpm >= 20 && request.sourceBpm <= 999)
+        if (auto data = samples_.load(request.path); data && data->audio.getNumSamples() > 0)
+        {
+            const double seconds = (double) data->audio.getNumSamples() / data->sampleRate;
+            const double loopBeats = seconds * request.sourceBpm / 60.0;
+            model::Clip clip;
+            clip.kind = model::Clip::Kind::Audio;
+            clip.sampleRate = data->sampleRate;
+            clip.lengthSamples = data->audio.getNumSamples();
+            clip.warped = true;
+            clip.warpMode = model::WarpMode::Complex; // general-purpose stretch for an arbitrary loop
+            clip.warpMarkers = {{0.0, 0.0}, {seconds, loopBeats}};
+            clip.loop = {0, loopBeats, 0, false};
+            clip.currentStart = 0;
+            clip.currentEnd = loopBeats;
+            clip.pitchCoarse = request.semitones;
+            preview->clip = prepareClip(clip, SampleSlot::makeReady(data));
+            preview->play = std::make_unique<AudioPlayState>();
+            preview->play->prepare(sampleRate_, blockSize_);
+            preview->scratch.setSize(2, blockSize_);
+            preview->loopBeats = loopBeats;
+            preview->sync = loopBeats > 0;
+        }
     delete retiredPreview_.exchange(nullptr, std::memory_order_acq_rel);
     delete pendingPreview_.exchange(preview.release(), std::memory_order_acq_rel);
 }
 
-void AudioEngine::renderPreview(float* const* outputs, int numOutputs, int numSamples)
+void AudioEngine::renderPreview(float* const* outputs, int numOutputs, int numSamples, const PreviewSync* sync)
 {
     if (retiredPreview_.load(std::memory_order_acquire) == nullptr)
         if (auto* next = pendingPreview_.exchange(nullptr, std::memory_order_acq_rel))
@@ -417,10 +480,46 @@ void AudioEngine::renderPreview(float* const* outputs, int numOutputs, int numSa
             currentPreview_ = next;
         }
     auto* preview = currentPreview_;
-    const auto* data = preview && preview->sample ? preview->sample->get() : nullptr;
+    if (! preview) { previewPlaying_.store(false); return; }
+    if (previewPaused_.load(std::memory_order_relaxed)) { previewPlaying_.store(true, std::memory_order_relaxed); return; } // held
+    const float previewGain = previewGain_.load(std::memory_order_relaxed);
+
+    // SPL-4: synced path — a warped, pitched loop that starts on the next bar when the transport is playing.
+    if (preview->sync && preview->play && preview->clip.sample && preview->clip.sample->get() != nullptr && sync != nullptr
+        && numSamples <= preview->scratch.getNumSamples())
+    {
+        const double spb = sampleRate_ * 60.0 / std::max(1.0, sync->tempo);
+        if (! preview->started)
+        {
+            if (sync->playing)
+            {
+                if (preview->startTimelineBeat < 0)
+                    preview->startTimelineBeat = std::ceil((sync->currentBeat + 1e-4) / sync->barBeats) * sync->barBeats;
+                if (sync->currentBeat + numSamples / spb >= preview->startTimelineBeat) preview->started = true;
+                else { previewPlaying_.store(true, std::memory_order_relaxed); return; } // armed, waiting for the bar
+            }
+            else preview->started = true; // transport stopped: audition immediately
+        }
+        preview->scratch.clear();
+        BlockSegment seg{0, numSamples, preview->beat, spb};
+        preview->play->render(preview->clip, seg, sync->tempo, preview->scratch);
+        for (int ch = 0; ch < std::min(2, numOutputs); ++ch)
+            if (outputs[ch]) juce::FloatVectorOperations::addWithMultiply(outputs[ch], preview->scratch.getReadPointer(ch), previewGain, numSamples);
+        preview->beat += numSamples / spb;
+        if (preview->loopBeats > 0 && preview->beat >= preview->loopBeats)
+        {
+            preview->beat -= preview->loopBeats; // seamless-enough loop for audition
+            preview->play->reset();
+        }
+        previewPlaying_.store(true, std::memory_order_relaxed);
+        return;
+    }
+
+    // Native path: one-shot (or no transport context), transposed by resampling.
+    const auto* data = preview->sample ? preview->sample->get() : nullptr;
     if (! data || data->audio.getNumSamples() == 0) { previewPlaying_.store(false); return; }
     const int frames = data->audio.getNumSamples();
-    const double ratio = data->sampleRate / sampleRate_;
+    const double ratio = data->sampleRate / sampleRate_ * preview->pitchRatio;
     for (int i = 0; i < numSamples && preview->position < frames; ++i, preview->position += ratio)
     {
         const int a = (int) preview->position, b = std::min(frames - 1, a + 1);
@@ -429,7 +528,7 @@ void AudioEngine::renderPreview(float* const* outputs, int numOutputs, int numSa
             if (outputs[ch])
             {
                 const float* samples = data->audio.getReadPointer(ch);
-                outputs[ch][i] += 0.25f * (samples[a] + fraction * (samples[b] - samples[a]));
+                outputs[ch][i] += 0.5f * previewGain * (samples[a] + fraction * (samples[b] - samples[a]));
             }
     }
     previewPlaying_.store(preview->position < frames, std::memory_order_relaxed);
@@ -1419,7 +1518,11 @@ void AudioEngine::renderBlock(float* const* outputs, int numOutputs, int numSamp
                           outputs[0], outputs[1], 4.0 / std::max(1, den));
     }
 
-    renderPreview(outputs, numOutputs, numSamples);
+    {
+        const int num = transport_.timeSigNumerator(), den = transport_.timeSigDenominator();
+        const PreviewSync previewSync{tempo, bs.position, num * 4.0 / std::max(1, den), bs.playing}; // SPL-4: next-bar start
+        renderPreview(outputs, numOutputs, numSamples, &previewSync);
+    }
     if (bs.playing)
         transport_.advanceTo(endPos);
     publishLoad(*g, juce::Time::getHighResolutionTicks() - renderStart, numSamples, threads, helpers > 0);

@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -546,9 +547,32 @@ struct WaveformSource
 constexpr float kFadeHandle = 7.0f;
 Rect fadeHandleRect(const Rect& body, float x) { return {x - kFadeHandle * 0.5f, body.y + 1.5f, kFadeHandle, kFadeHandle}; }
 
+// UI-87: the clip gain handle in an audio clip's title bar, at the right of the clip's visible part and left of its right
+// resize zone (ui::hitZone). None on narrow clips: their title bar is all move and resize.
+constexpr float kGainHandleW = 18.0f, kGainHandleH = 9.0f;
+std::optional<Rect> gainHandleRect(float x0, float x1, float titleY, float visibleX0, float visibleX1)
+{
+    const float left = std::max(x0, visibleX0), right = std::min(x1, visibleX1);
+    if (x1 - x0 < 48.0f || right - left < 40.0f) return std::nullopt;
+    const float edge = std::min(9.0f, (x1 - x0) * 0.25f);
+    const float hx = (right < x1 - 0.5f ? right - 4.0f : right - edge - 3.0f) - kGainHandleW;
+    return Rect{hx, titleY + 1.5f, kGainHandleW, kGainHandleH};
+}
+
+void drawGainHandle(SkCanvas& c, const Rect& h, SkColor ink, bool active)
+{
+    paint::fillRounded(c, h, 2.0f, paint::withAlpha(SK_ColorWHITE, active ? 255 : 220));
+    paint::stroke(c, h, ink);
+    const float cx = h.centreX();
+    ctl::triangle(c, cx, h.y + 2.6f, 6.0f, 3.0f, ctl::Dir::Up, ink);
+    ctl::triangle(c, cx, h.bottom() - 2.6f, 6.0f, 3.0f, ctl::Dir::Down, ink);
+}
+
 void drawFades(SkCanvas& c, const Theme& t, const model::Clip& clip, const Rect& r, const Rect& body, float pixelsPerBeat, SkColor ink, bool handles)
 {
-    const float fi = (float) (clip.fadeIn * pixelsPerBeat), fo = (float) (clip.fadeOut * pixelsPerBeat);
+    // UI-85: drawn as they play, inside the clip (a set may hold fades longer than a clip that was shortened).
+    const auto fades = model::fittedClipFades(clip.fadeIn, clip.fadeOut, clip.currentEnd - clip.currentStart);
+    const float fi = std::min(r.w, (float) (fades.in * pixelsPerBeat)), fo = std::min(r.w, (float) (fades.out * pixelsPerBeat));
     SkPaint shade;
     shade.setAntiAlias(true);
     shade.setColor(paint::withAlpha(t.color("SurfaceBackground"), 150));
@@ -660,6 +684,9 @@ void drawClip(SkCanvas& c, const Theme& t, const model::Clip& clip, const Rect& 
         else
             paint::line(c, r.x, body.centreY(), r.right(), body.centreY(), ink); // still loading
         drawFades(c, t, clip, r, body, pixelsPerBeat, ink, handles);
+        if (handles)
+            if (const auto h = gainHandleRect(r.x, r.right(), r.y, wave.visibleX0, wave.visibleX1); h && r.h >= 24.0f)
+                drawGainHandle(c, *h, ink, ghost);
     }
     if (clip.disabled)
     {
@@ -1476,6 +1503,24 @@ void ArrangementView::paintDragGuide(SkCanvas& c, const Theme& t)
     bool tagLeft = false; // the tag sits left of the line for edges that end a clip
     float bottom = 0;
     const Lane* clipLane = nullptr;
+    if (drag_.active && drag_.moved && drag_.mode == ui::DragMode::Gain)
+    {
+        // UI-87: the gain readout next to the clip's gain handle.
+        for (const auto& lane : lanes_)
+            if (lane.controlIndex == drag_.track && lane.takeLaneId < 0)
+            {
+                const float x0 = beatToX(drag_.preview.currentStart), x1 = beatToX(drag_.preview.currentEnd);
+                const auto h = gainHandleRect(x0, x1, lane.y + 1, 0.0f, timelineArea().w);
+                const float right = h ? h->x - 2 : std::min(x1, timelineArea().w) - 2;
+                const SkColor ink = t.color("ControlForeground");
+                const auto text = ui::clipGainText(drag_.preview.gain);
+                const float w = gfx::measureText(text, t.metrics.fontSize) + 8;
+                const Rect tag{std::max(std::max(0.0f, x0) + 1.0f, right - w), lane.y + 1, w, 13};
+                paint::fillRounded(c, tag, 2, ink);
+                paint::text(c, text, tag, paint::contrastText(ink), t.metrics.fontSize, Align::Centre);
+            }
+        return;
+    }
     if (drag_.active && drag_.moved)
     {
         beat = ui::dragGuideBeat(drag_.preview, drag_.mode, drag_.alignEnd);
@@ -1746,9 +1791,10 @@ bool ArrangementView::fadeHandleAt(const model::Clip& clip, const model::ClipLoc
     if (lane == nullptr)
         return false;
     const float bodyTop = lane->y + 1 + 12; // below the clip's title strip
+    const auto fades = model::fittedClipFades(clip.fadeIn, clip.fadeOut, clip.currentEnd - clip.currentStart); // UI-85
     for (const bool fadeIn : {true, false})
     {
-        const float length = (float) ((fadeIn ? clip.fadeIn : clip.fadeOut) * ctx().pixelsPerBeat);
+        const float length = (float) ((fadeIn ? fades.in : fades.out) * ctx().pixelsPerBeat);
         if (length < 14) continue;
         const float px = fadeIn ? clipX0 + length * 0.5f : clipX1 - length * 0.5f;
         const float bodyHeight = lane->h - 15.0f;
@@ -1757,13 +1803,34 @@ bool ArrangementView::fadeHandleAt(const model::Clip& clip, const model::ClipLoc
         { mode = fadeIn ? ui::DragMode::FadeInCurve : ui::DragMode::FadeOutCurve; return true; }
     }
     if (y < bodyTop - 2 || y > bodyTop + kFadeHandle + 4) return false;
-    const float inX = clipX0 + (float) (clip.fadeIn * ctx().pixelsPerBeat), outX = clipX1 - (float) (clip.fadeOut * ctx().pixelsPerBeat);
+    const float inX = clipX0 + (float) (fades.in * ctx().pixelsPerBeat), outX = clipX1 - (float) (fades.out * ctx().pixelsPerBeat);
     const bool nearIn = std::fabs(x - inX) <= kFadeHandle, nearOut = std::fabs(x - outX) <= kFadeHandle;
     if (! nearIn && ! nearOut)
         return false;
-    // overlapping handles (a clip fully faded): the closer one wins
-    mode = nearIn && (! nearOut || std::fabs(x - inX) <= std::fabs(x - outX)) ? ui::DragMode::FadeIn : ui::DragMode::FadeOut;
+    // overlapping handles (a clip fully faded): the closer one wins; where they meet (fades shrunk to fill a shortened clip,
+    // UI-85) the side of the pointer picks the fade it is over
+    const bool fadeIn = std::fabs(inX - outX) < 1.0f ? x < inX : std::fabs(x - inX) <= std::fabs(x - outX);
+    mode = nearIn && (! nearOut || fadeIn) ? ui::DragMode::FadeIn : ui::DragMode::FadeOut;
     return true;
+}
+
+bool ArrangementView::gainHandleAt(const model::Clip& clip, const model::ClipLocation& location, float clipX0, float clipX1, float x, float y) const
+{
+    if (clip.kind != model::Clip::Kind::Audio || location.kind != model::ClipLocation::Kind::Arrangement) return false;
+    const Lane* lane = laneAt(y);
+    if (lane == nullptr || lane->takeLaneId >= 0) return false;
+    if (lane->h - ctx().automationHeight(lane->controlIndex) - 2.0f < 24.0f) return false; // drawn only on clips this tall
+    const auto h = gainHandleRect(clipX0, clipX1, lane->y + 1, 0.0f, timelineArea().w);
+    return h && h->reduced(-2.0f, -1.5f).contains(x, y);
+}
+
+// UI-87: Cmd+Option dragged on an audio clip's body changes its gain, like the title-bar handle.
+bool ArrangementView::gainGesture(const MouseEvent& e, const model::Clip& clip, const model::ClipLocation& location, float clipX0, float clipX1) const
+{
+    if (clip.kind != model::Clip::Kind::Audio || location.kind != model::ClipLocation::Kind::Arrangement || e.clicks >= 2) return false;
+    if (gainHandleAt(clip, location, clipX0, clipX1, e.x, e.y)) return true;
+    const Lane* lane = laneAt(e.y);
+    return e.cmd && e.alt && ! e.shift && lane != nullptr && e.y >= lane->y + 13;
 }
 
 ArrangementView::LoopDrag ArrangementView::loopZoneAt(float x, float y) const
@@ -1797,8 +1864,11 @@ Cursor ArrangementView::cursorAt(float x, float y) const
     model::ClipLocation location;
     float x0 = 0, x1 = 0;
     ui::DragMode mode;
+    if (drag_.active && drag_.mode == ui::DragMode::Gain) return Cursor::ResizeVertical; // UI-87, wherever the pointer goes
     if (const auto* clip = clipAt(x, y, location, x0, x1); clip != nullptr && fadeHandleAt(*clip, location, x0, x1, x, y, mode))
         return mode == ui::DragMode::FadeInCurve || mode == ui::DragMode::FadeOutCurve ? Cursor::ResizeVertical : Cursor::ResizeHorizontal;
+    if (const auto* clip = clipAt(x, y, location, x0, x1); clip != nullptr && gainHandleAt(*clip, location, x0, x1, x, y))
+        return Cursor::ResizeVertical; // UI-87: the clip gain handle
     if (const auto* clip = clipAt(x, y, location, x0, x1); clip && clipEdgeAt(laneAt(y), x, y, x0, x1) != ui::DragMode::Move)
         return Cursor::ResizeHorizontal;
     // A clip's title bar moves the clip: the hand, like the reference (the body below it selects time: the arrow).
@@ -1825,6 +1895,8 @@ void ArrangementView::mouseMove(const MouseEvent& e)
     model::ClipLocation location;
     float x0 = 0, x1 = 0;
     const auto* clip = clipAt(e.x, e.y, location, x0, x1);
+    if (clip != nullptr && gainHandleAt(*clip, location, x0, x1, e.x, e.y))
+        tooltip = "Clip Gain " + ui::clipGainText(clip->gain) + ": drag up/down (Shift: fine), double-click for 0 dB. Cmd+Option-drag on the clip also works";
     const int uid = clip != nullptr && location.kind != model::ClipLocation::Kind::Take ? clip->uid : -1;
     const int track = uid >= 0 ? location.track : -1;
     if (uid != hoverUid_ || track != hoverTrack_)
@@ -1981,8 +2053,10 @@ void ArrangementView::mouseDown(const MouseEvent& e)
         model::ClipLocation target;
         float left = 0, right = 0;
         // (Shift on an audio clip's title-bar edge stretches it instead, UI-45.)
+        // (Shift on an audio clip's gain handle drags its gain in fine steps instead, UI-87.)
         if (const auto* last = clipAt(e.x, e.y, target, left, right); last && target.kind == model::ClipLocation::Kind::Arrangement
-            && (last->kind != model::Clip::Kind::Audio || clipEdgeAt(hitLane, e.x, e.y, left, right) == ui::DragMode::Move))
+            && (last->kind != model::Clip::Kind::Audio || clipEdgeAt(hitLane, e.x, e.y, left, right) == ui::DragMode::Move)
+            && ! gainHandleAt(*last, target, left, right, e.x, e.y))
         {
             auto anchor = selectionAnchorSong_ == x.song ? selectionAnchor_ : x.selectedClipLocation();
             const auto* first = anchor.kind == model::ClipLocation::Kind::Arrangement ? model::findClip(*x.song, anchor) : nullptr;
@@ -2005,13 +2079,13 @@ void ArrangementView::mouseDown(const MouseEvent& e)
         float left = 0, right = 0;
         ui::DragMode mode;
         const auto* clip = clipAt(e.x, e.y, hit, left, right);
-        if (! clip || ! fadeHandleAt(*clip, hit, left, right, e.x, e.y, mode))
+        if (! clip || (! fadeHandleAt(*clip, hit, left, right, e.x, e.y, mode) && ! gainGesture(e, *clip, hit, left, right)))
         {
             if (x.recording || x.recordingRequested) { x.statusText = "Finish recording before moving the selection"; return; }
             regionDrag_.active = regionDrag_.valid = true; regionDrag_.copy = e.alt;
             regionDrag_.original = x.arrangementSelection; regionDrag_.song = x.song; regionDrag_.structure = x.trackStructure();
             regionDrag_.at = regionDrag_.original.start; regionDrag_.grabBeat = xToBeat(e.x);
-            regionDrag_.startX = e.x; regionDrag_.startY = e.y; regionDrag_.grabTrack = hitLane->controlIndex;
+            regionDrag_.startX = e.x; regionDrag_.startY = e.y; regionDrag_.grabTrack = hitLane->controlIndex; regionDrag_.down = e;
             for (int track = regionDrag_.original.firstTrack; track <= regionDrag_.original.lastTrack; ++track)
                 for (const auto& selected : x.song->tracks[(size_t) track].arrangementClips)
                     if (selected.currentStart < regionDrag_.original.end && selected.currentEnd > regionDrag_.original.start)
@@ -2036,6 +2110,18 @@ void ArrangementView::mouseDown(const MouseEvent& e)
         x.selectedClipTrack = track;
         x.selectedClipScene = -1;
         x.selectedClipUid = clip->uid;
+        if (e.clicks >= 2 && x.applyEdit && gainHandleAt(*clip, location, x0, x1, e.x, e.y))
+        {
+            // UI-87: a double-click on the gain handle puts the clip back at 0 dB (the Gain fader's double-click).
+            if (std::abs(clip->gain - 1.0) > 1e-9)
+            {
+                auto reset = *clip;
+                reset.gain = 1.0;
+                x.applyEdit(model::modifyClip(*x.song, location, std::move(reset), "Reset Clip Gain"));
+            }
+            x.statusText = "Clip Gain: 0.0 dB";
+            repaint(); return;
+        }
         if (e.clicks >= 2) // double-click opens the clip in the detail view
         {
             ++x.clipZoomRequest;
@@ -2056,9 +2142,10 @@ void ArrangementView::mouseDown(const MouseEvent& e)
         // UI-45 (Live): edges resize, trim or (Shift/Alt, audio) stretch only from the clip's title bar; below it the
         // whole body, edges included, selects time.
         const auto edge = clipEdgeAt(hitLane, e.x, e.y, x0, x1);
-        const bool stretch = edge != ui::DragMode::Move && (e.shift || e.alt) && clip->kind == model::Clip::Kind::Audio
+        const bool gain = gainGesture(e, *clip, location, x0, x1); // UI-87
+        const bool stretch = ! gain && edge != ui::DragMode::Move && (e.shift || e.alt) && clip->kind == model::Clip::Kind::Audio
                              && location.kind != model::ClipLocation::Kind::Take;
-        if (hitLane && hitLane->takeLaneId < 0 && e.clicks < 2 && ! e.alt && ! fadeHandle && ! stretch
+        if (hitLane && hitLane->takeLaneId < 0 && e.clicks < 2 && ! e.alt && ! fadeHandle && ! stretch && ! gain
             && (e.shift || e.y >= hitLane->y + 13))
         {
             selectionGrab_ = std::max(0.0, ui::snapToGrid(xToBeat(e.x), snapUnit(e)));
@@ -2072,13 +2159,17 @@ void ArrangementView::mouseDown(const MouseEvent& e)
         drag_.uid = clip->uid;
         drag_.original = drag_.preview = *clip;
         drag_.mode = edge;
-        if (fadeHandle)
+        if (gain)
+            drag_.mode = ui::DragMode::Gain;
+        else if (fadeHandle)
             drag_.mode = fadeMode; // the fade handles sit at the top corners of the waveform
         else if (stretch)
             drag_.mode = edge == ui::DragMode::TrimStart ? ui::DragMode::StretchStart : ui::DragMode::StretchEnd;
         drag_.copy = e.alt && drag_.mode == ui::DragMode::Move && location.kind != model::ClipLocation::Kind::Take; // Opt+drag copies
         drag_.startX = e.x;
         drag_.startY = e.y;
+        drag_.gainAnchor = clip->gain; drag_.gainAnchorY = e.y; drag_.gainFine = e.shift;
+        if (gain) x.statusText = "Clip Gain: " + ui::clipGainText(clip->gain) + " (drag up/down; Shift: fine; double-click the handle: 0 dB)";
     }
     else
     {
@@ -2419,6 +2510,19 @@ void ArrangementView::mouseDrag(const MouseEvent& e)
         drag_.moved = true;
     if (! drag_.moved)
         return;
+    if (drag_.mode == ui::DragMode::Gain)
+    {
+        // UI-87: up is louder; Shift switches to fine steps from where the pointer is (no jump).
+        if (e.shift != drag_.gainFine)
+        {
+            drag_.gainAnchor = drag_.preview.gain; drag_.gainAnchorY = e.y; drag_.gainFine = e.shift;
+        }
+        drag_.preview = drag_.original;
+        drag_.preview.gain = ui::dragClipGain(drag_.gainAnchor, e.y - drag_.gainAnchorY, drag_.gainFine);
+        x.statusText = "Clip Gain: " + ui::clipGainText(drag_.preview.gain);
+        repaint();
+        return;
+    }
     const double deltaBeats = (e.x - drag_.startX) / x.pixelsPerBeat;
     // Moving can also change the track, if the lane under the mouse takes the same kind of clip.
     drag_.targetTrack = drag_.track;
@@ -2497,6 +2601,18 @@ void ArrangementView::mouseUp(const MouseEvent& e)
         mouseDrag(e); // validate the release position even when no final drag event arrived
         auto region = std::move(regionDrag_); regionDrag_ = {};
         x.dragRange.reset();
+        if (! region.moved)
+        {
+            // UI-89 (Live): a press inside the selection keeps it only for a drag. A plain click collapses it: the press
+            // runs again as an ordinary click (the clip under it is selected, or the insert marker goes there).
+            if (region.song == x.song && region.structure == x.trackStructure())
+            {
+                x.arrangementSelection = {};
+                mouseDown(region.down);
+                mouseUp(e);
+            }
+            repaint(); return;
+        }
         if (region.moved && region.valid && region.song == x.song && region.structure == x.trackStructure()
             && ! x.recording && ! x.recordingRequested && x.applyEdit)
         {
@@ -2535,7 +2651,13 @@ void ArrangementView::mouseUp(const MouseEvent& e)
         loopDrag_ = LoopDrag::None;
         return;
     }
-    if (drag_.active && drag_.moved && x.song != nullptr && x.applyEdit)
+    if (drag_.active && drag_.moved && drag_.mode == ui::DragMode::Gain && x.song != nullptr && x.applyEdit)
+    {
+        // UI-87: one undo step; the same field as the Clip view's Gain fader (<SampleVolume>).
+        if (std::abs(drag_.preview.gain - drag_.original.gain) > 1e-12)
+            x.applyEdit(model::modifyClip(*x.song, model::ClipLocation::arrangement(drag_.track, drag_.uid), drag_.preview, "Change Clip Gain"));
+    }
+    else if (drag_.active && drag_.moved && x.song != nullptr && x.applyEdit)
     {
         const char* label = drag_.mode == ui::DragMode::Move ? "Move Clip" : drag_.mode == ui::DragMode::ResizeEnd ? "Resize Clip"
                           : drag_.mode == ui::DragMode::TrimStart ? "Trim Clip"

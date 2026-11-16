@@ -295,7 +295,11 @@ HushSession::HushSession(Hush& hush) : hush_(hush)
     presetValues_ = slots_[0] = slots_[1] = snapshot();
     // A preset chosen as the default (preset menu > Set as default) starts every new instance.
     if (const auto& name = HushSettings::get().defaultPreset; ! name.empty() && name != presetName_)
-        for (const auto& preset : allPresets())
+    {
+        // COM-15: a factory default needs no folder; only a saved preset reads the preset folders (in ~/Documents).
+        const auto& factory = factoryPresets();
+        const bool isFactory = std::any_of(factory.begin(), factory.end(), [&](const HushPreset& p) { return p.name == name; });
+        for (const auto& preset : isFactory ? factory : allPresets())
             if (preset.name == name)
             {
                 loadPreset(preset);
@@ -303,6 +307,7 @@ HushSession::HushSession(Hush& hush) : hush_(hush)
                 slots_[0] = slots_[1] = snapshot();
                 break;
             }
+    }
     applySettings();
 }
 

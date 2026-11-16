@@ -13,6 +13,7 @@
 #include "collab/Net.h"
 #include "collab/Video.h"
 #include "core/Edit.h"
+#include "core/Privacy.h"
 #include "control/ControlService.h"
 #include "control/LocalEndpoint.h"
 #include "engine/AudioEngine.h"
@@ -33,6 +34,7 @@
 #include "plugins/PluginHost.h"
 #include "plugins/NativeReplacement.h"
 #include "packs/PackStore.h"
+#include "platform/splice/SpliceStore.h"
 #include "ui/UiContext.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -184,6 +186,7 @@ private:
     bool collabCameraOn_ = false;
     uint64_t videoSerial_ = 0; // sum of the shown frames' serials: repaint when it moves
     std::unique_ptr<collab::LanBrowser> lanBrowser_;
+    bool localNetworkAsked_ = false; // COM-15: the Collaborate panel explained the local network once this run
     struct CollabTimer : juce::Timer
     {
         explicit CollabTimer(AppController& owner) : owner_(owner) {}
@@ -279,6 +282,8 @@ private:
     // LIB-1 (AppSamplePacks.cpp): the Browser's Packs list and downloads.
     void setUpSamplePacks();
     void publishSamplePacks();
+    // SPL-3/4/5 (AppSplice.cpp): the Browser's Splice section — login, search, buy, preview and place.
+    void setUpSplice();
     // PLG-16 (AppNativeSwap.cpp): after a load, offer Sonora Prism / Curve LFO for missing Serum 2 / LFOTool instances.
     void offerNativeReplacements();
     void showNativeReplacementOffer(std::shared_ptr<std::vector<plugins::NativeReplacement>> found, int generation, int attempt);
@@ -291,6 +296,13 @@ private:
                                        const std::string& path, int chain, int child);
     void dropDeviceItem(const ui::BrowserDrag& item, int track, int device, int chain, int zone, int child);
     void findProjectsInBackground();
+    void addProjectFolder(const juce::File& folder); // COM-15: the opened set's folder joins the Projects list
+    std::set<std::string> projectFolders_; // message thread: folders addProjectFolder walked
+    // COM-15 (AppPrivacy.cpp): the microphone, camera and local network. Explains why in Sonora's prompt first when macOS
+    // has not asked yet and `request` allows it; Continue lets macOS ask. `done` runs on the message thread, maybe at once.
+    enum class AccessResult { Granted, Denied, NotNow };
+    void withAccess(core::Access access, core::AccessRequest request, std::function<void(AccessResult)> done);
+    bool localNetworkAllowed(); // Continue was chosen (or the system has no such prompt)
     juce::PropertiesFile& settings();
     static juce::File midiSettingsFile();
     void loadMappingsForSong();
@@ -390,7 +402,8 @@ private:
     int documentGeneration_ = 0; // rejects sample drops after another set was opened
     void toggleRecording();
     void beginRecording();
-    void ensureAudioInputs(bool record = false);
+    // `request` says who wants the inputs (COM-15): only a person's action may show the microphone explanation.
+    void ensureAudioInputs(bool record = false, core::AccessRequest request = core::AccessRequest::Automatic);
     int requiredInputChannels(bool record) const;
     bool inputPermissionPending_ = false, inputPermissionDenied_ = false;
     // UI-82: CPU meter details. Message thread.
@@ -478,6 +491,19 @@ private:
     bool samplePacksFetched_ = false, samplePacksPublished_ = false;
     std::set<std::string> samplePacksInstalled_, samplePacksFailed_;
     std::unique_ptr<packs::PackStore> packStore_; // its worker stops before anything above goes away
+    // SPL-3/4/5: one serial worker for every Splice network job (login polling, search, buy, download).
+    std::unique_ptr<platform::splice::SpliceStore> spliceStore_;
+    std::shared_ptr<std::atomic<int>> spliceSearchGen_ = std::make_shared<std::atomic<int>>(0);
+    std::shared_ptr<std::atomic<bool>> spliceLoginActive_ = std::make_shared<std::atomic<bool>>(false);
+    void dropSpliceSample(const ui::BrowserDrag& item, int track, double beat, int scene);
+    void spliceBuyAsset(const std::string& uuid, const std::function<void()>& afterCredits);
+    void splicePreviewRow(const std::string& uuid);
+    void spliceRequireLogin(const std::string& reason); // SPL-12: no valid sign-in for a user action: say so, start sign-in
+    // Buy (if needed) + download a Splice sample's WAV; `then` runs on the message thread with the local path (empty = failed).
+    void spliceEnsureLocal(const std::string& uuid, std::function<void(std::string)> then);
+    int spliceTranspose(const ui::UiContext::SpliceRow& row) const; // semitones to the project key
+    juce::ThreadPool splicePool_{juce::ThreadPoolOptions{}.withThreadName("Sonora Splice").withNumberOfThreads(1)
+                                    .withThreadStackSizeBytes(8u * 1024 * 1024)};
     // LIB-4: Show Similar Files decodes many files; its own thread keeps the browser's folder reads (pool_) responsive.
     std::shared_ptr<engine::SoundFeatureCache> soundFeatures_;
     std::shared_ptr<std::atomic<int>> similarGeneration_ = std::make_shared<std::atomic<int>>(0);

@@ -73,6 +73,7 @@ existed before COM-7, moved without behaviour changes.
 | `platform/CNumeric.h` — C-locale `strtod` (Serum JSON, SFZ) | `newlocale` + `strtod_l` | same | `_create_locale` + `_strtod_l` |
 | `platform/Paths.h` — `appDataFolder()` | `~/Library/Application Support/Sonora` | `~/.config/Sonora` | `%APPDATA%\Sonora` |
 | `platform/ReferenceLibrary.h` — the reference app's Core Library, User Library and pack folders (LIB-2 device presets, read only) | `/Applications/Ableton Live*.app/Contents/App-Resources/Core Library`, `~/Music/Ableton/...` | none (User Library / packs under `~/Music`) | `%ProgramData%\Ableton\Live*\Resources\Core Library`, `Documents\Ableton\...` |
+| `platform/FolderList.h` — one folder's names and types without asking about each entry (COM-15 privacy prompts) | POSIX `readdir` | same | JUCE iterator |
 | `platform/HttpClient.h` — no-redirect HTTPS POST (agent providers); resumable GET into a file (LIB-1 sample packs) | `HttpClientMac.mm` (NSURLSession, ephemeral) | `HttpClientJuce.cpp` (JUCE + libcurl) | `HttpClientJuce.cpp` (JUCE + WinINet) |
 | `platform/SecretStore.h` — provider API keys | `SecretStoreMac.mm` (Keychain) | `SecretStoreFile.cpp` (`Secrets.json`, mode 0600) | `SecretStoreFile.cpp` (profile ACL only) |
 | `gfx/MetalRenderer.h` — GPU canvas | `MetalLayerView.mm` | `MetalRendererNone.cpp` → raster | same |
@@ -145,6 +146,59 @@ audio device (JUCE), so capture is the same on every OS; macOS asks for permissi
 needed for MAY_HAVE_NEON` on macOS arm64: it is a status line (NEON is presumed), not an error. Ship Opus's `COPYING`.
 
 The camera (COL-8) is macOS only: AVFoundation capture and VideoToolbox H.264. Windows and Linux show it disabled.
+
+## Privacy prompts (COM-15)
+
+macOS (TCC) asks the person before an app reads some folders or opens a protected device. User report (2026-11-17):
+Sonora asked for Photos "and several others" at launch. Audit of every prompt the app could cause, and what it does now.
+The rule: **opening and playing a set asks for nothing**. A folder is read only when the person chose it (Places, User
+Library, a set they opened); a device or the network is asked for only by the feature that needs it, and Sonora's own
+prompt (`app/AppPrivacy.cpp`, drawn by `PromptWindow`) says why first. Only **Continue** lets macOS ask.
+
+| Resource (TCC service) | What triggered it before COM-15 | When it is requested now | Sonora's explanation (title; Continue / Not Now) |
+|---|---|---|---|
+| Documents, Desktop (`SystemPolicyDocumentsFolder`, `...DesktopFolder`) | **At every launch**: the Projects list walked all of `~/Music`, `~/Documents` and `~/Desktop` recursively (`findProjectsInBackground`). | Never by a scan. Only when the person opens a set or adds a Place there (the set's folder is then listed). Recent sets in those folders are listed without reading the folder. Hush reads `~/Documents/oeksound/soothe3/Presets` and `~/Documents/Sonora/Hush Presets` only when its preset menu opens, or when a saved (not factory) preset is Hush's default. | none (the person's own file choice) |
+| Media & Apple Music (`MediaLibrary`) | At launch (Projects walk) and 20 s later (sound index, LIB-4c), on a browser search of `~/Music` and when the Samples category listed `~/Music`. Even listing `~/Music` with JUCE's iterator was enough: it asks Foundation (NSDirectoryEnumerator, `NSURLIsHiddenKey`) about each child, and asking about `~/Music/Music` made tccd log a `kTCCServiceMediaLibrary preflight=no` request (measured, see below). | Never. `core::walkFolder` does not enter `~/Music/Music`, `~/Music/iTunes`, `~/Movies/TV` or `*.musiclibrary`/`*.tvlibrary`, and lists folders with `platform::listFolder` (POSIX `readdir`, names and types only); the browser's folder listing uses it too. Opening `~/Music/Music` in the browser yourself still asks (your choice). | none |
+| Photos (`Photos`) | Most likely the launch walks: they followed symbolic links (`RangedDirectoryIterator`'s default) under Music/Documents/Desktop, and a link to the home folder or to Pictures reaches `Photos Library.photoslibrary`. Not seen directly: the Mac's TCC log keeps about two days, after the prompt had been answered. No other code reads Pictures. | Never. Media library packages (`*.photoslibrary`, `*.photolibrary`, `*.aplibrary`, Photo Booth Library) are never entered, even in a chosen folder; links are followed only to ordinary folders outside the walk. | none |
+| Downloads, iCloud Drive, other apps' data, removable and network volumes (`...DownloadsFolder`, `FileProviderDomain`, `SystemPolicyAppData`, `...RemovableVolumes`, `...NetworkVolumes`) | Reachable through followed links in the launch walks. | Only for a Place or set the person chose there. A walk never crosses into another guarded place (`~/Library`, `/Volumes/<volume>`, Desktop, Documents, Downloads, Pictures) than its own root's. | none |
+| Microphone (`Microphone`) | (1) Once an input was used, its device was saved and **reopened at every launch**. (2) Arming, Record, input monitoring, the audio settings window and the collab mic opened the input straight away: JUCE's `RuntimePermissions::request` grants at once on macOS, so the system prompt came from CoreAudio with no explanation. (3) A set saved with armed tracks opened inputs while loading. | Launch opens the output only (`AudioEngine::initialiseAudio` strips the saved input and remembers it). Inputs open when the person arms a track, presses Record, changes a track's input/monitoring, picks an input in the audio settings window, or turns the collab mic on. A set opened with armed tracks opens them only if already allowed; otherwise the status bar says to arm or record. | **Use your audio inputs?** Recording, input monitoring and your voice in a shared session come in through your audio interface or microphone; playing a set never needs one. |
+| Camera (`Camera`) | Collab camera button: system prompt at once (AVFoundation). | Same button, explanation first. | **Show your camera in this session?** It starts off in every session and stops when you turn it off or leave. |
+| Local Network (macOS 15+, no TCC API) | Opening the Collaborate panel started a Bonjour browse (the nearby sessions list); sharing/joining. | The panel explains once per run (not again after Not Now); sharing, joining by link and joining a nearby session explain until Continue. The panel lists nearby sessions only after Continue. | **Find collaborators on your network?** Shared sessions connect straight to the other people's computers on the same network; Sonora uses it only for shared sessions. |
+| Keychain item (not TCC: "Sonora wants to use your confidential information...") | With Splice on and signed in, the credit balance was fetched at launch, reading the stored sign-in. Ad hoc-signed updates change the app's signature, so macOS may ask to confirm the read. | At the first Splice search (or sign-in / turning Splice on). Launch only checks that an item exists (attributes, `interactionNotAllowed`), which never asks. The collab relay key and agent API keys are read only by their own dialogs/actions. | none |
+| Contacts, Calendars, Reminders, Screen Recording, Input Monitoring, Accessibility, Automation, Bluetooth, Location | Never by Sonora's code (searched: no Contacts/EventKit/ScreenCaptureKit/CGEventTap/AX/Apple Events/CoreBluetooth/CoreLocation use). The TCC log shows only *preflight* checks made by system services for Sonora (AppKit's open panel and AutoFill helper, Spotlight), which never prompt. | Never. | none |
+
+What a choice does:
+
+- **Continue**: macOS shows its own prompt (microphone/camera through `AVCaptureDevice requestAccessForMediaType`; local
+  network on the session's first LAN packet). macOS remembers its answer; Sonora does not explain again.
+- **Not Now**: remembered in the settings (`privacyNotNowMicrophone`, `privacyNotNowCamera`, `privacyNotNowLocalNetwork`).
+  Background requests (the audio settings window, the Collaborate panel) then stay quiet; the person's own action (arm,
+  Record, mic/camera button, Share/Join) explains again. Continue clears it.
+- **Denied in System Settings**: no prompt; the status bar or collab notice names the System Settings pane.
+- Linux and Windows have no such prompts: `platform::mediaAccess` grants and `localNetworkPromptExists()` is false, so no
+  explanation shows there.
+
+Info.plist privacy keys (all still needed, texts updated): `NSMicrophoneUsageDescription`, `NSCameraUsageDescription`,
+`NSLocalNetworkUsageDescription` + `NSBonjourServices` (`_sonora-collab._tcp`). No others. Hardened-runtime entitlements
+(`scripts/release/Sonora.entitlements`, used only with a Developer ID): `device.audio-input` and, since COM-15,
+`device.camera` (COL-8 video would get no camera without it).
+
+Not under Sonora's control: a hosted plug-in runs inside Sonora, so a plug-in that reads `~/Documents` (many keep presets
+there) or opens a web view makes macOS ask in Sonora's name; the out-of-process scanner (`sonora_plugin_scanner`) is part
+of the bundle and counts as Sonora too. Releases are signed ad hoc, so macOS may forget earlier answers after an update
+(its record is tied to the exact build); a stable Developer ID signature (COM-4) fixes that.
+
+Verification: `sonora_tests privacy:` (scan pruning on a fake home with links into Documents, Pictures' Photos library,
+another volume and back up the tree; the Projects roots; the explain/skip rules; the saved audio state without inputs);
+`brand_render <dir>` writes `preview-prompt-privacy-{microphone,camera,local-network}.png`; the app prints
+`[sonora] projects: scanning <folder>` per root and `[sonora] privacy: ...` per explanation.
+
+Measured 2026-11-17 (Debug app, `SONORA_DATA_FOLDER=permtest`, 45 s, `log stream --predicate 'subsystem == "com.apple.TCC"'`,
+requests whose attribution names the build's binary): with the walk still on JUCE's iterator, one
+`kTCCServiceMediaLibrary preflight=no` request 0.2 s after start; with `listFolder`, none. What remains are *preflight*
+checks that never prompt: Microphone from CoreAudio's own device setup (voice-isolation support, no input opened),
+ListenEvent and ScreenCapture from WindowServer. To repeat: run the app as above with the log stream in parallel and
+list `AUTHREQ_CTX` lines with `preflight=no` for the app's pid (`AUTHREQ_ATTRIBUTION` names it).
 
 ## Not available per platform
 

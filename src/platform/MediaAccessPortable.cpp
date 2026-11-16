@@ -10,4 +10,6 @@ void requestMediaAccess(MediaKind, std::function<void(bool granted)> done)
     if (done) done(true);
 }
 
+bool localNetworkPromptExists() { return false; }
+
 } // namespace sonora::platform

@@ -288,3 +288,77 @@ TEST_CASE("clip placement: a clip dropped onto others overwrites what it covers,
     CHECK(song.tracks[0].arrangementClips.size() == 2);
     CHECK(song.tracks[0].arrangementClips[1].uid == 5);
 }
+
+namespace
+{
+Clip fadedAudioClip(double start, double end, double fadeIn, double fadeOut)
+{
+    Clip c;
+    c.kind = Clip::Kind::Audio;
+    c.warped = true;
+    c.sampleRate = 48000;
+    c.lengthSamples = 48000 * 8; // 8 s = 16 beats at 120 BPM
+    c.warpMarkers = {{0.0, 0.0}, {8.0, 16.0}};
+    c.currentStart = c.time = start;
+    c.currentEnd = end;
+    c.loop = {0.0, end - start, 0.0, false};
+    c.fadeIn = fadeIn;
+    c.fadeOut = fadeOut;
+    c.fadeInDefault = c.fadeOutDefault = false;
+    return c;
+}
+} // namespace
+
+TEST_CASE("clip fades (UI-85): fades always fit inside the clip, and resizing it shorter shrinks them like Live")
+{
+    // The pure rule: each fade fits the clip, a pair that overlaps shrinks in proportion, short fades stay as they are.
+    auto f = fittedClipFades(0.5, 0.25, 4.0);
+    CHECK_NEAR(f.in, 0.5, 1e-12); CHECK_NEAR(f.out, 0.25, 1e-12);
+    f = fittedClipFades(0.0, 4.0, 1.0); // the reported case: a 4-beat fade-out on a 1-beat clip
+    CHECK_NEAR(f.in, 0.0, 1e-12); CHECK_NEAR(f.out, 1.0, 1e-12);
+    f = fittedClipFades(2.0, 3.0, 2.0);
+    CHECK_NEAR(f.in, 0.8, 1e-12); CHECK_NEAR(f.out, 1.2, 1e-12);
+    f = fittedClipFades(-1.0, 1.0, 0.0);
+    CHECK_NEAR(f.in, 0.0, 1e-12); CHECK_NEAR(f.out, 0.0, 1e-12);
+
+    // Right edge from 12 to 6: the 2 + 3 beat fades of the 8-beat clip become 0.8 + 1.2 of the 2-beat clip.
+    const auto clip = fadedAudioClip(4, 12, 2.0, 3.0);
+    auto shorter = resizedEnd(clip, 6.0, 120.0, 1.0 / 64.0);
+    CHECK_NEAR(shorter.currentEnd, 6.0, 1e-9);
+    CHECK_NEAR(shorter.fadeIn, 0.8, 1e-9); CHECK_NEAR(shorter.fadeOut, 1.2, 1e-9);
+    // Fades that already fit are left alone, and a longer clip does not grow them back.
+    auto longer = resizedEnd(shorter, 12.0, 120.0, 1.0 / 64.0);
+    CHECK_NEAR(longer.fadeIn, 0.8, 1e-9); CHECK_NEAR(longer.fadeOut, 1.2, 1e-9);
+    auto fits = resizedEnd(fadedAudioClip(4, 12, 1.0, 1.0), 8.0, 120.0, 1.0 / 64.0);
+    CHECK_NEAR(fits.fadeIn, 1.0, 1e-9); CHECK_NEAR(fits.fadeOut, 1.0, 1e-9);
+
+    // Left edge: the same rule.
+    auto trimmed = trimmedStart(clip, 11.0, 120.0, 1.0 / 64.0);
+    CHECK_NEAR(trimmed.currentStart, 11.0, 1e-9);
+    CHECK_NEAR(trimmed.fadeIn, 0.4, 1e-9); CHECK_NEAR(trimmed.fadeOut, 0.6, 1e-9);
+
+    // Edits keep the rule too: a clip stored through modifyClip, and the part of a clip another one is placed over.
+    Song song;
+    song.tempo = 120;
+    song.tracks.resize(1);
+    auto stale = clip;
+    stale.uid = 7;
+    song.tracks[0].arrangementClips = {stale};
+    EditHistory history;
+    auto cut = stale;
+    cut.currentEnd = 5.0; // a 1-beat clip with 2 + 3 beats of fades, as an older edit could leave it
+    history.perform(song, modifyClip(song, 0, 7, cut, "Resize Clip"));
+    const auto& stored = song.tracks[0].arrangementClips[0];
+    CHECK(stored.fadeIn <= 1.0 + 1e-9); CHECK(stored.fadeOut <= 1.0 + 1e-9);
+    CHECK_NEAR(stored.fadeIn + stored.fadeOut, 1.0, 1e-9);
+    REQUIRE(history.undo(song));
+    CHECK_NEAR(song.tracks[0].arrangementClips[0].fadeOut, 3.0, 1e-9); // undo brings the original back
+    auto over = fadedAudioClip(14, 18, 0.0, 0.0);
+    over.uid = 8;
+    song.tracks[0].arrangementClips.push_back(over);
+    history.perform(song, placeArrangementClip(song, 0, 8, 0, movedClip(over, 6), false, "Move Clip"));
+    REQUIRE(song.tracks[0].arrangementClips.size() == 3);
+    const auto& head = song.tracks[0].arrangementClips[0]; // 4 .. 6 is what is left of the faded clip before the moved one
+    CHECK_NEAR(head.currentEnd, 6.0, 1e-9);
+    CHECK_NEAR(head.fadeIn, 0.8, 1e-9); CHECK_NEAR(head.fadeOut, 1.2, 1e-9);
+}

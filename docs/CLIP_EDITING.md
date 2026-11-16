@@ -61,6 +61,11 @@ its Arrangement length (`clipMarkers`), so older files still show the right end.
   repetitions. Minimum one grid step. `model::trimmedStart`. **Wrap-around is unverified** against the reference app (the
   stored invariant "start always inside the brace" is verified).
 - Edges are grabbed in the title bar only; below it the body selects time (UI-45, kept).
+- **Fades fit the clip** (UI-85): fade-in and fade-out are each at most the clip's length and together never longer; an edit
+  that shortens a clip shrinks a pair that no longer fits in proportion (`model::fittedClipFades` / `fitClipFades`). Drawing,
+  the handles and playback use the fitted values, so a set saved with oversized fades plays and draws inside its clips.
+- **Clip gain** (UI-87, not in the reference): the up/down handle in a hovered audio clip's title bar, or Cmd+Option dragged on
+  its body, changes `<SampleVolume>` (0.2 dB per pixel, Shift 0.02; -inf .. +24 dB); double-click the handle for 0 dB.
 - **Insert MIDI clip** (Editing MIDI "Creating a MIDI Clip"): Shift+Cmd+M or Create > Insert Empty MIDI Clip spans the time
   selection; without one it is one bar at the bar of the play position. The Arrangement's own Shift+Cmd+M ignored the selection
   (the menu did not); fixed. It refuses to land on existing clips. Double-click in an empty MIDI lane: one bar at the grid

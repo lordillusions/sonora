@@ -61,6 +61,12 @@ public:
 
     // Shift+A / View > Show All Automation: every track's automated lanes, or hides them all when lanes show.
     static void toggleAllAutomation(UiContext& ctx);
+    // UI-88: View > Show This Track's Automation Only (Opt+Shift+A, also in the track header menu): `track` (a control index)
+    // shows a lane per automated parameter (mixer and devices; one lane when it has none) and every other track's lanes
+    // hide. Again on the same track gives back the lanes shown before; on another track it moves there.
+    static void toggleTrackAutomationOnly(UiContext& ctx, int track);
+    // True while that view is on (for `track`, or for any track when -1) and nobody changed the shown lanes since.
+    static bool trackAutomationOnlyActive(const UiContext& ctx, int track = -1);
     // The automation target a mixer or device control drives (pending id for an unlisted plugin parameter); -1 for none.
     static int targetFor(const UiContext& ctx, const midi::ControlTarget& control, int& track);
     // A control's context menu (Live): its envelope in the track's first lane, or in a new lane below the others.

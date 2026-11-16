@@ -13,7 +13,6 @@
 #include "devices/DeviceFactory.h"
 #include "devices/RackProcessor.h"
 #include "io/als/AlsReader.h"
-#include "platform/MediaAccess.h"
 #include "platform/SecretStore.h"
 #include "plugins/PluginDevice.h"
 #include "ui/SetView.h"
@@ -416,6 +415,15 @@ void AppController::shareSession(bool lan)
     if (! song_) { collabNotice("Open or create a set first, then share it."); return; }
     if (! collab::networkAvailable()) { collabNotice("This build of Sonora has no collab networking."); return; }
     if (ui_.recording || exporting_) { collabNotice("Finish recording or exporting before sharing."); return; }
+    if (! localNetworkAllowed())
+    {
+        // COM-15: say why first; macOS asks when the session's first packet reaches the LAN.
+        withAccess(core::Access::LocalNetwork, core::AccessRequest::UserAction, [this, lan](AccessResult result) {
+            if (result == AccessResult::Granted) shareSession(lan);
+            else collabNotice("Sharing needs the local network. Choose Share again when you want to start.");
+        });
+        return;
+    }
     collab::HostNetOptions net;
     net.mode = lan ? collab::HostNetOptions::Mode::Lan : collab::HostNetOptions::Mode::Relay;
     net.relay = ui_.collab.relayUrl;
@@ -469,6 +477,14 @@ void AppController::joinSession(const std::string& link)
     const auto invite = collab::parseInvite(link, error);
     if (! invite) { collabNotice(error); return; }
     if (! collab::networkAvailable()) { collabNotice("This build of Sonora has no collab networking."); return; }
+    if (! localNetworkAllowed())
+    {
+        withAccess(core::Access::LocalNetwork, core::AccessRequest::UserAction, [this, link](AccessResult result) {
+            if (result == AccessResult::Granted) joinSession(link);
+            else collabNotice("Joining needs the local network. Use the invite link again when you want to join.");
+        });
+        return;
+    }
     confirmDiscardChanges([this, accepted = *invite] {
         const auto name = collabName();
         auto transport = collab::openGuest(accepted, name);
@@ -485,6 +501,13 @@ void AppController::joinSession(const std::string& link)
 void AppController::joinNearbySession(const std::string& address)
 {
     if (inCollabSession() || address.empty()) return;
+    if (! localNetworkAllowed())
+    {
+        withAccess(core::Access::LocalNetwork, core::AccessRequest::UserAction, [this, address](AccessResult result) {
+            if (result == AccessResult::Granted) joinNearbySession(address);
+        });
+        return;
+    }
     confirmDiscardChanges([this, address] {
         const auto name = collabName();
         auto transport = collab::openGuestByAddress(address, name);
@@ -592,14 +615,10 @@ void AppController::setCollabMic(bool on)
         refreshCollabView();
     };
     if (juce::SystemStats::getEnvironmentVariable("SONORA_COLLAB_VOICE_TONE", {}).getFloatValue() > 0.0f) { enable(); return; } // autotest
-    platform::requestMediaAccess(platform::MediaKind::Microphone, [this, enable, alive = std::weak_ptr<bool>(alive_)](bool granted) {
-        if (alive.expired()) return;
-        if (! granted)
-        {
-            collabNotice("Sonora may not use the microphone. Allow it in System Settings > Privacy & Security > Microphone.");
-            return;
-        }
-        enable();
+    // COM-15: Sonora's explanation first, then the system prompt.
+    withAccess(core::Access::Microphone, core::AccessRequest::UserAction, [this, enable](AccessResult result) {
+        if (result == AccessResult::Denied) collabNotice(core::accessExplanation(core::Access::Microphone).deniedText);
+        if (result == AccessResult::Granted) enable();
     });
 }
 
@@ -655,14 +674,9 @@ void AppController::setCollabCamera(bool on)
         refreshCollabView();
     };
     if (pattern) { start(); return; }
-    platform::requestMediaAccess(platform::MediaKind::Camera, [this, start, alive = std::weak_ptr<bool>(alive_)](bool granted) {
-        if (alive.expired()) return;
-        if (! granted)
-        {
-            collabNotice("Sonora may not use the camera. Allow it in System Settings > Privacy & Security > Camera.");
-            return;
-        }
-        start();
+    withAccess(core::Access::Camera, core::AccessRequest::UserAction, [this, start](AccessResult result) {
+        if (result == AccessResult::Denied) collabNotice(core::accessExplanation(core::Access::Camera).deniedText);
+        if (result == AccessResult::Granted) start();
     });
 }
 
@@ -1060,7 +1074,13 @@ void AppController::pollCollab()
 {
     if (! collab_)
     {
-        if (ui_.collabOpen && ! lanBrowser_ && collab::networkAvailable()) lanBrowser_ = std::make_unique<collab::LanBrowser>();
+        // COM-15: the nearby list browses the LAN (a macOS prompt), so the panel explains it first, once per run.
+        if (ui_.collabOpen && ! lanBrowser_ && collab::networkAvailable() && ! localNetworkAllowed() && ! localNetworkAsked_)
+        {
+            localNetworkAsked_ = true;
+            withAccess(core::Access::LocalNetwork, core::AccessRequest::Browsing, [](AccessResult) {}); // the next poll starts it
+        }
+        if (ui_.collabOpen && ! lanBrowser_ && collab::networkAvailable() && localNetworkAllowed()) lanBrowser_ = std::make_unique<collab::LanBrowser>();
         if (! ui_.collabOpen && lanBrowser_) lanBrowser_.reset();
         if (lanBrowser_ && ++collabTicks_ % 50 == 0) refreshCollabView();
         return;

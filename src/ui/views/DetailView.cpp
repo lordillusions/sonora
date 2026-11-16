@@ -906,9 +906,18 @@ public:
 
     // Any press inside the box (title, knobs, buttons) selects the device, so Delete removes the one being worked on. A press
     // on the box itself (title, body) is handled by mouseDown, which also reads Shift / Cmd (DEV-15c multi-selection).
-    void descendantPressed(Widget* leaf) override
+    // DEV-15d: Shift / Cmd on what fills the body (a plug-in's pad and Sidechain panel, a face) extend the selection as on
+    // the title. Before, such a press made this device the only one selected, so Shift-clicking plug-ins one by one and
+    // pressing Cmd+G grouped just the last one. Knobs and faders keep Shift for fine moves: there Shift leaves a selection
+    // the device is part of as it is.
+    void descendantPressed(Widget* leaf, const MouseEvent& press) override
     {
-        if (chain_ >= 0 || leaf == this) return;
+        if (leaf == this) return;
+        const bool modifier = ! press.right && (press.shift || press.cmd);
+        const bool fineMove = press.shift && (dynamic_cast<Knob*>(leaf) != nullptr || dynamic_cast<Fader*>(leaf) != nullptr);
+        if (modifier && ! fineMove) { pick(press.shift, press.cmd); return; }
+        if (chain_ >= 0) return;
+        if (modifier && ctx().isDeviceSelected(trackIndex_, selectionPath(), model_.id)) return;
         pick(false, false);
     }
 

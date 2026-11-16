@@ -377,3 +377,85 @@ TEST_CASE("audio clip edits: Option lower edge stretch preserves source pitch an
     CHECK(enabled.warped); CHECK(enabled.warpMarkers.size() == 2); CHECK_NEAR(enabled.currentEnd, 16, 1e-9);
     CHECK(ui::hitZone(8, 100) == ui::DragMode::TrimStart); CHECK(ui::hitZone(92, 100) == ui::DragMode::ResizeEnd);
 }
+
+#include "engine/AudioClipPlayer.h"
+namespace
+{
+// RMS of the clip's output (stretch path, as the engine plays it) in [from, to) seconds at 120 BPM / 48 kHz.
+double stretchedRms(const model::Clip& clip, const std::shared_ptr<engine::SampleData>& data, double from, double to)
+{
+    auto prepared = engine::prepareClip(clip, data);
+    engine::AudioPlayState state;
+    state.prepare(48000, 512);
+    const double spb = 24000.0; // samples per beat at 120 BPM
+    const int total = (int) ((clip.currentEnd - clip.currentStart) * spb);
+    juce::AudioBuffer<float> out(2, 512);
+    double sum = 0.0;
+    int count = 0;
+    for (int pos = 0; pos < total; pos += 512)
+    {
+        out.clear();
+        const int num = std::min(512, total - pos);
+        state.render(prepared, {0, num, clip.currentStart + pos / spb, spb}, 120.0, out);
+        for (int i = 0; i < num; ++i)
+        {
+            const double t = (pos + i) / 48000.0;
+            if (t >= from && t < to) { sum += (double) out.getSample(0, i) * out.getSample(0, i); ++count; }
+        }
+    }
+    return count > 0 ? std::sqrt(sum / count) : 0.0;
+}
+} // namespace
+
+TEST_CASE("audio clip stretch (UI-86): the audio follows the stretched edge, also for a one-shot in Beats mode")
+{
+    // A one-shot: one second of a 440 Hz tone fading linearly to silence, one transient (at 0).
+    auto data = std::make_shared<engine::SampleData>();
+    data->sampleRate = 48000.0;
+    data->audio.setSize(2, 48000);
+    for (int i = 0; i < 48000; ++i)
+        for (int ch = 0; ch < 2; ++ch)
+            data->audio.setSample(ch, i, (float) ((1.0 - i / 48000.0) * std::sin(2.0 * 3.14159265358979 * 440.0 * i / 48000.0)));
+    data->onsets = {0.0};
+    model::Clip clip;
+    clip.kind = model::Clip::Kind::Audio;
+    clip.warped = true;
+    clip.warpMode = model::WarpMode::Beats; // Live's default, and what dropped samples get
+    clip.sampleRate = 48000;
+    clip.lengthSamples = 48000;
+    clip.warpMarkers = {{0.0, 0.0}, {1.0, 2.0}}; // 120 BPM: the second lasts two beats
+    clip.loop = {0.0, 2.0, 0.0, false};
+    clip.currentStart = clip.time = 0.0;
+    clip.currentEnd = 2.0;
+    // Before: half way through (0.4 .. 0.6 s) the tone is at half level.
+    const double sine = std::sqrt(0.5);
+    CHECK_NEAR(stretchedRms(clip, data, 0.4, 0.6), 0.5 * sine, 0.03);
+
+    // Twice as long from its right edge: the same tone now takes two seconds, so at 1.4 .. 1.6 s it is at 0.25 and at
+    // 0.4 .. 0.6 s at 0.75 (Beats kept the original speed: 0.5 there and only a 25 ms loop of silence after 1 s).
+    auto twice = ui::dragClip(clip, ui::DragMode::StretchEnd, 2.0, 0.25, true, 120.0);
+    CHECK_NEAR(twice.currentEnd, 4.0, 1e-9);
+    CHECK(twice.warpMode == model::WarpMode::Complex);
+    CHECK_NEAR(stretchedRms(twice, data, 0.4, 0.6), 0.75 * sine, 0.06);
+    CHECK_NEAR(stretchedRms(twice, data, 1.4, 1.6), 0.25 * sine, 0.04);
+    // Far past that: eight times as long, the level half way (4 s) is still about half (the WSOLA grains lose ~15 % of
+    // level at 8x: stretch quality is ENG-5b) and the end is reached at the edge, not after one second.
+    auto eight = ui::dragClip(clip, ui::DragMode::StretchEnd, 14.0, 0.25, true, 120.0);
+    CHECK_NEAR(eight.currentEnd, 16.0, 1e-9);
+    CHECK_NEAR(stretchedRms(eight, data, 3.8, 4.2), 0.5 * sine, 0.08);
+    CHECK(stretchedRms(eight, data, 6.8, 7.2) > 0.02); // the faded tail still sounds near the edge (Beats: silence)
+
+    // Re-Pitch keeps its mode (the pitch follows the speed, like Live) and its audio follows the edge too.
+    auto repitch = clip;
+    repitch.warpMode = model::WarpMode::RePitch;
+    auto slower = ui::dragClip(repitch, ui::DragMode::StretchEnd, 2.0, 0.25, true, 120.0);
+    CHECK(slower.warpMode == model::WarpMode::RePitch);
+    juce::AudioBuffer<float> out(2, 96000);
+    out.clear();
+    engine::renderAudioClip(engine::prepareClip(slower, data), {0, 96000, 0.0, 24000.0}, 120.0, out);
+    double late = 0.0;
+    for (int i = 67200; i < 76800; ++i) late += (double) out.getSample(0, i) * out.getSample(0, i); // 1.4 .. 1.6 s
+    CHECK_NEAR(std::sqrt(late / 9600.0), 0.25 * sine, 0.04);
+    // A stretch dragged back to where it started changes nothing.
+    CHECK(ui::dragClip(clip, ui::DragMode::StretchEnd, 0.0, 0.25, true, 120.0).warpMode == model::WarpMode::Beats);
+}

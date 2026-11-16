@@ -25,4 +25,8 @@ MediaAccess mediaAccess(MediaKind);
 // Asks when not determined yet; `done(granted)` runs on the message thread.
 void requestMediaAccess(MediaKind, std::function<void(bool granted)> done);
 
+// COM-15: whether the system asks before an app reaches devices on the local network (macOS 15 and later). There is
+// no API to ask or to read the answer: the prompt shows the first time collab traffic reaches the LAN.
+bool localNetworkPromptExists();
+
 } // namespace sonora::platform

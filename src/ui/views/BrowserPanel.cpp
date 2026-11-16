@@ -79,6 +79,7 @@ const std::vector<BrowserPanel::Category>& BrowserPanel::categories()
         {"Library", true}, {"All", false}, {"Sounds", false}, {"Drums", false}, {"Instruments", false},
         {"Audio Effects", false}, {"MIDI Effects", false}, {"Plug-ins", false}, {"Samples", false},
         {"Places", true}, {"Projects", false}, {"Current Project", false}, {"User Library", false}, {"Packs", false},
+        {"Splice", false}, // SPL-3
     };
     return categories;
 }
@@ -215,6 +216,7 @@ Rect BrowserPanel::filterChipBounds(int index) const
 
 float BrowserPanel::filtersHeight() const
 {
+    if (spliceList()) return kFacet; // SPL: a one-row strip for the Loop / One-shot filter chips
     if (! filtersVisible_) return similarRowHeight();
     const auto chips = filterChips();
     const auto groups = filterGroups();
@@ -396,10 +398,11 @@ const std::vector<BrowserPanel::Item>& BrowserPanel::items(bool filtered, bool g
         || itemsKey_->tagsRevision != context.browserTags.revision() || itemsKey_->category != selectedCategory_
         || itemsKey_->folderMode != folderMode_ || itemsKey_->query != query_ || itemsKey_->folder != context.browserFolder
         || itemsKey_->filters != filters_ || itemsKey_->groups != expandedGroups_ || itemsKey_->folders != expandedFolders_
-        || itemsKey_->similarRevision != context.similarSamples.revision)
+        || itemsKey_->searchCollapsed != collapsedInSearch() || itemsKey_->similarRevision != context.similarSamples.revision)
     {
         itemsKey_ = ItemsKey{context.browserContentRevision, context.browserTags.revision(), selectedCategory_, folderMode_,
-                             query_, context.browserFolder, filters_, expandedGroups_, expandedFolders_, context.similarSamples.revision};
+                             query_, context.browserFolder, filters_, expandedGroups_, expandedFolders_, collapsedInSearch(),
+                             context.similarSamples.revision};
         for (auto& entry : itemsCache_) entry.reset();
         facetGroups_.reset();
     }
@@ -515,10 +518,11 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
             for (auto i = first; i < result.size(); ++i) result[i].section = category;
         }
     else if (packList()) appendPacks(result);
+    else if (spliceList()) appendSplice(result); // SPL-3
     else appendCategory(selectedCategory_, result, indexed);
     for (auto& item : result)
     {
-        if (item.directory || ! item.packId.empty()) continue;
+        if (item.directory || ! item.packId.empty() || item.splice) continue; // SPL-3: Splice rows carry their own tags
         item.key = item.drag && item.drag->kind != BrowserDrag::Kind::Sample && item.drag->kind != BrowserDrag::Kind::DevicePreset
                        ? (item.drag->kind == BrowserDrag::Kind::Plugin ? "plugin:" : "native:") + item.drag->value : "file:" + item.path;
         if (item.tags.empty())
@@ -532,7 +536,7 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
         item.suggestedTags = item.tags;
         item.tags = context.browserTags.tagsFor(item.key, std::move(item.tags));
     }
-    if (! query_.empty())
+    if (! query_.empty() && ! spliceList()) // SPL-3: the Splice query drives the remote search, not a local filter
     {
         const auto query = juce::String::fromUTF8(query_.c_str());
         result.erase(std::remove_if(result.begin(), result.end(), [&](const Item& item) {
@@ -569,7 +573,7 @@ std::vector<BrowserPanel::Item> BrowserPanel::buildItems(bool filtered, bool gro
                 previous = item.group;
                 grouped.push_back({previous, {}, false, false, {}, previous, true});
             }
-            if (! query_.empty() || ! filters_.empty() || expandedGroups_.contains(item.group)) grouped.push_back(std::move(item));
+            if (headingOpen(item.group)) grouped.push_back(std::move(item));
         }
         return attachPresets(std::move(grouped));
     }
@@ -640,7 +644,6 @@ std::vector<BrowserPanel::Item> BrowserPanel::attachPresets(std::vector<Item> ro
 // the folder rows for Samples. Rows keep their identity, drag and icon; only their indent and group key change.
 std::vector<BrowserPanel::Item> BrowserPanel::groupAll(std::vector<Item> result) const
 {
-    const bool searching = ! query_.empty() || ! filters_.empty();
     std::vector<Item> grouped;
     for (int category = Sounds; category <= Samples; ++category)
     {
@@ -650,7 +653,7 @@ std::vector<BrowserPanel::Item> BrowserPanel::groupAll(std::vector<Item> result)
         const std::string name = categories()[(size_t) category].name, key = "All/" + name;
         grouped.push_back({name, {}, false, false, {}, key, true});
         grouped.back().section = category;
-        if (! searching && ! expandedGroups_.contains(key)) continue;
+        if (! headingOpen(key)) continue;
         if (category == Samples)
         {
             for (auto& item : rows) { ++item.depth; grouped.push_back(std::move(item)); }
@@ -670,7 +673,7 @@ std::vector<BrowserPanel::Item> BrowserPanel::groupAll(std::vector<Item> result)
                 grouped.push_back({previous, {}, false, false, {}, subgroup, true, 1});
                 grouped.back().section = category;
             }
-            if (! searching && ! expandedGroups_.contains(subgroup)) continue;
+            if (! headingOpen(subgroup)) continue;
             item.group = subgroup;
             item.depth = 1;
             grouped.push_back(std::move(item));
@@ -814,6 +817,7 @@ Glyph glyphFor(const std::string& name)
     if (name == "Plug-ins") return Glyph::PlugIn;
     if (name == "Samples") return Glyph::Samples;
     if (name == "Packs") return Glyph::Pack;
+    if (name == "Splice") return Glyph::Samples; // SPL-3
     if (name == "Projects" || name == "Current Project" || name == "User Library") return Glyph::Folder;
     return Glyph::Library;
 }
@@ -928,15 +932,35 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
                         theme.metrics.fontSize);
     }
 
-    // Facet selectors and removable active filters stay above the results column.
-    for (const auto& [group, box] : filterGroups())
+    if (spliceList()) // SPL: the compact filter strip under the search field — "D" toggle + category dropdown
+    {
+        // "Describe a sound" (semantic) toggle — a small "D" with a hover tooltip; always fits.
+        const auto desc = spliceDescribeBounds();
+        const bool describe = ctx().splice.describe;
+        ctl::framed(canvas, theme, desc, theme.color(describe ? "ChosenPreListen" : "ControlTextBack"));
+        paint::text(canvas, "D", desc, describe ? theme.color("ControlTextBack") : fg, theme.metrics.fontSize, Align::Centre, true);
+        // Category dropdown: All / Loops / One-shots.
+        const auto cat = spliceCategoryBounds();
+        if (cat.right() <= width() - 4)
+        {
+            const std::string& c = ctx().splice.category;
+            const char* label = c == "loop" ? "Loops" : c == "oneshot" ? "One-shots" : "All";
+            const bool on = ! c.empty();
+            ctl::framed(canvas, theme, cat, theme.color(on ? "ChosenDefault" : "ControlTextBack"));
+            paint::text(canvas, label, {cat.x + 6, cat.y, cat.w - 18, cat.h}, on ? theme.color("ControlTextBack") : fg,
+                        theme.metrics.fontSize, Align::Left);
+            ctl::triangle(canvas, cat.right() - 8, cat.centreY(), 5, 3, ctl::Dir::Down, on ? theme.color("ControlTextBack") : fg);
+        }
+    }
+    // Facet selectors and removable active filters stay above the results column (not in the Splice section).
+    for (const auto& [group, box] : spliceList() ? decltype(filterGroups()){} : filterGroups())
     {
         const bool active = std::any_of(filters_.begin(), filters_.end(), [&](const auto& tag) { return tag.group == group; });
         ctl::framed(canvas, theme, box, theme.color(active ? "ChosenDefault" : "ControlTextBack"));
         paint::text(canvas, group, {box.x + 5, box.y, box.w - 17, box.h}, fg, theme.metrics.fontSize);
         ctl::triangle(canvas, box.right() - 7, box.centreY(), 5, 3, ctl::Dir::Down, fg);
     }
-    const auto filterBoxes = filterChips();
+    const auto filterBoxes = spliceList() ? std::vector<Rect>{} : filterChips();
     for (size_t i = 0; i < filterBoxes.size(); ++i)
     {
         const auto box = filterBoxes[i];
@@ -966,7 +990,7 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
         const auto& item = entries[i];
         if (item.directory || item.heading || ! item.disclosure.empty())
             ctl::triangle(canvas, row.x + (item.disclosure.empty() ? 12 + (float) item.depth * 14 : rowInset(item) - 12), row.centreY(), 8, 5,
-                          ((item.heading && (! query_.empty() || ! filters_.empty() || expandedGroups_.contains(item.group)))
+                          ((item.heading && headingOpen(item.group))
                            || (item.directory && expandedFolders_.contains(item.path)) || (! item.disclosure.empty() && item.open))
                               ? ctl::Dir::Down : ctl::Dir::Right,
                           theme.color("TreeRowCategoryForeground"));
@@ -978,6 +1002,7 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
             inset += 24;
         }
         if (! item.packId.empty()) { paintPack(canvas, theme, item, row, selected); continue; }
+        if (item.splice) { paintSplice(canvas, theme, item, row, selected); continue; } // SPL-3
         float labelRight = row.right() - 4;
         if (similarList() && ! item.hint.empty() && row.w > 220) // LIB-4: the folder each match lives in
         {
@@ -1036,6 +1061,7 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
     const Rect footer = previewFooter();
     paint::fill(canvas, footer, theme.color("SurfaceBackground"));
     paint::fill(canvas, {footer.x, footer.y, footer.w, 1}, paint::withAlpha(theme.color("SurfaceArea"), 110));
+    if (spliceList()) { paintSpliceFooter(canvas, theme, footer); return; } // SPL: the Splice control bar
     const Rect button = previewButton();
     SkPaint p;
     p.setAntiAlias(true);
@@ -1096,12 +1122,34 @@ void BrowserPanel::selectCategory(int index)
     }
 }
 
+const std::set<std::string>& BrowserPanel::collapsedInSearch() const
+{
+    static const std::set<std::string> none;
+    return searchActive() && searchCollapsedScope_ == searchScope() ? searchCollapsed_ : none;
+}
+
+// UI-90: under a search every heading starts open (its matches are what was asked for) and a click closes it for as long
+// as that search stays; without a search the headings open and close in expandedGroups_ as they always did. Before, a
+// search drew every heading open whatever expandedGroups_ held, so clicking a category's triangle did nothing.
+bool BrowserPanel::headingOpen(const std::string& group) const
+{
+    return searchActive() ? collapsedInSearch().count(group) == 0 : expandedGroups_.contains(group);
+}
+
+void BrowserPanel::setHeadingOpen(const std::string& group, bool open)
+{
+    if (! searchActive())
+    {
+        if (open) expandedGroups_.insert(group); else expandedGroups_.erase(group);
+        return;
+    }
+    if (searchCollapsedScope_ != searchScope()) { searchCollapsed_.clear(); searchCollapsedScope_ = searchScope(); }
+    if (open) searchCollapsed_.erase(group); else searchCollapsed_.insert(group);
+}
+
 void BrowserPanel::disclose(const Item& item, bool open)
 {
-    if (item.heading)
-    {
-        if (open) expandedGroups_.insert(item.group); else expandedGroups_.erase(item.group);
-    }
+    if (item.heading) setHeadingOpen(item.group, open);
     else if (! item.disclosure.empty()) // LIB-2: a device's presets or a preset folder
     {
         if (open) expandedFolders_.insert(item.disclosure); else expandedFolders_.erase(item.disclosure);
@@ -1122,6 +1170,12 @@ void BrowserPanel::disclose(const Item& item, bool open)
 
 void BrowserPanel::activate(const Item& item)
 {
+    if (item.splice) // SPL-5: double-click / Enter buys (if needed), downloads and places on the selected track
+    {
+        if (item.spliceStatus == "@status") { spliceRowClicked(item); return; }
+        if (item.drag && ctx().dropBrowserItem) ctx().dropBrowserItem(*item.drag, ctx().selectedTrack, 0, -1);
+        return;
+    }
     if (! item.packId.empty())
     {
         if (! item.path.empty()) navigate(item.path); // an installed pack opens like a folder; Up comes back here
@@ -1130,7 +1184,7 @@ void BrowserPanel::activate(const Item& item)
     else if (item.directory && packList()) navigate(item.path); // the factory packs folder: rows expand only in folders
     else if (item.heading)
     {
-        if (! expandedGroups_.erase(item.group)) expandedGroups_.insert(item.group);
+        setHeadingOpen(item.group, ! headingOpen(item.group));
         repaint();
     }
     else if (! item.disclosure.empty() && ! item.drag) disclose(item, ! item.open); // LIB-2: a preset folder
@@ -1153,7 +1207,7 @@ void BrowserPanel::showItemMenu(Item item)
     const bool preset = item.drag && item.drag->kind == BrowserDrag::Kind::DevicePreset;
     if (item.heading || item.directory || (! item.disclosure.empty() && ! item.drag))
     {
-        const bool expanded = item.heading ? expandedGroups_.contains(item.group)
+        const bool expanded = item.heading ? headingOpen(item.group)
                               : item.directory ? expandedFolders_.contains(item.path) : item.open;
         juce::PopupMenu::Item entry(expanded ? "Collapse" : "Expand");
         entry.action = [this, item, expanded] { if (Widget::isAlive(this)) disclose(item, ! expanded); };
@@ -1262,11 +1316,20 @@ void BrowserPanel::mouseDown(const MouseEvent& event)
         repaint();
         return;
     }
-    for (const auto& [group, box] : filterGroups())
-        if (box.contains(event.x, event.y)) { showFilterMenu(group); return; }
-    const auto filterBoxes = filterChips();
-    for (size_t i = 0; i < filterBoxes.size(); ++i)
-        if (filterBoxes[i].contains(event.x, event.y)) { toggleTagFilter(filters_[i]); return; }
+    if (spliceList()) // SPL: the Describe toggle + the category dropdown
+    {
+        if (spliceDescribeBounds().contains(event.x, event.y))
+        { if (ctx().spliceSetDescribe) ctx().spliceSetDescribe(! ctx().splice.describe); return; }
+        if (spliceCategoryBounds().contains(event.x, event.y)) { showSpliceCategoryMenu(); return; }
+    }
+    else
+    {
+        for (const auto& [group, box] : filterGroups())
+            if (box.contains(event.x, event.y)) { showFilterMenu(group); return; }
+        const auto filterBoxes = filterChips();
+        for (size_t i = 0; i < filterBoxes.size(); ++i)
+            if (filterBoxes[i].contains(event.x, event.y)) { toggleTagFilter(filters_[i]); return; }
+    }
     if (tagFooter().contains(event.x, event.y))
     {
         if (event.right) { showTagMenu(); return; }
@@ -1282,6 +1345,26 @@ void BrowserPanel::mouseDown(const MouseEvent& event)
                 }
             showTagMenu();
         }
+        return;
+    }
+    if (spliceList() && (previewFooter().contains(event.x, event.y) || spliceVolumeHotzone().contains(event.x, event.y)))
+    { // SPL: the Splice control bar (the volume knob's pop-up slider sits just above the footer)
+        auto& c = ctx();
+        const auto groove = spliceVolumePopupBounds();
+        if (spliceVolHover_ && groove.reduced(-4, -2).contains(event.x, event.y)) // drag the vertical slider
+        {
+            draggingSpliceVolume_ = true;
+            if (c.spliceSetPreviewGain) c.spliceSetPreviewGain(std::clamp((groove.bottom() - event.y) / std::max(1.0f, groove.h), 0.0f, 1.0f));
+        }
+        else if (splicePlayBounds().contains(event.x, event.y)) { if (c.splicePreviewTransport) c.splicePreviewTransport(1); }
+        else if (spliceStopBounds().contains(event.x, event.y)) { if (c.splicePreviewTransport) c.splicePreviewTransport(0); }
+        else if (spliceVolumeIconBounds().contains(event.x, event.y)) // click the speaker to reveal + grab the slider
+        {
+            spliceVolHover_ = true;
+            draggingSpliceVolume_ = true; // a drag up into the slider sets the level; a plain click just opens it
+        }
+        else if (spliceKeyToggleBounds().contains(event.x, event.y)) { if (c.spliceSetMatchKey) c.spliceSetMatchKey(! c.splice.matchKey); }
+        repaint();
         return;
     }
     if (previewFooter().contains(event.x, event.y))
@@ -1320,11 +1403,22 @@ void BrowserPanel::mouseDown(const MouseEvent& event)
         {
             const auto& item = entries[(size_t) selectedItem_];
             if (! item.packId.empty() && packButtonBounds(selectedItem_).contains(event.x, event.y)) { packAction(item); repaint(); return; }
+            if (item.splice) // SPL-3: "+" buys; elsewhere on the row auditions / signs in
+            {
+                if (item.spliceStatus != "@status" && ! item.spliceLicensed && item.spliceBusy == 0
+                    && spliceAddButtonBounds(selectedItem_).contains(event.x, event.y))
+                { if (ctx().spliceBuy) ctx().spliceBuy(item.spliceUuid); repaint(); return; }
+                spliceRowClicked(item);
+                if (item.spliceStatus != "@status") pendingDrag_ = item.drag;
+                repaint();
+                return;
+            }
             if (item.heading || (item.directory && event.x < listArea().x + 22 + (float) item.depth * 14)) activate(item);
             else if (! item.disclosure.empty() && event.x < listArea().x + rowInset(item) - 2) disclose(item, ! item.open);
             else pendingDrag_ = item.drag;
         }
         if (selectedItem_ >= 0 && (size_t) selectedItem_ < entries.size() && entries[(size_t) selectedItem_].sample
+            && ! entries[(size_t) selectedItem_].splice
             && ctx().browserPreviewEnabled && ctx().previewSample) ctx().previewSample(entries[(size_t) selectedItem_].path);
     }
     repaint();
@@ -1332,6 +1426,13 @@ void BrowserPanel::mouseDown(const MouseEvent& event)
 
 void BrowserPanel::mouseDrag(const MouseEvent& event)
 {
+    if (draggingSpliceVolume_) // SPL: scrub the vertical audition volume slider (up = louder)
+    {
+        const auto g = spliceVolumePopupBounds();
+        if (ctx().spliceSetPreviewGain) ctx().spliceSetPreviewGain(std::clamp((g.bottom() - event.y) / std::max(1.0f, g.h), 0.0f, 1.0f));
+        repaint();
+        return;
+    }
     if (selectingText_ && searchFocused_)
     {
         searchEdit_.dragTo(searchEdit_.offsetAt(event.x, searchFieldBounds(), ctx().theme.metrics.fontSize));
@@ -1346,6 +1447,39 @@ void BrowserPanel::mouseDrag(const MouseEvent& event)
         pendingDrag_.reset();
         repaint();
     }
+}
+
+void BrowserPanel::setSpliceTip(const std::string& text, const Rect& anchor)
+{
+    if (text == spliceTip_) { spliceTipAnchor_ = anchor; return; }
+    spliceTip_ = text;
+    spliceTipAnchor_ = anchor;
+    spliceTipShown_ = false;
+    spliceTipAt_ = juce::Time::currentTimeMillis() + 450; // a short hover before it appears
+    repaint();
+}
+
+void BrowserPanel::mouseMove(const MouseEvent& event)
+{
+    if (! spliceList()) { if (! spliceTip_.empty()) setSpliceTip("", {}); return; }
+    // Keep the volume pop-up open while the cursor is over the icon or the slider; close it otherwise.
+    const bool overVol = spliceVolumeHotzone().contains(event.x, event.y);
+    if (overVol != spliceVolHover_ && ! draggingSpliceVolume_) { spliceVolHover_ = overVol; repaint(); }
+    // Hover tooltips for the compact controls.
+    if (spliceDescribeBounds().contains(event.x, event.y))
+        setSpliceTip("Describe a sound in words (semantic search; needs your Splice login)", spliceDescribeBounds());
+    else if (spliceVolumeIconBounds().contains(event.x, event.y))
+        setSpliceTip("Preview volume", spliceVolumeIconBounds());
+    else if (spliceKeyToggleBounds().contains(event.x, event.y))
+        setSpliceTip("Match the preview to the project's key", spliceKeyToggleBounds());
+    else if (! spliceTip_.empty())
+        setSpliceTip("", {});
+}
+
+void BrowserPanel::mouseExit()
+{
+    if (! spliceTip_.empty()) setSpliceTip("", {});
+    if (spliceVolHover_ && ! draggingSpliceVolume_) { spliceVolHover_ = false; repaint(); }
 }
 
 void BrowserPanel::mouseDoubleClick(const MouseEvent& event)
@@ -1386,6 +1520,15 @@ void BrowserPanel::tick()
     if (listsFolder() && ! query_.empty() && context.indexBrowserFolder && ! context.browserFolder.empty()
         && context.browserSearchRoot != context.browserFolder)
         context.indexBrowserFolder(context.browserFolder);
+    // SPL-3: debounced Splice search as the query is typed (Enter also fires it immediately).
+    if (spliceList() && spliceSearchAt_ > 0 && juce::Time::currentTimeMillis() >= spliceSearchAt_)
+    {
+        spliceSearchAt_ = 0;
+        if (query_ != spliceLastSearched_ && context.spliceSearch) { spliceLastSearched_ = query_; context.spliceSearch(query_); }
+    }
+    // SPL: reveal a hovered-control tooltip once its delay has elapsed.
+    if (! spliceTip_.empty() && ! spliceTipShown_ && juce::Time::currentTimeMillis() >= spliceTipAt_)
+    { spliceTipShown_ = true; repaint(); }
 }
 
 void BrowserPanel::focusSearch()
@@ -1412,8 +1555,10 @@ void BrowserPanel::moveSelection(int delta)
     if (top < scroll_) scroll_ = top;
     else if (bottom > scroll_ + viewHeight) scroll_ = bottom - viewHeight;
     scroll_ = std::max(0.0f, scroll_);
+    maybeLoadMoreSplice(); // SPL: keyboard navigation to the bottom pulls the next page
     const auto& item = entries[(size_t) selectedItem_];
-    if (item.sample && ctx().browserPreviewEnabled && ctx().previewSample) ctx().previewSample(item.path);
+    if (item.splice) spliceRowClicked(item); // SPL-3: audition the highlighted Splice row
+    else if (item.sample && ctx().browserPreviewEnabled && ctx().previewSample) ctx().previewSample(item.path);
     else if (! item.sample && ctx().previewSample) ctx().previewSample("");
     repaint();
 }
@@ -1465,7 +1610,7 @@ bool BrowserPanel::keyPressed(const KeyEvent& key)
                 if (item.heading || item.directory || ! item.disclosure.empty()) disclose(item, true);
                 else if (item.sample && ctx().previewSample) ctx().previewSample(item.path);
             }
-            else if ((item.heading && expandedGroups_.contains(item.group)) || (item.directory && expandedFolders_.contains(item.path))
+            else if ((item.heading && headingOpen(item.group)) || (item.directory && expandedFolders_.contains(item.path))
                      || (! item.disclosure.empty() && item.open))
                 disclose(item, false);
             else
@@ -1482,7 +1627,12 @@ bool BrowserPanel::keyPressed(const KeyEvent& key)
     {
         // UI-78: the field edits like a text field (InlineTextEdit): selection, Cmd+A/C/X/V, word moves.
         restartCaret();
-        if (key.keyCode == juce::KeyPress::returnKey) { searchFocused_ = false; repaint(); return true; }
+        if (key.keyCode == juce::KeyPress::returnKey)
+        {
+            if (spliceList() && ctx().spliceSearch) // SPL-3: run the Splice search now (and stop the debounce re-firing)
+            { spliceSearchAt_ = 0; spliceLastSearched_ = query_; ctx().spliceSearch(query_); }
+            searchFocused_ = false; repaint(); return true;
+        }
         if (key.ctrl || (key.cmd && key.textChar != 'a' && key.textChar != 'A' && key.textChar != 'c' && key.textChar != 'C'
                          && key.textChar != 'x' && key.textChar != 'X' && key.textChar != 'v' && key.textChar != 'V'
                          && key.keyCode != juce::KeyPress::leftKey && key.keyCode != juce::KeyPress::rightKey
@@ -1508,8 +1658,19 @@ bool BrowserPanel::mouseWheel(const MouseEvent& event)
 {
     const float maximum = std::max(0.0f, (float) items().size() * kRow - listArea().h + 8);
     scroll_ = std::clamp(scroll_ - event.wheelDeltaY * kWheelPixels, 0.0f, maximum);
+    maybeLoadMoreSplice();
     repaint();
     return true;
+}
+
+void BrowserPanel::maybeLoadMoreSplice()
+{
+    // SPL: infinite scroll — fetch the next page once the list is scrolled near the bottom.
+    if (! spliceList() || ! ctx().spliceLoadMore) return;
+    const auto& s = ctx().splice;
+    if (s.loading || s.loadingMore || (s.totalPages > 0 && s.page >= s.totalPages)) return;
+    const float maximum = std::max(0.0f, (float) items().size() * kRow - listArea().h + 8);
+    if (maximum > 0 && scroll_ >= maximum - 2 * kRow) ctx().spliceLoadMore();
 }
 
 // ---- UI-78 search field ---------------------------------------------------------------------------------------------
@@ -1532,9 +1693,11 @@ bool BrowserPanel::clearSearchVisible() const
 
 void BrowserPanel::searchChanged(bool starting)
 {
+    if (query_ != searchEdit_.text) searchCollapsed_.clear(); // UI-90: another query opens every heading again
     query_ = searchEdit_.text;
     // A new search re-reads the folder tree so it also finds files added since the last one.
     if (starting && ! query_.empty() && listsFolder() && ctx().indexBrowserFolder) ctx().indexBrowserFolder(ctx().browserFolder);
+    if (spliceList()) spliceSearchAt_ = juce::Time::currentTimeMillis() + 350; // SPL-3: debounce the remote search
     selectedItem_ = -1;
     scroll_ = 0;
     pendingDrag_.reset();
@@ -1545,6 +1708,7 @@ void BrowserPanel::clearSearch()
     searchEdit_.clear();
     query_.clear();
     filters_.clear();
+    searchCollapsed_.clear();
     tagEditing_ = false;
     leaveSimilar();
     selectedItem_ = -1;
@@ -1861,6 +2025,256 @@ void BrowserPanel::showPackMenu(const Item& item)
         add("Remove Pack (moves it to the Trash)", ! busy, [this, id] { if (ctx().removeSamplePack) ctx().removeSamplePack(id); });
     }
     menu.showMenuAsync(juce::PopupMenu::Options());
+}
+
+// ---- SPL-3: the Splice search section ------------------------------------------------------------------------------
+
+void BrowserPanel::appendSplice(std::vector<Item>& result) const
+{
+    const auto& context = ctx();
+    const auto& s = context.splice;
+    std::string status;
+    using Auth = UiContext::SpliceAuth;
+    if (! s.enabled) status = "Splice is off  (turn it on in Preferences)";
+    else if (s.auth == Auth::AwaitingLogin) status = s.message.empty() ? "Finish signing in in your browser..." : s.message;
+    else if (s.auth != Auth::LoggedIn) status = s.message.empty() ? "Sign in to Splice  (double-click here)" : s.message;
+    else if (s.loading) status = "Searching Splice...";
+    else if (! s.message.empty()) status = s.message;
+    else if (s.results.empty()) status = s.query.empty() ? (s.describe ? "Describe a sound you're looking for" : "Type to search Splice sounds")
+                                                          : "No Splice results for \"" + s.query + "\"";
+    if (! status.empty())
+    {
+        result.push_back({status, {}, false, false, {}});
+        result.back().splice = true;
+        result.back().spliceStatus = "@status";
+    }
+    if (s.auth != Auth::LoggedIn) return;
+    for (const auto& row : s.results)
+    {
+        Item item{row.fileName.empty() ? row.name : row.fileName, {}, false, true, // sample=true: audition on select
+                  BrowserDrag{BrowserDrag::Kind::SpliceSample, row.uuid, row.fileName.empty() ? row.name : row.fileName}};
+        item.splice = true;
+        item.spliceUuid = row.uuid;
+        item.spliceBpm = row.bpm;
+        item.spliceKey = row.musicalKey.empty() ? std::string() : row.musicalKey + (row.chordType.empty() ? "" : " " + row.chordType);
+        item.splicePrice = row.priceCredits;
+        item.spliceLicensed = row.licensed;
+        item.spliceBusy = (int) row.busy;
+        item.parentFolder = row.pack;
+        result.push_back(std::move(item));
+    }
+    // A trailing count / "loading more" line so the user knows there is more to scroll to.
+    if (! s.results.empty())
+    {
+        std::string tail = std::to_string(s.results.size());
+        if (s.totalRecords > 0) tail += " of " + juce::String(s.totalRecords).toStdString();
+        tail += " results";
+        if (s.loadingMore) tail += "  ·  loading more...";
+        else if (s.totalPages > 0 && s.page < s.totalPages) tail += "  ·  scroll for more";
+        result.push_back({tail, {}, false, false, {}});
+        result.back().splice = true;
+        result.back().spliceStatus = "@status";
+    }
+}
+
+Rect BrowserPanel::spliceAddButtonBounds(int listRow) const
+{
+    const auto row = listRowBounds(listRow);
+    const float size = row.h - 4;
+    return {row.right() - size - 6, row.y + 2, size, size};
+}
+
+void BrowserPanel::paintSplice(SkCanvas& canvas, const Theme& theme, const Item& item, const Rect& row, bool selected) const
+{
+    const SkColor fg = theme.color("ControlForeground"), dim = theme.color("TextDisabled");
+    const float font = theme.metrics.fontSize;
+    if (item.spliceStatus == "@status")
+    {
+        paint::text(canvas, item.label, row.reduced(10, 0), dim, font);
+        return;
+    }
+    const bool playing = ctx().splice.playingUuid == item.spliceUuid;
+    drawGlyph(canvas, Glyph::Samples, {row.x + 8, row.centreY() - 7, 14, 14}, playing ? theme.color("ChosenPreListen") : fg);
+    const Rect button = spliceAddButtonBounds(-1); // size only; position recomputed below
+    const float bsize = row.h - 4;
+    const Rect add{row.right() - bsize - 6, row.y + 2, bsize, bsize};
+    (void) button;
+    // Info column: BPM and key always when there is any room; the pack name too on a wide browser.
+    std::string info, keyShort = item.spliceKey;
+    keyShort = juce::String(keyShort).replace(" minor", "m").replace(" major", "").toStdString();
+    if (item.spliceBpm > 0) info += std::to_string((int) std::lround(item.spliceBpm));
+    if (! keyShort.empty()) info += (info.empty() ? "" : " ") + keyShort;
+    const bool wide = row.w >= 300;
+    if (wide && ! item.parentFolder.empty()) info += (info.empty() ? "" : "   ") + item.parentFolder;
+    const float infoW = wide ? 200.0f : 70.0f;
+    const bool showInfo = ! info.empty() && row.w >= 170;
+    const Rect infoRect{add.x - infoW - 6, row.y, infoW, row.h};
+    const float nameRight = showInfo ? infoRect.x - 4 : add.x - 6;
+    paint::text(canvas, item.label, {row.x + 28, row.y, std::max(0.0f, nameRight - row.x - 28), row.h}, fg, font);
+    if (showInfo) paint::text(canvas, info, infoRect, dim, font, Align::Right);
+    // The "+" / owned / busy button.
+    ctl::framed(canvas, theme, add, theme.color(selected ? "ControlTextBack" : "SurfaceBackground"));
+    if (item.spliceBusy != 0) paint::text(canvas, "...", add, dim, font, Align::Centre);
+    else if (item.spliceLicensed) paint::text(canvas, juce::String::fromUTF8("✓").toStdString(), add, theme.color("ChosenDefault"), font, Align::Centre);
+    else
+    {
+        const float cx = add.centreX(), cy = add.centreY();
+        SkPaint p; p.setAntiAlias(true); p.setColor(fg); p.setStrokeWidth(1.6f); p.setStyle(SkPaint::kStroke_Style);
+        canvas.drawLine(cx - 4, cy, cx + 4, cy, p);
+        canvas.drawLine(cx, cy - 4, cx, cy + 4, p);
+    }
+}
+
+Rect BrowserPanel::splicePlayBounds() const { const auto f = previewFooter(); return {f.x + 6, f.centreY() - 8, 16, 16}; }
+Rect BrowserPanel::spliceStopBounds() const { const auto f = previewFooter(); return {f.x + 26, f.centreY() - 8, 16, 16}; }
+Rect BrowserPanel::spliceVolumeIconBounds() const { const auto f = previewFooter(); return {f.x + 48, f.centreY() - 8, 16, 16}; }
+Rect BrowserPanel::spliceVolumePopupBounds() const
+{
+    // A vertical groove centred over the speaker icon, popping up above the footer.
+    const auto icon = spliceVolumeIconBounds();
+    return {icon.centreX() - 3, previewFooter().y - 64, 6, 56};
+}
+Rect BrowserPanel::spliceVolumeHotzone() const
+{
+    // Icon + pop-up as one region (with a bridge between them) so the slider stays open while in use.
+    const auto icon = spliceVolumeIconBounds(), pop = spliceVolumePopupBounds();
+    const float x = std::min(icon.x, pop.x) - 4, right = std::max(icon.right(), pop.right()) + 4;
+    return {x, pop.y - 4, right - x, icon.bottom() - pop.y + 8};
+}
+Rect BrowserPanel::spliceKeyToggleBounds() const { const auto f = previewFooter(); return {f.x + 70, f.centreY() - 8, 34, 16}; }
+Rect BrowserPanel::spliceDescribeBounds() const
+{
+    // SPL-9: a compact "D" toggle, first in the strip so it stays visible at any width (the main ask).
+    return {sidebarArea().right() + 6, kSearch + 2, 22, kFacet - 4};
+}
+
+Rect BrowserPanel::spliceCategoryBounds() const
+{
+    // The All / Loops / One-shots dropdown, right of the "D".
+    return {spliceDescribeBounds().right() + 6, kSearch + 2, 92, kFacet - 4};
+}
+
+void BrowserPanel::showSpliceCategoryMenu()
+{
+    juce::PopupMenu menu;
+    const std::string current = ctx().splice.category;
+    const std::pair<const char*, const char*> options[3] = {{"All", ""}, {"Loops", "loop"}, {"One-shots", "oneshot"}};
+    for (const auto& [label, value] : options)
+    {
+        juce::PopupMenu::Item entry(label);
+        entry.isTicked = current == value;
+        const std::string v = value;
+        entry.action = [this, v] { if (Widget::isAlive(this) && ctx().spliceSetCategory) ctx().spliceSetCategory(v); };
+        menu.addItem(std::move(entry));
+    }
+    menu.showMenuAsync(juce::PopupMenu::Options());
+}
+
+void BrowserPanel::paintSpliceFooter(SkCanvas& canvas, const Theme& theme, const Rect& footer) const
+{
+    const auto& s = ctx().splice;
+    const SkColor fg = theme.color("ControlForeground"), dim = theme.color("TextDisabled");
+    const SkColor accent = theme.color("ChosenPreListen");
+    const float font = theme.metrics.fontSize;
+    const bool hasPreview = ! s.playingUuid.empty();
+    SkPaint p; p.setAntiAlias(true);
+
+    // Play / Pause.
+    const auto play = splicePlayBounds();
+    p.setColor(hasPreview ? fg : dim); p.setStyle(SkPaint::kFill_Style);
+    if (hasPreview && ! s.paused) // pause glyph (two bars)
+    {
+        paint::fill(canvas, {play.x + 3, play.y + 2, 4, play.h - 4}, hasPreview ? fg : dim);
+        paint::fill(canvas, {play.x + 9, play.y + 2, 4, play.h - 4}, hasPreview ? fg : dim);
+    }
+    else // play triangle
+    {
+        SkPath tri; tri.moveTo(play.x + 4, play.y + 2); tri.lineTo(play.x + 4, play.y + play.h - 2);
+        tri.lineTo(play.x + play.w - 2, play.centreY()); tri.close();
+        canvas.drawPath(tri, p);
+    }
+    // Stop (square).
+    const auto stop = spliceStopBounds();
+    paint::fill(canvas, {stop.x + 3, stop.y + 3, stop.w - 6, stop.h - 6}, hasPreview ? fg : dim);
+
+    // Volume: a speaker icon; the level slider pops up vertically on hover (keeps the footer narrow).
+    const auto icon = spliceVolumeIconBounds();
+    const float gain = std::clamp(s.previewGain, 0.0f, 1.0f);
+    {
+        const SkColor ink = spliceVolHover_ ? accent : fg;
+        // A small speaker: a box + cone.
+        SkPath cone;
+        cone.moveTo(icon.x + 3, icon.centreY() - 2.5f);
+        cone.lineTo(icon.x + 6, icon.centreY() - 2.5f);
+        cone.lineTo(icon.x + 9.5f, icon.centreY() - 5.5f);
+        cone.lineTo(icon.x + 9.5f, icon.centreY() + 5.5f);
+        cone.lineTo(icon.x + 6, icon.centreY() + 2.5f);
+        cone.lineTo(icon.x + 3, icon.centreY() + 2.5f);
+        cone.close();
+        p.setColor(ink); p.setStyle(SkPaint::kFill_Style);
+        canvas.drawPath(cone, p);
+        p.setStyle(SkPaint::kStroke_Style); p.setStrokeWidth(1.1f);
+        if (gain <= 0.001f) // muted: a small x
+        {
+            canvas.drawLine(icon.x + 11.5f, icon.centreY() - 3, icon.right(), icon.centreY() + 3, p);
+            canvas.drawLine(icon.x + 11.5f, icon.centreY() + 3, icon.right(), icon.centreY() - 3, p);
+        }
+        else // one or two sound waves by level
+        {
+            canvas.drawArc(SkRect::MakeXYWH(icon.x + 7.5f, icon.centreY() - 4, 5, 8), -55, 110, false, p);
+            if (gain > 0.5f) canvas.drawArc(SkRect::MakeXYWH(icon.x + 6, icon.centreY() - 6.5f, 8, 13), -55, 110, false, p);
+        }
+    }
+    if (spliceVolHover_) // the vertical pop-up slider
+    {
+        const auto groove = spliceVolumePopupBounds();
+        const Rect panel{groove.x - 8, groove.y - 6, groove.w + 16, groove.h + 12};
+        paint::fill(canvas, panel, theme.color("ControlTextBack"));
+        paint::stroke(canvas, panel, theme.color("ControlContrastFrame"));
+        paint::fill(canvas, groove, paint::withAlpha(fg, 60));
+        const float fill = groove.h * gain;
+        paint::fill(canvas, {groove.x, groove.bottom() - fill, groove.w, fill}, accent);
+        p.setColor(fg); p.setStyle(SkPaint::kFill_Style);
+        canvas.drawCircle(groove.centreX(), groove.bottom() - fill, 5.0f, p);
+    }
+
+    // Key (pitch-match) toggle.
+    const auto key = spliceKeyToggleBounds();
+    ctl::framed(canvas, theme, key, theme.color(s.matchKey ? "ChosenDefault" : "SurfaceBackground"));
+    paint::text(canvas, "Key", key, s.matchKey ? theme.color("ControlTextBack") : dim, font, Align::Centre);
+
+    // Credits / status, right-aligned.
+    using Auth = UiContext::SpliceAuth;
+    const std::string status = ! s.enabled ? "Splice off"
+                   : s.auth == Auth::AwaitingLogin ? (s.loginUserCode.empty() ? "Signing in..." : "Code " + s.loginUserCode)
+                   : s.auth == Auth::LoggedIn ? (s.credits >= 0 ? std::to_string(s.credits) + " credits" : "Signed in")
+                   : "Sign in";
+    paint::text(canvas, status, {footer.right() - 90, footer.y, 84, footer.h}, fg, font, Align::Right);
+
+    // SPL: the hover tooltip for the compact controls, drawn last so nothing covers it.
+    if (spliceTipShown_ && ! spliceTip_.empty())
+    {
+        const float w = std::min(width() - 8.0f, gfx::measureText(spliceTip_, font) + 14);
+        const float tx = std::clamp(spliceTipAnchor_.x, 4.0f, std::max(4.0f, width() - w - 4));
+        const float ty = spliceTipAnchor_.bottom() > height() - 40 ? spliceTipAnchor_.y - 22 : spliceTipAnchor_.bottom() + 4;
+        const Rect tip{tx, ty, w, 18};
+        paint::fill(canvas, tip, theme.color("ControlTextBack"));
+        paint::stroke(canvas, tip, theme.color("ControlContrastFrame"));
+        paint::text(canvas, spliceTip_, tip.reduced(6, 0), fg, font);
+    }
+}
+
+void BrowserPanel::spliceRowClicked(const Item& item)
+{
+    if (item.spliceStatus == "@status")
+    {
+        auto& c = ctx();
+        if (c.splice.enabled && c.splice.auth != UiContext::SpliceAuth::LoggedIn && c.splice.auth != UiContext::SpliceAuth::AwaitingLogin
+            && c.spliceLogin)
+            c.spliceLogin();
+        return;
+    }
+    if (ctx().splicePreview) ctx().splicePreview(item.spliceUuid);
 }
 
 } // namespace sonora::ui

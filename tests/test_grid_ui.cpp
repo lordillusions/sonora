@@ -7,6 +7,7 @@
 #include "io/als/AlsWriter.h"
 #include "ui/RootWidget.h"
 #include "ui/views/ArrangementView.h"
+#include "ui/views/AutomationEditor.h"
 #include "engine/MasterMonitor.h"
 #include "ui/views/MainLayout.h"
 #include "ui/views/MonitorPanel.h"
@@ -1632,6 +1633,8 @@ TEST_CASE("region drag UI: click Escape and no-op drag make no edits; Option cop
     RollRig rig; prepareRegionDrag(rig); selectRegion(rig);
     const auto grab = regionPoint(rig, 1.5, 0);
     rig.root->dispatchMouseDown(grab); rig.root->dispatchMouseUp(grab); CHECK(! rig.history.canUndo());
+    CHECK(! rig.ctx.arrangementSelection.active); // UI-89: a plain click inside the selection collapses it
+    selectRegion(rig);
     rig.root->dispatchMouseDown(grab); rig.root->dispatchMouseDrag(regionPoint(rig, 5.5, 0));
     REQUIRE(rig.root->dispatchKey({.keyCode = juce::KeyPress::escapeKey}));
     rig.root->dispatchMouseUp(regionPoint(rig, 5.5, 0)); CHECK(! rig.history.canUndo());
@@ -1643,6 +1646,67 @@ TEST_CASE("region drag UI: click Escape and no-op drag make no edits; Option cop
     CHECK_NEAR(rig.song.tracks[0].arrangementClips[0].currentStart, 1, 1e-9);
     CHECK_NEAR(rig.song.tracks[0].arrangementClips[2].currentStart, 9.37, 1e-5);
     CHECK_NEAR(rig.ctx.arrangementSelection.start, 8.37, 1e-5);
+}
+
+TEST_CASE("selection UI (UI-89): a click inside a multi-track selection collapses it like Live, a drag keeps it")
+{
+    RollRig rig; prepareRegionDrag(rig);
+    const int firstUid = rig.song.tracks[0].arrangementClips[0].uid, lateUid = rig.song.tracks[1].arrangementClips[1].uid;
+    // The press keeps the selection until the release: it may still become a drag of the whole selection.
+    selectRegion(rig);
+    const auto title = regionPoint(rig, 6.5, 1, true);
+    rig.root->dispatchMouseDown(title);
+    CHECK(rig.ctx.arrangementSelection.active);
+    rig.root->dispatchMouseUp(title);
+    // Released without moving: only the clicked clip is selected (its title bar), nothing was edited.
+    CHECK(! rig.ctx.arrangementSelection.active);
+    CHECK(rig.ctx.selectedClipUid == lateUid); CHECK(rig.ctx.selectedClipTrack == 1); CHECK(rig.ctx.selectedTrack == 1);
+    CHECK(! rig.history.canUndo());
+    // A clip body inside the selection: that clip, and the insert marker where it was clicked.
+    selectRegion(rig);
+    rig.root->dispatchMouseDown(regionPoint(rig, 2, 0)); rig.root->dispatchMouseUp(regionPoint(rig, 2, 0));
+    CHECK(! rig.ctx.arrangementSelection.active); CHECK(rig.ctx.selectedClipUid == firstUid);
+    CHECK_NEAR(rig.ctx.arrangementCursor, 2, 1e-9);
+    // Empty lane space inside the selection: a new insert marker on that track, no clip.
+    selectRegion(rig);
+    rig.root->dispatchMouseDown(regionPoint(rig, 4, 0)); rig.root->dispatchMouseUp(regionPoint(rig, 4, 0));
+    CHECK(! rig.ctx.arrangementSelection.active); CHECK(rig.ctx.selectedClipUid == -1); CHECK(rig.ctx.selectedTrack == 0);
+    CHECK_NEAR(rig.ctx.arrangementCursor, 4, 1e-9);
+    // Option-click (the copy modifier) without a drag copies nothing and collapses too.
+    selectRegion(rig);
+    auto copyClick = regionPoint(rig, 1.5, 0, true); copyClick.alt = true;
+    rig.root->dispatchMouseDown(copyClick); rig.root->dispatchMouseUp(copyClick);
+    CHECK(! rig.ctx.arrangementSelection.active); CHECK(! rig.history.canUndo());
+    CHECK(rig.song.tracks[0].arrangementClips.size() == 2);
+    // A press that jitters less than the drag threshold is still a click.
+    selectRegion(rig);
+    auto jitter = regionPoint(rig, 2, 1); jitter.x += 2;
+    rig.root->dispatchMouseDown(regionPoint(rig, 2, 1)); rig.root->dispatchMouseDrag(jitter); rig.root->dispatchMouseUp(jitter);
+    CHECK(! rig.ctx.arrangementSelection.active); CHECK(! rig.history.canUndo());
+    // A real drag still moves the whole selection and the selection follows it.
+    selectRegion(rig);
+    rig.root->dispatchMouseDown(regionPoint(rig, 1.5, 0, true));
+    rig.root->dispatchMouseDrag(regionPoint(rig, 5.5, 0, true)); rig.root->dispatchMouseUp(regionPoint(rig, 5.5, 0, true));
+    CHECK(rig.history.undoLabel() == "Move Region");
+    REQUIRE(rig.ctx.arrangementSelection.active); CHECK_NEAR(rig.ctx.arrangementSelection.start, 4, 1e-9);
+    CHECK(rig.ctx.arrangementSelection.firstTrack == 0); CHECK(rig.ctx.arrangementSelection.lastTrack == 1);
+    REQUIRE(rig.history.undo(rig.song));
+    // A click in an automation lane of a selected track starts that lane's own selection: the time selection lets go.
+    rig.ctx.toggleAutomationLane(0); rig.root->layout();
+    selectRegion(rig);
+    auto* arrangement = findWidget<ui::ArrangementView>(*rig.root);
+    REQUIRE(arrangement != nullptr);
+    ui::AutomationEditor* lane = nullptr;
+    std::function<void(ui::Widget&)> visibleLane = [&](ui::Widget& w) {
+        if (auto* editor = dynamic_cast<ui::AutomationEditor*>(&w); editor && editor->visible && lane == nullptr) lane = editor;
+        for (auto& child : w.children()) if (child->visible) visibleLane(*child);
+    };
+    visibleLane(*arrangement);
+    REQUIRE(lane != nullptr);
+    const auto plot = lane->boundsInRoot();
+    rig.root->dispatchMouseDown(mouseAt(plot.x + (float) ((3.5 - rig.ctx.scrollBeats) * rig.ctx.pixelsPerBeat), plot.y + plot.h * 0.5f));
+    rig.root->dispatchMouseUp(mouseAt(plot.x + (float) ((3.5 - rig.ctx.scrollBeats) * rig.ctx.pixelsPerBeat), plot.y + plot.h * 0.5f));
+    CHECK(! rig.ctx.arrangementSelection.active);
 }
 
 TEST_CASE("region drag UI: release outside cancels, recording blocks commit and the whole region clamps to beat zero")

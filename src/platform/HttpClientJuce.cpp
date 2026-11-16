@@ -79,7 +79,8 @@ HttpResponse postNoRedirect(const HttpRequest& request, const std::atomic<bool>&
     for (int i = 0; i < names.size(); ++i)
         headers << names[i] << ": " << values[i] << "\r\n";
 
-    juce::WebInputStream stream(url.withPOSTData(request.body), true);
+    const bool isGet = request.method.equalsIgnoreCase("GET"); // SPL-1: authenticated REST reads
+    juce::WebInputStream stream(isGet ? url : url.withPOSTData(request.body), ! isGet);
     stream.withExtraHeaders(headers)
         .withConnectionTimeout(request.requestTimeoutSeconds * 1000)
         .withNumRedirectsToFollow(0);

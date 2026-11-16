@@ -20,14 +20,16 @@ public:
     enum CategoryIndex : int
     {
         LibraryHeading, AllItems, Sounds, Drums, Instruments, AudioEffects, MidiEffects, PlugIns, Samples,
-        PlacesHeading, Projects, CurrentProject, UserLibrary, Packs
+        PlacesHeading, Projects, CurrentProject, UserLibrary, Packs, Splice // SPL-3: Splice is last (indices stay valid)
     };
     void paint(SkCanvas& c, const Theme& t) override;
     void layout() override;
     void mouseDown(const MouseEvent& e) override;
     void mouseDoubleClick(const MouseEvent& e) override;
     void mouseDrag(const MouseEvent& e) override;
-    void mouseUp(const MouseEvent&) override { pendingDrag_.reset(); selectingText_ = false; }
+    void mouseMove(const MouseEvent& e) override;
+    void mouseExit() override;
+    void mouseUp(const MouseEvent&) override { pendingDrag_.reset(); selectingText_ = false; draggingSpliceVolume_ = false; }
     bool mouseWheel(const MouseEvent& e) override;
     bool keyPressed(const KeyEvent& k) override;
     void tick() override;
@@ -103,6 +105,12 @@ private:
         // "preset:<tag>/<folder>"); `open` is whether its children follow (expanded, or a search found presets in it).
         std::string disclosure{};
         bool open = false;
+        // SPL-3: a Splice search row ("@status" = the sign-in / loading / empty status line).
+        bool splice = false;
+        std::string spliceUuid{}, spliceKey{}, spliceStatus{};
+        double spliceBpm = 0;
+        int splicePrice = 0, spliceBusy = 0; // Busy: 0 none, 1 preview, 2 buy, 3 download
+        bool spliceLicensed = false;
     };
     static const std::vector<Category>& categories();
     const std::vector<Item>& items(bool filtered = true, bool grouped = true) const;
@@ -120,7 +128,7 @@ private:
         bool folderMode = false;
         std::string query, folder;
         BrowserTags::Tags filters;
-        std::set<std::string> groups, folders;
+        std::set<std::string> groups, folders, searchCollapsed;
         uint64_t similarRevision = 0;
     };
     mutable std::optional<ItemsKey> itemsKey_;
@@ -154,6 +162,12 @@ private:
     void paintPack(SkCanvas& c, const Theme& t, const Item& item, const Rect& row, bool selected) const;
     void packAction(const Item& item);
     void showPackMenu(const Item& item);
+    // SPL-3: the Splice search section.
+    bool spliceList() const { return ! folderMode_ && selectedCategory_ == Splice; }
+    void appendSplice(std::vector<Item>& result) const;
+    void paintSplice(SkCanvas& c, const Theme& t, const Item& item, const Rect& row, bool selected) const;
+    Rect spliceAddButtonBounds(int listRow) const; // the "+" buy button of a Splice row
+    void spliceRowClicked(const Item& item);
 
     class Splitter* splitter_ = nullptr;
     int selectedCategory_ = Projects, selectedItem_ = -1;
@@ -167,10 +181,49 @@ private:
     std::string tagText_;
     BrowserTags::Tags filters_;
     std::set<std::string> expandedGroups_, expandedFolders_;
+    // UI-90: a search or a tag filter opens every heading; the headings closed while it is up are kept here, for the
+    // search they were closed in (category, query, filters). Another search opens them all again.
+    struct SearchScope
+    {
+        int category = -1;
+        std::string query;
+        BrowserTags::Tags filters;
+        bool operator==(const SearchScope&) const = default;
+    };
+    std::set<std::string> searchCollapsed_;
+    SearchScope searchCollapsedScope_;
+    SearchScope searchScope() const { return {selectedCategory_, query_, filters_}; }
+    bool searchActive() const { return ! query_.empty() || ! filters_.empty(); }
+    const std::set<std::string>& collapsedInSearch() const; // empty unless the search is the one they were closed in
+    bool headingOpen(const std::string& group) const;
+    void setHeadingOpen(const std::string& group, bool open);
     std::optional<BrowserDrag> pendingDrag_;
     uint32_t caretEpoch_ = 0;
     bool caretShown_ = false;
     float dragStartX_ = 0, dragStartY_ = 0;
+    int64_t spliceSearchAt_ = 0;       // SPL-3: debounce — juce ms to fire the Splice search, 0 = none
+    std::string spliceLastSearched_;   // the query last sent to Splice (so the debounce doesn't repeat it)
+    bool draggingSpliceVolume_ = false; // SPL: the audition volume slider is being dragged
+    bool spliceVolHover_ = false;       // SPL: the volume knob's vertical pop-up slider is showing
+    // SPL: a small hover tooltip for the compact Splice controls (Describe, volume, Key).
+    std::string spliceTip_;
+    Rect spliceTipAnchor_{};
+    int64_t spliceTipAt_ = 0; // juce ms the tip becomes visible (hover delay)
+    bool spliceTipShown_ = false;
+    void setSpliceTip(const std::string& text, const Rect& anchor); // called from mouseMove
+    // SPL control bar (Splice category footer): play/pause, stop, volume (pop-up), Key toggle.
+    Rect splicePlayBounds() const;
+    Rect spliceStopBounds() const;
+    Rect spliceVolumeIconBounds() const;  // the speaker icon in the footer
+    Rect spliceVolumePopupBounds() const; // the vertical slider that pops up on hover
+    Rect spliceVolumeHotzone() const;     // icon + pop-up: the region that keeps the slider open
+    Rect spliceKeyToggleBounds() const;
+    // SPL: the filter strip under the search field — a "D" (Describe) toggle and a category dropdown.
+    Rect spliceDescribeBounds() const;
+    Rect spliceCategoryBounds() const;   // All / Loops / One-shots dropdown
+    void showSpliceCategoryMenu();
+    void paintSpliceFooter(SkCanvas& c, const Theme& t, const Rect& footer) const;
+    void maybeLoadMoreSplice(); // infinite scroll
 };
 
 } // namespace sonora::ui

@@ -224,6 +224,18 @@ struct UiContext
     // list yet (AutomationEditor::pendingTargetId). Kept while lanes are hidden, like Live keeps them folded.
     std::map<int, std::vector<int>> automationLaneTargets;
     bool automationAutomatedOnly = false; // "Show Automated Parameters Only" at the bottom of the lane choosers
+    // UI-88: View > Show This Track's Automation Only (Opt+Shift+A) shows one track's automated lanes and no other track's.
+    // The lanes shown before it, restored when it is toggled off. Stale once the lanes changed in between (see
+    // AutomationEditor::trackAutomationOnlyActive).
+    struct AutomationOnlyTrack
+    {
+        const model::Song* song = nullptr;
+        int track = -1;
+        bool visible = false;
+        std::vector<int> tracks;
+        std::map<int, std::vector<int>> laneTargets;
+    };
+    std::optional<AutomationOnlyTrack> automationOnlyTrack;
     int automationLaneCount(int controlIndex) const
     {
         const auto it = automationLaneTargets.find(controlIndex);
@@ -724,6 +736,49 @@ struct UiContext
     std::map<std::string, BrowserTags::Tags> samplePackFileTags; // installed file path -> its pack's and pack.json's tags
     std::function<void()> showSamplePackList, refreshSamplePacks;
     std::function<void(const std::string& id)> downloadSamplePack, cancelSamplePack, removeSamplePack;
+    // ---- SPL: Splice browser integration (docs/SPLICE_INTEROP.md). Off by default; filled by app/AppSplice.cpp.
+    struct SpliceRow
+    {
+        std::string uuid, name, fileName, pack, provider, musicalKey, chordType, category, previewUrl;
+        std::vector<std::string> tags;
+        double bpm = 0;
+        int durationMs = 0, priceCredits = 0;
+        bool licensed = false, loop = false;
+        std::string localPath; // set once the WAV is downloaded (placement / repeat preview)
+        enum class Busy { None, Previewing, Buying, Downloading } busy = Busy::None;
+    };
+    enum class SpliceAuth { Disabled, LoggedOut, AwaitingLogin, LoggedIn, Error };
+    struct SpliceState
+    {
+        bool enabled = false;               // the Preference (off by default)
+        SpliceAuth auth = SpliceAuth::Disabled;
+        std::string username, message, loginUserCode, loginUrl, query;
+        int credits = -1;                   // -1 unknown
+        bool loading = false;
+        std::vector<SpliceRow> results;
+        int page = 1, totalPages = 0, totalRecords = 0;
+        bool loadingMore = false;           // fetching the next page (infinite scroll)
+        std::string playingUuid;            // the row currently auditioned (preview highlight)
+        bool paused = false;                // the audition is paused (play/pause button)
+        bool matchKey = true;               // transpose the preview and placement to the project key (toggle)
+        float previewGain = 0.5f;           // audition volume (0..2)
+        std::string category;               // "" all, "loop", "oneshot" — a remote filter
+        bool describe = false;              // "Describe a sound": semantic search (needs an entitled account)
+        uint64_t revision = 0;              // bump on any change (with browserContentRevision) so the browser re-reads
+    };
+    SpliceState splice;
+    std::function<void(const std::string& query)> spliceSearch;
+    std::function<void()> spliceLoadMore; // SPL: fetch and append the next page (infinite scroll)
+    std::function<void(const std::string& uuid)> spliceBuy;     // the "+" button: buy with credits
+    std::function<void(const std::string& uuid)> splicePreview; // audition (tempo/key synced), "" stops
+    std::function<void()> spliceLogin, spliceSignOut;
+    std::function<void(bool)> spliceSetEnabled;
+    std::function<void(int)> splicePreviewTransport; // SPL: 0 stop, 1 play/pause toggle
+    std::function<void(bool)> spliceSetMatchKey;     // SPL: pitch-match on/off
+    std::function<void(float)> spliceSetPreviewGain; // SPL: audition volume (0..1 from the slider)
+    std::function<void(const std::string&)> spliceSetCategory; // SPL: "" / "loop" / "oneshot", re-runs the search
+    std::function<void(bool)> spliceSetDescribe; // SPL-9: "describe the sound" semantic search on/off
+
     std::function<void()> insertMidiClip, toggleFullScreen;
 
     // ---- editing (UI-3 / UI-10): the selected Arrangement/Session clip and the document commands

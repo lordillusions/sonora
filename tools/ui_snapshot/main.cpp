@@ -6,7 +6,7 @@
 //                       [--prefs plugins|midi|display|audio|keys|updates] [--zoom 1.25] [--midimap|--keymap] [--clip TRACK] [--clip-index N] [--scene N] [--count-in N]
 //                       [--floating-wavetables] [--wavetable-window] [--waveform-zoom FACTOR] [--device-mini] [--add-devices TYPES]
 //                       [--wavetable-browser] [--wavetable-preset NAME] [--wavetable-search TEXT]
-//                       [--collab share|share-wifi|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N] [--all-automation] [--automation-write]
+//                       [--collab share|share-wifi|host|guest|presence] [--play-at BEAT] [--piano-rows PX] [--automation-track N] [--all-automation] [--track-automation-only] [--automation-write]
 //                       [--bench N [--gpu] [--warmup N] [--no-sweep|--device-sweep]]
 //                       [--native-swap-prompt] [--sampler-zones k|v|s] [--cpu]
 // --cpu (UI-82) opens the CPU meter details with synthetic load figures and a per-track cost for the set's tracks.
@@ -200,6 +200,7 @@ int main(int argc, char** argv)
     std::string regionDrag;
     int browserCategory = -1, browserSelection = -1;
     std::string browserQuery, browserPacks;
+    bool browserSplice = false;
     std::string revealPath, similarPath; // LIB-3 / LIB-4
     std::vector<std::string> similarRoots; // LIB-4c
     std::vector<std::string> browserOpen;
@@ -207,6 +208,7 @@ int main(int argc, char** argv)
     std::vector<int> selectedTracks;
     bool setView = false;
     bool allAutomation = false; // UI-65: Shift+A, every automated parameter in its own lane
+    bool trackAutomationOnly = false; // UI-88: Opt+Shift+A, the --track's automation only
     struct RecordingState { int track = -1, scene = -1, phase = 0; };
     std::vector<RecordingState> recordingStates;
 
@@ -245,6 +247,8 @@ int main(int argc, char** argv)
             ctx.automationWriteMode = true;
         else if (a == "--all-automation")
             allAutomation = true;
+        else if (a == "--track-automation-only") // UI-88: after --all-automation, the others hide
+            trackAutomationOnly = true;
         else if (a == "--automation-track") // one track's automation lane, as the A key shows it (UI-46)
         {
             ctx.automationVisible = true;
@@ -316,6 +320,8 @@ int main(int argc, char** argv)
             browserOpen.push_back(next());
         else if (a == "--browser-packs")
             browserPacks = next();
+        else if (a == "--browser-splice") // SPL-3: demo the Splice section (no network)
+            browserSplice = true;
         else if (a == "--rack-chain")
             ctx.selectedRackChain = std::stoi(next());
         else if (a == "--no-browser")
@@ -609,6 +615,7 @@ int main(int argc, char** argv)
     ctx.buildLog = graph.log;
     if (setView) ui::applySetView(ctx);
     if (allAutomation) ui::AutomationEditor::toggleAllAutomation(ctx);
+    if (trackAutomationOnly) ui::AutomationEditor::toggleTrackAutomationOnly(ctx, ctx.selectedTrack);
     if (! deviceMenu.empty())
     {
         // PLG-16f: the device title menu of track N's device at PATH ("N:0" top level, "N:0.1.2" a rack's child).
@@ -1038,6 +1045,31 @@ int main(int argc, char** argv)
         if (browserFolder.empty())
             for (auto& child : root.children())
                 if (auto* browser = dynamic_cast<ui::BrowserPanel*>(child.get())) browser->showCategory(ui::BrowserPanel::packsCategory());
+    }
+    if (browserSplice) // SPL-3: a logged-in Splice section with a few demo results
+    {
+        ctx.splice.enabled = true;
+        ctx.splice.auth = ui::UiContext::SpliceAuth::LoggedIn;
+        ctx.splice.credits = 680;
+        ctx.splice.query = "piano";
+        ctx.splice.page = 1;
+        ctx.splice.totalPages = 505;
+        ctx.splice.totalRecords = 25250;
+        const auto row = [](const char* name, const char* pack, double bpm, const char* key, const char* chord,
+                            int price, bool licensed, bool loop) {
+            ui::UiContext::SpliceRow r;
+            r.uuid = name; r.name = name; r.fileName = name; r.pack = pack; r.bpm = bpm; r.musicalKey = key;
+            r.chordType = chord; r.priceCredits = price; r.licensed = licensed; r.loop = loop;
+            r.category = loop ? "loop" : "oneshot";
+            return r;
+        };
+        ctx.splice.results = {
+            row("Saffron_100_Am_Piano04.wav", "Minimal Piano Loops", 100, "a", "minor", 1, false, true),
+            row("Dreamhouse_Keys_124_C.wav", "Deep House Keys", 124, "c", "major", 1, true, true),
+            row("vox_chop_need_B.wav", "Chilled Vocal Chops", 0, "b", "", 1, false, false),
+            row("808_main_mavrik_C.wav", "808 Bass Shots", 0, "c", "", 1, false, false)};
+        for (auto& child : root.children())
+            if (auto* browser = dynamic_cast<ui::BrowserPanel*>(child.get())) browser->showCategory(ui::BrowserPanel::Splice);
     }
     if (browserCategory >= 0)
         for (auto& child : root.children())

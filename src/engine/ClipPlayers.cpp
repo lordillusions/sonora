@@ -25,8 +25,10 @@ PreparedClip prepareClip(const model::Clip& c, std::shared_ptr<SampleSlot> sampl
     p.midiControllers = prepareMidiControllers(c.envelopes);
     p.probabilitySeed = (uint32_t) std::max(0, c.uid);
     p.gain = (float) c.gain;
-    p.fadeInBeats = c.fadeIn;
-    p.fadeOutBeats = c.fadeOut;
+    // UI-85: the fades as they fit the clip, also for a set saved with fades longer than its clip.
+    const auto fades = model::fittedClipFades(c.fadeIn, c.fadeOut, c.currentEnd - c.currentStart);
+    p.fadeInBeats = fades.in;
+    p.fadeOutBeats = fades.out;
     p.fadeInCurve = c.fadeInCurve; p.fadeOutCurve = c.fadeOutCurve;
     for (const auto& n : c.notes)
         if (n.enabled)

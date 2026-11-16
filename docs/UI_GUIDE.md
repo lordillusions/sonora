@@ -96,6 +96,7 @@ Options > Load Live Theme (.ask) imports any Live 12 theme, e.g.
 | Cmd+S / Shift+Cmd+S | save / save as |
 | Cmd+M / Cmd+K | MIDI mapping / Session clip computer-key mapping |
 | A (Arrangement) | show/hide automation lanes |
+| Opt+Shift+A | show the selected track's automation only; again restores the lanes (UI-88) |
 | Cmd+Opt+U (Arrangement) | show/hide selected track take lanes |
 | T (take selected) | toggle audition of that lane |
 | F9 / Record button | record armed tracks to Arrangement |
@@ -139,6 +140,12 @@ play position; another parameter gets the same shape on its own range) and dupli
 Cmd+Delete deletes the lane's automation. Right-click: Edit Value (type -6 dB, 25L, On, 2.5k...), Insert Shape (sine,
 triangle, saw, square, ramps, ADSR over the selection), Simplify Envelope, Delete Automation, Re-Enable Automation, Lock
 Envelopes. Each gesture is one undo step.
+
+View > Show This Track's Automation Only (Opt+Shift+A, also in the track header's context menu, UI-88): the selected track
+shows one lane per automated parameter (mixer, sends, devices, plug-ins; one lane that picks its own target when it has none)
+and every other track's lanes hide. The command again on that track gives back exactly the lanes shown before (none, A's
+tracks, or Show All Automation); on another track it moves there. Once the lanes were changed by hand (A, Shift+A, a lane's
+hide button) the next press starts from what shows then.
 
 Moving, Option-copying or Cmd+D-duplicating an Arrangement clip (or a time selection) whose time range holds automation asks
 whether the automation goes along (With Automation / Clip Only / Always / Cancel); Options > Clip Automation changes the
@@ -931,6 +938,11 @@ in `docs/agent/{README,NATIVE_LLM,CONTROL_API}.md`; broader controls and per-cli
 Reviewed native screenshots: `screenshots/agent-control-{mcp,native-llm,settings}.png`.
 
 ## Arrangement context and channel deletion (UI-37)
+
+Clicking inside an Arrangement time selection (UI-89, Live): the press keeps the selection only while it can still become a
+drag that moves (Option: copies) the whole selection. Released without moving more than 3 px, it is an ordinary click: the
+selection collapses to the clicked clip, or to an insert marker where empty lane space was clicked. A click in an automation
+lane also lets go of the Arrangement selection (the lane starts its own). Right-click inside keeps it for the menu.
 
 Right-clicking the empty Arrangement grid or a time selection shows Zoom to/Back from Time Selection (Z/X),
 Insert Empty MIDI Clip (Shift+Cmd+M on MIDI lanes), Activate/Deactivate Loop (Cmd+L), and the rendering commands.

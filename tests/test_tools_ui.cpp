@@ -375,7 +375,7 @@ TEST_CASE("browser: Up/Down walk the samples and audition them, the content-colu
         root.dispatchMouseDown(mouseAt(origin.x + x, origin.y + y));
         root.dispatchMouseUp(mouseAt(origin.x + x, origin.y + y));
     };
-    const auto place = browser->sidebarRowBounds(ui::BrowserPanel::Packs + 1); // the custom Place
+    const auto place = browser->sidebarRowBounds(ui::BrowserPanel::Splice + 1); // the custom Place
     click(place.centreX(), place.centreY());
     const auto first = browser->listRowBounds(0);
     click(first.centreX(), first.centreY());
@@ -556,7 +556,7 @@ TEST_CASE("browser disclosure: folder arrows expand inline, Right is idempotent,
         root.dispatchMouseDown(e); root.dispatchMouseUp(e);
     };
     auto key = [&](int code) { root.dispatchKey({.keyCode = code}); };
-    click(browser->sidebarRowBounds(ui::BrowserPanel::Packs + 1));
+    click(browser->sidebarRowBounds(ui::BrowserPanel::Splice + 1));
     click(browser->listRowBounds(0), true);
     CHECK(ctx.browserFolder == "/tmp/Tree"); CHECK(requests == 0); // cached children
     key(juce::KeyPress::rightKey); key(juce::KeyPress::rightKey);

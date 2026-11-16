@@ -48,6 +48,26 @@ inline double clipFadeGain(double progress, double shape = 0.0)
     return 1.0 - inverse * inverse;
 }
 
+// UI-85: a clip's fades as they apply to a clip `length` beats long (Live): each fits inside the clip and together they
+// never overlap; a pair longer than the clip shrinks in proportion. Drawing, hit testing, playback and the edits that
+// change a clip's length all go through this, so a fade never reaches outside its clip.
+struct FittedFades
+{
+    double in = 0.0, out = 0.0;
+};
+inline FittedFades fittedClipFades(double fadeIn, double fadeOut, double length)
+{
+    const double room = std::fmax(0.0, length);
+    FittedFades f{std::fmax(0.0, fadeIn), std::fmax(0.0, fadeOut)};
+    const double sum = f.in + f.out;
+    if (sum > room)
+    {
+        f.in *= room / sum; // sum > room >= 0: each share is at most the clip
+        f.out = room - f.in;
+    }
+    return f;
+}
+
 // Maps an arrangement position to a position inside the clip's content, following
 // the loop region. Returns the content position in beats.
 // Approximation of Live's semantics, see docs/ALS_FORMAT.md "Clip timing".

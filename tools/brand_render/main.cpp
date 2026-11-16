@@ -5,6 +5,7 @@
 //
 // resources/brand/ holds the committed output; src/CMakeLists.txt uses resources/brand/icon-1024.png as ICON_BIG.
 
+#include "core/Privacy.h"
 #include "gfx/Brand.h"
 
 #include "include/core/SkCanvas.h"
@@ -98,6 +99,19 @@ int main(int argc, char** argv)
     const float choiceH = brand::promptHeight(choice);
     ok &= writePng((dir / "preview-prompt-choice.png").string(), (int) brand::promptWidth * 2, (int) choiceH * 2, 2.0f,
                    [&](SkCanvas& c) { brand::drawPrompt(c, brand::promptWidth, choiceH, choice); });
+    // COM-15: the explanations shown before macOS asks for the microphone, camera and local network.
+    for (const auto& [access, name] : {std::pair{sonora::core::Access::Microphone, "microphone"}, std::pair{sonora::core::Access::Camera, "camera"},
+                                       std::pair{sonora::core::Access::LocalNetwork, "local-network"}})
+    {
+        const auto text = sonora::core::accessExplanation(access);
+        brand::PromptState privacy;
+        privacy.title = text.title;
+        privacy.message = text.message;
+        privacy.buttons = {{text.notNowLabel, false, false}, {text.continueLabel, true, false}};
+        const float privacyH = brand::promptHeight(privacy);
+        ok &= writePng((dir / (std::string("preview-prompt-privacy-") + name + ".png")).string(), (int) brand::promptWidth * 2,
+                       (int) privacyH * 2, 2.0f, [&](SkCanvas& c) { brand::drawPrompt(c, brand::promptWidth, privacyH, privacy); });
+    }
     // About window (COM-8), with sample supporters and with none.
     for (const bool sample : {true, false})
     {

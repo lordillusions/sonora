@@ -87,7 +87,7 @@ void RootWidget::dispatchMouseDown(MouseEvent e)
     if (writeTouch_) ctx_.automationWriteTouch(*writeTouch_, true);
     if (! isAlive(captured_)) { captured_ = nullptr; writeTouch_.reset(); return; }
     for (auto* a = captured_; a != nullptr && a != this; a = a->parent())
-        a->descendantPressed(captured_);
+        a->descendantPressed(captured_, e);
     if (! isAlive(captured_)) { captured_ = nullptr; return; }
     capturedOrigin_ = captured_->boundsInRoot();
     auto local = localise(e, capturedOrigin_);

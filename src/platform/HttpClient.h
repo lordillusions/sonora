@@ -19,6 +19,7 @@ namespace sonora::platform
 struct HttpRequest
 {
     juce::String url;
+    juce::String method = "POST"; // SPL-1: "GET" skips the body (authenticated REST reads); default stays POST.
     juce::StringPairArray headers; // name -> value
     juce::String body;             // sent as UTF-8
     int requestTimeoutSeconds = 60; // idle timeout per read

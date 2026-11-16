@@ -1,5 +1,6 @@
 #include "engine/SoundSimilarity.h"
 
+#include "core/Privacy.h"
 #include "engine/AudioFileFormats.h"
 
 #include <algorithm>
@@ -152,18 +153,19 @@ std::vector<std::string> similarCandidates(const SimilarSearch& search, const st
     {
         const juce::File folder(juce::String::fromUTF8(root.c_str()));
         if (! folder.isDirectory()) continue;
-        for (const auto& entry : juce::RangedDirectoryIterator(folder, true, "*", juce::File::findFiles | juce::File::ignoreHiddenFiles,
-                                                               juce::File::FollowSymlinks::noCycles))
-        {
-            if (cancelled && cancelled()) return {};
-            const auto& file = entry.getFile();
-            if (! isAudioFile(file)) continue;
+        // COM-15: the walk never enters the Apple Music or Photos libraries, nor follows a link into a guarded place.
+        bool full = false;
+        core::walkFolder(folder, juce::File::getSpecialLocation(juce::File::userHomeDirectory), [&](const juce::File& file, bool directory) {
+            if (directory || ! isAudioFile(file)) return true;
             auto path = file.getFullPathName().toStdString();
-            if (! seen.insert(path).second) continue;
-            if (skip(file.getParentDirectory(), folder)) continue;
+            if (! seen.insert(path).second) return true;
+            if (skip(file.getParentDirectory(), folder)) return true;
             result.push_back(std::move(path));
-            if (result.size() >= search.maxCandidates) return result;
-        }
+            full = result.size() >= search.maxCandidates;
+            return ! full;
+        }, cancelled);
+        if (cancelled && cancelled()) return {};
+        if (full) return result;
     }
     return result;
 }

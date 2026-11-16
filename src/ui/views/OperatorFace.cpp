@@ -761,7 +761,7 @@ public:
     }
     void mouseUp(const MouseEvent&) override { drag_ = Drag::None; }
 
-    void descendantPressed(Widget* leaf) override
+    void descendantPressed(Widget* leaf, const MouseEvent&) override
     {
         // Touching a control of a strip or panel selects it, as a click on its background does.
         for (Widget* w = leaf; w != nullptr && w != this; w = w->parent())

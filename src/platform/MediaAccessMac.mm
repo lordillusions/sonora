@@ -40,4 +40,10 @@ void requestMediaAccess(MediaKind kind, std::function<void(bool granted)> done)
                              }];
 }
 
+bool localNetworkPromptExists()
+{
+    if (@available(macOS 15.0, *)) return true;
+    return false;
+}
+
 } // namespace sonora::platform

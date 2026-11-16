@@ -1,5 +1,6 @@
 #include "core/ClipGeometry.h"
 #include "core/Edit.h"
+#include "core/TimeUtils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -121,7 +122,10 @@ Clip withMarkers(Clip clip, const ClipMarkers& markers, bool arrangement, double
         clip.loop.startRelative = 0.0;
         clip.loop.loopEnd = end;
         if (arrangement && units > 0.0)
+        {
             clip.currentEnd = clip.currentStart + (end - markers.start) / units;
+            fitClipFades(clip);
+        }
     }
     else
     {
@@ -150,7 +154,16 @@ bool sampleContentRange(const Clip& clip, double tempo, double& first, double& l
     return last > first;
 }
 
-Clip resizedEnd(const Clip& original, Beats newEnd, double tempo, Beats minLength)
+void fitClipFades(Clip& clip)
+{
+    const auto fades = fittedClipFades(clip.fadeIn, clip.fadeOut, clip.currentEnd - clip.currentStart);
+    clip.fadeIn = fades.in;
+    clip.fadeOut = fades.out;
+}
+
+namespace
+{
+Clip resizedEndUnfitted(const Clip& original, Beats newEnd, double tempo, Beats minLength)
 {
     Clip clip = original;
     const double units = contentUnitsPerBeat(clip, tempo);
@@ -170,7 +183,7 @@ Clip resizedEnd(const Clip& original, Beats newEnd, double tempo, Beats minLengt
     return clip;
 }
 
-Clip trimmedStart(const Clip& original, Beats newStart, double tempo, Beats minLength)
+Clip trimmedStartUnfitted(const Clip& original, Beats newStart, double tempo, Beats minLength)
 {
     Clip clip = original;
     const double units = contentUnitsPerBeat(clip, tempo);
@@ -200,6 +213,22 @@ Clip trimmedStart(const Clip& original, Beats newStart, double tempo, Beats minL
         start = wrapIntoLoop(start, clip.loop.loopStart, clip.loop.loopEnd);
     clip.currentStart = clip.time = newStart;
     clip.loop.startRelative = start - clip.loop.loopStart;
+    return clip;
+}
+} // namespace
+
+// UI-85: a shorter clip shrinks its fades so they stay inside it (Live).
+Clip resizedEnd(const Clip& original, Beats newEnd, double tempo, Beats minLength)
+{
+    auto clip = resizedEndUnfitted(original, newEnd, tempo, minLength);
+    fitClipFades(clip);
+    return clip;
+}
+
+Clip trimmedStart(const Clip& original, Beats newStart, double tempo, Beats minLength)
+{
+    auto clip = trimmedStartUnfitted(original, newStart, tempo, minLength);
+    fitClipFades(clip);
     return clip;
 }
 

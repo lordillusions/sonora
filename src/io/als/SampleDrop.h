@@ -20,6 +20,7 @@ struct DroppedSample
     int64_t frames = 0;
     double detectedBpm = 0;    // UI-47: tempo found while reading the file (0: none, the set's tempo is assumed)
     double tempoConfidence = 0; // UI-47b: 0..1, how clear that tempo was
+    int transposeSemitones = 0; // SPL-5: pitch the clip so a Splice sample's key matches the project (0: none)
 };
 
 struct SampleDropTarget

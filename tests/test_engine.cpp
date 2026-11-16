@@ -3203,6 +3203,37 @@ TEST_CASE("audio clip fades: fade in and out ramp the gain over the chosen beats
     }
 }
 
+TEST_CASE("audio clip fades (UI-85): a fade longer than its clip plays as the fitted fade, never from outside the clip")
+{
+    auto data = std::make_shared<engine::SampleData>();
+    data->sampleRate = 1000.0;
+    data->audio.setSize(2, 20000);
+    for (int i = 0; i < 20000; ++i)
+        for (int ch = 0; ch < 2; ++ch) data->audio.setSample(ch, i, 1.0f);
+    // The reported case: a 1-beat clip that kept a 4-beat fade-out (and a 3-beat fade-in) from before it was shortened.
+    model::Clip c;
+    c.kind = model::Clip::Kind::Audio;
+    c.currentStart = 0.0;
+    c.currentEnd = 2.0;
+    c.loop = {0.0, 2.0, 0.0, false};
+    c.fadeIn = 0.0;
+    c.fadeOut = 8.0;
+    c.fadeInDefault = c.fadeOutDefault = false;
+    auto prepared = engine::prepareClip(c, data);
+    CHECK_NEAR(prepared.fadeOutBeats, 2.0, 1e-12);
+    juce::AudioBuffer<float> out(2, 2000);
+    out.clear();
+    engine::renderAudioClip(prepared, {0, 2000, 0.0, 1000.0}, 60.0, out);
+    // The fade-out covers exactly the clip: at its middle the curve's 0.75 (not 1 - 0.75 of a curve 4x too long).
+    CHECK_NEAR(out.getSample(0, 1000), 0.75, 0.01);
+    CHECK_NEAR(out.getSample(0, 1999), 0.0, 0.01);
+
+    c.fadeIn = 3.0; c.fadeOut = 1.0; // together twice the clip: they share it in proportion
+    prepared = engine::prepareClip(c, data);
+    CHECK_NEAR(prepared.fadeInBeats, 1.5, 1e-12);
+    CHECK_NEAR(prepared.fadeOutBeats, 0.5, 1e-12);
+}
+
 namespace
 {
 class ConstantSource final : public devices::DeviceProcessor

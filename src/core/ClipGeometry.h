@@ -54,9 +54,14 @@ void normaliseUnloopedMarkers(Clip& clip, double tempo);
 // False for MIDI clips or when the sample length is unknown.
 bool sampleContentRange(const Clip& clip, double tempo, double& first, double& last);
 
+// UI-85 (Live): fade-in and fade-out each fit inside the clip and together never exceed its length (TimeUtils
+// fittedClipFades). Every edit that changes an Arrangement clip's length applies it.
+void fitClipFades(Clip& clip);
+
 // Edge drags in the Arrangement (Live, "Moving and Resizing Clips"): the right edge sets the clip's end, the left edge
 // trims its start while the content stays where it is on the timeline. An unlooped audio clip cannot reveal more than
 // its sample; a looped clip repeats its loop in both directions. `minLength` is the shortest the clip may become.
+// Both shrink the clip's fades so they still fit inside it (UI-85, fitClipFades).
 Clip resizedEnd(const Clip& clip, Beats newEnd, double tempo, Beats minLength);
 Clip trimmedStart(const Clip& clip, Beats newStart, double tempo, Beats minLength);
 

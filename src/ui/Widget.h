@@ -115,7 +115,8 @@ public:
     // True while the widget is collecting typed text (search field, rename box): letters are text then, never shortcuts or notes.
     virtual bool wantsTextInput() const { return false; }
     // A mouse press landed on `leaf` (this widget or one of its descendants); lets containers track "the thing the user is on".
-    virtual void descendantPressed(Widget* /*leaf*/) {}
+    // `press` is the event in root coordinates: read its buttons and modifiers (DEV-15d: Shift / Cmd extend a selection).
+    virtual void descendantPressed(Widget* /*leaf*/, const MouseEvent& /*press*/) {}
     virtual std::optional<midi::ControlTarget> mappingTargetAt(float /*x*/, float /*y*/) const { return midiTarget; }
     virtual bool browserDrop(const BrowserDrag&, const MouseEvent&) { return false; }
     // Pointer shape over local (x, y); views with internal dividers override it.

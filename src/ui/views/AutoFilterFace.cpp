@@ -282,7 +282,7 @@ public:
         repaint();
     }
     void mouseUp(const MouseEvent&) override { dragging_ = false; }
-    void descendantPressed(Widget* leaf) override
+    void descendantPressed(Widget* leaf, const MouseEvent&) override
     {
         for (auto* w : lfoWidgets_) if (w == leaf) select(Section::Lfo);
         for (auto* w : envelopeWidgets_) if (w == leaf) select(Section::Envelope);

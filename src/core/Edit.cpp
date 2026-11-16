@@ -177,6 +177,7 @@ EditCommand modifyClip(const Song& song, ClipLocation location, Clip after, std:
         after.resetSourceMarkers = true;
     }
     if (! before.envelopes.empty() && after.envelopes.empty()) after.stripSourceEnvelopes = true;
+    if (location.kind != ClipLocation::Kind::Session) fitClipFades(after); // UI-85: fades stay inside the clip
     after.uid = location.uid;
     assignNoteKeys(after.notes);
     EditCommand c;
@@ -209,6 +210,7 @@ EditCommand modifyClip(const Song& song, int track, int uid, Clip after, std::st
 EditCommand insertClip(int track, Clip clip, std::string label)
 {
     clip.stripSourceEnvelopes |= clip.envelopes.empty();
+    fitClipFades(clip); // UI-85
     assignNoteKeys(clip.notes);
     EditCommand c;
     c.label = std::move(label);
@@ -505,6 +507,7 @@ Clip regionSection(Clip clip, double start, double end, double tempo)
     clip.currentStart = clip.time = from;
     clip.currentEnd = std::min(end, clip.currentEnd);
     normaliseUnloopedMarkers(clip, tempo);
+    fitClipFades(clip); // UI-85: the part left over keeps its fades inside it
     return clip;
 }
 
@@ -731,6 +734,7 @@ EditCommand placeArrangementClip(const Song& song, int fromTrack, int uid, int t
     // Live: a clip put on top of others replaces the part of them it covers (crossing clips are truncated or split).
     eraseRegionClips(states->at(toTrack).after, song, toTrack, placed.currentStart, placed.currentEnd);
     placed.time = placed.currentStart;
+    fitClipFades(placed); // UI-85
     if (copy || toTrack != fromTrack)
     {
         markAsCopy(placed, song, fromTrack);

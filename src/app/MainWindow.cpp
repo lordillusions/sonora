@@ -80,7 +80,7 @@ enum MenuIds
     ContinuePlayback, ReturnToStart, SessionRecord, Metronome, BackToArrangement, FollowPlayhead,
     ToggleViews, ShowClip, ShowDevices, ToggleClipDevice, SearchBrowser,
     ToggleMixer, ToggleIo, ToggleSends, ToggleAutomation, ToggleAllAutomation, HideGroupedTracks,
-    ZoomUiIn, ZoomUiOut, ZoomUiReset, FullScreen, ComputerKeyboard, BrowserPreview, DrawMode, Overdub, AutomationWrite, ClipAutomationAsk, ClipAutomationAlways, ClipAutomationLock,
+    ZoomUiIn, ZoomUiOut, ZoomUiReset, FullScreen, ComputerKeyboard, BrowserPreview, EnableSplice, DrawMode, Overdub, AutomationWrite, ClipAutomationAsk, ClipAutomationAlways, ClipAutomationLock,
     SmallerQuant, LargerQuant, ToggleQuant,
     FocusControlBar, FocusBrowser, FocusSession, FocusArrangement, FocusClip, FocusDevices,
     ReadManual, ImportAudio, Rename, EditInfoText, AddLocator, ContentEditor, EnvelopeEditor, ExpressionEditor, ShowGroupedTrack, TripletLaunchQuant, InvertNotes,
@@ -89,6 +89,7 @@ enum MenuIds
     DeactivateTrack, HideTrack, ShowHiddenTracks, StripSilence, NextTransient, PreviousTransient,
     CheckForUpdates, AboutSonora,
     ShareSession, JoinSession, LeaveSession, SessionChat,
+    ShowTrackAutomationOnly,
     RecentBase = 1000,
 };
 class Workspace final : public juce::Component
@@ -586,6 +587,8 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         unavailable(m, {"Arrangement Track Controls", "Overview", "Scene Tempo and Time Signature"});
         m.addItem(ToggleAutomation, "Automation Mode    (A)", loaded, ui.showsAutomation(ui.selectedTrack));
         m.addItem(ToggleAllAutomation, ui.automationVisible ? "Hide All Automation    (Shift+A)" : "Show All Automation    (Shift+A)", loaded);
+        m.addItem(ShowTrackAutomationOnly, "Show This Track's Automation Only    (Opt+Shift+A)", loaded && ui.trackAt(ui.selectedTrack) != nullptr,
+                  ui::AutomationEditor::trackAutomationOnlyActive(ui, ui.selectedTrack)); // UI-88
         m.addItem(HideGroupedTracks, "Hide Grouped Tracks", loaded);
         m.addItem(UnfoldAllGroups, "Show All Grouped Tracks", loaded);
         int hiddenCount = 0;
@@ -617,6 +620,7 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         m.addItem(ComputerKeyboard, "Computer MIDI Keyboard    (M)", true, ui.computerKeyboard);
         m.addItem(PianoPreview, "MIDI Note Editor Preview", true, ui.pianoPreview);
         m.addItem(BrowserPreview, "Browser File Preview", true, ui.browserPreviewEnabled);
+        m.addItem(EnableSplice, "Splice Browser (unofficial)", true, ui.splice.enabled); // SPL-6
         unavailable(m, {"External Sync", "Delay Compensation", "Reduced Latency When Monitoring", "Time Ruler Format"});
         m.addItem(SmallerQuant, "Smaller Launch Quantization", loaded);
         m.addItem(LargerQuant, "Larger Launch Quantization", loaded);
@@ -959,6 +963,7 @@ void MainWindow::menuItemSelected(int itemId, int)
         case ToggleSends: ui.sendsVisible = ! ui.sendsVisible; if (ui.layoutChanged) ui.layoutChanged(); break;
         case ToggleAutomation: ui.toggleAutomationLane(ui.selectedTrack); ui.mainView = ui::MainView::Arrangement; break;
         case ToggleAllAutomation: ui::AutomationEditor::toggleAllAutomation(ui); break;
+        case ShowTrackAutomationOnly: ui::AutomationEditor::toggleTrackAutomationOnly(ui, ui.selectedTrack); break;
         case HideGroupedTracks:
             if (ui.song && ui.applyEdit)
             {
@@ -1005,6 +1010,7 @@ void MainWindow::menuItemSelected(int itemId, int)
             if (! ui.browserPreviewEnabled && ui.previewSample) ui.previewSample("");
             if (ui.layoutChanged) ui.layoutChanged();
             break;
+        case EnableSplice: if (ui.spliceSetEnabled) ui.spliceSetEnabled(! ui.splice.enabled); break; // SPL-6
         case DrawMode: ui.drawMode = ! ui.drawMode; break;
         case Overdub: ui.arrangementOverdub = ! ui.arrangementOverdub; if (ui.layoutChanged) ui.layoutChanged(); break;
         case AutomationWrite: if (ui.setAutomationWriteMode) ui.setAutomationWriteMode(! ui.automationWriteMode); break;

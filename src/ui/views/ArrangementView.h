@@ -141,6 +141,10 @@ private:
         int laneId = -1;
         model::Clip original, preview;
         float startX = 0, startY = 0;
+        // UI-87 gain drags: the gain and pointer height the drag measures from (re-anchored when Shift toggles fine steps).
+        double gainAnchor = 1.0;
+        float gainAnchorY = 0;
+        bool gainFine = false;
     } drag_;
     struct RegionDrag
     {
@@ -151,6 +155,7 @@ private:
         double grabBeat = 0, at = 0;
         float startX = 0, startY = 0;
         int grabTrack = -1, trackOffset = 0;
+        MouseEvent down{}; // UI-89: a release without a drag replays this press as a plain click (collapses the selection)
         std::vector<std::pair<int, model::Clip>> clips; // immutable full clips, clipped to the range while painting
     } regionDrag_;
     bool inTimeSelection(float x, float y) const;
@@ -197,6 +202,10 @@ private:
     int hoverUid_ = -1, hoverTrack_ = -1; // clip under the pointer: its fade handles show
     // Fade handle of an audio clip under (x, y), if any: FadeIn / FadeOut.
     bool fadeHandleAt(const model::Clip& clip, const model::ClipLocation& location, float clipX0, float clipX1, float x, float y, ui::DragMode& mode) const;
+    // UI-87: the gain handle in an audio clip's title bar is under (x, y); gainGesture: the press starts a clip gain drag
+    // (the handle, or Cmd+Option on the clip's body).
+    bool gainHandleAt(const model::Clip& clip, const model::ClipLocation& location, float clipX0, float clipX1, float x, float y) const;
+    bool gainGesture(const MouseEvent& e, const model::Clip& clip, const model::ClipLocation& location, float clipX0, float clipX1) const;
     bool draggingRuler_ = false, draggingOverview_ = false;
     struct RulerZoom
     {

@@ -280,6 +280,14 @@ std::vector<MenuAction> trackContextActions(UiContext& ctx)
         if (ctx.layoutChanged) ctx.layoutChanged();
         if (ctx.requestRepaint) ctx.requestRepaint();
     }, automatedTracks});
+    // UI-88: this track's automation and no other track's; ticked while on, choosing it again restores the lanes.
+    MenuAction only{"Show This Track's Automation Only", [&ctx, valid, index] {
+        if (! valid()) return;
+        AutomationEditor::toggleTrackAutomationOnly(ctx, index);
+        if (ctx.requestRepaint) ctx.requestRepaint();
+    }, track != nullptr, "⌥⇧A"};
+    only.ticked = AutomationEditor::trackAutomationOnlyActive(ctx, index);
+    result.push_back(std::move(only));
     const bool regular = track && (track->kind == model::TrackKind::Audio || track->kind == model::TrackKind::Midi);
     if (regular)
     {

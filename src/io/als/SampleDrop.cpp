@@ -34,6 +34,7 @@ model::Clip makeSampleClip(const model::Song& song, const DroppedSample& sample,
     clip.warpMode = model::WarpMode::Beats;
     clip.warpMarkers = {{0.0, 0.0}, {seconds, beats}};
     clip.loop = {0, beats, 0, false};
+    clip.pitchCoarse = sample.transposeSemitones; // SPL-5: match the project key (Splice drops only; 0 otherwise)
     clip.time = clip.currentStart = start;
     clip.currentEnd = clip.currentStart + beats;
     // Use a set's full audio format when available, retaining an immutable copy for undo.

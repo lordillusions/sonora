@@ -79,7 +79,9 @@ HttpResponse postNoRedirect(const HttpRequest& request, const std::atomic<bool>&
         settings.timeoutIntervalForResource = request.totalTimeoutSeconds;
         settings.URLCache = nil; settings.HTTPCookieStorage = nil;
         auto* session = [NSURLSession sessionWithConfiguration:settings delegate:delegate delegateQueue:nil];
-        auto* urlRequest = [NSMutableURLRequest requestWithURL:url]; urlRequest.HTTPMethod = @"POST";
+        const bool isGet = request.method.equalsIgnoreCase("GET");
+        auto* urlRequest = [NSMutableURLRequest requestWithURL:url];
+        urlRequest.HTTPMethod = isGet ? @"GET" : @"POST";
         const auto names = request.headers.getAllKeys();
         const auto values = request.headers.getAllValues();
         for (int i = 0; i < names.size(); ++i)
@@ -88,7 +90,8 @@ HttpResponse postNoRedirect(const HttpRequest& request, const std::atomic<bool>&
             auto* name = [NSString stringWithUTF8String:names[i].toRawUTF8()];
             if (value && name) [urlRequest setValue:value forHTTPHeaderField:name];
         }
-        urlRequest.HTTPBody = [NSData dataWithBytes:request.body.toRawUTF8() length:request.body.getNumBytesAsUTF8()];
+        if (! isGet)
+            urlRequest.HTTPBody = [NSData dataWithBytes:request.body.toRawUTF8() length:request.body.getNumBytesAsUTF8()];
         auto* task = [session dataTaskWithRequest:urlRequest]; [task resume];
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(request.totalTimeoutSeconds);
         std::unique_lock lock(state->mutex);

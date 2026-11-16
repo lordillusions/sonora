@@ -8,6 +8,7 @@
 // This guarantees the audio thread never sees a deleted graph and never frees memory.
 
 #include "core/Model.h"
+#include <algorithm>
 #include "engine/AudioCapture.h"
 #include "engine/EngineGraph.h"
 #include "engine/EngineWorkers.h"
@@ -15,6 +16,8 @@
 #include "engine/Metronome.h"
 #include "engine/RecordingManager.h"
 #include "engine/SampleCache.h"
+#include "engine/AudioClipPlayer.h" // SPL-4: AudioPlayState for the synced preview
+#include "engine/ClipPlayers.h"     // SPL-4: PreparedClip
 #include "engine/Transport.h"
 #include "engine/VoiceTap.h"
 #include "midi/InputBlock.h"
@@ -46,8 +49,15 @@ public:
     AudioEngine(plugins::PluginHost& host, midi::MidiManager& midi);
     ~AudioEngine() override;
 
-    // Opens the default output (and input when available). Returns an error string or "".
+    // Opens the saved (or default) output. Returns an error string or "". COM-15: never an input: macOS asks for the
+    // microphone as soon as an input opens, so the saved input is only remembered and enableRecordingInputs() opens it
+    // when recording, monitoring or the collab mic needs it.
     juce::String initialiseAudio(const juce::XmlElement* savedState = nullptr);
+    // The device state to save in the settings: the current one, with the remembered input while none is open.
+    std::unique_ptr<juce::XmlElement> audioStateForSettings() const;
+    // COM-15: `saved` without its input device and channels (a combined device keeps its output). `inputDevice` and
+    // `inputChannels` receive what was removed.
+    static std::unique_ptr<juce::XmlElement> withoutInputs(const juce::XmlElement& saved, juce::String& inputDevice, juce::String& inputChannels);
     juce::AudioDeviceManager& deviceManager() { return deviceManager_; }
 
     // Builds and installs a graph for the song. Message thread. Returns the build log.
@@ -84,7 +94,14 @@ public:
     std::function<void()> beforeReprepare, afterReprepare; // UI drops processor pointers during prepare
 
     void previewSample(const std::string& path); // message thread; empty path stops audition
+    // SPL-4: audition a sample matched to the project (warped to the project tempo from sourceBpm, transposed by
+    // `semitones`), starting on the next bar when the transport plays. sourceBpm <= 0 plays it natively (one-shots).
+    struct PreviewRequest { std::string path; double sourceBpm = 0; int semitones = 0; bool syncToProject = false; };
+    void previewSample(const PreviewRequest& request); // message thread; empty path stops audition
     bool previewPlaying() const { return previewPlaying_.load(); }
+    void setPreviewPaused(bool paused) { previewPaused_.store(paused, std::memory_order_relaxed); } // SPL: pause/resume audition
+    bool previewPaused() const { return previewPaused_.load(std::memory_order_relaxed); }
+    void setPreviewGain(float gain) { previewGain_.store(std::clamp(gain, 0.0f, 2.0f), std::memory_order_relaxed); } // SPL: audition volume
 
     // ---- offline render (Export). beginOffline()/endOffline() on the message thread; renderOffline() on one worker
     // thread in between. The device callback is removed meanwhile, so nothing is heard and nothing else may touch
@@ -106,7 +123,7 @@ public:
                        const std::function<void(const OfflineBlock&)>& onBlock, bool preMixer = false, int sessionScene = -1);
 
     RecordingManager& recorder() { return recorder_; }
-    juce::String enableRecordingInputs(int requiredChannels = 2);
+    juce::String enableRecordingInputs(int requiredChannels = 2); // the remembered input first, else the first one
     int inputChannelCount() const;
 
     Transport& transport() { return transport_; }
@@ -178,7 +195,10 @@ private:
     // juce::Timer — garbage collects retired graphs.
     void timerCallback() override;
 
-    void renderPreview(float* const* outputs, int numOutputs, int numSamples);
+    // SPL-4: `sync` (null when the graph is not ready) carries the project tempo and transport so a warped preview can
+    // land on the next bar.
+    struct PreviewSync { double tempo = 120; double currentBeat = 0; double barBeats = 4; bool playing = false; };
+    void renderPreview(float* const* outputs, int numOutputs, int numSamples, const PreviewSync* sync = nullptr);
 
     // Clip envelopes (ALS-9) of one track at the block start position.
     void applyClipEnvelopes(TrackNode& node, TrackControls& ctl, double beat);
@@ -205,6 +225,7 @@ private:
     plugins::PluginHost& host_;
     midi::MidiManager& midi_;
     juce::AudioDeviceManager deviceManager_;
+    juce::String savedInputDevice_, savedInputChannels_; // COM-15: the saved input, opened only when needed
     SampleCache samples_;
     juce::ThreadPool loaderPool_{2}; // declared after samples_: destroyed (jobs drained) first
     Transport transport_;
@@ -231,11 +252,23 @@ private:
     struct Preview
     {
         std::shared_ptr<SampleSlot> sample;
-        double position = 0;
+        double position = 0;    // native path: source-sample read position
+        double pitchRatio = 1;  // native path: transpose as a resample ratio
+        // SPL-4 synced path: a warped, pitched, looping clip driven by the shared time-stretcher.
+        bool sync = false;
+        bool started = false;   // the next-bar gate has opened
+        double startTimelineBeat = -1; // the project beat at which to begin (next bar); -1 until the transport is seen
+        double beat = 0;        // the preview's own timeline beat fed to the stretcher
+        double loopBeats = 0;   // the sample's length in beats at the project tempo
+        PreparedClip clip;
+        std::unique_ptr<AudioPlayState> play;
+        juce::AudioBuffer<float> scratch;
     };
     std::atomic<Preview*> pendingPreview_{nullptr}, retiredPreview_{nullptr};
     Preview* currentPreview_ = nullptr; // audio thread; freed after callback removal
     std::atomic<bool> previewPlaying_{false};
+    std::atomic<bool> previewPaused_{false};     // SPL: audition paused (held silent, position kept)
+    std::atomic<float> previewGain_{0.5f};       // SPL: audition volume (0..2)
     std::atomic<midi::MidiClockOut*> clockOut_{nullptr};
 
     // ENG-14e

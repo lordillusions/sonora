@@ -203,6 +203,48 @@ void AutomationEditor::toggleAllAutomation(UiContext& ctx)
     if (ctx.layoutChanged) ctx.layoutChanged();
 }
 
+bool AutomationEditor::trackAutomationOnlyActive(const UiContext& ctx, int track)
+{
+    const auto& only = ctx.automationOnlyTrack;
+    return only && ctx.song != nullptr && only->song == ctx.song && ctx.automationVisible && ctx.automationTracks.size() == 1
+           && ctx.automationTracks.front() == only->track && (track < 0 || track == only->track);
+}
+
+void AutomationEditor::toggleTrackAutomationOnly(UiContext& ctx, int track)
+{
+    if (ctx.song == nullptr) return;
+    if (trackAutomationOnlyActive(ctx, track))
+    {
+        auto before = std::move(*ctx.automationOnlyTrack);
+        ctx.automationOnlyTrack.reset();
+        ctx.automationVisible = before.visible;
+        ctx.automationTracks = std::move(before.tracks);
+        ctx.automationLaneTargets = std::move(before.laneTargets);
+        ctx.statusText = "Automation lanes restored";
+    }
+    else
+    {
+        const auto* shown = ctx.trackAt(track);
+        if (shown == nullptr) return;
+        // Pressed again on another track while the view is on: it moves there and still restores the original lanes.
+        if (trackAutomationOnlyActive(ctx)) ctx.automationOnlyTrack->track = track;
+        else ctx.automationOnlyTrack = UiContext::AutomationOnlyTrack{ctx.song, track, ctx.automationVisible, ctx.automationTracks,
+                                                                      ctx.automationLaneTargets};
+        auto automated = automatedTargets(ctx, track);
+        const size_t count = automated.size();
+        if (count > 0) ctx.automationLaneTargets[track] = std::move(automated); // else its one lane picks its own target
+        ctx.automationVisible = true;
+        ctx.automationTracks = {track};
+        ctx.mainView = MainView::Arrangement;
+        ctx.statusText = count == 0 ? shown->name + " has no automation yet; Opt+Shift+A shows the other tracks' lanes again"
+                                    : "Showing only " + shown->name + "'s automation (" + std::to_string(count)
+                                          + (count == 1 ? " lane" : " lanes") + "); Opt+Shift+A shows the other tracks' lanes again";
+    }
+    if (ctx.selectedAutomationTrack >= 0 && ! ctx.showsAutomation(ctx.selectedAutomationTrack)) ctx.selectedAutomationTrack = -1;
+    if (ctx.automationSelection.track >= 0 && ! ctx.showsAutomation(ctx.automationSelection.track)) ctx.automationSelection = {};
+    if (ctx.layoutChanged) ctx.layoutChanged();
+}
+
 int AutomationEditor::targetFor(const UiContext& ctx, const midi::ControlTarget& control, int& track)
 {
     using K = midi::ControlTarget::Kind;
@@ -830,6 +872,8 @@ void AutomationEditor::mouseDown(const MouseEvent& e)
         return;
     }
     if (e.right) { showContextMenu(e.x, e.y); return; }
+    // UI-89 (Live): a click in a lane starts this lane's own selection; the Arrangement's time selection lets go of it.
+    ctx().arrangementSelection = {};
     if (! ctx().applyEdit || ctx().recording) return;
     dragTarget_ = *it;
     original_ = preview_ = envelope(*it);

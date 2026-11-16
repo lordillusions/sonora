@@ -4,6 +4,7 @@
 
 #include "core/ClipGeometry.h"
 #include "core/Edit.h"
+#include "core/TimeUtils.h"
 #include "ui/AudioClipEdits.h"
 
 #include <algorithm>
@@ -25,7 +26,8 @@ enum class DragMode
     FadeInCurve,
     FadeOutCurve,
     StretchStart,
-    StretchEnd
+    StretchEnd,
+    Gain // UI-87: audio clips, vertical drag of the title-bar gain handle (or Cmd+Option on the body)
 };
 
 // Grid (in beats) matching the zoom level, like Live's adaptive grid: finer when zoomed in.
@@ -71,7 +73,8 @@ inline model::Clip dragClip(const model::Clip& original, DragMode mode, double d
     {
         case DragMode::FadeInCurve:
         case DragMode::FadeOutCurve:
-            return original; // vertical shape gesture is handled in ArrangementView
+        case DragMode::Gain:
+            return original; // vertical gestures (fade shape, gain) are handled in ArrangementView
         case DragMode::StretchStart:
         case DragMode::StretchEnd:
         {
@@ -92,7 +95,13 @@ inline model::Clip dragClip(const model::Clip& original, DragMode mode, double d
             clip = audioedit::scaleTempo(clip, length / oldLength);
             clip = model::movedClip(clip, left ? edge : original.currentStart);
             clip.fadeIn *= length / oldLength; clip.fadeOut *= length / oldLength;
-            return clip; // the warp mode stays (Live): a Re-Pitch clip changes pitch as it stretches
+            // UI-86: Beats mode plays each transient slice at its own speed and only loops the slice's last 25 ms to fill,
+            // so a stretched one-shot or any sample with few transients kept its length while the clip and its waveform
+            // grew. Complex stretches the audio to the edge. Re-Pitch (pitch follows, like Live) and the granular modes
+            // stay as they are.
+            if (clip.warpMode == model::WarpMode::Beats && std::fabs(length - oldLength) > 1e-9)
+                clip.warpMode = model::WarpMode::Complex;
+            return clip;
         }
         case DragMode::Move:
         {
@@ -111,13 +120,17 @@ inline model::Clip dragClip(const model::Clip& original, DragMode mode, double d
         case DragMode::FadeOut:
         {
             // Fade lengths are in beats from the clip's own edge; they cannot overlap each other.
+            // UI-85: from the fades as they fit the clip, so a stale longer fade can neither push the other one out nor
+            // reach outside the clip.
             const double length = original.currentEnd - original.currentStart;
             const bool in = mode == DragMode::FadeIn;
-            double fade = (in ? original.fadeIn + deltaBeats : original.fadeOut - deltaBeats);
+            const auto fitted = model::fittedClipFades(original.fadeIn, original.fadeOut, length);
+            double fade = (in ? fitted.in + deltaBeats : fitted.out - deltaBeats);
             if (snap)
                 fade = snapToGrid(fade, grid);
-            fade = std::clamp(fade, 0.0, std::max(0.0, length - (in ? original.fadeOut : original.fadeIn)));
+            fade = std::clamp(fade, 0.0, std::max(0.0, length - (in ? fitted.out : fitted.in)));
             auto c = original;
+            (in ? c.fadeOut : c.fadeIn) = in ? fitted.out : fitted.in;
             if (fade < 0.01) fade = 0.0; // back at the automatic edge fade
             (in ? c.fadeIn : c.fadeOut) = fade;
             (in ? c.fadeInDefault : c.fadeOutDefault) = fade == 0.0;
@@ -147,9 +160,31 @@ inline double dragGuideBeat(const model::Clip& preview, DragMode mode, bool alig
         case DragMode::FadeIn: return preview.currentStart + preview.fadeIn;
         case DragMode::FadeOut: return preview.currentEnd - preview.fadeOut;
         case DragMode::FadeInCurve:
-        case DragMode::FadeOutCurve: break;
+        case DragMode::FadeOutCurve:
+        case DragMode::Gain: break;
     }
     return -1.0;
+}
+
+// UI-87: clip gain (<SampleVolume>, the Clip view's Gain fader) dragged vertically: up is louder, 0.2 dB per pixel (`fine`:
+// 0.02 dB), in the fader's range: -70 dB and below is silence (-inf), +24 dB at most. Returns the linear gain.
+constexpr double kClipGainMinDb = -70.0, kClipGainMaxDb = 24.0;
+inline double dragClipGain(double originalGain, float deltaY, bool fine)
+{
+    const double startDb = originalGain > 0.0 ? std::clamp(20.0 * std::log10(originalGain), kClipGainMinDb, kClipGainMaxDb) : kClipGainMinDb;
+    const double db = std::min(kClipGainMaxDb, startDb - (double) deltaY * (fine ? 0.02 : 0.2));
+    return db <= kClipGainMinDb ? 0.0 : std::pow(10.0, db / 20.0);
+}
+
+// "+3.0 dB", "0.0 dB", "-inf dB": the readout shown while the clip gain is dragged.
+inline std::string clipGainText(double gain)
+{
+    if (gain <= 0.0 || 20.0 * std::log10(gain) <= kClipGainMinDb)
+        return "-inf dB";
+    const double db = 20.0 * std::log10(gain);
+    char text[24];
+    std::snprintf(text, sizeof(text), "%s%.1f dB", db >= 0.05 ? "+" : "", std::fabs(db) < 0.05 ? 0.0 : db);
+    return text;
 }
 
 // "bar.beat.sixteenth" (1-based) of an Arrangement position, or "bars.beats.sixteenths" (0-based) of a length.

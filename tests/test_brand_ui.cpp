@@ -2,6 +2,7 @@
 #include <cmath>
 
 #include "app/AboutUpdates.h"
+#include "core/Privacy.h"
 #include "gfx/Brand.h"
 #include "ui/UiContext.h"
 
@@ -244,4 +245,25 @@ TEST_CASE("brand: About's update row follows the updater and sits between the cr
     state.updates.enabled = true;
     CHECK(off < 140);
     CHECK(labelBrightness(state) > 200);
+}
+
+TEST_CASE("brand: the privacy explanations fit the app prompt with Continue on the right (COM-15)")
+{
+    for (auto access : {core::Access::Microphone, core::Access::Camera, core::Access::LocalNetwork})
+    {
+        const auto text = core::accessExplanation(access);
+        gfx::brand::PromptState state; // as AppController::withAccess builds it
+        state.title = text.title;
+        state.message = text.message;
+        state.buttons = {{text.notNowLabel, false, false}, {text.continueLabel, true, false}};
+        const float w = gfx::brand::promptWidth, h = gfx::brand::promptHeight(state);
+        gfx::brand::PromptState oneLine = state;
+        oneLine.message = "One line.";
+        CHECK(h > gfx::brand::promptHeight(oneLine) + 40); // the whole explanation wraps into the panel
+        CHECK(h < 420);                                     // and stays a prompt, not a page
+        const auto rects = gfx::brand::promptButtonRects(state, w, h);
+        CHECK(rects.size() == 2);
+        CHECK(rects[1].left() > rects[0].right()); // Continue (primary) right of Not Now
+        for (const auto& r : rects) CHECK(r.left() > 0 && r.right() < w && r.top() > 0 && r.bottom() < h);
+    }
 }
