@@ -206,4 +206,48 @@ bool applySessionClipControl(const midi::ControlTarget& target, const midi::Cont
     return true;
 }
 
+std::optional<TouchedParameterWatch::Touch> TouchedParameterWatch::poll(const EngineGraph* graph)
+{
+    std::map<const devices::DeviceProcessor*, Seen> next;
+    std::optional<Touch> touch;
+    bool touchHeld = false;
+    if (graph != nullptr)
+        for (const auto& node : graph->nodes)
+            for (size_t d = 0; d < node.processorForModelDevice.size(); ++d)
+            {
+                const auto* proc = node.processorForModelDevice[d];
+                if (proc == nullptr || ! proc->isHostedPlugin()) continue;
+                const auto count = proc->parameters().size();
+                const uint32_t total = proc->handEditTotal();
+                auto old = seen_.find(proc);
+                auto& state = next[proc];
+                if (old == seen_.end() || old->second.serials.size() != count)
+                {
+                    state.total = total;
+                    state.serials.resize(count);
+                    for (size_t i = 0; i < count; ++i) state.serials[i] = proc->handEdit((int) i).serial;
+                    continue;
+                }
+                state = std::move(old->second);
+                if (state.total == total) continue;
+                state.total = total;
+                int held = -1, loose = -1, looseCount = 0;
+                for (size_t i = 0; i < count; ++i)
+                {
+                    const auto edit = proc->handEdit((int) i);
+                    if (edit.gesture && held < 0) held = (int) i; // a held control wins even before it moves
+                    if (edit.serial == state.serials[i]) continue;
+                    state.serials[i] = edit.serial;
+                    if (! edit.gesture) { if (loose < 0) loose = (int) i; ++looseCount; }
+                }
+                const int picked = held >= 0 ? held : (looseCount > 0 && looseCount <= 8 ? loose : -1);
+                if (picked < 0 || (touch && touchHeld && held < 0)) continue;
+                const auto& info = proc->parameters()[(size_t) picked];
+                touch = Touch{{midi::ControlTarget::Kind::DeviceParameter, node.controlIndex, (int) d, 0, info.id}, info.name};
+                touchHeld = held >= 0;
+            }
+    seen_ = std::move(next);
+    return touch;
+}
+
 } // namespace sonora::engine

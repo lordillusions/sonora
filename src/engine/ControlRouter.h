@@ -7,7 +7,9 @@
 #include "engine/Transport.h"
 #include "midi/ControlTarget.h"
 
+#include <map>
 #include <optional>
+#include <vector>
 
 namespace sonora::engine
 {
@@ -23,5 +25,29 @@ bool applyControl(const midi::ControlTarget& target, const midi::ControlChange& 
 // Session launches need the message-thread model to resolve stable clip identity and launch settings.
 bool applySessionClipControl(const midi::ControlTarget&, const midi::ControlChange&, const model::Song&, EngineGraph*,
                              Transport&, const RecordingManager* recording = nullptr);
+
+// MIDI-10: MIDI Map mode for hosted plug-ins. A plug-in's parameters have no controls in the device view, so Map mode
+// learns the parameter the user last touched in the plug-in's own window (the edits it reports, UI-65). Message thread.
+class TouchedParameterWatch
+{
+public:
+    struct Touch
+    {
+        midi::ControlTarget target; // DeviceParameter of a top-level device
+        std::string parameterName;
+    };
+    // The newest touch since the previous poll, or nullopt. Edits reported before a device was first seen do not count;
+    // many parameters changing at once without a gesture is a preset load, not a touch.
+    std::optional<Touch> poll(const EngineGraph* graph);
+    void reset() { seen_.clear(); }
+
+private:
+    struct Seen
+    {
+        uint32_t total = 0;
+        std::vector<uint32_t> serials;
+    };
+    std::map<const devices::DeviceProcessor*, Seen> seen_;
+};
 
 } // namespace sonora::engine

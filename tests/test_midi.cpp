@@ -393,3 +393,79 @@ TEST_CASE("track mappings: regular returns Main device and send controls follow 
     midi::rebindTrackMappings(before, {10, 11, 20, -1}, {20, 21}, {20}, mappings);
     CHECK(mappings[1].target.index == -1); // never redirects B's mapping to A
 }
+
+namespace
+{
+// A hosted plug-in that reports edits from its own window (UI-65), for the Map mode watcher (MIDI-10).
+class TouchPlugin final : public devices::DeviceProcessor
+{
+public:
+    explicit TouchPlugin(int count)
+    {
+        for (int i = 0; i < count; ++i)
+        {
+            infos_.push_back(devices::makeParam("id" + std::to_string(i), "Param " + std::to_string(i), 0, 1, 0.5f));
+            edits_.push_back({});
+        }
+    }
+    std::string name() const override { return "Touch"; }
+    bool isHostedPlugin() const override { return true; }
+    void prepare(double, int) override {}
+    void process(juce::AudioBuffer<float>&, juce::MidiBuffer&) override {}
+    const std::vector<devices::ParameterInfo>& parameters() const override { return infos_; }
+    uint32_t handEditTotal() const override { return total_; }
+    HandEdit handEdit(int i) const override { return edits_[(size_t) i]; }
+    void edit(int i, bool gesture) { auto& e = edits_[(size_t) i]; ++e.serial; e.gesture = gesture; ++total_; }
+    void release(int i) { edits_[(size_t) i].gesture = false; ++total_; }
+
+private:
+    std::vector<devices::ParameterInfo> infos_;
+    std::vector<HandEdit> edits_;
+    uint32_t total_ = 0;
+};
+} // namespace
+
+TEST_CASE("router: Map mode picks the parameter touched in a plug-in window")
+{
+    engine::EngineGraph graph;
+    graph.nodes.resize(2);
+    graph.nodes[1].controlIndex = 4;
+    TouchPlugin plugin(20);
+    plugin.edit(7, false); // before Map mode: not a touch
+    graph.nodes[1].processorForModelDevice = {nullptr, &plugin};
+
+    engine::TouchedParameterWatch watch;
+    CHECK(! watch.poll(&graph)); // first look only takes a snapshot
+    CHECK(! watch.poll(&graph));
+
+    plugin.edit(3, true); // the user grabs a knob in the plug-in's window
+    auto touch = watch.poll(&graph);
+    REQUIRE(touch.has_value());
+    CHECK(touch->target.kind == Kind::DeviceParameter);
+    CHECK(touch->target.track == 4);
+    CHECK(touch->target.device == 1);
+    CHECK(touch->target.param == "id3");
+    CHECK(touch->parameterName == "Param 3");
+    plugin.release(3);
+    CHECK(! watch.poll(&graph)); // letting go is not a new touch
+
+    plugin.edit(5, false); // plug-ins that report edits without gestures
+    touch = watch.poll(&graph);
+    REQUIRE(touch.has_value());
+    CHECK(touch->target.param == "id5");
+
+    for (int i = 0; i < 12; ++i) plugin.edit(i, false); // a preset load changes many at once
+    CHECK(! watch.poll(&graph));
+
+    // The touched parameter becomes a learnable target: the next CC maps to it and then drives the plug-in.
+    midi::MidiManager mm;
+    mm.postToMessageThread = [](std::function<void()> f) { f(); };
+    mm.beginLearn(touch->target);
+    mm.handleMessage(juce::MidiMessage::controllerEvent(1, 74, 10), true, true);
+    REQUIRE(mm.mappings().size() == 1);
+    CHECK(mm.mappings()[0].target == touch->target);
+
+    watch.reset();
+    plugin.edit(2, true);
+    CHECK(! watch.poll(&graph)); // after leaving Map mode the next poll starts from a fresh snapshot
+}

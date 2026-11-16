@@ -19,6 +19,7 @@
 #include "engine/Exporter.h"
 #include "engine/StemSeparator.h"
 #include "engine/AutomationCapture.h"
+#include "engine/ControlRouter.h"
 #include "engine/PeakCache.h"
 #include "engine/SoundSimilarity.h"
 #include "io/als/AlsReader.h"
@@ -239,6 +240,7 @@ private:
     } exportPoller_{*this};
 
     void timerCallback() override;
+    void pollTouchedPluginParameter();
     void installSong(std::unique_ptr<model::Song> song);
     void closePluginWindows();
     void openWavetableWindow(const ui::UiContext::WavetableKey&);
@@ -449,6 +451,7 @@ private:
     plugins::PluginHost host_;
     midi::MidiManager midi_;
     midi::MidiClockOut midiClock_;
+    engine::TouchedParameterWatch touchedParameter_; // MIDI-10: Map mode learns plug-in parameters touched in their windows
     engine::AudioEngine engine_;
     std::unique_ptr<model::Song> song_;
     ui::UiContext ui_;

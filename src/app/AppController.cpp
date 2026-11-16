@@ -616,6 +616,23 @@ void AppController::timerCallback()
     if (auto controls = engine_.controls()) for (size_t i = 0; i < controls->size(); ++i)
         if ((*controls)[i].midiControllerOverflow.exchange(false, std::memory_order_relaxed))
             ui_.statusText = "MIDI preview/controller playback exceeded its buffer; voices, pedals and pitch bend were reset";
+    pollTouchedPluginParameter();
+}
+
+void AppController::pollTouchedPluginParameter()
+{
+    // MIDI-10: in MIDI Map mode, touching a control in a plug-in's own window selects that parameter; the next knob, fader
+    // or key on the controller is mapped to it (plug-in parameters have no controls of their own in the device view).
+    if (! ui_.midiMapMode || ui_.keyMapMode) { touchedParameter_.reset(); return; }
+    const auto touch = touchedParameter_.poll(engine_.latestGraph());
+    if (! touch || (ui_.mapSelection && *ui_.mapSelection == touch->target)) return;
+    ui_.mapSelection = touch->target;
+    midi_.beginLearn(touch->target);
+    std::string device = "Plug-in";
+    if (const auto* track = ui_.trackAt(touch->target.track); track && (size_t) touch->target.device < track->devices.size())
+        device = track->devices[(size_t) touch->target.device].displayName;
+    ui_.statusText = "MIDI Map: " + device + " > " + touch->parameterName + ". Move a control on your MIDI controller to map it.";
+    if (ui_.requestRepaint) ui_.requestRepaint();
 }
 
 // UI-82: what the CPU meter details show (ENG-14e load figures, the driver's own dropouts, per-track cost).
