@@ -66,10 +66,10 @@ TEST_CASE("device faces: FM operator selection exposes its own envelope and grap
     auto right = localEvent(face->graphBounds(), 0.1f, 0.1f); right.right = true; click(root, right);
     CHECK_NEAR(processor->getParameter(devices::FmSynth::oscParam(3, devices::FmSynth::Sustain)), 0.3, 1e-6);
 }
-TEST_CASE("device faces: browser searches find FM and compact Wavetable and Impulse also appears in Drums")
+TEST_CASE("device faces: browser searches find Operator and compact Wavetable and Impulse also appears in Drums")
 {
     struct Search { const char* query; const char* type; int category; };
-    for (const auto& search : {Search{"operator", "SonoraFm", ui::BrowserPanel::Instruments}, Search{"wavetable", "SonoraVector", ui::BrowserPanel::Instruments}, Search{"impulse", "SonoraImpulse", ui::BrowserPanel::Drums},
+    for (const auto& search : {Search{"operator", "Operator", ui::BrowserPanel::Instruments}, Search{"wavetable", "SonoraVector", ui::BrowserPanel::Instruments}, Search{"impulse", "SonoraImpulse", ui::BrowserPanel::Drums},
                               Search{"swiss", "max:Swiss Army Meter", ui::BrowserPanel::AudioEffects}})
     {
         ui::UiContext context; context.detailVisible = false;

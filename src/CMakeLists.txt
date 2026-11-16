@@ -44,6 +44,7 @@ add_library(sonora_core STATIC
     core/Model.cpp
     core/ResynthModel.cpp
     core/Edit.cpp
+    core/DeviceGroups.cpp
     core/DrumFill.cpp
     core/AutomationEdits.cpp
     core/ClipOperations.cpp
@@ -122,6 +123,8 @@ add_library(sonora_engine STATIC
     devices/native/FmSynth.cpp
     devices/native/VectorSynth.cpp
     devices/native/WavetableInstrument.cpp
+    devices/native/Operator.cpp
+    devices/native/OperatorParams.cpp
     devices/native/Tension.cpp
     devices/native/WavetableSprites.cpp
     devices/native/Resynth.cpp
@@ -279,6 +282,7 @@ add_library(sonora_ui STATIC
     ui/views/RackFace.cpp
     ui/views/WavetableFace.cpp
     ui/views/TensionFace.cpp
+    ui/views/OperatorFace.cpp
     ui/views/EffectFaces.cpp
     ui/views/ResynthEditor.cpp
     ui/views/CurveLfoEditor.cpp
@@ -583,6 +587,7 @@ target_sources(Sonora PRIVATE
     app/AppSamplePacks.cpp
     app/AppSampleFiles.cpp
     app/AppDevicePresets.cpp
+    app/AppDeviceGroups.cpp
     app/AppStems.cpp
     app/AppRecovery.cpp
 )

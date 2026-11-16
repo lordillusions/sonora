@@ -35,7 +35,10 @@ class MainLayout : public RootWidget
 {
 public:
     explicit MainLayout(UiContext& ctx);
+    ~MainLayout() override;
 
+    // DEV-15c: the keyboard focus is in the Device View (its Devices tab), so Cmd+G groups devices instead of tracks.
+    bool deviceChainFocused();
     void layout() override;
     void paint(SkCanvas& c, const Theme& t) override;
     void paintOverChildren(SkCanvas& c, const Theme& t) override;

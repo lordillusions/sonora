@@ -413,6 +413,8 @@ AppController::AppController() : engine_(host_, midi_)
     };
     ui_.groupSelectedTracks = [this] { groupSelectedTracks(); };
     ui_.ungroupSelectedTracks = [this] { ungroupSelectedTracks(); };
+    ui_.groupSelectedDevices = [this] { groupSelectedDevices(); };
+    ui_.ungroupSelectedDevice = [this] { ungroupSelectedDevice(); };
     ui_.saveCopy = [this] { saveCopy(); };
     ui_.collectAllAndSave = [this] { collectAllAndSave(); };
     ui_.canUndo = [this] { return canUndo(); };

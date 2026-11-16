@@ -22,6 +22,7 @@ set(SONORA_TEST_SOURCES
     test_compact_devices.cpp
     test_wavetable_instrument.cpp
     test_tension.cpp
+    test_operator.cpp
     test_serum_state.cpp
     test_native_replacement.cpp
     test_lfotool_state.cpp
@@ -78,6 +79,7 @@ set(SONORA_TEST_SOURCES
     test_edit.cpp
     test_clip_geometry.cpp
     test_project.cpp
+    test_device_groups.cpp
     test_recovery.cpp
     test_live_compat.cpp
     test_updates.cpp
@@ -98,7 +100,7 @@ set(SONORA_TEST_SOURCES
 )
 if(SONORA_WITH_UI)
     list(APPEND SONORA_TEST_SOURCES test_resynth_ui.cpp test_transport_warp_ui.cpp test_sample_drop_ui.cpp)
-    list(APPEND SONORA_TEST_SOURCES test_device_faces.cpp test_wavetable_face_ui.cpp test_tension_face_ui.cpp test_sampler_face_ui.cpp test_editor_workflow_ui.cpp test_browser_tags_ui.cpp test_device_presets_ui.cpp test_sample_packs_ui.cpp test_context_track_ui.cpp test_locators_ui.cpp test_inline_rename_ui.cpp test_sample_files_ui.cpp test_drag_guide_ui.cpp test_clip_editing_ui.cpp test_ruler_zoom_ui.cpp test_track_state_ui.cpp test_set_view_ui.cpp test_shortcuts_ui.cpp test_updates_ui.cpp test_device_chain_drop_ui.cpp)
+    list(APPEND SONORA_TEST_SOURCES test_device_faces.cpp test_wavetable_face_ui.cpp test_tension_face_ui.cpp test_operator_face_ui.cpp test_sampler_face_ui.cpp test_editor_workflow_ui.cpp test_browser_tags_ui.cpp test_device_presets_ui.cpp test_sample_packs_ui.cpp test_context_track_ui.cpp test_locators_ui.cpp test_inline_rename_ui.cpp test_sample_files_ui.cpp test_drag_guide_ui.cpp test_clip_editing_ui.cpp test_ruler_zoom_ui.cpp test_track_state_ui.cpp test_set_view_ui.cpp test_shortcuts_ui.cpp test_updates_ui.cpp test_device_chain_drop_ui.cpp)
     list(APPEND SONORA_TEST_SOURCES test_ui.cpp test_clip_envelope_ui.cpp test_audio_clip.cpp test_grid.cpp test_grid_ui.cpp test_tools_ui.cpp test_automation_ui.cpp test_automation_edit_ui.cpp test_clip_launch_ui.cpp test_native_plugin_ui.cpp test_rack_face_ui.cpp test_curve_lfo_ui.cpp test_wavetable_ui.cpp test_wavetable_fx_ui.cpp test_wavetable_modulation_ui.cpp test_wavetable_routing_ui.cpp test_wavetable_sub_ui.cpp test_wavetable_quality_ui.cpp test_wavetable_noise_ui.cpp test_wavetable_window_ui.cpp test_device_mini_ui.cpp test_wavetable_drag_modulation_ui.cpp test_wavetable_preset_browser_ui.cpp test_brand_ui.cpp)
     # PLG-11: the VST3's processor and editor, built here against the app's JUCE (no plug-in wrapper needed).
     list(APPEND SONORA_TEST_SOURCES test_wavetable_plugin.cpp ../src/plugin/WavetablePlugin.cpp ../src/plugin/WavetablePluginEditor.cpp)
@@ -111,6 +113,7 @@ if(SONORA_WITH_UI)
     list(APPEND SONORA_TEST_SOURCES test_sidechain_menu_ui.cpp) # PLG-14i: choosing the sidechain source
     list(APPEND SONORA_TEST_SOURCES test_clip_menu_creative_ui.cpp) # PLG-19/20: Make Riser, Generate Drum Fill
     list(APPEND SONORA_TEST_SOURCES test_sidechain_panel_ui.cpp) # PLG-22: hosted plug-in sidechain, the Sidechain panel
+    list(APPEND SONORA_TEST_SOURCES test_device_groups_ui.cpp) # DEV-15c: device Group / Ungroup (selection, Cmd+G, plug-in handover)
     list(APPEND SONORA_TEST_SOURCES test_hush_sidechain_engine.cpp) # PLG-22: Hush hears and shows its sidechain
     set_source_files_properties(../src/plugin/HushPlugin.cpp PROPERTIES COMPILE_DEFINITIONS SONORA_PLUGIN_NO_ENTRY=1)
     set_source_files_properties(../src/plugin/HushPluginEditor.cpp PROPERTIES COMPILE_DEFINITIONS JucePlugin_VersionString="${PROJECT_VERSION}")

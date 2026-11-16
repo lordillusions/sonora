@@ -915,6 +915,7 @@ ReferenceFace* addReferenceFace(Widget& parent, const model::Device& model, devi
     if (auto* face = addWavetableFace(parent, model, processor, tag)) return face;
     if (auto* face = addChannelEqFace(parent, model, processor, tag)) return face;
     if (auto* face = addTensionFace(parent, processor, tag)) return face;
+    if (auto* face = addOperatorFace(parent, processor, tag)) return face;
     if (auto* eq = dynamic_cast<devices::EqEight*>(processor)) return parent.add<EqEightFace>(eq, std::move(tag));
     if (auto* eq = dynamic_cast<devices::EqThree*>(processor)) return parent.add<EqThreeFace>(eq, std::move(tag));
     if (auto* compressor = dynamic_cast<devices::Compressor*>(processor)) return parent.add<CompressorFace>(compressor, model, std::move(tag));

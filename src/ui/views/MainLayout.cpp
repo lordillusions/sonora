@@ -38,6 +38,7 @@ MainLayout::MainLayout(UiContext& ctx) : RootWidget(ctx)
     session_ = add<SessionView>();
     arrangement_ = add<ArrangementView>();
     detail_ = add<DetailView>();
+    ctx.deviceChainFocused = [this] { return deviceChainFocused(); };
     zones_ = add<SamplerZoneEditor>();
     status_ = add<StatusBar>();
     status_->detailView = detail_;
@@ -115,6 +116,19 @@ bool MainLayout::hasResynthEditor()
             for (const auto& child : device.chains[(size_t) x.selectedRackChain].devices)
                 if (child.type == "SonoraResynth") return true;
     }
+    return false;
+}
+
+MainLayout::~MainLayout()
+{
+    context().deviceChainFocused = nullptr;
+}
+
+bool MainLayout::deviceChainFocused()
+{
+    if (context().detailTab != DetailTab::Devices || ! detail_->visible) return false;
+    for (auto* focus = keyboardFocus(); focus; focus = focus->parent())
+        if (focus == detail_) return true;
     return false;
 }
 
@@ -591,6 +605,13 @@ bool MainLayout::keyPressed(const KeyEvent& k)
     }
     else if (k.cmd && ! k.alt && ! k.ctrl && (k.textChar == 'g' || k.textChar == 'G'))
     {
+        // DEV-15c: with the Device View in focus Cmd+G groups the selected devices (Shift: ungroups the selected rack).
+        if (deviceChainFocused())
+        {
+            if (k.shift) { if (x.ungroupSelectedDevice) x.ungroupSelectedDevice(); }
+            else if (x.groupSelectedDevices) x.groupSelectedDevices();
+            return true;
+        }
         for (auto* focus = keyboardFocus(); focus; focus = focus->parent())
             if (focus == detail_ || focus == browser_) return true;
         if (k.shift) { if (x.ungroupSelectedTracks) x.ungroupSelectedTracks(); }

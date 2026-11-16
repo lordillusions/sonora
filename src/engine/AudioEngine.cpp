@@ -2,6 +2,8 @@
 #include "engine/AudioEngine.h"
 
 #include <map>
+#include <set>
+#include "devices/RackProcessor.h"
 #include "plugins/PluginDevice.h"
 
 #include "engine/ClipLauncher.h"
@@ -215,16 +217,86 @@ std::vector<std::string> AudioEngine::updateTrackDevices(int trackIndex, const m
     context.placeholderForMissingInstruments = placeholderInstruments;
     std::vector<std::unique_ptr<devices::DeviceProcessor>> inserted(track->devices.size());
     std::vector<devices::DeviceProcessor*> pointers;
+    const auto reusedIndex = [&](const model::Device& device) {
+        for (size_t j = 0; j < before->devices.size() && j < node.processorForModelDevice.size(); ++j)
+            if (before->devices[j].id == device.id && before->devices[j].type == device.type) return (int) j;
+        return -1;
+    };
+    // DEV-15c: a hosted plug-in that moves into or out of a rack (Group / Ungroup, a rack edit that gives the rack a fresh
+    // processor) keeps its running instance: the plug-ins of the devices that are not reused, by device id, go to the new
+    // devices with the same id and plug-in. The audio stops first: their old processors must not run once emptied.
+    std::map<int, plugins::PluginDevice*> movable;
+    lastReused_ = 0;
+    {
+        std::set<int> reusedOld;
+        for (const auto& device : track->devices)
+            if (const int j = reusedIndex(device); j >= 0) reusedOld.insert(j);
+        std::function<void(const model::Device&, devices::DeviceProcessor*)> harvest = [&](const model::Device& d, devices::DeviceProcessor* proc) {
+            if (auto* plugin = dynamic_cast<plugins::PluginDevice*>(proc); plugin && d.plugin) movable[d.id] = plugin;
+            if (const auto* rack = dynamic_cast<devices::RackProcessor*>(proc))
+                for (size_t ci = 0; ci < d.chains.size() && ci < rack->chains().size(); ++ci)
+                {
+                    const auto& processors = rack->chains()[ci].processorForModelDevice;
+                    for (size_t di = 0; di < d.chains[ci].devices.size() && di < processors.size(); ++di)
+                        harvest(d.chains[ci].devices[di], processors[di]);
+                }
+        };
+        for (size_t j = 0; j < before->devices.size() && j < node.processorForModelDevice.size(); ++j)
+            if (reusedOld.count((int) j) == 0) harvest(before->devices[j], node.processorForModelDevice[j]);
+    }
+    std::map<int, std::string> handover; // device id -> plug-in name, for the new devices that take a running instance
+    {
+        const auto beforeOf = [&](int id) -> const model::Device* {
+            std::function<const model::Device*(const std::vector<model::Device>&)> find = [&](const auto& list) -> const model::Device* {
+                for (const auto& d : list)
+                {
+                    if (d.id == id && d.plugin && movable.count(id) > 0) return &d;
+                    for (const auto& chain : d.chains) if (const auto* f = find(chain.devices)) return f;
+                }
+                return nullptr;
+            };
+            return find(before->devices);
+        };
+        std::function<void(const model::Device&)> want = [&](const model::Device& d) {
+            if (d.plugin)
+                if (const auto* old = beforeOf(d.id); old && old->kind == d.kind && old->plugin->name == d.plugin->name
+                                                      && old->plugin->vst3Uid == d.plugin->vst3Uid)
+                    handover[d.id] = d.plugin->name;
+            for (const auto& chain : d.chains) for (const auto& child : chain.devices) want(child);
+        };
+        for (const auto& device : track->devices)
+            if (reusedIndex(device) < 0) want(device);
+    }
+    const bool running = deviceManager_.getCurrentAudioDevice() != nullptr;
+    bool stopped = false;
+    const auto stopAudio = [&] {
+        if (stopped) return;
+        stopped = true;
+        if (running) deviceManager_.removeAudioCallback(this); // waits for any running callback
+        if (auto* pending = pending_.exchange(nullptr))
+        {
+            delete current_;
+            current_ = pending;
+        }
+    };
+    if (! handover.empty())
+    {
+        stopAudio();
+        context.trackId = track->id;
+        context.takeRunningPlugin = [&](int, int deviceId) -> std::unique_ptr<juce::AudioPluginInstance> {
+            const auto found = movable.find(deviceId);
+            if (handover.count(deviceId) == 0 || found == movable.end()) return nullptr;
+            auto instance = found->second->releaseInstance();
+            movable.erase(found);
+            if (instance) ++lastReused_;
+            return instance;
+        };
+    }
     for (size_t i = 0; i < track->devices.size(); ++i)
     {
         const auto& device = track->devices[i];
-        devices::DeviceProcessor* reused = nullptr;
-        for (size_t j = 0; j < before->devices.size() && j < node.processorForModelDevice.size(); ++j)
-            if (before->devices[j].id == device.id && before->devices[j].type == device.type)
-            {
-                reused = node.processorForModelDevice[j];
-                break;
-            }
+        const int j = reusedIndex(device);
+        devices::DeviceProcessor* reused = j >= 0 ? node.processorForModelDevice[(size_t) j] : nullptr;
         if (! reused)
         {
             inserted[i] = devices::createDevice(device, context);
@@ -233,13 +305,7 @@ std::vector<std::string> AudioEngine::updateTrackDevices(int trackIndex, const m
         }
         pointers.push_back(reused);
     }
-    const bool running = deviceManager_.getCurrentAudioDevice() != nullptr;
-    if (running) deviceManager_.removeAudioCallback(this); // waits for any running callback
-    if (auto* pending = pending_.exchange(nullptr))
-    {
-        delete current_;
-        current_ = pending;
-    }
+    stopAudio();
     std::vector<std::unique_ptr<devices::DeviceProcessor>> devices;
     for (size_t i = 0; i < pointers.size(); ++i)
     {

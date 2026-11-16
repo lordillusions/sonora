@@ -904,13 +904,23 @@ public:
         }
     }
 
-    // Any press inside the box (title, knobs, buttons) selects the device, so Delete removes the one being worked on.
-    void descendantPressed(Widget*) override
+    // Any press inside the box (title, knobs, buttons) selects the device, so Delete removes the one being worked on. A press
+    // on the box itself (title, body) is handled by mouseDown, which also reads Shift / Cmd (DEV-15c multi-selection).
+    void descendantPressed(Widget* leaf) override
     {
-        if (chain_ >= 0) return;
-        ctx().selectedTrack = trackIndex_;
-        ctx().statusText = model_.displayName;
-        if (ctx().selectedDeviceId != model_.id) { ctx().selectedDeviceId = model_.id; repaint(); }
+        if (chain_ >= 0 || leaf == this) return;
+        pick(false, false);
+    }
+
+    std::vector<int> selectionPath() const { return chain_ < 0 ? std::vector<int>{} : std::vector<int>{deviceIndex_, chain_}; }
+    void pick(bool shift, bool cmd)
+    {
+        auto& x = ctx();
+        x.selectDevice(trackIndex_, selectionPath(), model_.id, shift, cmd);
+        const auto count = x.selectedDeviceIds().size();
+        x.statusText = count > 1 ? std::to_string(count) + " devices selected (Cmd+G groups them)" : model_.displayName;
+        if (parent_) parent_->repaint();
+        repaint();
     }
 
     bool showsTitleIcons() const { return chain_ < 0 && width() >= 120; }
@@ -934,6 +944,9 @@ public:
 
     void mouseDown(const MouseEvent& e) override
     {
+        // DEV-15c: a right-click keeps a selection the device is part of (the menu's Group groups all of it).
+        if (! e.right || ! ctx().isDeviceSelected(trackIndex_, selectionPath(), model_.id))
+            if (chain_ < 0 || e.y < kTitle) pick(! e.right && e.shift, ! e.right && e.cmd);
         if (chain_ >= 0)
         {
             // A rack's child: its menu has what applies inside a rack (PLG-16f: Replace with a Sonora device).
@@ -982,7 +995,7 @@ public:
         const bool darkBody = deviceFace_ && deviceFace_->kind() == DeviceFace::Kind::Meter;
         paint::fillRounded(c, r, 3, darkBody ? SkColorSetRGB(0x33, 0x33, 0x33) : t.color("SurfaceBackground"));
         auto title = r.removeFromTop(kTitle);
-        const bool picked = chain_ < 0 && ctx().selectedDeviceId == model_.id && ctx().selectedTrack == trackIndex_;
+        const bool picked = ctx().isDeviceSelected(trackIndex_, selectionPath(), model_.id);
         // Every device's title band is lighter than its body in the reference (native and plugin alike).
         const SkColor band = picked ? paint::mix(t.color("SurfaceHighlight"), t.color("ChosenAlternative"), 0.2f) : t.color("SurfaceHighlight");
         paint::fillRounded(c, title, 3, band); // rounded top corners, square where it meets the body
@@ -1514,7 +1527,14 @@ bool DetailView::keyPressed(const KeyEvent& k)
         for (const auto& child : children_) if (auto* panel = dynamic_cast<ClipControls*>(child.get()); panel && panel->keyPressed(k)) return true;
     if (dragDeviceId_ >= 0 && k.keyCode == juce::KeyPress::escapeKey) { cancelDeviceDrag(); repaint(); return true; }
     if (visible && x.detailTab == DetailTab::Devices && k.cmd && ! k.alt && (k.textChar == 'g' || k.textChar == 'G'))
-    { x.statusText = "Device grouping is not implemented"; return true; }
+    {
+        // DEV-15c: Cmd+G groups the selected devices, Shift+Cmd+G ungroups the selected rack.
+        if (k.shift) { if (x.ungroupSelectedDevice) x.ungroupSelectedDevice(); }
+        else if (x.groupSelectedDevices) x.groupSelectedDevices();
+        layout();
+        repaint();
+        return true;
+    }
     if (! visible || x.detailTab != DetailTab::Devices || x.selectedDeviceId < 0)
         return false;
     if (k.cmd || k.alt || (k.keyCode != juce::KeyPress::deleteKey && k.keyCode != juce::KeyPress::backspaceKey))

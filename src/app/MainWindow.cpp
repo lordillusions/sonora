@@ -60,6 +60,8 @@ enum MenuIds
     LoopSelection,
     GroupTracks,
     UngroupTracks,
+    GroupDevices,
+    UngroupDevices,
     InsertMidiClip,
     NarrowGrid,
     WidenGrid,
@@ -466,9 +468,18 @@ juce::PopupMenu MainWindow::getMenuForIndex(int index, const juce::String&)
         m.addSubMenu("Clip Markers", markers);
         m.addSeparator();
         std::vector<int> members;
-        m.addItem(GroupTracks, "Group Tracks    (Cmd+G)", loaded && trackContext && ! ui.recording && ! ui.recordingRequested && model::groupableSelection(*ui.song, ui.selectedTrackIndices(), members));
         const auto* track = ui.trackAt(ui.selectedTrack);
-        m.addItem(UngroupTracks, "Ungroup Tracks    (Shift+Cmd+G)", trackContext && track && track->kind == model::TrackKind::Group && ui.selectedTrack < ui.numTracks());
+        if (loaded && ui.deviceChainFocused && ui.deviceChainFocused()) // DEV-15c: the Device View has the focus
+        {
+            const bool editable = ! ui.recording && ! ui.recordingRequested;
+            m.addItem(GroupDevices, "Group    (Cmd+G)", editable && ui.canGroupSelectedDevices());
+            m.addItem(UngroupDevices, "Ungroup    (Shift+Cmd+G)", editable && ui.canUngroupSelectedDevice());
+        }
+        else
+        {
+            m.addItem(GroupTracks, "Group Tracks    (Cmd+G)", loaded && trackContext && ! ui.recording && ! ui.recordingRequested && model::groupableSelection(*ui.song, ui.selectedTrackIndices(), members));
+            m.addItem(UngroupTracks, "Ungroup Tracks    (Shift+Cmd+G)", trackContext && track && track->kind == model::TrackKind::Group && ui.selectedTrack < ui.numTracks());
+        }
         unavailable(m, {"Compare: Switch to B", "Compare: Copy A to B", "Cut Time", "Copy Time", "Paste Time", "Duplicate Time", "Delete Time"});
         m.addItem(ApplyMidiTool, "Apply Transformation/Generator    (Cmd+Enter)", hasClip && toolReady);
         m.addItem(Rename, "Rename    (Cmd+R)", hasClip || (track && track->kind != model::TrackKind::Main)
@@ -859,6 +870,8 @@ void MainWindow::menuItemSelected(int itemId, int)
         case InsertTakeLane: ui::insertEmptyTakeLane(ui); break;
         case GroupTracks: if (ui.groupSelectedTracks) ui.groupSelectedTracks(); break;
         case UngroupTracks: if (ui.ungroupSelectedTracks) ui.ungroupSelectedTracks(); break;
+        case GroupDevices: if (ui.groupSelectedDevices) ui.groupSelectedDevices(); break;
+        case UngroupDevices: if (ui.ungroupSelectedDevice) ui.ungroupSelectedDevice(); break;
         case NarrowGrid: ui::handleGridShortcut(ui.activeGrid(), '1'); if (ui.layoutChanged) ui.layoutChanged(); break;
         case WidenGrid: ui::handleGridShortcut(ui.activeGrid(), '2'); if (ui.layoutChanged) ui.layoutChanged(); break;
         case TripletGrid: ui::handleGridShortcut(ui.activeGrid(), '3'); if (ui.layoutChanged) ui.layoutChanged(); break;

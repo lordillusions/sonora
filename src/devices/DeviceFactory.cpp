@@ -25,6 +25,7 @@
 #include "devices/native/FmSynth.h"
 #include "devices/native/VectorSynth.h"
 #include "devices/native/Tension.h"
+#include "devices/native/Operator.h"
 #include "devices/native/WavetableInstrument.h"
 #include "devices/native/WavetableSprites.h"
 #include "devices/native/Resynth.h"
@@ -94,12 +95,6 @@ std::unique_ptr<DeviceProcessor> placeholderIfInstrument(const model::Device& d,
 
 std::unique_ptr<DeviceProcessor> createRack(const model::Device& d, BuildContext& ctx)
 {
-    if (d.type == "MidiEffectGroupDevice")
-    {
-        note(ctx, "MIDI Effect Rack skipped (not implemented)");
-        return nullptr;
-    }
-
     std::vector<RackProcessor::Chain> chains;
     std::vector<RackProcessor::MacroLink> links;
     for (const auto& mc : d.chains)
@@ -142,6 +137,7 @@ std::unique_ptr<DeviceProcessor> createRack(const model::Device& d, BuildContext
     }
     auto rack = std::make_unique<RackProcessor>(d.displayName, isInstrumentDevice(d), d.type == "DrumGroupDevice",
                                                 std::move(chains));
+    rack->setMidiEffectRack(d.type == "MidiEffectGroupDevice"); // DEV-15c
     std::array<float, RackProcessor::kNumMacros> macroValues{};
     for (int i = 0; i < RackProcessor::kNumMacros; ++i)
         macroValues[(size_t) i] = (float) d.param("MacroControls." + std::to_string(i), 0.0);
@@ -368,6 +364,8 @@ std::unique_ptr<DeviceProcessor> createNative(const model::Device& d, std::vecto
         dev = std::make_unique<FmSynth>();
     else if (d.type == "SonoraVector")
         dev = std::make_unique<VectorSynth>();
+    else if (d.type == "Operator") // DEV-28a: the reference's Operator
+        dev = std::make_unique<Operator>();
     else if (d.type == "StringStudio") // DEV-28j: the reference's Tension
         dev = std::make_unique<Tension>();
     else if (d.type == "InstrumentVector") // DEV-28b: the reference's Wavetable

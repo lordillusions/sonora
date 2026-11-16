@@ -4,6 +4,7 @@
 // All pointers may be null (headless snapshot) — views must cope with that.
 
 #include "core/AutomationEdits.h"
+#include "core/DeviceGroups.h"
 #include "core/Edit.h"
 #include "core/Model.h"
 #include "core/SampleReplace.h"
@@ -275,6 +276,92 @@ struct UiContext
                 return true;
             }
         return false;
+    }
+    // DEV-15c: device multi-selection in the Device View (Shift+click = range, Cmd+click = toggle on a device's title), for
+    // Group (Cmd+G) / Ungroup (Shift+Cmd+G). The selected devices are in one list of `deviceSelectionTrack`: the track's chain
+    // (path {}) or a rack chain (path {rack index, chain index}, model::deviceListAt). On the track's chain selectedDeviceId
+    // is the device clicked last and always part of the selection.
+    int deviceSelectionTrack = -1, deviceSelectionAnchor = -1;
+    std::vector<int> deviceSelectionPath;
+    std::set<int> deviceSelection;
+    std::function<void()> groupSelectedDevices, ungroupSelectedDevice;
+    std::function<bool()> deviceChainFocused; // the Device View has the keyboard focus (Cmd+G groups devices, not tracks)
+    void selectDevice(int track, const std::vector<int>& path, int id, bool shift, bool cmd)
+    {
+        const auto* t = song != nullptr ? trackAt(track) : nullptr;
+        const auto* list = t != nullptr ? model::deviceListAt(*t, path) : nullptr;
+        if (list == nullptr) return;
+        const auto indexOf = [list](int deviceId) {
+            for (size_t i = 0; i < list->size(); ++i) if ((*list)[i].id == deviceId) return (int) i;
+            return -1;
+        };
+        if (indexOf(id) < 0) return;
+        const bool same = deviceSelectionTrack == track && deviceSelectionPath == path && track == selectedTrack;
+        if (! same || (! shift && ! cmd))
+        {
+            deviceSelection = {id};
+            deviceSelectionAnchor = id;
+        }
+        else if (shift)
+        {
+            const int anchor = indexOf(deviceSelectionAnchor) >= 0 ? indexOf(deviceSelectionAnchor) : indexOf(id);
+            const int at = indexOf(id);
+            deviceSelection.clear();
+            for (int i = std::min(anchor, at); i <= std::max(anchor, at); ++i) deviceSelection.insert((*list)[(size_t) i].id);
+        }
+        else if (deviceSelection.count(id) > 0 && deviceSelection.size() > 1) deviceSelection.erase(id);
+        else { deviceSelection.insert(id); deviceSelectionAnchor = id; }
+        deviceSelectionTrack = selectedTrack = track;
+        deviceSelectionPath = path;
+        if (path.empty()) selectedDeviceId = deviceSelection.count(id) > 0 ? id : *deviceSelection.begin();
+        else selectedDeviceId = -1; // Delete removes track-level devices only
+    }
+    // The selected devices of the selection's list, in chain order (empty when that list is gone).
+    std::vector<int> selectedDeviceIds() const
+    {
+        std::vector<int> out;
+        const auto* t = song != nullptr ? trackAt(selectedTrack) : nullptr;
+        if (t == nullptr) return out;
+        const bool valid = deviceSelectionTrack == selectedTrack;
+        const auto* list = model::deviceListAt(*t, valid ? deviceSelectionPath : std::vector<int>{});
+        if (list == nullptr) return out;
+        const bool topLevel = ! valid || deviceSelectionPath.empty();
+        for (const auto& d : *list)
+        {
+            const bool picked = topLevel ? (d.id == selectedDeviceId || (valid && deviceSelection.count(selectedDeviceId) > 0 && deviceSelection.count(d.id) > 0))
+                                         : deviceSelection.count(d.id) > 0;
+            if (picked) out.push_back(d.id);
+        }
+        return out;
+    }
+    std::vector<int> selectedDevicePath() const
+    {
+        return deviceSelectionTrack == selectedTrack ? deviceSelectionPath : std::vector<int>{};
+    }
+    // Whether Group / Ungroup apply to the device selection (adjacent devices that fit one rack / one rack with one chain).
+    bool canGroupSelectedDevices() const
+    {
+        const auto* t = song != nullptr ? trackAt(selectedTrack) : nullptr;
+        const auto* list = t != nullptr ? model::deviceListAt(*t, selectedDevicePath()) : nullptr;
+        int first = 0, count = 0;
+        return list != nullptr && ! t->frozen && ! t->deactivated && model::groupableDevices(*list, selectedDeviceIds(), first, count)
+               && ! model::groupRackType(*list, first, count).empty();
+    }
+    bool canUngroupSelectedDevice() const
+    {
+        const auto* t = song != nullptr ? trackAt(selectedTrack) : nullptr;
+        const auto* list = t != nullptr ? model::deviceListAt(*t, selectedDevicePath()) : nullptr;
+        const auto ids = selectedDeviceIds();
+        if (list == nullptr || t->frozen || t->deactivated || ids.size() != 1) return false;
+        for (const auto& d : *list) if (d.id == ids.front()) return model::canUngroupDevice(d);
+        return false;
+    }
+    bool isDeviceSelected(int track, const std::vector<int>& path, int id) const
+    {
+        if (track != selectedTrack || path != selectedDevicePath()) return false;
+        if (path.empty() && id == selectedDeviceId) return true;
+        const auto ids = selectedDeviceIds();
+        return std::find(ids.begin(), ids.end(), id) != ids.end();
     }
     // Track multi-selection (Shift = range, Cmd = toggle on a track header): the extra tracks besides `selectedTrack`.
     std::set<int> trackSelection;

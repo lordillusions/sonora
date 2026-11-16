@@ -74,6 +74,8 @@ public:
     // device still exists with the same state are handed to the new graph instead of being created again. Creating them
     // again was slow and could deadlock (SoundID Reference blocked forever in its initialise on Duplicate Tracks).
     std::vector<std::string> reloadSongKeepingPlugins(const model::Song& song);
+    // Running instances the last reloadSongKeepingPlugins / updateTrackDevices handed over (DEV-15c: plug-ins moved into
+    // or out of a rack by updateTrackDevices).
     int lastReusedPlugins() const { return lastReused_; }
     bool changingDevices() const { return changingDevices_; } // message thread: a device update or reprepare is running
     void reprepareGraph(); // message thread; retains instances, controls and transport on device changes

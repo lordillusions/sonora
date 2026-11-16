@@ -1,0 +1,249 @@
+# DEV-28a Operator law probes. Device XML: the reference's default Operator preset read at run time from the installed
+# library (A sine at 0 dB, B-D at -inf, Volume -18 dB, filter LP 24 12 kHz), one variable per case. Docs: docs/OPERATOR.md.
+case o-default notes=single
+  device Defaults/Instruments/Operator.adv 
+case o-velocities notes=velocities
+  device Defaults/Instruments/Operator.adv 
+case o-keys notes=keys
+  device Defaults/Instruments/Operator.adv 
+case o-melody notes=melody
+  device Defaults/Instruments/Operator.adv 
+case o-chords notes=chords
+  device Defaults/Instruments/Operator.adv 
+case o-vel0 notes=velocities
+  device Defaults/Instruments/Operator.adv Operator.0/VelScale=0
+case o-vel100 notes=velocities
+  device Defaults/Instruments/Operator.adv Operator.0/VelScale=100
+case o-velm100 notes=velocities
+  device Defaults/Instruments/Operator.adv Operator.0/VelScale=-100
+case o-key100 notes=keys
+  device Defaults/Instruments/Operator.adv Operator.0/KeyScale=100
+case o-keym100 notes=keys
+  device Defaults/Instruments/Operator.adv Operator.0/KeyScale=-100
+case o-volume0db notes=single
+  device Defaults/Instruments/Operator.adv Globals/Volume=1
+case o-level-12 notes=single
+  device Defaults/Instruments/Operator.adv Operator.0/Volume=0.2511886
+case o-filteroff notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false
+case o-wave1 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=1
+case o-wave2 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=2
+case o-wave3 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=3
+case o-wave4 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=4
+case o-wave5 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=5
+case o-wave6 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=6
+case o-wave7 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=7
+case o-wave8 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=8
+case o-wave9 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=9
+case o-wave10 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=10
+case o-wave11 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=11
+case o-wave12 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=12
+case o-wave13 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=13
+case o-wave14 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=14
+case o-wave15 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=15
+case o-wave16 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=16
+case o-wave17 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=17
+case o-wave18 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=18
+case o-wave19 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=19
+case o-wave20 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=20
+case o-wave21 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=21
+case o-wave22 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=22
+case o-wave9-keys notes=keys
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=9
+case o-wave10-keys notes=keys
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=10
+case o-wave18-keys notes=keys
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=18
+case o-wave19-keys notes=keys
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=19
+case o-tone0 notes=keys
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=9 Globals/Tone=0
+case o-tone0.35 notes=keys
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=9 Globals/Tone=0.35
+case o-tone1 notes=keys
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=9 Globals/Tone=1
+case o-antialias-off notes=keys
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/WaveForm=9 Globals/AntiAlias=false
+case o-coarse0 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/Coarse=0
+case o-coarse3 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/Coarse=3
+case o-fine500 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/Fine=500
+case o-coarse3-fine500 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/Coarse=3 Operator.0/Tune/Fine=500
+case o-fine10 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/Fine=10
+case o-fixed-m0 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/FixedFrequencyOn=true Operator.0/Tune/FixedFrequency=100 Operator.0/Tune/FixedFrequencyMulti=0
+case o-fixed-m1 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/FixedFrequencyOn=true Operator.0/Tune/FixedFrequency=100 Operator.0/Tune/FixedFrequencyMulti=1
+case o-fixed-m2 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/FixedFrequencyOn=true Operator.0/Tune/FixedFrequency=100 Operator.0/Tune/FixedFrequencyMulti=2
+case o-fixed-m3 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/FixedFrequencyOn=true Operator.0/Tune/FixedFrequency=100 Operator.0/Tune/FixedFrequencyMulti=3
+case o-fixed-m4 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/FixedFrequencyOn=true Operator.0/Tune/FixedFrequency=100 Operator.0/Tune/FixedFrequencyMulti=4
+case o-fixed-m5 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/FixedFrequencyOn=true Operator.0/Tune/FixedFrequency=100 Operator.0/Tune/FixedFrequencyMulti=5
+case o-fixed-f1000 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/FixedFrequencyOn=true Operator.0/Tune/FixedFrequency=1000 Operator.0/Tune/FixedFrequencyMulti=4
+case o-velcoarse notes=velocities
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/VelCoarseScale=100
+case o-velcoarse-noq notes=velocities
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Tune/VelCoarseScale=100 Operator.0/Tune/VelCoarseScaleQuantized=false
+case o-fm-b-24 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.1/Volume=0.0630957
+case o-fm-b-12 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.1/Volume=0.2511886
+case o-fm-b-6 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.1/Volume=0.5011872
+case o-fm-b0 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.1/Volume=1
+case o-fm-b2-0 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.1/Volume=1 Operator.1/Tune/Coarse=2
+case o-fm-b-keys notes=keys
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.1/Volume=0.5011872
+case o-fm-env notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.1/Volume=1 Operator.1/Envelope/DecayTime=300 Operator.1/Envelope/SustainLevel=0.0003162277571
+case o-feedback25 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Feedback=25
+case o-feedback50 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Feedback=50
+case o-feedback100 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Feedback=100
+case o-phase50 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Phase=50
+case o-alg1 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Algorithm=0 Operator.0/Volume=0.2511886 Operator.0/Tune/Coarse=8 Operator.1/Volume=0.2511886 Operator.1/Tune/Coarse=11 Operator.2/Volume=0.2511886 Operator.2/Tune/Coarse=13 Operator.3/Volume=0.2511886 Operator.3/Tune/Coarse=17
+case o-alg2 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Algorithm=1 Operator.0/Volume=0.2511886 Operator.0/Tune/Coarse=8 Operator.1/Volume=0.2511886 Operator.1/Tune/Coarse=11 Operator.2/Volume=0.2511886 Operator.2/Tune/Coarse=13 Operator.3/Volume=0.2511886 Operator.3/Tune/Coarse=17
+case o-alg3 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Algorithm=2 Operator.0/Volume=0.2511886 Operator.0/Tune/Coarse=8 Operator.1/Volume=0.2511886 Operator.1/Tune/Coarse=11 Operator.2/Volume=0.2511886 Operator.2/Tune/Coarse=13 Operator.3/Volume=0.2511886 Operator.3/Tune/Coarse=17
+case o-alg4 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Algorithm=3 Operator.0/Volume=0.2511886 Operator.0/Tune/Coarse=8 Operator.1/Volume=0.2511886 Operator.1/Tune/Coarse=11 Operator.2/Volume=0.2511886 Operator.2/Tune/Coarse=13 Operator.3/Volume=0.2511886 Operator.3/Tune/Coarse=17
+case o-alg5 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Algorithm=4 Operator.0/Volume=0.2511886 Operator.0/Tune/Coarse=8 Operator.1/Volume=0.2511886 Operator.1/Tune/Coarse=11 Operator.2/Volume=0.2511886 Operator.2/Tune/Coarse=13 Operator.3/Volume=0.2511886 Operator.3/Tune/Coarse=17
+case o-alg6 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Algorithm=5 Operator.0/Volume=0.2511886 Operator.0/Tune/Coarse=8 Operator.1/Volume=0.2511886 Operator.1/Tune/Coarse=11 Operator.2/Volume=0.2511886 Operator.2/Tune/Coarse=13 Operator.3/Volume=0.2511886 Operator.3/Tune/Coarse=17
+case o-alg7 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Algorithm=6 Operator.0/Volume=0.2511886 Operator.0/Tune/Coarse=8 Operator.1/Volume=0.2511886 Operator.1/Tune/Coarse=11 Operator.2/Volume=0.2511886 Operator.2/Tune/Coarse=13 Operator.3/Volume=0.2511886 Operator.3/Tune/Coarse=17
+case o-alg8 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Algorithm=7 Operator.0/Volume=0.2511886 Operator.0/Tune/Coarse=8 Operator.1/Volume=0.2511886 Operator.1/Tune/Coarse=11 Operator.2/Volume=0.2511886 Operator.2/Tune/Coarse=13 Operator.3/Volume=0.2511886 Operator.3/Tune/Coarse=17
+case o-alg9 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Algorithm=8 Operator.0/Volume=0.2511886 Operator.0/Tune/Coarse=8 Operator.1/Volume=0.2511886 Operator.1/Tune/Coarse=11 Operator.2/Volume=0.2511886 Operator.2/Tune/Coarse=13 Operator.3/Volume=0.2511886 Operator.3/Tune/Coarse=17
+case o-alg10 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Algorithm=9 Operator.0/Volume=0.2511886 Operator.0/Tune/Coarse=8 Operator.1/Volume=0.2511886 Operator.1/Tune/Coarse=11 Operator.2/Volume=0.2511886 Operator.2/Tune/Coarse=13 Operator.3/Volume=0.2511886 Operator.3/Tune/Coarse=17
+case o-alg11 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Algorithm=10 Operator.0/Volume=0.2511886 Operator.0/Tune/Coarse=8 Operator.1/Volume=0.2511886 Operator.1/Tune/Coarse=11 Operator.2/Volume=0.2511886 Operator.2/Tune/Coarse=13 Operator.3/Volume=0.2511886 Operator.3/Tune/Coarse=17
+case o-env-attack notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Envelope/AttackTime=200
+case o-env-decay notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Envelope/DecayTime=500 Operator.0/Envelope/SustainLevel=0.2511886
+case o-env-initial notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Envelope/AttackTime=300 Operator.0/Envelope/AttackLevel=0.2511886
+case o-env-peak notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Envelope/DecayLevel=0.5011872 Operator.0/Envelope/DecayTime=200 Operator.0/Envelope/SustainLevel=1
+case o-env-release notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Envelope/ReleaseTime=1500
+case o-env-loop notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Envelope/DecayTime=200 Operator.0/Envelope/SustainLevel=0.1 Operator.0/Envelope/LoopMode=1 Operator.0/Envelope/LoopTime=300
+case o-env-beat notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Envelope/DecayTime=100 Operator.0/Envelope/SustainLevel=0.1 Operator.0/Envelope/LoopMode=2 Operator.0/Envelope/RepeatTime=5
+case o-env-trigger notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Envelope/DecayTime=300 Operator.0/Envelope/SustainLevel=0.3 Operator.0/Envelope/LoopMode=4
+case o-env-timevel notes=velocities
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Envelope/DecayTime=500 Operator.0/Envelope/SustainLevel=0.0003162277571 Operator.0/Envelope/TimeVelScale=100
+case o-time-50 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Envelope/DecayTime=500 Operator.0/Envelope/SustainLevel=0.0003162277571 EnvScale/EnvTime=-50
+case o-time50 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Envelope/DecayTime=500 Operator.0/Envelope/SustainLevel=0.0003162277571 EnvScale/EnvTime=50
+case o-timekey notes=keys
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Operator.0/Envelope/DecayTime=500 Operator.0/Envelope/SustainLevel=0.0003162277571 EnvScale/EnvTimeKeyScale=100
+case o-pitchenv notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false PitchEnv/PitchEnvOn=true
+case o-pitchenv-neg notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false PitchEnv/PitchEnvOn=true PitchEnv/PitchEnv/EnvelopeAmount=-0.5
+case o-lfo-L0 notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRate=0
+case o-lfo-L50 notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRate=50
+case o-lfo-L100 notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRate=100
+case o-lfo-L127 notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRate=127
+case o-lfo-H0 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRange=1 Lfo/LfoRate=0
+case o-lfo-H64 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRange=1 Lfo/LfoRate=64
+case o-lfo-H127 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRange=1 Lfo/LfoRate=127
+case o-lfo-sync notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRange=2
+case o-lfo-type1 notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRate=80 Lfo/LfoType=1
+case o-lfo-type2 notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRate=80 Lfo/LfoType=2
+case o-lfo-type3 notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRate=80 Lfo/LfoType=3
+case o-lfo-type4 notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRate=80 Lfo/LfoType=4
+case o-lfo-type5 notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRate=80 Lfo/LfoType=5
+case o-lfo-type6 notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRate=80 Lfo/LfoType=6
+case o-lfo-amount1 notes=long
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Lfo/LfoOn=true Lfo/LfoRate=80 Lfo/LfoAmount=1
+case o-lfo-filter notes=long
+  device Defaults/Instruments/Operator.adv Lfo/LfoOn=true Lfo/LfoRate=80 Lfo/LfoAmount=1 Filter/LfoOn=true Operator.0/LfoOn=false Operator.0/WaveForm=9 Filter/Frequency=1000
+case o-filter-default notes=single
+  device Defaults/Instruments/Operator.adv Operator.0/WaveForm=9
+case o-filter-1k notes=single
+  device Defaults/Instruments/Operator.adv Operator.0/WaveForm=9 Filter/Frequency=1000 Filter/Resonance=0.6
+case o-filter-env notes=single
+  device Defaults/Instruments/Operator.adv Operator.0/WaveForm=9 Filter/Frequency=300 Filter/EnvelopeAmount=50
+case o-filter-key notes=keys
+  device Defaults/Instruments/Operator.adv Operator.0/WaveForm=9 Filter/Frequency=500 Filter/FrequencyKeyScale=100
+case o-filter-vel notes=velocities
+  device Defaults/Instruments/Operator.adv Operator.0/WaveForm=9 Filter/Frequency=500 Filter/FrequencyVelScale=100
+case o-shaper1 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Shaper/Type=1 Shaper/Drive=6
+case o-shaper2 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Shaper/Type=2 Shaper/Drive=6
+case o-shaper3 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Shaper/Type=3 Shaper/Drive=6
+case o-shaper4 notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Shaper/Type=4 Shaper/Drive=6
+case o-spread notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/SpreadAmount=100
+case o-transpose notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Transpose=12
+case o-pan notes=single
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/Panorama=-0.5
+case o-glide notes=legato
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/PortamentoOn=true Globals/PortamentoTime=200
+case o-mono notes=legato
+  device Defaults/Instruments/Operator.adv Filter/OnOff=false Globals/NumVoices=0
+presets Devices/Instruments/Operator

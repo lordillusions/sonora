@@ -8,7 +8,9 @@
 //     only active while the chain selector is inside its selector range.
 //   - 16 macros are exposed as parameters ("MacroControls.N", 0..127). Parameters of the devices
 //     in the chains that are mapped to a macro follow it (MacroLink).
-// Not yet: zone / selector crossfades, return chains, MIDI Effect Racks (need MIDI effects).
+//   - MIDI Effect Racks (DEV-15c): each chain runs its MIDI effects on the notes its zones let in; the notes of the
+//     sounding chains are merged and go on down the track's chain. Audio passes through untouched.
+// Not yet: zone / selector crossfades, return chains.
 
 #include "devices/DeviceProcessor.h"
 #include "engine/DelayLine.h"
@@ -67,6 +69,10 @@ public:
     void setMacros(const std::vector<std::string>& names, const std::array<float, kNumMacros>& defaults,
                    std::vector<MacroLink> links, int numVisible);
 
+    // DEV-15c: a MIDI Effect Rack (message thread, before prepare).
+    void setMidiEffectRack(bool midiRack) { midiRack_ = midiRack; }
+    bool midiEffectRack() const { return midiRack_; }
+
     std::string name() const override { return name_; }
     bool isInstrument() const override { return instrument_; }
     void prepare(double sampleRate, int maxBlockSize) override;
@@ -93,10 +99,12 @@ public:
 private:
     void applyMacro(int macro);
     bool chainSelected(const Chain& c, float selector) const;
+    void processMidiChains(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi, float selector);
 
     std::string name_;
     bool instrument_;
     bool drumRack_;
+    bool midiRack_ = false;
     int latency_ = 0; // slowest chain; shorter chains are delayed to match
     int numVisibleMacros_ = 8;
     std::vector<Chain> chains_;

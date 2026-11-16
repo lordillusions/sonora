@@ -201,6 +201,12 @@ void RackProcessor::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& m
         }
     }
 
+    if (midiRack_)
+    {
+        processMidiChains(audio, midi, selector);
+        return;
+    }
+
     // 2) Run the chains and sum them. While any chain is soloed only soloed chains sound (UI-66).
     sum_.clear(0, n);
     bool anySolo = false;
@@ -251,6 +257,35 @@ void RackProcessor::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& m
             audio.addFrom(ch, 0, sum_, ch, 0, n);
         else
             audio.copyFrom(ch, 0, sum_, ch, 0, n);
+    }
+}
+
+// DEV-15c: the chains' MIDI effects run on their notes (the audio of the track is left alone), then the notes of every
+// sounding chain go on down the track's chain. A full track buffer drops what does not fit (no allocation here).
+void RackProcessor::processMidiChains(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi, float selector)
+{
+    const int n = audio.getNumSamples();
+    bool anySolo = false;
+    for (size_t ci = 0; ci < chains_.size(); ++ci)
+        anySolo = anySolo || mix_[ci].solo.load(std::memory_order_relaxed);
+    midi.clear();
+    const int capacity = sonora::midi::InputBlock::bufferCapacity * 2;
+    for (size_t ci = 0; ci < chains_.size(); ++ci)
+    {
+        auto& chain = chains_[ci];
+        auto& mix = mix_[ci];
+        if (! mix.active.load(std::memory_order_relaxed) || (anySolo && ! mix.solo.load(std::memory_order_relaxed))
+            || ! chainSelected(chain, selector))
+            continue;
+        for (int ch = 0; ch < 2; ++ch) scratch_.copyFrom(ch, 0, audio, ch, 0, n);
+        juce::AudioBuffer<float> view(scratch_.getArrayOfWritePointers(), 2, n);
+        for (auto& d : chain.devices)
+        {
+            d->process(view, chainMidi_[ci]);
+            d->outputMeter.measure(view, n);
+        }
+        for (const auto meta : chainMidi_[ci])
+            if (midi.data.size() + meta.numBytes + 8 <= capacity) midi.addEvent(meta.data, meta.numBytes, meta.samplePosition);
     }
 }
 

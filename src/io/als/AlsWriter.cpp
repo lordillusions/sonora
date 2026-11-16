@@ -480,6 +480,28 @@ void patchDevice(XmlElement* x, const model::Device& d)
     }
 }
 
+// DEV-15c: a device on the track's own chain belongs to no rack, so a macro mapping (<KeyMidi> on channel 16) left on it
+// (an ungrouped rack's child, including parameters Sonora does not model such as On) made the reference crash while opening
+// the set. Its own rack chains keep theirs.
+void dropTrackLevelMacroMappings(XmlElement& device)
+{
+    std::function<void(XmlElement&)> visit = [&](XmlElement& e) {
+        for (auto* c = e.getFirstChildElement(); c != nullptr;)
+        {
+            auto* next = c->getNextElement();
+            if (c->hasTagName("Branches") || c->hasTagName("ReturnBranches")) { c = next; continue; }
+            if (c->hasTagName("KeyMidi"))
+            {
+                if (const auto* channel = c->getChildByName("Channel"); channel && channel->getIntAttribute("Value", -1) == 16)
+                    e.removeChildElement(c, true);
+            }
+            else visit(*c);
+            c = next;
+        }
+    };
+    visit(device);
+}
+
 // ---------------------------------------------------------------- clips
 
 // True when the notes already in the XML are exactly `notes` (so an untouched clip is left byte-for-byte alone).
@@ -1380,6 +1402,7 @@ void patchTrackMixerAndDevices(XmlElement* x, const model::Track& t)
             if (! dx) continue; // validated before patching
             dx->setAttribute("Id", device.id);
             patchDevice(dx.get(), device);
+            dropTrackLevelMacroMappings(*dx);
             ordered.push_back(std::move(dx));
         }
         devices->deleteAllChildElements();

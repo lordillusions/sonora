@@ -49,6 +49,19 @@ juce::PopupMenu menuFrom(const std::vector<MenuAction>& actions)
     return menu;
 }
 
+// DEV-15c: Group / Ungroup act on the device selection, which the right-click made (or kept, when the device was in it).
+void appendGroupActions(UiContext& ctx, std::vector<MenuAction>& actions, bool editable)
+{
+    const auto* song = ctx.song;
+    actions.push_back({"Group", [&ctx, song] {
+        if (ctx.song == song && ctx.groupSelectedDevices) ctx.groupSelectedDevices();
+    }, editable && static_cast<bool>(ctx.groupSelectedDevices) && ctx.canGroupSelectedDevices(), "⌘G"});
+    if (ctx.canUngroupSelectedDevice())
+        actions.push_back({"Ungroup", [&ctx, song] {
+            if (ctx.song == song && ctx.ungroupSelectedDevice) ctx.ungroupSelectedDevice();
+        }, editable && static_cast<bool>(ctx.ungroupSelectedDevice), "⇧⌘G"});
+}
+
 juce::PopupMenu createMenu(UiContext& ctx, int track, const std::vector<int>& path)
 {
     return menuFrom(deviceContextActions(ctx, track, path));
@@ -73,7 +86,7 @@ std::vector<MenuAction> deviceContextActions(UiContext& ctx, int track, const st
         }, ! ctx.recording && ! ctx.recordingRequested});
         for (const auto* label : {"Rename", "Edit Info Text"}) actions.push_back({label, {}, false});
         actions.push_back({"", {}, false});
-        actions.push_back({"Group", {}, false});
+        appendGroupActions(ctx, actions, editable);
         actions.push_back({"Save as Default Preset", {}, false});
         if (auto sources = sidechainActions(ctx, track, path[0]); ! sources.empty())
         {
@@ -83,6 +96,8 @@ std::vector<MenuAction> deviceContextActions(UiContext& ctx, int track, const st
             actions.push_back(std::move(sidechain));
         }
     }
+    else if (path.size() == 3) // a rack's child (DEV-15c: group inside the chain, ungroup a nested rack)
+        appendGroupActions(ctx, actions, editable);
     const auto alternative = plugins::nativeAlternativeFor(*device);
     if (alternative == plugins::NativeAlternative::None || song == nullptr) return actions;
     const std::string target = plugins::nativeAlternativeName(alternative);

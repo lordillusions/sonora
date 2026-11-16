@@ -685,6 +685,8 @@ Device readDevice(const XmlElement* x, std::vector<std::string>& warnings)
                     d.plain[key] = value.equalsIgnoreCase("true") ? 1.0 : value.equalsIgnoreCase("false") ? 0.0 : value.getDoubleValue();
                 }
         d.sidechain = readSidechain(x);
+        if (d.type == "Operator") // DEV-28a: user harmonics, MIDI routing and the Remoteable globals (plain leaves)
+            collectPlainLeaves(x, {}, d.plain, 0);
         if (d.type == "InstrumentVector") // DEV-28b: root enum/user leaves and the modulation matrix (docs/ALS_FORMAT.md)
             for (const auto* leaf : x->getChildIterator())
             {

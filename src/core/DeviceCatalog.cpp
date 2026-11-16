@@ -60,7 +60,7 @@ constexpr std::array kCatalog{
     CatalogEntry{"InstrumentGroupDevice", "Sonora Instrument Rack", R::Instrument, true},
     CatalogEntry{"DrumGroupDevice", "Sonora Drum Rack", R::Instrument, true},
     CatalogEntry{"AudioEffectGroupDevice", "Audio Effect Rack", R::AudioEffect, true},
-    CatalogEntry{"Operator", "Operator", R::Instrument, false},
+    CatalogEntry{"Operator", "Operator", R::Instrument, true}, // DEV-28a
     CatalogEntry{"UltraAnalog", "Analog", R::Instrument, false},
     CatalogEntry{"Drift", "Drift", R::Instrument, false},
     CatalogEntry{"InstrumentMeld", "Meld", R::Instrument, false},

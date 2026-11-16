@@ -127,6 +127,13 @@ ReferenceFace* addWavetableFace(Widget& parent, const model::Device&, devices::D
 ReferenceFace* addTensionFace(Widget& parent, devices::DeviceProcessor*, ReferenceFace::Tag tag);
 // The text Tension's face shows for `parameter` at `value` (the reference's value laws, Tension::filterHz ...).
 std::string tensionValueText(const devices::DeviceProcessor& tension, int parameter, float value);
+// Operator (DEV-28a) face, OperatorFace.cpp; also adds the display's top (over the title band) to `parent` (the device box).
+// nullptr for any other processor.
+ReferenceFace* addOperatorFace(Widget& parent, devices::DeviceProcessor*, ReferenceFace::Tag tag);
+// The text Operator's face shows for `parameter` at `value` ("0.0 dB", "1.00 s", "12.0 kHz", "Sin").
+std::string operatorValueText(const devices::DeviceProcessor& op, int parameter, float value);
+// The page an Operator face shows: 0..3 oscillators A..D, 4 LFO, 5 Filter, 6 Pitch, 7 Global; -1 for other faces.
+int operatorFacePage(const ReferenceFace& face);
 // Channel EQ (`ChannelEq`, DEV-30) face, ChannelEqFace.cpp; nullptr for any other processor. `model` marks the knobs that
 // follow a rack macro.
 ReferenceFace* addChannelEqFace(Widget& parent, const model::Device& model, devices::DeviceProcessor*, ReferenceFace::Tag tag);

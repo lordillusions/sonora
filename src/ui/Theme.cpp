@@ -108,6 +108,10 @@ Theme::Theme()
         {"Modulation", 0x008cad},
         {"RangeEditField", 0x00cadb},
         {"MacroAssignment", 0x5cc83a}, // UI-66: rack Map mode (an approximation; a loaded .ask theme overrides it)
+        {"Operator1", 0xe0d825}, // DEV-28a: Operator's oscillator colours A..D (the reference's light and dark themes agree)
+        {"Operator2", 0x29d6cd},
+        {"Operator3", 0x6571f6},
+        {"Operator4", 0xf3751b},
     };
     for (const auto& [k, v] : defaults)
         colors_[k] = rgb(v);
