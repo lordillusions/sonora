@@ -158,6 +158,8 @@ private:
     void spectrumOf(const float* impulse, int length, float* spectrum);
     void synthesise(long long t);
     float lowLatencyFilter(int channel, float x);
+    // 1 when the face's Bypass or the device's on/off button (DeviceProcessor bypass) is set.
+    float bypassTarget() const { return value(Bypass) >= 0.5f || isBypassed() ? 1.0f : 0.0f; }
 
     juce::dsp::FFT& fft(int size);
 

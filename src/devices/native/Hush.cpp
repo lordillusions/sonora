@@ -324,7 +324,7 @@ void Hush::reset()
     mix_.setCurrentAndTargetValue(value(Mix) / 100.0f);
     wetGain_.setCurrentAndTargetValue(juce::Decibels::decibelsToGain(value(WetTrim)));
     outGain_.setCurrentAndTargetValue(juce::Decibels::decibelsToGain(value(OutTrim)));
-    bypassMix_.setCurrentAndTargetValue(value(Bypass) >= 0.5f ? 1.0f : 0.0f);
+    bypassMix_.setCurrentAndTargetValue(bypassTarget());
 }
 
 void Hush::setSidechain(const juce::AudioBuffer<float>* audio, float gain)
@@ -379,7 +379,7 @@ void Hush::updateDerived()
     mix_.setTargetValue(value(Mix) / 100.0f);
     wetGain_.setTargetValue(juce::Decibels::decibelsToGain(value(WetTrim)));
     outGain_.setTargetValue(juce::Decibels::decibelsToGain(value(OutTrim)));
-    bypassMix_.setTargetValue(value(Bypass) >= 0.5f ? 1.0f : 0.0f);
+    bypassMix_.setTargetValue(bypassTarget());
 }
 
 namespace
@@ -780,6 +780,9 @@ void Hush::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
     const bool ms = value(StereoMode) >= 0.5f;
     const bool delta = value(Delta) >= 0.5f;
     const bool listening = std::lround(value(BandListen)) > 0;
+    // The device's on/off button (DeviceProcessor bypass) and the face's own Bypass both fade to the delayed dry
+    // signal, so the latency the engine compensates stays the same and switching does not click.
+    bypassMix_.setTargetValue(bypassTarget());
 
     for (int i = 0; i < n; ++i)
     {

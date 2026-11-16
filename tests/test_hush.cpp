@@ -188,3 +188,39 @@ TEST_CASE("hush: depth curve shapes")
     bands[0].enabled = false;
     CHECK_NEAR(evaluate(bands, 4000, 0).curve, 0.0, 1e-6);
 }
+
+TEST_CASE("hush: the device's on/off button fades to the delayed dry signal and back")
+{
+    // Owner: switching Hush off with the device's on/off button made no difference (its process() ignored the device
+    // bypass and only read its own Bypass parameter).
+    const int n = 48000 * 3;
+    const auto in = noisePlusTone(n, 0.05f, 0.5f, 1000);
+    H h;
+    h.setParameter(H::Depth, 10.0f);
+    h.prepare(kRate, 512);
+    juce::AudioBuffer<float> out(in);
+    juce::MidiBuffer midi;
+    for (int start = 0; start < n; start += 512)
+    {
+        h.setBypassed(start >= 48000 && start < 96000); // second 1: off; seconds 0 and 2: on
+        const int len = std::min(512, n - start);
+        juce::AudioBuffer<float> view(out.getArrayOfWritePointers(), 2, start, len);
+        h.process(view, midi);
+    }
+    const int lat = h.latencySamples();
+    double offErr = 0;
+    for (int s = 48000 + 2048; s < 96000; ++s) offErr = std::max(offErr, (double) std::abs(out.getSample(0, s) - in.getSample(0, s - lat)));
+    CHECK(offErr < 1e-4); // off: exactly the input, still delayed by the reported latency
+    const double dryTone = toneLevel(in, 30000, 12000, 1000);
+    CHECK(toneLevel(out, 30000 + lat, 12000, 1000) < 0.7 * dryTone);  // on: the resonance is cut
+    CHECK(toneLevel(out, 126000, 12000, 1000) < 0.7 * dryTone);       // on again after the off stretch
+    // The switch fades over 20 ms: no step larger than the signal's own sample-to-sample movement.
+    const auto maxStep = [&](int from, int to)
+    {
+        double m = 0;
+        for (int s = from; s < to; ++s) m = std::max(m, (double) std::abs(out.getSample(0, s) - out.getSample(0, s - 1)));
+        return m;
+    };
+    CHECK(maxStep(47990, 49200) < 1.3 * maxStep(20000, 40000));
+    CHECK(maxStep(95990, 97200) < 1.3 * maxStep(20000, 40000));
+}

@@ -199,8 +199,9 @@ Verified 2026-10-19 with `build-updates-rel/` (Release). Every step runs on this
 
 ## Not verified / next steps
 
-- **Clicking through Sparkle's own windows** (Install Update / Install and Relaunch / Skip) and the save prompt.
-  The autotest hook bypasses the windows; nobody clicked them.
+- **Sparkle's own windows**: on 2026-11-07 the owner updated the published 0.1.18 to 0.1.19 by hand through Check for
+  Updates and Sparkle's window. It worked, and the app in `/Applications` became 0.1.19. Still not clicked on purpose:
+  Skip, the save prompt and the postponed-while-playing path. The autotest hook bypasses the windows.
 - An earlier design asked "Restart Now / Later" when playback stopped. In two runs that dialog was answered
   "Restart Now" about 10 s after it appeared, with nobody intending to. Probably a keystroke meant for another window;
   the cause was not identified. That design was removed (Safe restart, point 3).
