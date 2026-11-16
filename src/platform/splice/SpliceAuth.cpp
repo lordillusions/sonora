@@ -52,7 +52,7 @@ TokenSet SpliceAuth::parseToken(const juce::String& json, int status)
     }
     out.accessToken = str(v.getProperty("access_token", {}));
     out.refreshToken = str(v.getProperty("refresh_token", {}));
-    const int64_t expiresIn = (int64_t) v.getProperty("expires_in", 3600);
+    const int64_t expiresIn = static_cast<int64_t>((juce::int64) v.getProperty("expires_in", 3600));
     out.expiresAtMs = juce::Time::currentTimeMillis() + expiresIn * 1000;
     if (out.accessToken.empty()) { out.error = status >= 400 ? ("http " + std::to_string(status)) : "no token"; return out; }
     out.ok = true;

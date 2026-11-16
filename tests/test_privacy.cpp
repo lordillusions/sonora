@@ -8,13 +8,29 @@
 
 using namespace sonora;
 
+#if defined(_WIN32)
+extern "C" __declspec(dllimport) unsigned long __stdcall GetLongPathNameW(const wchar_t*, wchar_t*, unsigned long);
+#endif
+
 namespace
 {
+// The temp folder in its long form. Windows CI's TEMP is a short (8.3) path (C:\Users\RUNNER~1\...) while links
+// resolve to the long one (...\runneradmin\...), so link targets would never look like they are inside the fake home.
+juce::File longTempFolder()
+{
+    auto temp = juce::File::getSpecialLocation(juce::File::tempDirectory);
+#if defined(_WIN32)
+    wchar_t buffer[4096] = {};
+    if (const auto n = GetLongPathNameW(temp.getFullPathName().toWideCharPointer(), buffer, 4096); n > 0 && n < 4096)
+        temp = juce::File(juce::String(buffer));
+#endif
+    return temp;
+}
+
 // A fake tree: <root>/Users/me is the home folder, <root>/Volumes holds the other volumes.
 struct FakeHome
 {
-    juce::File root = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                          .getChildFile("sonora-privacy-" + juce::String::toHexString(juce::Random::getSystemRandom().nextInt64()));
+    juce::File root = longTempFolder().getChildFile("sonora-privacy-" + juce::String::toHexString(juce::Random::getSystemRandom().nextInt64()));
     juce::File home = root.getChildFile("Users/me");
 
     FakeHome()
@@ -51,7 +67,7 @@ struct FakeHome
     {
         std::vector<std::string> seen;
         core::walkFolder(from, home, [&](const juce::File& file, bool) {
-            seen.push_back(file.getRelativePathFrom(root).toStdString());
+            seen.push_back(file.getRelativePathFrom(root).replaceCharacter('\\', '/').toStdString());
             return true;
         });
         std::sort(seen.begin(), seen.end());

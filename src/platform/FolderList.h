@@ -33,8 +33,12 @@ inline std::vector<FolderEntry> listFolder(const juce::File& folder)
     for (const auto& entry : juce::RangedDirectoryIterator(folder, false, "*", juce::File::findFilesAndDirectories | juce::File::ignoreHiddenFiles,
                                                            juce::File::FollowSymlinks::no))
     {
-        const bool link = entry.getFile().isSymbolicLink();
-        entries.push_back({entry.getFile(), entry.isDirectory() && ! link, link});
+        // Keep the caller's spelling of the folder: the iterator may give the long form of a path the caller holds in
+        // its short (8.3) form, and the guard / cycle checks compare paths.
+        if (entry.getFile().getFileName().startsWithChar('.')) continue; // hidden by name, as on macOS/Linux
+        const auto file = folder.getChildFile(entry.getFile().getFileName());
+        const bool link = file.isSymbolicLink();
+        entries.push_back({file, entry.isDirectory() && ! link, link});
     }
 #else
     DIR* dir = opendir(folder.getFullPathName().toRawUTF8());

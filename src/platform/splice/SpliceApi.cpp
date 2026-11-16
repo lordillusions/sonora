@@ -162,7 +162,7 @@ SpliceApi::DownloadInfo SpliceApi::parsePremium(const juce::String& json)
     if (! sample.isObject()) return out;
     out.url = str(sample.getProperty("url", {}));
     out.path = str(sample.getProperty("path", {}));
-    out.size = (int64_t) sample.getProperty("file_size", 0);
+    out.size = static_cast<int64_t>((juce::int64) sample.getProperty("file_size", 0));
     out.ok = ! out.url.empty();
     return out;
 }
