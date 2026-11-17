@@ -4,6 +4,7 @@
 #include "devices/MidiGenerator.h"
 #include "devices/RackProcessor.h"
 #include "devices/native/Correlation.h"
+#include "devices/native/Kickstract.h"
 #include "devices/native/Seraph.h"
 #include "devices/native/PhaseAlign.h"
 #include "devices/native/Stutter.h"
@@ -14,6 +15,7 @@
 #include "ui/GeneratorClipUi.h"
 #include "ui/Painter.h"
 #include "ui/views/CorrelationFace.h"
+#include "ui/views/KickstractFace.h"
 #include "ui/views/SeraphFace.h"
 #include "ui/views/PhaseAlignFace.h"
 #include "ui/views/StutterFace.h"
@@ -37,6 +39,7 @@ ProFace* addProFace(Widget& parent, devices::DeviceProcessor* processor)
     if (auto* meter = dynamic_cast<devices::Correlation*>(processor)) return parent.add<CorrelationFace>(*meter);
     if (auto* phrase = dynamic_cast<devices::Phrase*>(processor)) return parent.add<PhraseFace>(*phrase); // PLG-25
     if (auto* seraph = dynamic_cast<devices::Seraph*>(processor)) return parent.add<SeraphFace>(*seraph);
+    if (auto* kick = dynamic_cast<devices::Kickstract*>(processor)) return parent.add<KickstractFace>(*kick); // PLG-17f
     return nullptr;
 }
 
@@ -148,10 +151,56 @@ void wireProFace(ProFace& face, std::function<UiContext*()> context, int trackIn
             });
         };
     }
+    if (auto* kick = dynamic_cast<KickstractFace*>(&face)) // PLG-17e: the timeline window from the face's button
+        kick->onOpenTimeline = [context, trackIndex, deviceIndex] {
+            auto* x = context();
+            if (x == nullptr) return;
+            if (const auto key = x->wavetableKey(trackIndex, deviceIndex, -1, -1); key && x->openKickstractTimeline) x->openKickstractTimeline(*key);
+        };
     if (auto* sweep = dynamic_cast<SweepFace*>(&face))
     {
         sweep->onSampleDropped = [context, trackIndex, deviceIndex](const std::string& path) {
             if (auto* x = context()) loadSweepSample(*x, trackIndex, deviceIndex, path);
+        };
+        // PLG-19d: the rendered sweep as a WAV, saved by hand or dragged out of the display onto a track (a Browser-style
+        // sample drag: the arrangement or the session puts it where it is let go). Renders go next to the set
+        // (Samples/Processed/Sweep), or to Music/Sonora/Sweep Renders for a set not saved yet.
+        sweep->onDragOut = [context, sweep] {
+            auto* x = context();
+            if (x == nullptr) return;
+            const auto& device = sweep->sweep();
+            juce::File folder = juce::File::getSpecialLocation(juce::File::userMusicDirectory).getChildFile("Sonora/Sweep Renders");
+            if (x->song != nullptr && ! x->song->sourcePath.empty())
+                folder = juce::File(juce::String::fromUTF8(x->song->sourcePath.c_str())).getParentDirectory().getChildFile("Samples/Processed/Sweep");
+            const bool sample = std::lround(device.getParameter(devices::Sweep::Source)) == devices::Sweep::Sample && ! device.sampleName().empty();
+            const bool up = std::lround(device.getParameter(devices::Sweep::Direction)) == devices::Sweep::Up;
+            const std::string name = (sample ? device.sampleName() : std::string("Sweep")) + (up ? " riser" : " downlifter");
+            const auto file = folder.getChildFile(juce::String::fromUTF8(name.c_str()) + ".wav").getNonexistentSibling();
+            std::string error;
+            if (! device.renderToFile(file, error)) { x->statusText = "Could not render the sweep: " + error; return; }
+            BrowserDrag drag;
+            drag.kind = BrowserDrag::Kind::Sample;
+            drag.value = file.getFullPathName().toStdString();
+            drag.files = {drag.value};
+            drag.label = file.getFileName().toStdString();
+            x->browserDrag = drag;
+            x->statusText = "Drop the sweep on a track";
+        };
+        sweep->onSaveWav = [context, sweep, alive = sweep->faceLifetime()] {
+            const auto& device = sweep->sweep();
+            const std::string base = device.sampleName().empty() ? std::string("Sonora Sweep") : device.sampleName() + " swell";
+            auto chooser = std::make_shared<juce::FileChooser>("Save the sweep as a WAV",
+                juce::File::getSpecialLocation(juce::File::userMusicDirectory).getChildFile(juce::String::fromUTF8(base.c_str()) + ".wav"), "*.wav");
+            chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
+                                 [context, chooser, sweep, alive](const juce::FileChooser& fc) {
+                if (alive.expired()) return; // the face (and its device) went away while the chooser was open
+                const auto file = fc.getResult();
+                if (file == juce::File()) return;
+                std::string error;
+                auto* x = context();
+                const bool ok = sweep->sweep().renderToFile(file.withFileExtension("wav"), error);
+                if (x != nullptr) x->statusText = ok ? "Saved " + file.getFileName().toStdString() : "Could not save the WAV: " + error;
+            });
         };
         sweep->onChooseSample = [context, trackIndex, deviceIndex] {
             auto chooser = std::make_shared<juce::FileChooser>("Load a sample into Sonora Sweep", juce::File(),
@@ -187,7 +236,7 @@ void wireProFace(ProFace& face, std::function<UiContext*()> context, int trackIn
 bool ProFaceWindowView::isProFaceDevice(const std::string& type)
 {
     return type == "SonoraStutter" || type == "SonoraSweep" || type == "SonoraPhaseAlign" || type == "SonoraCorrelation"
-           || type == "SonoraPhrase" || type == "SonoraSeraph";
+           || type == "SonoraPhrase" || type == "SonoraSeraph" || type == "SonoraKickstract";
 }
 
 std::optional<ProFaceWindowView::Site> ProFaceWindowView::find(const UiContext& x, const UiContext::WavetableKey& key)

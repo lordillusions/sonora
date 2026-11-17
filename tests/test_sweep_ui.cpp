@@ -67,8 +67,8 @@ TEST_CASE("sweep plugin: the full face; types, sources and Up/Down by click; a d
     CHECK(face.renderedMax().size() > 100);
 
     // Preview: one sweep without MIDI.
-    view.dispatchMouseDown(designAt(face, 1014, 30));
-    view.dispatchMouseUp(designAt(face, 1014, 30));
+    view.dispatchMouseDown(designAt(face, 1084, 30));
+    view.dispatchMouseUp(designAt(face, 1084, 30));
     juce::AudioBuffer<float> block(2, 512);
     float peak = 0;
     for (int i = 0; i < 40; ++i)
@@ -94,6 +94,29 @@ TEST_CASE("sweep plugin: the full face; types, sources and Up/Down by click; a d
     restored.setStateInformation(state.getData(), (int) state.getSize());
     CHECK(restored.buildLog.empty());
     CHECK(restored.device().samplePath() == crash.getFullPathName().toStdString());
+
+    // PLG-19d: a reverb swell type, the character pad and the Region by mouse; Save WAV is offered.
+    CHECK(face.onSaveWav != nullptr);
+    CHECK(face.onDragOut != nullptr);
+    REQUIRE(face.controlCentre("Save WAV\xE2\x80\xA6").has_value());
+    REQUIRE(click(view, face, "Vocal Swell"));
+    CHECK(p.device().reverbSwell());
+    CHECK(face.headline().rfind("Reverb swell", 0) == 0);
+    CHECK(std::lround(p.device().getParameter(W::SwellMode)) == W::ReverbSwell);
+    view.dispatchMouseDown(designAt(face, 248 + 168 * 0.9f, 404 + 160 * 0.1f)); // the pad's top right: Bloom
+    view.dispatchMouseDrag(designAt(face, 248 + 168 * 0.8f, 404 + 160 * 0.2f));
+    view.dispatchMouseUp(designAt(face, 248 + 168 * 0.8f, 404 + 160 * 0.2f));
+    CHECK(std::abs(p.device().getParameter(W::CharacterX) - 0.8f) < 0.02f);
+    CHECK(std::abs(p.device().getParameter(W::CharacterY) - 0.8f) < 0.02f);
+    CHECK(p.device().matchingType() == -1);
+    view.dispatchMouseDown(designAt(face, 28 + 2, 660)); // the Region's start handle, dragged to 20 %
+    view.dispatchMouseDrag(designAt(face, 28 + 182 * 0.2f, 660));
+    view.dispatchMouseUp(designAt(face, 28 + 182 * 0.2f, 660));
+    CHECK(std::abs(p.device().getParameter(W::RegionStart) - 0.2f) < 0.02f);
+    CHECK(std::abs(p.device().getParameter(W::RegionEnd) - 1.0f) < 1e-6f);
+    for (int i = 0; i < 8; ++i) view.tickTree(); // the face prepares the sample again once the settings rest
+    CHECK(std::abs(p.device().hitSeconds() - 0.8) < 0.01);
+    CHECK(gfx::renderToPng(view, (int) size.w, (int) size.h, 2.0f, testFile("sonora_sweep_plugin_swell.png").getFullPathName().toStdString()));
     p.editorBeingDeleted(editor.get());
     editor.reset();
     crash.deleteFile();
@@ -138,6 +161,91 @@ TEST_CASE("sweep: the compact face in the app's chain takes a sample dropped fro
     window.sync();
     REQUIRE(window.face() != nullptr);
     CHECK(window.face()->layoutMode() == ui::ProFace::Layout::Full);
+
+    // PLG-19d: dragging the display out renders the sweep next to the set and starts a sample drag (a track takes it).
+    const auto project = testFile("sonora_sweep_dragout");
+    project.deleteRecursively();
+    chain.song.sourcePath = project.getChildFile("Set.als").getFullPathName().toStdString();
+    auto* big = dynamic_cast<ui::SweepFace*>(window.face());
+    REQUIRE(big != nullptr);
+    REQUIRE(big->onDragOut != nullptr);
+    CHECK(big->onSaveWav != nullptr);
+    window.dispatchMouseDown(designAt(*big, 600, 180));
+    window.dispatchMouseDrag(designAt(*big, 620, 190));
+    window.dispatchMouseDrag(designAt(*big, 700, 260));
+    REQUIRE(chain.context.browserDrag.has_value());
+    CHECK(chain.context.browserDrag->kind == ui::BrowserDrag::Kind::Sample);
+    const juce::File rendered(juce::String::fromUTF8(chain.context.browserDrag->value.c_str()));
+    CHECK(rendered.existsAsFile());
+    CHECK(rendered.isAChildOf(project.getChildFile("Samples/Processed/Sweep")));
+    CHECK(rendered.getFileName() == "Sweep riser.wav");
+    chain.context.browserDrag.reset();
+    project.deleteRecursively();
     CHECK(gfx::renderToPng(window, (int) ui::SweepFace::kFull.w, (int) ui::SweepFace::kFull.h, 1.0f,
                            testFile("sonora_sweep_window.png").getFullPathName().toStdString()));
+}
+
+// The owner's crash (0.1.51): a sample dragged from the Browser onto Sweep in the device chain. The app's editDevice
+// rebuilds the views inside the edit (MainWindow's modelChanged lays the window out again synchronously, to drop pointers
+// into the old graph), so the face that took the drop is deleted before its browserDrop returns; it then called repaint()
+// on itself and walked freed parent pointers. Run with MallocScribble=1 to see the old code crash deterministically.
+TEST_CASE("sweep: a Browser drop on the chain face survives the app rebuilding the chain inside the edit")
+{
+    Chain chain(model::TrackKind::Midi, {devices::nativeDeviceModel("SonoraSweep")});
+    ui::MainLayout root(chain.context);
+    const auto crash = writeCrash();
+    int nextId = 100, rebuilds = 0;
+    // What AppController::editDevice + afterEdit + MainWindow's modelChanged do: a new device id (a fresh processor),
+    // a new graph, and the views rebuilt before the call returns.
+    chain.context.editDevice = [&](int track, int device, std::function<void(model::Device&)> fn, std::string label) {
+        chain.edits.push_back(label);
+        auto& d = chain.song.tracks[(size_t) track].devices[(size_t) device];
+        fn(d);
+        d.id = nextId++;
+        chain.context.graph = nullptr;
+        root.layout(); // the app drops view pointers before processors die
+        chain.graph = engine::buildGraph(chain.song, chain.build, chain.samples);
+        chain.graph.graph->prepare(48000.0, 512);
+        chain.context.graph = chain.graph.graph.get();
+        chain.context.controls = chain.graph.graph->controls;
+        root.layout();
+        root.markDirty();
+        ++rebuilds;
+    };
+    root.setBounds({0, 0, 1500, 900});
+    root.layout();
+    std::vector<ui::SweepFace*> faces;
+    collect(root, faces);
+    REQUIRE(faces.size() == 1);
+    auto* before = faces[0];
+    REQUIRE(before->onSampleDropped != nullptr);
+
+    ui::BrowserDrag drag;
+    drag.kind = ui::BrowserDrag::Kind::Sample;
+    drag.value = crash.getFullPathName().toStdString();
+    drag.label = "sonora_sweep_crash";
+    const auto e = designAt(*before, 150, 80);
+    chain.context.browserDrag = drag;
+    root.dispatchMouseDrag(e);
+    root.dispatchMouseUp(e);
+    REQUIRE(rebuilds == 1);
+    CHECK(chain.edits.size() == 1);
+    faces.clear();
+    collect(root, faces);
+    REQUIRE(faces.size() == 1); // the face that took the drop was replaced: the new one shows the new processor
+    auto* sweep = dynamic_cast<devices::Sweep*>(chain.processor());
+    REQUIRE(sweep != nullptr);
+    CHECK(&faces[0]->sweep() == sweep);
+    CHECK(sweep->hasSample());
+    CHECK(std::lround(sweep->getParameter(W::Source)) == W::Sample);
+    root.tickTree();
+    CHECK(gfx::renderToPng(root, 1500, 900, 1.0f, testFile("sonora_sweep_chain_dropped.png").getFullPathName().toStdString()));
+
+    // The same drop on the face in its own window (ProFaceWindowView) and a second drop on the new chain face.
+    const auto e2 = designAt(*faces[0], 150, 80);
+    chain.context.browserDrag = drag;
+    root.dispatchMouseDrag(e2);
+    root.dispatchMouseUp(e2);
+    CHECK(rebuilds == 2);
+    crash.deleteFile();
 }

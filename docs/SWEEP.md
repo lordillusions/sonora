@@ -31,6 +31,35 @@ integral of the rising playback speed over the sweep) so the reversed audio ends
 sweep's end: reverse chord going up, reverse crash, reverse vocal. Prepared buffers are swapped to the audio thread
 lock-free (the audio thread acknowledges what it uses; older ones are freed on the message thread).
 
+## Reverb swells (PLG-19d, 0.1.52)
+
+Owner (2026-11-18): bring Sweep closer to a commercial "reverse reverb swell" plug-in and the technique in its demo video.
+The technique (decades old, nothing product specific): render a sound's reverb **on its own** (wet only), **reverse**
+it, and place it so it rises out of silence and ends exactly where the dry sound starts: the sound breathes in before
+it hits (vocal swells, snare pre-verbs). What that category of tools does, and what Sweep lacked before 0.1.52:
+
+| Feature | Sweep 0.1.51 | 0.1.52 |
+|---|---|---|
+| Only the reverb tail reversed (the dry sound is not in the swell) | no: the whole sample reversed + a reverb under it | **Reverb Swell** mode (default); the old one stays as **Reversed Sample** |
+| Several reverb characters, blended on an XY pad | one small Freeverb | **Hall** (8-line FDN), **Shimmer** (octave up), **Bloom** (spectral smear), **Grain** (grain cloud), XY blend |
+| Tail length tied to the swell length | Tail 1-5 s | **Fit** (decay = 1.2 x Length at the tempo) or Decay 0.4-12 s |
+| Tone of the tail | no | **Damp** |
+| The dry hit after the swell | no | **Hit** (at the drop; Down: with the note, then the tail = a reverb throw) |
+| Use part of the sample | no | **Region** (two handles on the waveform; a swell uses up to 12 s) |
+| Get the result out as audio | Clip menu only | **Save WAV...** and **drag the display** onto a track (app) or into the host (VST3) |
+| One-click starting points | 10 synth types | + Vocal Swell, Snare Pre-Verb, Shimmer Rise, Spectral Bloom, Grain Cloud, Reverb Throw |
+| Capture the track's own audio, MSEG shape, export forward + reversed | no | not yet: PLG-19e |
+
+Engine: `src/devices/native/SweepSwell.{h,cpp}` (offline, message thread; each character is normalised to the same
+loudness before the blend, the blend to the dry peak). The Sample is prepared again when a swell setting, the Region,
+Length or the tempo (with Fit) changes: the face does it once the settings rest, the VST3 from its 20 Hz timer.
+Prepared buffers are freed only a second after a newer one replaced them (the audio thread may still be loading the old
+one). Measured (`sonora_tests "sweep swell"`, Debug): each character renders a 2.5 s tail in 4-23 ms; a 4 s Fit swell of a
+0.5 s hit: RMS per second 0.003 / 0.013 / 0.057 / 0.213, the last 100 ms 0.452, silence after the drop with Hit off, the
+click within 1 ms of the drop with Hit on; Shimmer puts 75 % of the 100 Hz-10 kHz energy at the octave of a 440 Hz
+burst (Hall 0 %); Damp 1 cuts the energy above 4 kHz by >30 % in every character; Region 0.5..1 plays the second half's
+1 kHz (998 Hz measured).
+
 ## Types, Preview
 
 `Sweep::types()`: White Riser, Pink Wash, Supersaw Rise, Tension Gate, Whoosh Up, Reverse Crash, Sub Drop, Downlifter,
@@ -40,21 +69,26 @@ C3 (C2 for Sine) without MIDI; a second click stops it with a short fade.
 
 ## Face (`src/ui/views/SweepFace.cpp`, ProFace kit: docs/PRO_FACES.md)
 
-Full (1100 x 700): what it makes ("Riser . 4 Bars . 6.9 s at 139 BPM") and how to place the note; Preview; TYPE (one
-click) and SAMPLE (name, Choose..., drop); the display: the sweep itself rendered offline (22.05 kHz, time compressed to
-6 s for long sweeps, re-rendered when the settings rest for 4 ticks) under the filter / pitch / level curves, the bars, the
-drop (or the hit) marked, the play head; SOURCE, Up/Down, LENGTH; FILTER (Low, High, Reso, Air), PITCH (Pitch, Detune,
-Chord), SHAPE (Curve, Swell, Width, Rhythm), OUT (Level, Tail, Reverse sample); the help line. Compact (the chain,
-720 x 170): the display, the sources, Up/Down, Preview, Length, Swell, High, Level.
+Full (1180 x 760, PLG-19d): what it makes ("Reverb swell . 2 Bars . 4.0 s at 120 BPM"), Save WAV... and Preview; TYPE in
+two groups (REVERB SWELLS of a sample, SYNTH SWEEPS); SAMPLE (name, the waveform with the Region's two handles, Choose...,
+drop); the display: the sweep itself rendered offline (22.05 kHz, time compressed to 6 s for long sweeps, re-rendered
+when the settings rest for 4 ticks) under the filter / pitch / level curves, the bars, the drop (+ HIT) marked, the play
+head; drag it out to get the WAV; SOURCE, Up/Down, LENGTH; SWELL (the character pad with each corner's share, Decay,
+Damp, Hit, Reverb Swell / Reversed Sample, Fit to length, Reverse; veiled with what to do over a generator) and FILTER
+(Low, High, Reso, Air); PITCH (Pitch, Detune, Chord), SHAPE (Curve, Swell, Width, Rhythm), OUT (Level); the help line.
+Compact (the chain, 720 x 170): the display, the sources, Up/Down, Preview, Length, Swell, High, Level.
 
 **Samples from the Browser**: drop a sample from Sonora's Browser (or the Finder) anywhere on the face: the path goes into
-the device's native content as one undoable edit ("Load Sample", `ui::loadSweepSample`) and Source becomes Sample. In the
+the device's native content as one undoable edit ("Load Sample", `ui::loadSweepSample`) and Source becomes Sample. That
+edit rebuilds the device chain while the drop is running; 0.1.51 crashed there (the face repainted itself after it was
+deleted, PLG-19c; docs/PRO_FACES.md "Callbacks that edit the app"). In the
 VST3, drop a file on the window or use Choose....
 
 ## Clip > Make Riser / Make Downlifter from Clip (`src/engine/SweepFromClip.cpp`)
 
-Right-click an audio clip in the arrangement: 1, 2, 4 or 8 bars. The clip's sample (first 20 s) is rendered by the same
-device offline at the set's tempo (Low 400 Hz, High 20 kHz, Swell 70 %, Output 0 dB) into
+Right-click an audio clip in the arrangement: 1, 2, 4 or 8 bars. The clip's sample (first 20 s; a reverb swell uses the
+first 12 s) is rendered by the same device offline at the set's tempo (Low 400 Hz, High 20 kHz, Swell 70 %, Output 0 dB;
+since 0.1.52 a Reverb Swell fitted to the length: the clip's own reverb reversed into the clip, or thrown after it) into
 `Samples/Processed/Sweep/<name> [riser].wav`, and a new audio track ("Riser" / "Downlifter", same group) under the clip's
 track gets the clip: a riser ends where the clip starts, a downlifter starts with it. One undo step. Refused when there is
 not enough room before the clip.
@@ -72,3 +106,10 @@ not enough room before the clip.
   face with clicks on types, sources, Up/Down and Length, Preview sounding, a file dropped on the window
   (`sonora_sweep_plugin.png`); the compact face takes a Browser drop as one "Load Sample" edit (`sonora_sweep_chain.png`,
   `sonora_sweep_window.png`).
+- PLG-19c: `sonora_tests "sweep: a Browser drop on the chain face survives"` (editDevice rebuilds the chain like the app;
+  segfault, exit 139, before the fix); app autotest `SONORA_SWEEP_DROP_AUTOTEST="0:/path/sample.wav"` with
+  `SONORA_DATA_FOLDER` (two drops on the real face: 0.1.51 exit 139, now "survived; Source Sample ... undo Load Sample").
+- PLG-19d: `sonora_tests "sweep swell"` (above), the VST3's full face by mouse (Vocal Swell, the pad, the Region handle,
+  `sonora_sweep_plugin_swell.png`), the window face's drag-out (a sample drag of `Samples/Processed/Sweep/Sweep riser.wav`).
+  `fx_render "<path>/Sonora Sweep.vst3" --in silence.wav --out riser.wav --tempo 120 --note 60` (`--note` is new): the
+  25 parameters, a 4-bar riser of exactly 8.000 s rising every second.

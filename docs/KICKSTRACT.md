@@ -33,10 +33,18 @@ right after the hit, then play them together. Kickstract does that live, on ever
 
 ## Face (`src/ui/views/KickstractFace.cpp`)
 
-DETECT (Threshold, Retrigger, Input, Chop, detector meter with the threshold line and a hit lamp) | SPECTRUM (input in
-grey, result in each band's colour; drag the split lines, double-click resets; band regions glow with their gate) |
-LAST KICK (the captured hit: input in grey, each band after its gate, the result's waveform, each band's gate envelope;
-drag the dots to set Length and Fade) | LOW / MID / HIGH strips | FINISH (Punch, Drive, Output, Listen).
+Since PLG-17f (0.1.52, owner: "more standard with the other Sonora plug-ins") the face is a ProFace (docs/PRO_FACES.md):
+the dark studio look of Stutter, Sweep, Phrase and Seraph, accent orange `0xFFFF6A3D` (the Low band's colour).
+
+Full (1180 x 570; the VST3 window letterboxed on `pro::kBackground`, and the app's own window from the chain's window
+icon): the wordmark, the bands in words ("Low < 150 Hz < Mid < 1.50 kHz < High  ·  Chop on"), LISTEN (Kick / Removed /
+Input) and Timeline on top; DETECT (Threshold, Retrigger, Input, Chop, the detector meter with the threshold line and a
+hit lamp); SPECTRUM (input in grey, result in each band's colour; drag the split lines, double-click resets; band
+regions glow with their gate); LAST KICK (the captured hit: input in grey, each band after its gate, the result's
+waveform, each band's gate envelope; drag the dots: top = Length, middle = Fade); LOW / MID / HIGH panels in their
+colours (On, Solo, Length, Fade, Gain, the gate level as a lit strip); FINISH (Punch, Drive, Output); the help line.
+Compact (1100 x 170, the device chain): the two displays (handles work there too), the three bands (On, S, Length,
+Fade, Gain), Listen, Punch and Output. MIDI mapping through the ProFace kit (`wireProFace`).
 
 TIMELINE window (PLG-17e, `src/ui/views/KickstractTimeline.cpp`): the face's Timeline button opens it (the app: its own
 window, `app/AppKickstractWindow.cpp`; the VST3: a window owned by the editor). Three lanes scroll live: Input (delayed, so it

@@ -5,6 +5,7 @@
 #include "plugin/ProFaceEditor.h"
 
 #include <memory>
+#include <string>
 
 namespace sonora::ui { class SweepFace; }
 
@@ -17,6 +18,9 @@ class SweepPluginEditor final : public ProFaceEditor
 public:
     explicit SweepPluginEditor(SweepPlugin&);
     ui::SweepFace& face() { return *face_; }
+    // Where a dragged-out render is written (the host copies or references it).
+    static juce::File renderFolder();
+    std::string dragName() const;
 
 private:
     SweepPlugin& plugin_;

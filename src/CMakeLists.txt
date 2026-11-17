@@ -160,6 +160,7 @@ add_library(sonora_engine STATIC
     devices/native/PhaseAlign.cpp
     devices/native/Correlation.cpp
     devices/native/Sweep.cpp
+    devices/native/SweepSwell.cpp
     devices/native/Seraph.cpp
     devices/native/SeraphVoice.cpp
     devices/native/SeraphGlottis.cpp

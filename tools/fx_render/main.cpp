@@ -4,8 +4,9 @@
 //   fx_render <plugin> --params                       list parameters: index, name, default, steps, text at 0/.25/.5/.75/1
 //   fx_render <plugin> --editor-size                  the editor's default size in points
 //   fx_render <plugin> --in in.wav --out out.wav [--sc key.wav] [--set "Name=0.5"] [--text "Name=12 dB"]
-//             [--rate 48000] [--block 512] [--state-in s.bin] [--state-out s.bin] [--tempo 120]
+//             [--rate 48000] [--block 512] [--state-in s.bin] [--state-out s.bin] [--tempo 120] [--note 60]
 //
+// --note sends a note-on at sample 0 (instruments: Sonora Sweep plays one sweep; the input WAV only sets the length).
 // --tempo gives the plug-in a playing transport from beat 0 at that tempo (tempo-synced LFOs, gates); without it
 // the plug-in sees no host transport.
 //
@@ -81,7 +82,7 @@ int run(int argc, char** argv)
     juce::StringArray sets, texts;
     bool listParams = false, editorSize = false;
     double rate = 48000.0, tempo = 0.0;
-    int block = 512;
+    int block = 512, note = -1;
     for (int i = 2; i < argc; ++i)
     {
         const juce::String a = argv[i];
@@ -98,6 +99,7 @@ int run(int argc, char** argv)
         else if (a == "--state-in") stateIn = next();
         else if (a == "--state-out") stateOut = next();
         else if (a == "--tempo") tempo = next().getDoubleValue();
+        else if (a == "--note") note = juce::jlimit(0, 127, next().getIntValue());
         else
         {
             std::fprintf(stderr, "unknown option %s\n", a.toRawUTF8());
@@ -224,6 +226,7 @@ int run(int argc, char** argv)
                     work.copyFrom(2 + ch, 0, *key, juce::jmin(ch, key->getNumChannels() - 1), start,
                                   juce::jmin(n, key->getNumSamples() - start));
         midi.clear();
+        if (start == 0 && note >= 0) midi.addEvent(juce::MidiMessage::noteOn(1, note, (juce::uint8) 100), 0);
         plugin->processBlock(work, midi);
         if (transport != nullptr) transport->advance(n);
         for (int ch = 0; ch < 2; ++ch) out.copyFrom(ch, start, work, ch, 0, n);

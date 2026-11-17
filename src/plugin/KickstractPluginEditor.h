@@ -1,5 +1,6 @@
 #pragma once
-// The Sonora Kickstract VST3's window (PLG-17): a slim header above the shared KickstractFace on a Skia canvas.
+// The Sonora Kickstract VST3's window (PLG-17): the shared KickstractFace's full layout on a Skia canvas, letterboxed on
+// the ProFace background like Sonora's other plug-ins (PLG-17f).
 
 #include "ui/RootWidget.h"
 #include "ui/UiContext.h"
@@ -16,16 +17,15 @@ namespace sonora::plugin
 class KickstractPlugin;
 
 // Root of the plug-in window. The root never receives input itself (RootWidget hands events to children), so the face
-// is a child that fills the window below the header.
+// is a child, scaled to fit and centred.
 class KickstractView final : public ui::RootWidget
 {
 public:
-    static constexpr float kHeader = 24.0f, kWidth = 1110.0f, kHeight = 330.0f;
+    static constexpr float kWidth = 1003.0f, kHeight = 484.5f; // the full face at 85 %
     KickstractView(ui::UiContext&, KickstractPlugin&);
     ui::KickstractFace& face() { return *face_; }
     void layout() override;
     void paint(SkCanvas&, const ui::Theme&) override;
-    const char* version = "";
 
 private:
     KickstractPlugin& plugin_;

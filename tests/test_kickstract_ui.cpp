@@ -138,36 +138,33 @@ TEST_CASE("kickstract plugin: host parameters, latency, state, window with real 
     CHECK(p.device().getParameter(K::bandParam(K::Low, K::BandFade)) > before + 10);
     p.device().setParameter(K::bandParam(K::Low, K::BandFade), before);
 
-    // Buttons: Listen "Rem", the Mid band's solo.
-    std::vector<ui::TextButton*> buttons;
-    collect(face, buttons);
-    auto press = [&](const std::string& label, int nth = 0) {
-        for (auto* b : buttons)
-            if (b->label() == label && nth-- == 0)
-            {
-                const auto e = at(*b, b->width() / 2, b->height() / 2);
-                view.dispatchMouseDown(e);
-                view.dispatchMouseUp(e);
-                return true;
-            }
-        return false;
-    };
-    REQUIRE(press("Rem"));
-    CHECK(std::lround(p.device().getParameter(K::Listen)) == K::ListenRemoved);
-    REQUIRE(press("Kick"));
-    REQUIRE(press("S", 1));
-    CHECK(p.device().getParameter(K::bandParam(K::Mid, K::BandSolo)) > 0.5f);
-    REQUIRE(press("S", 1));
-
-    // PLG-17e: the Timeline button opens the timeline window; it scrolls live, Freeze holds the picture.
-    auto* timelineButton = face.timelineButton();
-    REQUIRE(timelineButton != nullptr);
-    CHECK(timelineButton->visible);
-    {
-        const auto e = at(*timelineButton, timelineButton->width() / 2, timelineButton->height() / 2);
+    // Listen "Removed", the Mid band's Solo, the Timeline button: clicks on the face's own controls (design grid).
+    const auto clickDesign = [&](float dx, float dy) {
+        auto e = face.designToLocal(dx, dy);
+        e = at(face, e.x, e.y);
         view.dispatchMouseDown(e);
         view.dispatchMouseUp(e);
-    }
+    };
+    const auto clickLabel = [&](const std::string& label) {
+        const auto centre = face.controlCentre(label);
+        if (! centre) return false;
+        clickDesign(centre->first, centre->second);
+        return true;
+    };
+    CHECK(face.layoutMode() == ui::ProFace::Layout::Full);
+    REQUIRE(clickLabel("Removed"));
+    CHECK(std::lround(p.device().getParameter(K::Listen)) == K::ListenRemoved);
+    REQUIRE(clickLabel("Kick"));
+    CHECK(std::lround(p.device().getParameter(K::Listen)) == K::ListenKick);
+    CHECK(face.parameterAt(28 + 302 + 226, 373) == K::bandParam(K::Mid, K::BandSolo));
+    clickDesign(28 + 302 + 226, 373);
+    CHECK(p.device().getParameter(K::bandParam(K::Mid, K::BandSolo)) > 0.5f);
+    clickDesign(28 + 302 + 226, 373);
+    CHECK(p.device().getParameter(K::bandParam(K::Mid, K::BandSolo)) < 0.5f);
+    CHECK(face.parameterAt(28 + 302 + 92 + 44, 440) == K::bandParam(K::Mid, K::BandFade)); // the Mid band's FADE knob
+
+    // PLG-17e: the Timeline button opens the timeline window; it scrolls live, Freeze holds the picture.
+    REQUIRE(clickLabel("Timeline"));
     auto* timeline = window->timeline();
     REQUIRE(timeline != nullptr);
     auto* timelineRoot = dynamic_cast<ui::RootWidget*>(timeline->parent());
@@ -255,16 +252,23 @@ TEST_CASE("kickstract: the face in the app's device chain")
     REQUIRE(faces.size() == 1);
     auto* kick = dynamic_cast<K*>(graph.graph->nodes[0].processorForModelDevice[0]);
     REQUIRE(kick != nullptr);
-    CHECK(faces[0]->width() >= ui::KickstractFace::kPreferredWidth - 1);
+    CHECK(faces[0]->layoutMode() == ui::ProFace::Layout::Compact); // PLG-17f: the house look, compact in the chain
     juce::MidiBuffer midi;
     play(root, mix(4), [&](juce::AudioBuffer<float>& block) { kick->process(block, midi); });
     CHECK(faces[0]->kick().bins > 0);
-    // Knobs are MIDI-mappable device parameters.
-    int mapped = 0;
-    std::vector<ui::Widget*> all;
-    collect(*faces[0], all);
-    for (auto* w : all) mapped += w->midiTarget.has_value() ? 1 : 0;
-    CHECK(mapped >= 20);
+    // Knobs, switches and Listen are MIDI-mappable device parameters; the timeline opens from the face.
+    REQUIRE(faces[0]->mappingTarget != nullptr);
+    CHECK(faces[0]->mappingTarget(K::bandParam(K::Low, K::BandLength)).has_value());
+    CHECK(faces[0]->onOpenTimeline != nullptr);
+    int mappable = 0;
+    for (int p = 0; p < K::NumParams; ++p)
+        for (float y = 10; y < 166; y += 4)
+            for (float x = 640; x < 1100; x += 4)
+                if (faces[0]->parameterAt(x, y) == p) { ++mappable; x = 2000; y = 2000; }
+    CHECK(mappable >= 18); // 3 bands x 5, Listen, Punch, Output (the window has the rest)
+    // The split line drag works at the chain's scale too.
+    const float sy = faces[0]->spectrumArea().centreY();
+    REQUIRE(faces[0]->handleAt(faces[0]->xForHz(kick->highSplitHz()), sy) == 1);
     const auto png = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora_kickstract_chain.png");
     CHECK(gfx::renderToPng(root, 1500, 900, 1.0f, png.getFullPathName().toStdString()));
 }

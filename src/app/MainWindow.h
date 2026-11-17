@@ -34,6 +34,7 @@ private:
     void menuItemSelected(int itemId, int topLevelMenuIndex) override;
 
     void updateChrome();
+    void runSweepDropAutotest(); // PLG-19c: SONORA_SWEEP_DROP_AUTOTEST
     // REQ-3a: the menu bar is the registry of rebindable commands; defaults come from the shortcut column of each item.
     void buildShortcutRegistry();
     bool commandEnabled(int id);

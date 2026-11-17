@@ -7,34 +7,32 @@
 #include "ui/views/KickstractTimeline.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace sonora::plugin
 {
 KickstractView::KickstractView(ui::UiContext& context, KickstractPlugin& plugin) : RootWidget(context), plugin_(plugin)
 {
-    face_ = add<ui::KickstractFace>(&plugin_.device());
+    face_ = add<ui::KickstractFace>(plugin_.device());
 #ifdef JucePlugin_VersionString
-    version = JucePlugin_VersionString;
+    face_->version = JucePlugin_VersionString;
 #endif
 }
 
 void KickstractView::layout()
 {
-    face_->setBounds({8, kHeader + 4, std::max(0.0f, width() - 16), std::max(0.0f, height() - kHeader - 10)});
+    const auto r = localBounds();
+    const auto d = face_->fullSize();
+    const float s = std::max(0.01f, std::min(r.w / d.w, r.h / d.h));
+    const float w = d.w * s, h = d.h * s;
+    face_->setBounds({std::floor((r.w - w) * 0.5f), std::floor((r.h - h) * 0.5f), w, h});
 }
 
-void KickstractView::paint(SkCanvas& c, const ui::Theme& t)
+void KickstractView::paint(SkCanvas& c, const ui::Theme&)
 {
-    const auto r = localBounds();
-    ui::paint::fill(c, r, t.color("SurfaceBackground"));
-    ui::paint::fill(c, {0, 0, r.w, kHeader}, t.color("SurfaceHighlight"));
-    ui::paint::text(c, "Sonora Kickstract", {10, 0, 200, kHeader}, t.color("ControlForeground"), t.metrics.fontSize, ui::Align::Left, true);
-    // The band colours as a small logo strip next to the name.
-    for (int b = 0; b < devices::Kickstract::kBands; ++b)
-        ui::paint::fillRounded(c, {140.0f + (float) b * 12, kHeader * 0.5f - 4, 9, 8}, 2, ui::KickstractFace::kBandColour[b]);
-    std::string note = plugin_.buildLog.empty() ? std::string("v") + version : plugin_.buildLog.back();
-    ui::paint::text(c, note, {200, 0, std::max(0.0f, r.w - 210), kHeader}, t.color("TextDisabled"), t.metrics.smallFontSize,
-                    ui::Align::Right);
+    ui::paint::fill(c, localBounds(), ui::pro::kBackground);
+    if (! plugin_.buildLog.empty()) // a load note (a state that could not be restored) under the face
+        ui::paint::text(c, plugin_.buildLog.back(), {8, height() - 16, width() - 16, 14}, ui::pro::kDim, 10.5f, ui::Align::Right);
 }
 
 namespace
@@ -113,7 +111,9 @@ KickstractPluginEditor::KickstractPluginEditor(KickstractPlugin& plugin)
     canvas_ = std::make_unique<gfx::SkiaCanvasComponent>(view_);
     addAndMakeVisible(*canvas_);
     setResizable(true, true);
-    setResizeLimits(900, 220, 3000, 1400);
+    setResizeLimits(juce::roundToInt(KickstractView::kWidth * 0.6f), juce::roundToInt(KickstractView::kHeight * 0.6f),
+                    juce::roundToInt(KickstractView::kWidth * 2.5f), juce::roundToInt(KickstractView::kHeight * 2.5f));
+    if (auto* constrainer = getConstrainer()) constrainer->setFixedAspectRatio(KickstractView::kWidth / KickstractView::kHeight);
     setSize(juce::roundToInt(KickstractView::kWidth), juce::roundToInt(KickstractView::kHeight));
 }
 

@@ -15,6 +15,8 @@
 #include "ui/views/ArrangementView.h"
 #include "ui/views/AutomationEditor.h"
 #include "ui/views/DetailView.h"
+#include "ui/views/SweepFace.h"
+#include "devices/native/Sweep.h"
 #include "engine/ClipLauncher.h"
 
 #include <cctype>
@@ -169,6 +171,7 @@ MainWindow::MainWindow(AppController& app)
     setVisible(true);
     updateChrome();
     canvas_->grabKeyboardFocus();
+    runSweepDropAutotest(); // PLG-19c
 
     // The registry reads every menu, so it is built once the window (assistant dock, layout) exists.
     buildShortcutRegistry();
@@ -1056,4 +1059,67 @@ void MainWindow::menuItemSelected(int itemId, int)
         ui.modelChanged();
 }
 
+} // namespace sonora::app
+
+namespace sonora::app
+{
+namespace
+{
+void collectSweepFaces(ui::Widget& w, std::vector<ui::SweepFace*>& found)
+{
+    if (auto* face = dynamic_cast<ui::SweepFace*>(&w)) found.push_back(face);
+    for (const auto& child : w.children()) collectSweepFaces(*child, found);
+}
+} // namespace
+
+// SONORA_SWEEP_DROP_AUTOTEST="track:/path/to/sample.wav" (PLG-19c, the owner's crash in 0.1.51): 4 s after start puts a
+// Sonora Sweep on that (MIDI) track through the Browser's device drop and shows its devices; 2.5 s later releases a
+// Browser sample drag over the Sweep face in this window, the way a person drops a sample from the Browser on it, twice
+// (the face is rebuilt by the first drop), and logs what the device has ("[sonora] sweep drop:"). Does not save.
+void MainWindow::runSweepDropAutotest()
+{
+    const auto spec = juce::SystemStats::getEnvironmentVariable("SONORA_SWEEP_DROP_AUTOTEST", {});
+    if (spec.isEmpty()) return;
+    const int track = spec.upToFirstOccurrenceOf(":", false, false).getIntValue();
+    const auto path = spec.fromFirstOccurrenceOf(":", false, false).toStdString();
+    juce::Component::SafePointer<MainWindow> safe(this);
+    juce::Timer::callAfterDelay(4000, [safe, track] {
+        if (safe == nullptr || ! safe->app_.ui().dropBrowserItem) return;
+        auto& ui = safe->app_.ui();
+        ui.selectedTrack = track;
+        ui.detailVisible = true;
+        ui.detailTab = ui::DetailTab::Devices;
+        ui::BrowserDrag device{ui::BrowserDrag::Kind::NativeDevice, "SonoraSweep", "Sonora Sweep"};
+        ui.dropBrowserItem(device, track, 0, -1);
+        logf("sweep drop: added Sonora Sweep to track %d, \"%s\"", track, ui.statusText.c_str());
+    });
+    juce::Timer::callAfterDelay(6500, [safe, path] {
+        if (safe == nullptr) return;
+        for (int round = 1; round <= 2; ++round)
+        {
+            safe->layout_->layout();
+            std::vector<ui::SweepFace*> faces;
+            collectSweepFaces(*safe->layout_, faces);
+            if (faces.empty()) { logf("sweep drop: no Sonora Sweep face on screen"); return; }
+            const auto bounds = faces.front()->boundsInRoot();
+            ui::MouseEvent e;
+            e.x = bounds.x + bounds.w * 0.25f;
+            e.y = bounds.y + bounds.h * 0.5f;
+            ui::BrowserDrag sample{ui::BrowserDrag::Kind::Sample, path, juce::File(juce::String::fromUTF8(path.c_str())).getFileNameWithoutExtension().toStdString()};
+            safe->app_.ui().browserDrag = sample;
+            safe->layout_->dispatchMouseDrag(e);
+            safe->layout_->dispatchMouseUp(e); // the drop: a "Load Sample" device edit that rebuilds the chain
+            safe->layout_->markDirty();
+            logf("sweep drop: drop %d released over the face at %.0f,%.0f, \"%s\"", round, e.x, e.y, safe->app_.ui().statusText.c_str());
+        }
+        std::vector<ui::SweepFace*> faces;
+        collectSweepFaces(*safe->layout_, faces);
+        if (faces.empty()) { logf("sweep drop: the face is gone after the drops"); return; }
+        auto& sweep = faces.front()->sweep();
+        logf("sweep drop: survived; Source %s, sample \"%s\" (%s), undo \"%s\"",
+             devices::Sweep::kSourceNames[std::clamp((int) std::lround(sweep.getParameter(devices::Sweep::Source)), 0, devices::Sweep::kSources - 1)],
+             sweep.sampleName().c_str(), sweep.hasSample() ? "loaded" : "not loaded",
+             safe->app_.ui().undoLabel ? safe->app_.ui().undoLabel().c_str() : "");
+    });
+}
 } // namespace sonora::app

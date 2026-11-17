@@ -57,7 +57,11 @@ public:
     void reportEditorChanges();
 
 private:
-    void timerCallback() override { reportEditorChanges(); }
+    void timerCallback() override
+    {
+        reportEditorChanges();
+        device_.refreshSample(); // PLG-19d: a swell setting, Length or the tempo changed: prepare the sample again
+    }
 
     devices::Sweep device_;
     std::vector<juce::AudioProcessorParameter*> hostParameters_;

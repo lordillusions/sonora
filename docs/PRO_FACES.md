@@ -1,13 +1,13 @@
 # ProFace kit (PLG-23)
 
-The face kit of Sonora's own creative devices: Stutter, Sweep, Phase Align, Correlation, Phrase and Seraph (`src/ui/views/ProFace.h/.cpp`). It
+The face kit of Sonora's own creative devices: Stutter, Sweep, Phase Align, Correlation, Phrase, Seraph and Kickstract (PLG-17f) (`src/ui/views/ProFace.h/.cpp`). It
 replaced their first faces (0.1.32), which reused the device chain's small knobs and grey panels and were hard to read. These devices are Sonora's own, with no reference device, so AGENTS rule 7
 does not apply.
 
 ## Look
 
 Graphite panels on near black (`pro::kBackground`, `kPanel`, `kWell`), one accent per device (Phrase teal, Stutter pink, Sweep amber,
-Phase Align cyan, Correlation violet, Seraph gold `0xFFE7C26B`), big knobs with the value inside, the label under it and a caption that says what the value means
+Phase Align cyan, Correlation violet, Seraph gold `0xFFE7C26B`, Kickstract orange `0xFFFF6A3D`), big knobs with the value inside, the label under it and a caption that says what the value means
 ("4.9x slower", "overlap x1.9", "rises"), segmented choices, pads, a help line at the bottom that explains the control
 under the pointer (or, idle, what the device is doing), and a wordmark ("stutter." with "sonora" and the version).
 
@@ -53,3 +53,12 @@ Level and the gate's Length, Smooth, Depth, Swing), and custom areas for the vow
 phrase, scale and pattern choosers. Its gate lane is a `StepLane` and its preset row a `PresetBar` (PLG-25a). Tests: `sonora_tests "seraph plugin"` and
 `"seraph: the compact face"` (`sonora_seraph_plugin.png`, `sonora_seraph_chain.png`, `sonora_seraph_window.png`,
 `sonora_seraph_site.png`).
+
+## Callbacks that edit the app (PLG-19c)
+
+In the app a face's drop or button is often a device edit, and a device edit rebuilds the device chain before it
+returns (MainWindow's `modelChanged` lays the window out synchronously to drop pointers into the old graph): the face
+that ran the callback is deleted while its callback runs. Never touch the face after such a callback: run a copy of the
+std::function and return (Sweep's and Seraph's `browserDrop`); ProFace buttons and pads do this and skip their repaint
+once `faceLifetime()` expires. `sonora_tests "sweep: a Browser drop"` rebuilds the chain inside `editDevice` like the app
+(it segfaulted before), and `SONORA_SWEEP_DROP_AUTOTEST="track:/path.wav"` does it in the real window.

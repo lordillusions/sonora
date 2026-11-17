@@ -1,5 +1,7 @@
 #include "devices/native/Sweep.h"
 
+#include "devices/native/SweepSwell.h"
+
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
@@ -38,6 +40,15 @@ std::vector<ParameterInfo> sweepParameters()
     p[S::Chord] = makeParam("Chord", "Chord", 0, S::kChords - 1, 0, "", false,
                             std::vector<std::string>(S::kChordNames, S::kChordNames + S::kChords));
     p[S::Air] = makeParam("Air", "Air", 0, 1, 0, "%");
+    p[S::SwellMode] = makeParam("SwellMode", "Swell Mode", 0, 1, S::ReverbSwell, "", false,
+                                std::vector<std::string>(S::kSwellModeNames, S::kSwellModeNames + 2));
+    p[S::CharacterX] = makeParam("CharacterX", "Character X", 0, 1, 0.2f, "%");
+    p[S::CharacterY] = makeParam("CharacterY", "Character Y", 0, 1, 0.3f, "%");
+    p[S::Fit] = makeParam("Fit", "Fit to Length", 0, 1, 1, "", true);
+    p[S::Damp] = makeParam("Damp", "Damp", 0, 1, 0.35f, "%");
+    p[S::Hit] = makeParam("Hit", "Hit", 0, 1, 0, "%");
+    p[S::RegionStart] = makeParam("RegionStart", "Region Start", 0, 1, 0, "%");
+    p[S::RegionEnd] = makeParam("RegionEnd", "Region End", 0, 1, 1, "%");
     return p;
 }
 
@@ -160,6 +171,7 @@ void Sweep::reset()
     release_ = 0;
     stopFade_ = 1.0f;
     stopping_ = false;
+    hitPos_ = -1;
     for (auto& ch : svf_) ch[0] = ch[1] = 0;
     for (auto& ch : pink_) std::fill(std::begin(ch), std::end(ch), 0.0f);
     airState_[0] = airState_[1] = metalHp_[0] = metalHp_[1] = 0;
@@ -204,60 +216,189 @@ void Sweep::clearSample()
     samplePath_.clear();
     sampleName_.clear();
     pending_.store(nullptr, std::memory_order_release);
+    preparedKey_.clear();
     collectGarbage();
+}
+
+bool Sweep::reverbSwell() const
+{
+    return std::lround(value(Source)) == Sample && std::lround(value(SwellMode)) == ReverbSwell;
+}
+
+double Sweep::swellDecaySeconds() const
+{
+    if (value(Fit) > 0.5f) return std::clamp(lengthSeconds() * 1.2, 0.3, 40.0);
+    return tailSeconds(value(Tail));
+}
+
+// Everything a preparation depends on: when it changes, the sample is prepared again.
+std::vector<float> Sweep::preparationKey() const
+{
+    const bool reverse = value(Reverse) > 0.5f && std::lround(value(Direction)) == Up;
+    const bool swell = std::lround(value(SwellMode)) == ReverbSwell;
+    std::vector<float> key{(float) sampleRate_, reverse ? 1.0f : 0.0f, swell ? 1.0f : 0.0f, value(RegionStart), value(RegionEnd)};
+    if (swell)
+    {
+        // The decay only to 2 % (a tempo that drifts a little does not render again).
+        const double decay = swellDecaySeconds();
+        key.insert(key.end(), {value(CharacterX), value(CharacterY), value(Damp), (float) std::round(std::log(decay) * 50.0)});
+    }
+    else
+        key.push_back(value(Tail));
+    return key;
 }
 
 void Sweep::refreshSample()
 {
-    const float reverse = value(Reverse) > 0.5f && std::lround(value(Direction)) == Up ? 1.0f : 0.0f;
-    if (sourceAudio_ != nullptr && (std::abs(value(Tail) - preparedTail_) > 1e-4f || std::abs(reverse - preparedReverse_) > 0.5f))
-        prepareSample();
+    if (sourceAudio_ != nullptr && preparationKey() != preparedKey_) prepareSample();
+    else collectGarbage();
+}
+
+double Sweep::hitSeconds() const
+{
+    if (sourceAudio_ == nullptr) return 0.0;
+    const double a = std::clamp((double) value(RegionStart), 0.0, 1.0), b = std::clamp((double) value(RegionEnd), 0.0, 1.0);
+    double seconds = std::max(0.0, std::max(a, b) - std::min(a, b)) * sourceAudio_->getNumSamples() / sourceRate_;
+    if (std::lround(value(SwellMode)) == ReverbSwell) seconds = std::min(seconds, kMaxSwellSeconds);
+    return seconds;
 }
 
 void Sweep::prepareSample()
 {
     if (sourceAudio_ == nullptr) return;
-    // Resample to the device rate (linear: the sweep repitches it anyway), add the tail, reverse for Up.
+    // The Region of the source, resampled to the device rate (linear: the sweep repitches it anyway).
     const auto& src = *sourceAudio_;
+    const bool swell = std::lround(value(SwellMode)) == ReverbSwell;
+    const int total = src.getNumSamples();
+    double a = std::clamp((double) value(RegionStart), 0.0, 1.0), b = std::clamp((double) value(RegionEnd), 0.0, 1.0);
+    if (b < a) std::swap(a, b);
+    int from = std::clamp((int) (a * total), 0, total - 1);
+    int to = std::clamp((int) (b * total), from + 1, total);
+    if (to - from < (int) (0.01 * sourceRate_)) to = std::min(total, from + std::max(1, (int) (0.01 * sourceRate_)));
+    if (swell) to = std::min(to, from + (int) (kMaxSwellSeconds * sourceRate_));
+    const int length = std::max(1, to - from);
     const double ratio = sourceRate_ / sampleRate_;
-    const int frames = std::max(1, (int) ((double) src.getNumSamples() / ratio));
+    const int frames = std::max(1, (int) ((double) length / ratio));
     juce::AudioBuffer<float> resampled(2, frames);
     for (int ch = 0; ch < 2; ++ch)
     {
-        const float* in = src.getReadPointer(ch);
+        const float* in = src.getReadPointer(ch) + from;
         float* out = resampled.getWritePointer(ch);
         for (int s = 0; s < frames; ++s)
         {
             const double pos = (double) s * ratio;
-            const int i0 = std::min((int) pos, src.getNumSamples() - 1), i1 = std::min(i0 + 1, src.getNumSamples() - 1);
+            const int i0 = std::min((int) pos, length - 1), i1 = std::min(i0 + 1, length - 1);
             out[s] = in[i0] + (in[i1] - in[i0]) * (float) (pos - (double) i0);
         }
     }
+    // A cut inside the file gets 3 ms fades so the Hit and the tail do not start or stop with a click.
+    const int edge = std::min(frames / 4, (int) (0.003 * sampleRate_));
+    if (edge > 0)
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            if (from > 0) resampled.applyGainRamp(ch, 0, edge, 0.0f, 1.0f);
+            if (to < total) resampled.applyGainRamp(ch, frames - edge, edge, 1.0f, 0.0f);
+        }
     auto prepared = std::make_unique<Prepared>();
-    preparedTail_ = value(Tail);
-    preparedReverse_ = value(Reverse) > 0.5f && std::lround(value(Direction)) == Up ? 1.0f : 0.0f;
-    prepared->audio = withTail(resampled, sampleRate_, preparedTail_);
-    prepared->reversed = preparedReverse_ > 0.5f;
+    preparedKey_ = preparationKey();
+    const bool reverse = value(Reverse) > 0.5f && std::lround(value(Direction)) == Up;
+    if (swell)
+    {
+        swell::Settings settings;
+        settings.x = value(CharacterX);
+        settings.y = value(CharacterY);
+        settings.damp = value(Damp);
+        settings.decaySeconds = swellDecaySeconds();
+        prepared->audio = swell::renderTail(resampled, sampleRate_, settings);
+    }
+    else
+        prepared->audio = withTail(resampled, sampleRate_, value(Tail));
+    prepared->hit = std::move(resampled);
+    prepared->reversed = reverse;
     if (prepared->reversed) prepared->audio.reverse(0, prepared->audio.getNumSamples());
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    for (auto& o : owned_)
+        if (o.supersededMs <= 0) o.supersededMs = now;
     pending_.store(prepared.get(), std::memory_order_release);
-    owned_.push_back(std::move(prepared));
+    owned_.push_back({std::move(prepared), 0});
     collectGarbage();
 }
 
 void Sweep::collectGarbage()
 {
-    // Keep what is pending, what the audio thread says it uses, and the two newest (it may be between loading pending_ and
-    // acknowledging it).
+    // Free what is neither pending nor acknowledged by the audio thread, and was replaced more than a second ago: the
+    // audio thread may be between loading pending_ and acknowledging it, but not for a second.
     const auto* pending = pending_.load(std::memory_order_acquire);
     const auto* used = inUse_.load(std::memory_order_acquire);
-    for (size_t i = 0; i + 2 < owned_.size();)
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    owned_.erase(std::remove_if(owned_.begin(), owned_.end(), [&](const Owned& o) {
+        return o.prepared.get() != pending && o.prepared.get() != used && o.supersededMs > 0 && now - o.supersededMs > 1000.0;
+    }), owned_.end());
+}
+
+std::vector<std::pair<float, float>> Sweep::sourceOverview(int bins) const
+{
+    std::vector<std::pair<float, float>> out;
+    if (sourceAudio_ == nullptr || bins <= 0) return out;
+    const auto& src = *sourceAudio_;
+    const int total = src.getNumSamples();
+    out.resize((size_t) bins, {0.0f, 0.0f});
+    for (int b = 0; b < bins; ++b)
     {
-        if (owned_[i].get() != pending && owned_[i].get() != used) owned_.erase(owned_.begin() + (long) i);
-        else ++i;
+        const int a = (int) ((int64_t) total * b / bins), z = std::max(a + 1, (int) ((int64_t) total * (b + 1) / bins));
+        float lo = 0, hi = 0;
+        const int step = std::max(1, (z - a) / 64);
+        for (int i = a; i < z && i < total; i += step)
+        {
+            const float v = 0.5f * (src.getSample(0, i) + src.getSample(1, i));
+            lo = std::min(lo, v);
+            hi = std::max(hi, v);
+        }
+        out[(size_t) b] = {lo, hi};
     }
+    return out;
+}
+
+bool Sweep::renderToFile(const juce::File& file, std::string& error) const
+{
+    std::vector<float> values;
+    for (int i = 0; i < NumParams; ++i) values.push_back(value(i));
+    const int source = (int) std::lround(value(Source));
+    const auto* audio = source == Sample ? sourceAudio_.get() : nullptr;
+    if (source == Sample && audio == nullptr) { error = "no sample loaded"; return false; }
+    const bool up = std::lround(value(Direction)) == Up;
+    const double extra = (value(Hit) > 0.001f && up ? hitSeconds() : 0.0) + 0.05;
+    constexpr double kRate = 48000.0;
+    const auto rendered = renderOffline(values, audio, kRate, tempo(), previewNote(source), sourceRate_, extra);
+    file.deleteFile();
+    if (! file.getParentDirectory().createDirectory()) { error = "cannot create " + file.getParentDirectory().getFullPathName().toStdString(); return false; }
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream>(file);
+    if (static_cast<juce::FileOutputStream*>(stream.get())->failedToOpen()) { error = "cannot write " + file.getFullPathName().toStdString(); return false; }
+    auto writer = wav.createWriterFor(stream, juce::AudioFormatWriterOptions{}.withSampleRate(kRate).withNumChannels(2).withBitsPerSample(24));
+    if (writer == nullptr || ! writer->writeFromAudioSampleBuffer(rendered, 0, rendered.getNumSamples()))
+    {
+        error = "cannot write " + file.getFullPathName().toStdString();
+        return false;
+    }
+    return true;
 }
 
 // ---- types
+
+namespace
+{
+// A reverb swell type: Sample, Reverb Swell, fitted to the length, reversed; the character, damping, Hit and shape vary.
+std::vector<std::pair<int, float>> swellType(int direction, float x, float y, float damp, float hit, float curve, float low,
+                                             float high, float swell)
+{
+    using S = Sweep;
+    return {{S::Source, S::Sample}, {S::Direction, (float) direction}, {S::Curve, curve}, {S::LowHz, low}, {S::HighHz, high},
+            {S::Resonance, 0.1f}, {S::Pitch, 0}, {S::Detune, 0.35f}, {S::Swell, swell}, {S::Width, 0.9f}, {S::Rhythm, 0},
+            {S::Reverse, 1}, {S::Chord, 0}, {S::Air, 0}, {S::SwellMode, S::ReverbSwell}, {S::CharacterX, x},
+            {S::CharacterY, y}, {S::Fit, 1}, {S::Damp, damp}, {S::Hit, hit}};
+}
+} // namespace
 
 const std::vector<Sweep::Type>& Sweep::types()
 {
@@ -293,7 +434,20 @@ const std::vector<Sweep::Type>& Sweep::types()
         {"Reverse Sample", "Any sample reversed with its reverb tail, rising in pitch to land on its own attack.",
          {{S::Source, S::Sample}, {S::Direction, S::Up}, {S::Curve, 0.35f}, {S::LowHz, 300}, {S::HighHz, 18000}, {S::Resonance, 0.2f},
           {S::Pitch, 12}, {S::Detune, 0.35f}, {S::Swell, 0.8f}, {S::Width, 0.8f}, {S::Rhythm, 0}, {S::Reverse, 1}, {S::Tail, 0.6f},
-          {S::Chord, 0}, {S::Air, 0}}},
+          {S::Chord, 0}, {S::Air, 0}, {S::SwellMode, S::ReversedSample}}},
+        // PLG-19d: reverb swells (only the sample's reverb, reversed, rising into the sample).
+        {"Vocal Swell", "The vocal's own reverb, reversed, breathing in to the first word. Put the note before the vocal.",
+         swellType(S::Up, 0.15f, 0.55f, 0.3f, 0.0f, 0.3f, 200, 18000, 0.4f)},
+        {"Snare Pre-Verb", "A hall tail reversed into the snare, then the snare itself (Hit): the classic pre-verb.",
+         swellType(S::Up, 0.0f, 0.0f, 0.45f, 1.0f, 0.5f, 300, 16000, 0.3f)},
+        {"Shimmer Rise", "A bright octave-up shimmer swelling into the sound.",
+         swellType(S::Up, 0.1f, 1.0f, 0.15f, 0.0f, 0.4f, 400, 20000, 0.5f)},
+        {"Spectral Bloom", "The sound smeared into a frozen spectral wash that blooms into it.",
+         swellType(S::Up, 1.0f, 1.0f, 0.4f, 0.0f, 0.6f, 250, 18000, 0.4f)},
+        {"Grain Cloud", "A cloud of tiny grains of the sound gathering into it.",
+         swellType(S::Up, 1.0f, 0.0f, 0.25f, 0.0f, 0.35f, 300, 18000, 0.4f)},
+        {"Reverb Throw", "The sound, then its reverb thrown forwards and closing down over the length (a downward swell).",
+         swellType(S::Down, 0.2f, 0.2f, 0.35f, 1.0f, -0.3f, 300, 16000, 0.8f)},
     };
     return list;
 }
@@ -341,6 +495,7 @@ void Sweep::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi)
     const bool up = std::lround(value(Direction)) == Up;
     const float detune = value(Detune), width = value(Width), resonance = value(Resonance), air = value(Air);
     const float output = juce::Decibels::decibelsToGain(value(Output));
+    const float hit = value(Hit);
     const double beatsPerSecond = std::clamp(host_.tempo, 20.0, 999.0) / 60.0;
     const bool whoosh = source == Whoosh;
     const float k = whoosh ? 1.0f / (1.2f + resonance * 9.0f) : 1.0f / (0.6f + resonance * 7.0f);
@@ -363,6 +518,8 @@ void Sweep::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi)
         for (auto& ph : metal_) ph = 0;
         gatePhase_ = 0;
         readPos_ = 0;
+        // Down: the Hit plays with the note (the tail follows it); Up: at the drop.
+        hitPos_ = source == Sample && ! up && hit > 0.0f && current_ != nullptr ? 0.0 : -1.0;
         if (source == Sample && current_ != nullptr && current_->reversed)
         {
             // Start where the reversed audio ends exactly at the sweep's end, with the pitch rising to 0 st.
@@ -390,7 +547,21 @@ void Sweep::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi)
             const auto m = (*midiIt).getMessage();
             if (m.isNoteOn()) start(m.getNoteNumber());
         }
-        if (! active_ || isBypassed()) continue;
+        if (isBypassed()) continue;
+        if (hitPos_ >= 0) // the dry Region, forwards, at the drop (Up) or with the note (Down)
+        {
+            if (current_ != nullptr && hitPos_ < (double) current_->hit.getNumSamples())
+            {
+                const int at = (int) hitPos_;
+                const float g = hit * output * (stopping_ ? stopFade_ : 1.0f);
+                left[i] += current_->hit.getSample(0, at) * g;
+                if (right != nullptr) right[i] += current_->hit.getSample(1, at) * g;
+                hitPos_ += 1.0;
+            }
+            else
+                hitPos_ = -1;
+        }
+        if (! active_) continue;
 
         if ((i & 15) == 0 || i == 0)
         {
@@ -563,13 +734,18 @@ void Sweep::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi)
         if (right != nullptr) right[i] += r * env * output;
 
         elapsed_ += 1.0;
-        if (elapsed_ >= duration_ || (stopping_ && stopFade_ <= 0.0f)) { active_ = false; stopping_ = false; }
+        if (stopping_ && stopFade_ <= 0.0f) { active_ = false; stopping_ = false; hitPos_ = -1; }
+        else if (elapsed_ >= duration_)
+        {
+            active_ = false;
+            if (up && source == Sample && hit > 0.0f && current_ != nullptr) hitPos_ = 0; // the drop
+        }
     }
     progress_.store(active_ ? (float) (elapsed_ / duration_) : -1.0f, std::memory_order_relaxed);
 }
 
 juce::AudioBuffer<float> Sweep::renderOffline(const std::vector<float>& parameterValues, const juce::AudioBuffer<float>* source,
-                                              double sampleRate, double tempo, int note, double sourceRate)
+                                              double sampleRate, double tempo, int note, double sourceRate, double extraSeconds)
 {
     auto sweep = std::make_unique<Sweep>();
     for (int i = 0; i < (int) parameterValues.size() && i < NumParams; ++i) sweep->setParameter(i, parameterValues[(size_t) i]);
@@ -583,7 +759,7 @@ juce::AudioBuffer<float> Sweep::renderOffline(const std::vector<float>& paramete
         sweep->setParameter(Source, (float) Sample);
         sweep->setSampleAudio(*source, sourceRate > 0 ? sourceRate : sampleRate, "clip");
     }
-    const int total = (int) std::ceil(sweep->lengthSeconds() * sampleRate);
+    const int total = (int) std::ceil((sweep->lengthSeconds() + std::max(0.0, extraSeconds)) * sampleRate);
     juce::AudioBuffer<float> out(2, total);
     out.clear();
     for (int start = 0; start < total; start += 512)
@@ -600,6 +776,7 @@ juce::AudioBuffer<float> Sweep::renderOffline(const std::vector<float>& paramete
 std::vector<DeviceProcessor::UiGroup> Sweep::uiGroups() const
 {
     return {{"Sweep", {Source, Direction, LengthParam, Curve}, 2}, {"Filter", {LowHz, HighHz, Resonance, Air}, 2},
-            {"Motion", {Pitch, Chord, Swell, Width, Rhythm}, 3}, {"Sound", {Detune, Reverse, Tail, Output}, 2}};
+            {"Motion", {Pitch, Chord, Swell, Width, Rhythm}, 3}, {"Sound", {Detune, Reverse, Tail, Output}, 2},
+            {"Swell", {SwellMode, CharacterX, CharacterY, Fit, Damp, Hit, RegionStart, RegionEnd}, 2}};
 }
 } // namespace sonora::devices

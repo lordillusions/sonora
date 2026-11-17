@@ -53,6 +53,10 @@ SweepFromClipResult sweepFromClip(const model::Song& song, const model::ClipLoca
     values[W::HighHz] = 20000.0f;
     values[W::Swell] = 0.7f;
     values[W::Output] = 0.0f;
+    // PLG-19d: the clip's own reverb, reversed, rising into the clip (the riser track ends where the clip starts; the clip
+    // stays on its track) or thrown forwards after it (downlifter). 0.1.32-0.1.51 reversed the clip itself.
+    values[W::SwellMode] = (float) W::ReverbSwell;
+    values[W::Fit] = 1.0f;
     const auto rendered = W::renderOffline(values, &clipped, sampleRate, song.tempo);
 
     if (! folder.createDirectory())

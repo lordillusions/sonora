@@ -523,14 +523,30 @@ void ProFace::mouseDown(const MouseEvent& raw)
             setValue(c.param, c.value);
             return;
         case Kind::Button:
-            if (! e.right && c.click) c.click();
-            repaint();
+        {
+            // A click may be an app edit that rebuilds the device chain (and deletes this face) before it returns: run a
+            // copy of the callback and touch nothing of ours once the face is gone.
+            const std::weak_ptr<int> alive = faceAlive_;
+            if (! e.right && c.click)
+            {
+                const auto click = c.click;
+                click();
+            }
+            if (! alive.expired()) repaint();
             return;
+        }
         case Kind::Pad:
+        {
+            const std::weak_ptr<int> alive = faceAlive_;
             pressedPad_ = index;
-            if (c.press) c.press(true);
-            repaint();
+            if (c.press)
+            {
+                const auto press = c.press;
+                press(true);
+            }
+            if (! alive.expired()) repaint();
             return;
+        }
         case Kind::Area:
             active_ = index;
             if (c.down) c.down(e);

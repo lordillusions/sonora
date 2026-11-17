@@ -20,8 +20,10 @@
 #include "devices/NativeDevice.h"
 
 #include <atomic>
+#include <cmath>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace sonora::devices
@@ -32,8 +34,15 @@ public:
     enum Param
     {
         Source, Direction, LengthParam, Curve, LowHz, HighHz, Resonance, Pitch, Detune, Swell, Width, Rhythm, Reverse,
-        Tail, Output, Chord, Air, NumParams
+        Tail, Output, Chord, Air,
+        // PLG-19d, the reverb swell (appended: older sets and VST3 states keep their indices)
+        SwellMode, CharacterX, CharacterY, Fit, Damp, Hit, RegionStart, RegionEnd, NumParams
     };
+    // How a Sample is prepared: the whole sample reversed with a reverb under it (0.1.32), or only its reverb tail,
+    // reversed, rising into the sample (the reverse reverb swell: the dry sound is not in it; Hit plays it at the drop).
+    enum SwellKind { ReversedSample, ReverbSwell };
+    static constexpr const char* kSwellModeNames[2] = {"Reversed Sample", "Reverb Swell"};
+    static constexpr double kMaxSwellSeconds = 12.0; // the part of a sample a reverb swell uses (Region)
     // The first three keep their indices from 0.1.32 (Noise = White Noise, Tone = Supersaw).
     enum SourceKind { Noise, Tone, Sample, Pink, Sine, Whoosh, Metal, kSources };
     static constexpr const char* kSourceNames[kSources] = {"White Noise", "Supersaw", "Sample", "Pink Noise", "Sine", "Whoosh", "Metal"};
@@ -79,6 +88,15 @@ public:
     // Auditions one sweep from the face (or stops the one playing). Message thread; the audio thread starts it.
     void preview();
     static int previewNote(int source) { return source == Sine ? 48 : 60; }
+    // The swell's reverb time in seconds now (Fit: 1.2 x the sweep's length; else Tail as 0.4 .. 12 s).
+    double swellDecaySeconds() const;
+    static double tailSeconds(float tail) { return 0.4 * std::pow(30.0, (double) tail); }
+    bool reverbSwell() const;   // Source is Sample and SwellMode is Reverb Swell
+    double hitSeconds() const;  // the length of the Region (what Hit plays at the drop), 0 without a sample
+    // Renders one sweep at the current settings and tempo (48 kHz, plus the Hit after the drop) into a 24-bit WAV.
+    bool renderToFile(const juce::File& file, std::string& error) const;
+    // The source's waveform (min/max of `bins` bins over the whole file, -1..1) for the face's region strip.
+    std::vector<std::pair<float, float>> sourceOverview(int bins) const;
     const std::string& sampleName() const { return sampleName_; }
     bool hasSample() const { return sourceAudio_ != nullptr; }
 
@@ -95,15 +113,24 @@ public:
     float gateRateAt(float p) const; // gates per beat (0: off)
 
     // Renders one sweep of `seconds` over `source` (or the device's own Noise/Tone when null) at `tempo`.
+    // `extraSeconds` renders past the sweep's end (the Hit after the drop).
     static juce::AudioBuffer<float> renderOffline(const std::vector<float>& parameterValues, const juce::AudioBuffer<float>* source,
-                                                  double sampleRate, double tempo, int note = 60, double sourceRate = 0);
+                                                  double sampleRate, double tempo, int note = 60, double sourceRate = 0,
+                                                  double extraSeconds = 0);
 
 private:
     struct Prepared
     {
         juce::AudioBuffer<float> audio; // at the device sample rate, reversed for Up when Reverse is on
+        juce::AudioBuffer<float> hit;   // the Region forwards at the device rate (Hit)
         bool reversed = false;
     };
+    struct Owned
+    {
+        std::unique_ptr<const Prepared> prepared;
+        double supersededMs = 0; // when a newer one replaced it (0: still the newest)
+    };
+    std::vector<float> preparationKey() const;
     void prepareSample();
     void collectGarbage();
 
@@ -122,6 +149,7 @@ private:
     int previewSeen_ = 0;
     std::atomic<int> previewRequests_{0};
     double readPos_ = 0, gatePhase_ = 0;
+    double hitPos_ = -1; // the Hit's read position (-1: not playing)
     float svf_[2][2]{};
     uint32_t noise_[2] = {0x1234567u, 0x89abcdefu};
     float release_ = 0; // short fade after the end / a retrigger
@@ -134,10 +162,10 @@ private:
     std::shared_ptr<const juce::AudioBuffer<float>> sourceAudio_;
     double sourceRate_ = 44100.0;
     std::string samplePath_, sampleName_;
-    float preparedTail_ = -1, preparedReverse_ = -1;
+    std::vector<float> preparedKey_;
     std::atomic<const Prepared*> pending_{nullptr};
     std::atomic<const Prepared*> inUse_{nullptr};
     const Prepared* current_ = nullptr; // audio thread
-    std::vector<std::unique_ptr<const Prepared>> owned_;
+    std::vector<Owned> owned_;
 };
 } // namespace sonora::devices

@@ -18,6 +18,7 @@
 #include "ui/Widget.h"
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -71,6 +72,8 @@ public:
     float compactWidthFor(float height) const { return height * compact_.w / compact_.h; }
     SkColor accent() const { return accent_; }
     devices::DeviceProcessor& device() const { return device_; }
+    // Expires when the face is deleted (async callbacks: file choosers).
+    std::weak_ptr<int> faceLifetime() const { return faceAlive_; }
 
     // ---- owners
     std::function<std::optional<midi::ControlTarget>(int parameter)> mappingTarget; // MIDI/key map target of a parameter
@@ -205,5 +208,6 @@ private:
     float wheelNorm_ = 0, wheelSet_ = 0;
     int ticks_ = 0;
     std::vector<float> lastValues_;
+    std::shared_ptr<int> faceAlive_ = std::make_shared<int>(0); // expires with the face (callbacks that edit the app)
 };
 } // namespace sonora::ui

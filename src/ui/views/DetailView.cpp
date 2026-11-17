@@ -287,24 +287,20 @@ public:
             foldButton_->onClick = [this, compact] { setCurveLfoMinimized(! compact); };
             return;
         }
-        if (auto* pro = addProFace(*this, proc_)) // PLG-23: Stutter, Sweep, Phase Align (scaled to the chain like Hush)
+        if (auto* pro = addProFace(*this, proc_)) // PLG-23: Stutter, Sweep, Phase Align, Kickstract... (scaled to the chain like Hush)
         {
             proFace_ = pro;
             if (chain_ < 0) wireProFace(*pro, [this] { return &ctx(); }, trackIndex_, deviceIndex_);
             proFace_->onOpenWindow = [this] { openProFaceWindow(); };
-            proWindow_ = add<IconButton>(IconButton::Icon::FloatWindow);
-            proWindow_->tooltip = "Open the editor in its own window";
-            proWindow_->onClick = [this] { openProFaceWindow(); };
-            return;
-        }
-        if (auto* kick = dynamic_cast<devices::Kickstract*>(proc_)) // PLG-17
-        {
-            kickstract_ = add<KickstractFace>(kick, [this](Widget* widget, int parameter) { tag(widget, parameter); });
-            kickstract_->onOpenTimeline = [this] { // the context is read on click: this panel is not attached yet
+            if (auto* kick = dynamic_cast<KickstractFace*>(pro)) // PLG-17e/f: Kickstract's timeline window, in racks too
+                kick->onOpenTimeline = [this] { // the context is read on click: this panel is not attached yet
                     auto& x = ctx();
                     if (const auto key = x.wavetableKey(trackIndex_, deviceIndex_, chain_, child_); key && x.openKickstractTimeline)
                         x.openKickstractTimeline(*key);
                 };
+            proWindow_ = add<IconButton>(IconButton::Icon::FloatWindow);
+            proWindow_->tooltip = "Open the editor in its own window";
+            proWindow_->onClick = [this] { openProFaceWindow(); };
             return;
         }
         if (auto* hush = dynamic_cast<devices::HushDevice*>(proc_))
@@ -763,7 +759,6 @@ public:
         if (lfoCurve_) return 730;
         if (curveLfo_) return CurveLfoEditor::kPreferredWidth + 12;
         if (curveLfoMini_) return CurveLfoMini::kWidth + 12;
-        if (kickstract_) return KickstractFace::kPreferredWidth + 12;
         if (proFace_) return proFace_->compactWidthFor(std::max(40.0f, (height() > kTitle ? height() - kTitle : ReferenceFace::kDefaultBody) - 12)) + 12;
         if (hush_) return (std::max(40.0f, (height() > kTitle ? height() - kTitle : ReferenceFace::kDefaultBody) - 12)) * HushFace::kWidth / HushFace::kHeight + 12;
         if (wavetableMini_) return WavetableMiniView::kWidth + 12;
@@ -821,7 +816,6 @@ public:
         if (foldButton_) foldButton_->setBounds({width() - kTitleIcons - 21, 1, 17, 16}); // where Hush has its window icon
         if (curveLfo_) { curveLfo_->setBounds(r); return; }
         if (curveLfoMini_) { curveLfoMini_->setBounds(r); return; }
-        if (kickstract_) { kickstract_->setBounds(r); return; }
         if (proFace_)
         {
             proWindow_->setBounds({width() - kTitleIcons - 21, 1, 17, 16});
@@ -1084,7 +1078,6 @@ private:
     CurveLfoEditor* curveLfo_ = nullptr;
     CurveLfoMini* curveLfoMini_ = nullptr; // UI-83: folded to its graph
     IconButton* foldButton_ = nullptr;     // UI-83: the title arrow (Curve LFO, Prism)
-    KickstractFace* kickstract_ = nullptr;
     ProFace* proFace_ = nullptr; // PLG-23
     IconButton* proWindow_ = nullptr;
     SidechainPanel* sidechainPanel_ = nullptr;

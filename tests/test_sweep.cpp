@@ -132,6 +132,7 @@ TEST_CASE("sweep: a sample sweep Up plays it reversed with its tail and lands on
     W w;
     setup(w);
     w.setParameter(W::Source, (float) W::Sample);
+    w.setParameter(W::SwellMode, (float) W::ReversedSample); // the 0.1.32 preparation (PLG-19d made Reverb Swell the default)
     w.setParameter(W::LowHz, 20000.0f);
     w.setParameter(W::HighHz, 20000.0f);
     w.setParameter(W::Swell, 0.0f);

@@ -87,8 +87,10 @@ void SeraphFace::loadVoices(const std::vector<std::string>& paths)
     if (paths.empty()) return;
     if (onVoicesDropped)
     {
-        onVoicesDropped(paths);
-        repaint();
+        // An app edit rebuilds the chain before it returns: this face may be gone afterwards (see SweepFace::browserDrop).
+        const auto dropped = onVoicesDropped;
+        const auto copy = paths;
+        dropped(copy);
         return;
     }
     realMessage.clear();
@@ -298,8 +300,9 @@ void SeraphFace::build(Layout layout)
                 const std::string chip = (name.rfind("Female", 0) == 0 ? "W" : name.rfind("Male", 0) == 0 ? "M" : "") + name.substr(name.find_last_of(' ') + 1);
                 auto& b = addButton({450 + (float) i * 38, 156, 34, 18}, chip, [this, name] {
                     const auto pack = devices::Seraph::findPackVoices(packsRoot);
+                    const std::string singer = name; // the face (and this button) may be gone after loadVoices
                     for (const auto& s : pack.singers)
-                        if (s.name == name) loadVoices(s.files);
+                        if (s.name == singer) { loadVoices(s.files); return; }
                 }, "Seraph Voices pack: load " + name + "'s sung notes (VocalSet, CC BY 4.0: music made with them needs the credit line).");
                 b.textSize = 9.5f;
                 b.lit = [this, name] {
