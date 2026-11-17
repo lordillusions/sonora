@@ -105,6 +105,7 @@
 #include <juce_core/juce_core.h>
 
 #include <cmath>
+#include <optional>
 #include <cstdio>
 #include <string>
 
@@ -212,6 +213,7 @@ int main(int argc, char** argv)
     struct RecordingState { int track = -1, scene = -1, phase = 0; };
     std::vector<RecordingState> recordingStates;
 
+    std::optional<ui::UiContext::TimeSelection> timeSelect; // --time-select
     for (int i = 2; i < argc; ++i)
     {
         const std::string a = argv[i];
@@ -367,6 +369,13 @@ int main(int argc, char** argv)
         }
         else if (a == "--scene")
             clipScene = std::stoi(next());
+        else if (a == "--time-select") // FIRST:LAST:START:END Arrangement time selection (tracks, beats); with --clip: UI-93
+        {
+            int first = 0, last = 0; double start = 0, end = 0;
+            if (std::sscanf(next().c_str(), "%d:%d:%lf:%lf", &first, &last, &start, &end) != 4 || end <= start)
+            { std::fprintf(stderr, "--time-select needs FIRST:LAST:START:END\n"); return 2; }
+            timeSelect = ui::UiContext::TimeSelection{true, start, end, first, last}; // applied after the first layout
+        }
         else if (a == "--clip-index") // with --clip: the Nth Arrangement clip of that track instead of the first
             clipIndex = std::max(0, std::stoi(next()));
         else if (a == "--play-at")
@@ -989,6 +998,13 @@ int main(int argc, char** argv)
                 auto drag = down; drag.x += (float) (delta * ctx.pixelsPerBeat); drag.y = origin.y + to->y + 30;
                 root.dispatchMouseDrag(drag);
             }
+    }
+    if (timeSelect)
+    {
+        // The Arrangement clears the selection when it first builds for a set, so it is set afterwards (UI-93).
+        ctx.arrangementSelection = *timeSelect;
+        for (auto& child : root.children())
+            if (auto* arrangement = dynamic_cast<ui::ArrangementView*>(child.get())) arrangement->zoomTimeSelection(false);
     }
     if (arrangementMenu)
         for (auto& child : root.children())

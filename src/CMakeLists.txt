@@ -56,6 +56,7 @@ add_library(sonora_core STATIC
     core/AutomationEdits.cpp
     core/ClipOperations.cpp
     core/ClipGeometry.cpp
+    core/MultiClipNotes.cpp
     core/SampleReplace.cpp
     core/Op.cpp
     core/OpJson.cpp

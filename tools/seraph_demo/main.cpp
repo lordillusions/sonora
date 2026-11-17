@@ -325,8 +325,11 @@ int demos(const juce::File& folder, double rate, const std::string& only)
         s.applyPreset(presetIndex("Gated Angels"));
         s.prepare(rate, 512);
         auto out = render(s, rate, beatsToSeconds(64.0) + 2.0, progression(16));
-        out.applyGain(0.8f);
+        out.applyGain(0.4f); // the pad sits under the floor (Seraph's own level went up 9 dB in 0.1.47)
         addKickAndBass(out, rate, 16, 4);
+        // the sum of three parts is a mix: keep it under the same ceiling as Seraph's output, never clipped in the file
+        if (const float peak = std::max(out.getMagnitude(0, 0, out.getNumSamples()), out.getMagnitude(1, 0, out.getNumSamples())); peak > 0.89f)
+            out.applyGain(0.89f / peak);
         fadeOut(out, rate, 1.5);
         writeWav(folder.getChildFile("Context - Gated women over kick and bass.wav"), out, rate);
         std::printf("Context - Gated women over kick and bass.wav\n");

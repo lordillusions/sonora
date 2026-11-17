@@ -12,8 +12,16 @@
 // vertically without limits (all 128 pitches are reachable), Shift+wheel scrolls in time. Dragging notes near an edge
 // scrolls the view. Right-click opens the grid menu; Cmd+1..5 are Narrow/Widen/Triplet/Snap/Fixed grid, + and - zoom.
 // Click Vel/Prob beside the note lane to switch between velocity and probability.
+//
+// UI-93 multi-clip editing (the reference manual, "Multi-Clip Editing in the Arrangement View"): when the Arrangement time
+// selection covers MIDI clips on several tracks (up to eight) or several clips of one track, and the focused clip is one of
+// them, the editor shows all their notes together in Arrangement time, each in its clip's colour. Loop bars (one row per
+// track) replace the marker strip; clicking a bar or a note focuses that clip. Note edits apply to all the clips, as one
+// undo step; the velocity / probability lane shows and edits only the focused clip's notes. Focus Mode (the Focus button,
+// or N) greys the other clips' notes and limits editing to the focused clip.
 
 #include "core/ClipGeometry.h"
+#include "core/MultiClipNotes.h"
 #include "ui/UiContext.h"
 #include "ui/MidiClipEdits.h"
 #include "ui/Widget.h"
@@ -52,7 +60,7 @@ public:
     };
     View view;
     bool runMidiTool(midiedit::ToolSettings);
-    enum class HeaderControl { Fold, Scale, Highlight };
+    enum class HeaderControl { Fold, Scale, Highlight, Focus };
     Rect headerControlBounds(HeaderControl) const;
     Rect rulerBounds() const { return rulerArea(); }
     // UI-71: the strip under the ruler's numbers with the start / end flags and the loop brace.
@@ -64,7 +72,15 @@ public:
     Rect noteAreaBounds() const { return notesArea(); }
     const std::set<int>& selectedNotes() const { return selected_; }
     // Where the selected clip is playing, in its content beats (the notes' time base); -1 when it is not playing.
+    // Multi-clip editing: the Arrangement position while it is inside the clips.
     double playheadBeat() const;
+    // UI-93: the clips shown together (more than one: multi-clip editing, Arrangement beats) and the notes the editor shows.
+    bool multiClip() const { return members_.size() > 1; }
+    const std::vector<model::MultiClipMember>& multiClipMembers() const { return members_; }
+    const std::vector<model::MidiNote>& shownNotes() const { syncMulti(); return notes(); }
+    int focusedMember() const;
+    bool focusMode() const { return focusMode_; }
+    Rect loopBarBounds(int member) const; // in this widget's coordinates (empty when not multi-clip editing)
 
 
 private:
@@ -114,6 +130,28 @@ private:
     void selectOnly(int index);
     bool isSelected(int index) const { return selected_.count(index) > 0; }
     const std::vector<model::MidiNote>& notes() const;
+    // The stored notes the editor works on: the selected clip's, or (multi-clip) all member clips' in Arrangement beats.
+    const std::vector<model::MidiNote>& sourceNotes() const;
+    // UI-93: recomputes the member clips and their merged notes from the song and the Arrangement time selection.
+    void syncMulti() const;
+    std::string membersKey() const;                // identity of what is shown: refits the view when it changes
+    int noteMember(const model::MidiNote&) const;  // member clip of a shown / working note (-1 when not multi-clip)
+    bool editable(const model::MidiNote& note) const { return ! multiClip() || ! focusMode_ || noteMember(note) == focusedMember(); }
+    bool inFocusedClip(const model::MidiNote& note) const { return ! multiClip() || noteMember(note) == focusedMember(); }
+    void focusMember(int member);
+    void storeNotes(std::vector<model::MidiNote> notes, const char* label); // one undoable edit (all member clips)
+    void reselect(const std::vector<model::MidiNote>& keep, bool matchDuration);
+    int loopBarRows() const;
+    int loopBarRow(int member) const;
+    float markerStripHeight() const;
+    float rulerHeight() const;
+    mutable std::vector<model::MultiClipMember> members_;
+    mutable model::MergedNotes merged_;
+    std::vector<model::MultiClipMember> editingMembers_; // the members and merged notes a gesture started from
+    model::MergedNotes editingBase_;
+    int editingFocus_ = 0;
+    std::string lastKey_;
+    bool focusMode_ = false;
 
     // The notes being edited: a copy of the clip's notes while a gesture is in progress.
     std::vector<model::MidiNote> working_;
@@ -137,7 +175,6 @@ private:
     int grabPitch_ = 0;
     int grabbedNote_ = -1;
     bool changed_ = false;
-    int lastUid_ = -1;
     double lastPlayhead_ = -1; // tick() repaints when the playhead moves half a pixel, appears or goes away
     bool probabilityLane_ = false;
     bool timeRange_ = false, selectingRuler_ = false;

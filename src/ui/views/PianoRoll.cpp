@@ -27,6 +27,7 @@ namespace
 {
 // The ruler: bar numbers on top, the marker strip (start / end flags, loop brace; UI-71) under them.
 constexpr float kKeysW = 40.0f, kToolbarH = 20.0f, kRulerH = 40.0f, kMarkerStripH = 9.0f;
+constexpr float kLoopBarH = 7.0f; // UI-93: one row of loop bars per track while editing several clips
 bool isBlackKey(int pitch)
 {
     const int pc = ((pitch % 12) + 12) % 12;
@@ -67,6 +68,12 @@ double PianoRoll::playheadBeat() const
     const auto* cl = clip();
     const auto* transport = ctx().transport;
     if (cl == nullptr || cl->kind != model::Clip::Kind::Midi || transport == nullptr || ! transport->isPlaying()) return -1;
+    if (multiClip())
+    {
+        const double beat = transport->positionBeats();
+        for (const auto& m : members_) if (beat >= m.start && beat < m.end) return beat;
+        return -1;
+    }
     const auto& loop = cl->loop;
     if (const int scene = ctx().selectedClipScene; scene >= 0)
     {
@@ -101,27 +108,139 @@ const model::Clip* PianoRoll::clip() const
 
 const std::vector<model::MidiNote>& PianoRoll::notes() const
 {
-    static const std::vector<model::MidiNote> none;
     if (editing_)
         return working_;
+    return sourceNotes();
+}
+
+const std::vector<model::MidiNote>& PianoRoll::sourceNotes() const
+{
+    static const std::vector<model::MidiNote> none;
+    if (multiClip()) return merged_.notes;
     const auto* c = clip();
     return c != nullptr ? c->notes : none;
+}
+
+// UI-93: multi-clip editing is on while the Arrangement time selection covers more than one MIDI clip and the focused clip
+// (the selected one) is among them.
+void PianoRoll::syncMulti() const
+{
+    const auto& x = ctx();
+    members_.clear();
+    const auto& range = x.arrangementSelection;
+    const auto* focused = clip();
+    if (x.song == nullptr || focused == nullptr || focused->kind != model::Clip::Kind::Midi || x.selectedClipScene >= 0
+        || x.selectedTakeLane >= 0 || x.mainView != MainView::Arrangement || ! range.active || range.end - range.start <= 1e-9)
+    { merged_ = {}; return; }
+    auto members = model::midiClipsInSelection(*x.song, range.firstTrack, range.lastTrack, range.start, range.end);
+    const bool contains = std::any_of(members.begin(), members.end(), [&](const auto& m) {
+        return m.location.track == x.selectedClipTrack && m.location.uid == x.selectedClipUid;
+    });
+    if (members.size() < 2 || ! contains) { merged_ = {}; return; }
+    members_ = std::move(members);
+    merged_ = model::mergeNotes(*x.song, members_);
+}
+
+std::string PianoRoll::membersKey() const
+{
+    if (! multiClip()) return clip() ? std::to_string(clip()->uid) : std::string();
+    std::string key = "multi";
+    for (const auto& m : members_) key += ":" + std::to_string(m.location.track) + "/" + std::to_string(m.location.uid);
+    return key;
+}
+
+int PianoRoll::focusedMember() const
+{
+    const auto& x = ctx();
+    const auto& members = editing_ ? editingMembers_ : members_;
+    for (int i = 0; i < (int) members.size(); ++i)
+        if (members[(size_t) i].location.track == x.selectedClipTrack && members[(size_t) i].location.uid == x.selectedClipUid) return i;
+    return 0;
+}
+
+int PianoRoll::noteMember(const model::MidiNote& note) const
+{
+    if (! multiClip()) return -1;
+    return editing_ ? model::memberOfNote(editingBase_, editingMembers_, note, editingFocus_)
+                    : model::memberOfNote(merged_, members_, note, focusedMember());
+}
+
+// Focusing another member clip changes the clip the Clip panel, the velocity lane and auditioning follow, not the selected
+// track (that would rebuild the Detail View under the gesture).
+void PianoRoll::focusMember(int member)
+{
+    if (member < 0 || member >= (int) members_.size()) return;
+    auto& x = ctx();
+    x.selectedClipTrack = members_[(size_t) member].location.track;
+    x.selectedClipUid = members_[(size_t) member].location.uid;
+    x.selectedClipScene = x.selectedTakeLane = -1;
+}
+
+void PianoRoll::storeNotes(std::vector<model::MidiNote> ns, const char* label)
+{
+    auto& x = ctx();
+    if (! x.song || ! x.applyEdit) return;
+    if (multiClip())
+    {
+        if (auto command = model::setMergedNotes(*x.song, members_, merged_, ns, focusedMember(), label); command.apply)
+            x.applyEdit(std::move(command));
+    }
+    else x.applyEdit(model::setNotes(*x.song, x.selectedClipLocation(), std::move(ns), label));
+    syncMulti();
+}
+
+// After an edit re-sorted the notes: select the stored notes that match `keep` by pitch and start (and duration).
+void PianoRoll::reselect(const std::vector<model::MidiNote>& keep, bool matchDuration)
+{
+    selected_.clear();
+    const auto& after = sourceNotes();
+    for (int i = 0; i < (int) after.size(); ++i)
+        for (const auto& k : keep)
+            if (after[(size_t) i].pitch == k.pitch && std::fabs(after[(size_t) i].start - k.start) < 1e-9
+                && (! matchDuration || std::fabs(after[(size_t) i].duration - k.duration) < 1e-9))
+                selected_.insert(i);
+}
+
+// Loop bars: one row per track that holds a member clip, in track order.
+int PianoRoll::loopBarRows() const
+{
+    int rows = 0, last = -1;
+    for (const auto& m : members_) if (m.location.track != last) { ++rows; last = m.location.track; }
+    return rows;
+}
+int PianoRoll::loopBarRow(int member) const
+{
+    int row = -1, last = -1;
+    for (int i = 0; i <= member && i < (int) members_.size(); ++i)
+        if (members_[(size_t) i].location.track != last) { ++row; last = members_[(size_t) i].location.track; }
+    return row;
+}
+float PianoRoll::markerStripHeight() const { return multiClip() ? std::max(kMarkerStripH, 2.0f + kLoopBarH * (float) loopBarRows()) : kMarkerStripH; }
+float PianoRoll::rulerHeight() const { return kRulerH - kMarkerStripH + markerStripHeight(); }
+Rect PianoRoll::loopBarBounds(int member) const
+{
+    if (! multiClip() || member < 0 || member >= (int) members_.size()) return {};
+    const auto strip = markerStrip();
+    const float x0 = std::max(strip.x, beatToX(members_[(size_t) member].start));
+    const float x1 = std::min(strip.right(), beatToX(members_[(size_t) member].end));
+    return {x0, strip.y + 1.0f + kLoopBarH * (float) loopBarRow(member), std::max(0.0f, x1 - x0), kLoopBarH - 1.0f};
 }
 
 float PianoRoll::velocityHeight() const
 {
     return std::clamp(ctx().theme.metrics.velocityLaneHeight, 24.0f, std::max(24.0f, height() * 0.7f));
 }
-Rect PianoRoll::keysArea() const { return {0, kRulerH, kKeysW, height() - kRulerH - velocityHeight()}; }
-Rect PianoRoll::rulerArea() const { return {kKeysW, kToolbarH, width() - kKeysW, kRulerH - kToolbarH}; }
+Rect PianoRoll::keysArea() const { return {0, rulerHeight(), kKeysW, height() - rulerHeight() - velocityHeight()}; }
+Rect PianoRoll::rulerArea() const { return {kKeysW, kToolbarH, width() - kKeysW, rulerHeight() - kToolbarH}; }
 Rect PianoRoll::headerControlBounds(HeaderControl control) const
 {
     if (control == HeaderControl::Fold) return {3, 1, 40, 17};
     if (control == HeaderControl::Scale) return {48, 1, 44, 17};
+    if (control == HeaderControl::Focus) return multiClip() ? Rect{219, 1, 46, 17} : Rect{}; // UI-93
     return {98, 1, 115, 17};
 }
-Rect PianoRoll::notesArea() const { return {kKeysW, kRulerH, width() - kKeysW, height() - kRulerH - velocityHeight()}; }
-Rect PianoRoll::markerStrip() const { const auto r = rulerArea(); return {r.x, r.bottom() - kMarkerStripH, r.w, kMarkerStripH}; }
+Rect PianoRoll::notesArea() const { return {kKeysW, rulerHeight(), width() - kKeysW, height() - rulerHeight() - velocityHeight()}; }
+Rect PianoRoll::markerStrip() const { const auto r = rulerArea(); return {r.x, r.bottom() - markerStripHeight(), r.w, markerStripHeight()}; }
 Rect PianoRoll::velocityArea() const { return {kKeysW, height() - velocityHeight(), width() - kKeysW, velocityHeight()}; }
 
 // The top edge of the velocity lane drags to resize it.
@@ -133,12 +252,12 @@ Cursor PianoRoll::cursorAt(float x, float y) const
 // Live: the clip editor's ruler and grid follow the clip's own signature (Clip panel > Signature), not the set's.
 double PianoRoll::beatsPerBar() const
 {
-    if (const auto* cl = clip()) return std::max(1, cl->timeSigNumerator) * 4.0 / std::max(1, cl->timeSigDenominator);
+    if (const auto* cl = clip(); cl && ! multiClip()) return std::max(1, cl->timeSigNumerator) * 4.0 / std::max(1, cl->timeSigDenominator);
     return ctx().song ? ctx().song->timeSigNumerator * 4.0 / ctx().song->timeSigDenominator : 4.0;
 }
 double PianoRoll::beatUnit() const
 {
-    if (const auto* cl = clip()) return 4.0 / std::max(1, cl->timeSigDenominator);
+    if (const auto* cl = clip(); cl && ! multiClip()) return 4.0 / std::max(1, cl->timeSigDenominator);
     return ctx().song ? 4.0 / std::max(1, ctx().song->timeSigDenominator) : 1.0;
 }
 bool PianoRoll::arrangementClip() const { return ctx().selectedClipScene < 0; }
@@ -153,6 +272,12 @@ double PianoRoll::minScroll() const
 {
     const auto* cl = clip();
     if (! cl) return 0.0;
+    if (multiClip())
+    {
+        double first = 0.0;
+        for (const auto& n : merged_.notes) first = std::min(first, n.start);
+        return first < 0.0 ? first - beatsPerBar() : 0.0;
+    }
     const double tempo = ctx().song ? ctx().song->tempo : 120.0;
     const auto range = model::clipEditorRange(*cl, arrangementClip(), tempo);
     double first = std::min({0.0, range.first, model::openingEditorRange(*cl, arrangementClip(), tempo).first});
@@ -163,6 +288,15 @@ void PianoRoll::fitClip()
 {
     const auto* cl = clip();
     if (! cl) return;
+    if (multiClip())
+    {
+        // The reference: from the beginning of the first clip to the end of the last, no silence around them.
+        double first = 1e18, last = -1e18;
+        for (const auto& m : members_) { first = std::min(first, m.start); last = std::max(last, m.end); }
+        view.scrollBeats = first;
+        view.pixelsPerBeat = std::clamp((double) std::max(1.0f, notesArea().w - 1) / std::max(0.0625, last - first), 2.0, 2400.0);
+        return;
+    }
     // Live: opening a clip shows the view saved with it (ScrollerTimePreserver), else its whole region: from the start
     // marker (or the loop start, when that is earlier) to the loop end, or to the end marker when the loop is off. A looped
     // Arrangement clip is NOT shown at its Arrangement length.
@@ -204,7 +338,8 @@ void PianoRoll::syncPitchRows()
     std::vector<int> next;
     for (int pitch = 0; pitch < 128; ++pitch)
     {
-        const bool used = clip() && std::any_of(clip()->notes.begin(), clip()->notes.end(), [pitch](const auto& note) { return note.pitch == pitch; });
+        const auto& stored = sourceNotes(); // multi-clip: Fold to Notes keeps the rows of every member clip's notes
+        const bool used = clip() && std::any_of(stored.begin(), stored.end(), [pitch](const auto& note) { return note.pitch == pitch; });
         if (ctx().noteFold ? used : (! ctx().scaleFold || ctx().pitchInScale(pitch) || used)) next.push_back(pitch);
     }
     if (next.empty()) for (int pitch = 0; pitch < 128; ++pitch) next.push_back(pitch);
@@ -230,18 +365,18 @@ bool PianoRoll::mouseMagnify(const MouseEvent& e, float factor)
 
 void PianoRoll::revealSelection()
 {
-    const auto* cl = clip();
-    if (cl == nullptr || selected_.empty())
+    const auto& ns = sourceNotes();
+    if (clip() == nullptr || selected_.empty())
         return;
     int lo = 127, hi = 0;
     double first = 1e18, last = -1e18;
     for (int i : selected_)
-        if (i >= 0 && (size_t) i < cl->notes.size())
+        if (i >= 0 && (size_t) i < ns.size())
         {
-            lo = std::min(lo, cl->notes[(size_t) i].pitch);
-            hi = std::max(hi, cl->notes[(size_t) i].pitch);
-            first = std::min(first, cl->notes[(size_t) i].start);
-            last = std::max(last, cl->notes[(size_t) i].start + cl->notes[(size_t) i].duration);
+            lo = std::min(lo, ns[(size_t) i].pitch);
+            hi = std::max(hi, ns[(size_t) i].pitch);
+            first = std::min(first, ns[(size_t) i].start);
+            last = std::max(last, ns[(size_t) i].start + ns[(size_t) i].duration);
         }
     if (lo > hi)
         return;
@@ -287,7 +422,7 @@ int PianoRoll::noteAt(float x, float y) const
         const float x0 = beatToX(ns[(size_t) i].start);
         const float x1 = std::max(x0 + 3.0f, beatToX(ns[(size_t) i].start + ns[(size_t) i].duration));
         const float y0 = pitchToY(ns[(size_t) i].pitch);
-        if (x >= x0 && x < x1 && y >= y0 && y < y0 + view.rowHeight)
+        if (x >= x0 && x < x1 && y >= y0 && y < y0 + view.rowHeight && editable(ns[(size_t) i]))
             return i;
     }
     return -1;
@@ -304,13 +439,28 @@ bool PianoRoll::runMidiTool(midiedit::ToolSettings settings)
 {
     const auto* current = clip(); auto& x = ctx();
     if (! current || ! x.song || ! x.applyEdit || x.recording || x.recordingRequested) return false;
-    double start = timeRange_ ? rangeStart_ : current->loop.loopStart;
-    double end = timeRange_ ? rangeEnd_ : current->loop.loopEnd;
+    syncMulti();
+    // UI-93: while several clips are shown, MIDI Tools work on the focused clip (its selected notes, in its content time).
+    std::set<int> picked = selected_;
+    double shift = 0.0;
+    int focus = -1, base = 0;
+    if (multiClip())
+    {
+        focus = focusedMember();
+        shift = members_[(size_t) focus].offset;
+        base = -1;
+        for (int i = 0; i < (int) merged_.origin.size() && base < 0; ++i) if (merged_.origin[(size_t) i].member == focus) base = i;
+        picked.clear();
+        for (int i : selected_)
+            if (base >= 0 && i >= 0 && i < (int) merged_.origin.size() && merged_.origin[(size_t) i].member == focus) picked.insert(i - base);
+    }
+    double start = timeRange_ ? rangeStart_ - shift : current->loop.loopStart;
+    double end = timeRange_ ? rangeEnd_ - shift : current->loop.loopEnd;
     std::vector<int> scope;
-    if (! midiedit::isGenerator(settings.tool) && ! selected_.empty() && ! timeRange_)
+    if (! midiedit::isGenerator(settings.tool) && ! picked.empty() && ! timeRange_)
     {
         start = 1e18; end = 0;
-        for (int i : selected_) if (i >= 0 && (size_t) i < current->notes.size())
+        for (int i : picked) if (i >= 0 && (size_t) i < current->notes.size())
         { scope.push_back(i); start = std::min(start, current->notes[(size_t) i].start); end = std::max(end, current->notes[(size_t) i].start + current->notes[(size_t) i].duration); }
     }
     else for (size_t i = 0; i < current->notes.size(); ++i)
@@ -321,9 +471,15 @@ bool PianoRoll::runMidiTool(midiedit::ToolSettings settings)
     const auto location = x.selectedClipLocation();
     selected_.clear(); editing_ = false;
     x.applyEdit(model::modifyClip(*x.song, location, std::move(changed), midiedit::toolName(settings.tool)));
+    syncMulti();
     // Keep the output in the same editing scope for successive tools.
-    if (const auto* updated = x.selectedClip()) for (size_t i = 0; i < updated->notes.size(); ++i)
-        if (updated->notes[i].start >= start && updated->notes[i].start < end) selected_.insert((int) i);
+    const auto& shown = sourceNotes();
+    for (size_t i = 0; i < shown.size(); ++i)
+    {
+        if (multiClip() && merged_.origin[i].member != focus) continue;
+        const double at = shown[i].start - shift;
+        if (at >= start && at < end) selected_.insert((int) i);
+    }
     syncPitchRows(); repaint(); return true;
 }
 
@@ -338,13 +494,22 @@ void PianoRoll::paintOverChildren(SkCanvas& c, const Theme& t)
     c.clipRect(area.sk());
     for (const auto& cursor : x.collab.cursors)
     {
-        if (cursor.view != 2 || cursor.clipUid != cl->uid || cursor.beat < 0) continue;
+        // UI-93: in multi-clip editing a cursor in any shown clip, moved from its content time into Arrangement time.
+        double offset = 0.0;
+        bool shown = cursor.clipUid == cl->uid;
+        if (multiClip())
+        {
+            shown = false;
+            for (const auto& m : members_)
+                if (m.location.uid == cursor.clipUid) { shown = true; offset = m.offset; }
+        }
+        if (cursor.view != 2 || ! shown || cursor.beat < 0) continue;
         if (cursor.pitch >= 0)
         {
             const float y = pitchToY(cursor.pitch);
             paint::fill(c, {area.x, y, area.w, view.rowHeight}, paint::withAlpha(collab::colour(cursor), 40));
         }
-        collab::pointer(c, beatToX(cursor.beat), area.y, area.bottom(), cursor, t.metrics.fontSize);
+        collab::pointer(c, beatToX(cursor.beat + offset), area.y, area.bottom(), cursor, t.metrics.fontSize);
     }
     c.restore();
 }
@@ -354,7 +519,8 @@ void PianoRoll::mouseMove(const MouseEvent& e)
     auto& x = ctx();
     if (! x.collabPointer || ! x.collab.active()) return;
     const bool inside = notesArea().contains(e.x, e.y);
-    x.collabPointer(2, x.selectedClipTrack, inside ? std::max(0.0, xToBeat(e.x)) : -1.0, inside ? yToPitch(e.y) : -1);
+    const double offset = multiClip() ? members_[(size_t) focusedMember()].offset : 0.0; // others see the focused clip's time
+    x.collabPointer(2, x.selectedClipTrack, inside ? std::max(0.0, xToBeat(e.x) - offset) : -1.0, inside ? yToPitch(e.y) : -1);
 }
 
 void PianoRoll::mouseExit()
@@ -374,11 +540,14 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
                     localBounds(), t.color("TextDisabled"), t.metrics.fontSize, Align::Centre);
         return;
     }
+    syncMulti();
     syncPitchRows();
-    if (cl->uid != lastUid_ || lastZoomRequest_ != ctx().clipZoomRequest) // fit a newly opened clip to its content length
+    // Fit a newly opened clip (or a new set of clips, UI-93) to its content length; focusing another of the shown clips
+    // keeps the view.
+    if (const auto key = membersKey(); key != lastKey_ || lastZoomRequest_ != ctx().clipZoomRequest)
     {
         stopAudition();
-        lastUid_ = cl->uid;
+        lastKey_ = key;
         lastZoomRequest_ = ctx().clipZoomRequest;
         editing_ = false;
         selected_.clear();
@@ -386,9 +555,10 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
         markerDrag_ = MarkerDrag::None; markerPreview_.reset();
         fitClip();
         int hi = 0;
-        for (const auto& n : cl->notes)
+        const auto& shown = sourceNotes();
+        for (const auto& n : shown)
             hi = std::max(hi, n.pitch);
-        view.topPitch = pitchRow(cl->notes.empty() ? 84 : std::clamp(hi + 4, 24, 127));
+        view.topPitch = pitchRow(shown.empty() ? 84 : std::clamp(hi + 4, 24, 127));
     }
     clampVertical();
 
@@ -432,6 +602,33 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
     // UI-71: outside the clip's region (before the start / loop start, after the loop end or the end marker) the note area
     // is shaded like Live's, with a line at each region edge.
     const auto mk = markers();
+    const bool multi = multiClip();
+    const int focus = focusedMember();
+    auto memberColor = [&](int member) { return member >= 0 && member < (int) members_.size() ? Theme::paletteColor(members_[(size_t) member].colorIndex) : clipColor; };
+    if (multi)
+    {
+        // UI-93: Arrangement time; outside every shown clip is shaded, with a line at each clip's edges.
+        const SkColor shade = paint::withAlpha(t.color("SurfaceArea"), 70);
+        std::vector<std::pair<double, double>> spans;
+        for (const auto& m : members_) spans.emplace_back(m.start, m.end);
+        std::sort(spans.begin(), spans.end());
+        double covered = xToBeat(area.x);
+        for (const auto& [start, end] : spans)
+        {
+            if (start > covered)
+            {
+                const float x0 = std::max(area.x, beatToX(covered)), x1 = std::min(area.right(), beatToX(start));
+                if (x1 > x0) paint::fill(c, {x0, area.y, x1 - x0, area.h}, shade);
+            }
+            covered = std::max(covered, end);
+        }
+        if (beatToX(covered) < area.right())
+            paint::fill(c, {std::max(area.x, beatToX(covered)), area.y, area.right() - std::max(area.x, beatToX(covered)), area.h}, shade);
+        for (const auto& m : members_)
+            for (const double edge : {m.start, m.end})
+                paint::line(c, beatToX(edge) + 0.5f, area.y, beatToX(edge) + 0.5f, area.bottom(), paint::withAlpha(t.color("ControlForeground"), 90));
+    }
+    else
     {
         const double regionStart = mk.looping ? std::min(mk.start, mk.loopStart) : mk.start;
         const double regionEnd = mk.looping ? mk.loopEnd : mk.end;
@@ -464,12 +661,20 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
         if (x1 < area.x || x0 > area.right() || y0 + view.rowHeight < area.y || y0 > area.bottom())
             continue;
         // UI-71 (Live): notes outside the region the clip plays (after the loop end, before the start) are drawn faded.
-        const bool outside = n.start >= (mk.looping ? mk.loopEnd : mk.end) - 1e-9
-                             || n.start + n.duration <= (mk.looping ? std::min(mk.start, mk.loopStart) : mk.start) + 1e-9;
-        const SkColor fill = outside ? paint::mix(clipColor, t.color("DetailViewBackground"), 0.55f) : clipColor;
+        bool outside = n.start >= (mk.looping ? mk.loopEnd : mk.end) - 1e-9
+                       || n.start + n.duration <= (mk.looping ? std::min(mk.start, mk.loopStart) : mk.start) + 1e-9;
+        SkColor noteColor = clipColor;
+        if (multi)
+        {
+            // UI-93: each note in its clip's colour (Focus Mode: the other clips' notes grey); faded outside its clip.
+            const int member = noteMember(n);
+            noteColor = focusMode_ && member != focus ? t.color("TextDisabled") : memberColor(member);
+            outside = member >= 0 && (n.start >= members_[(size_t) member].end - 1e-9 || n.start + n.duration <= members_[(size_t) member].start + 1e-9);
+        }
+        const SkColor fill = outside ? paint::mix(noteColor, t.color("DetailViewBackground"), 0.55f) : noteColor;
         const Rect r{x0, y0 + 0.5f, x1 - x0 - 0.5f, view.rowHeight - 1.0f};
         paint::fill(c, r, n.enabled ? fill : paint::withAlpha(fill, 90));
-        paint::stroke(c, r, isSelected(i) ? SkColorSetRGB(255, 255, 255) : paint::mix(clipColor, SkColorSetRGB(0, 0, 0), 0.6f));
+        paint::stroke(c, r, isSelected(i) ? SkColorSetRGB(255, 255, 255) : paint::mix(noteColor, SkColorSetRGB(0, 0, 0), 0.6f));
         // Zoomed in far enough (Live): the note's name centred inside it, once the row and the note fit the text.
         if (view.rowHeight >= 14.0f)
         {
@@ -522,13 +727,14 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
     const auto highlight = headerControlBounds(HeaderControl::Highlight);
     ctl::toggle(c, t, {highlight.x, highlight.y + 2, 13, 13}, ctx().scaleHighlight ? "✓" : "", ctx().scaleHighlight, Theme::paletteColor(cl->colorIndex));
     paint::text(c, "Highlight Scale", {highlight.x + 17, highlight.y, highlight.w - 17, highlight.h}, t.color("ControlForeground"), t.metrics.smallFontSize);
+    if (multi) ctl::toggle(c, t, headerControlBounds(HeaderControl::Focus), "Focus", focusMode_, t.color("SelectionBackground"));
     const auto ruler = rulerArea();
     paint::fill(c, ruler, t.color("SurfaceBackground"));
     c.save();
     c.clipRect(ruler.sk());
     // Numbers are the clip's own time (1 = its content's 1.1.1, Live), so a clip anywhere in the Arrangement starts at "1"
     // unless its markers say otherwise; positions before 1.1.1 read 0.4, 0, -1 ...
-    const float numbersBottom = kRulerH - kMarkerStripH;
+    const float numbersBottom = kRulerH - kMarkerStripH; // the loop bars (UI-93) grow the ruler below the numbers
     for (const auto& mark : ui::rulerMarks(firstBeat, lastBeat, view.pixelsPerBeat, bar, beatUnit, 5.5f, 9.0f, true))
     {
         const float mx = beatToX(mark.beat);
@@ -545,6 +751,20 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
     const Rect strip = markerStrip();
     paint::fill(c, strip, paint::mix(t.color("SurfaceBackground"), t.color("SurfaceArea"), 0.25f));
     paint::line(c, strip.x, strip.y + 0.5f, strip.right(), strip.y + 0.5f, t.color("ControlContrastFrame"));
+    if (multi)
+    {
+        // UI-93 loop bars: one row per track, each clip's span in its colour (Focus Mode: the others grey); the focused clip
+        // is framed.
+        for (int m = 0; m < (int) members_.size(); ++m)
+        {
+            const auto loopBar = loopBarBounds(m);
+            if (loopBar.w <= 0) continue;
+            const SkColor color = focusMode_ && m != focus ? paint::mix(t.color("TextDisabled"), t.color("SurfaceBackground"), 0.3f) : memberColor(m);
+            paint::fill(c, loopBar, color);
+            paint::stroke(c, loopBar, m == focus ? t.color("ControlForeground") : paint::mix(color, SkColorSetRGB(0, 0, 0), 0.45f));
+        }
+    }
+    else
     {
         const float x0 = beatToX(mk.loopStart), x1 = beatToX(mk.loopEnd);
         if (x1 > x0)
@@ -562,8 +782,11 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
         p.setStyle(SkPaint::kStroke_Style); p.setColor(flagInk);
         c.drawPath(shape, p);
     };
-    flag(mk.start, true);
-    if (! mk.looping) flag(mk.end, false); // Live hides the end marker while the clip loops
+    if (! multi)
+    {
+        flag(mk.start, true);
+        if (! mk.looping) flag(mk.end, false); // Live hides the end marker while the clip loops
+    }
     c.restore();
 
     // ---- velocity lane
@@ -576,7 +799,7 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
     {
         const auto& n = ns[(size_t) i];
         const float x0 = beatToX(n.start);
-        if (x0 < vel.x - 2 || x0 > vel.right())
+        if (x0 < vel.x - 2 || x0 > vel.right() || ! inFocusedClip(n)) // UI-93: the lane shows the focused clip's notes
             continue;
         const float h = (vel.h - 6) * (probabilityLane_ ? n.probability : n.velocity / 127.0f);
         paint::fill(c, {x0, vel.bottom() - 2 - h, 3.0f, h}, isSelected(i) ? SkColorSetRGB(255, 255, 255) : clipColor);
@@ -597,6 +820,7 @@ void PianoRoll::paint(SkCanvas& c, const Theme& t)
 
 void PianoRoll::mouseDown(const MouseEvent& e)
 {
+    syncMulti();
     const auto* cl = clip();
     auto& x = ctx();
     if (cl == nullptr || cl->kind != model::Clip::Kind::Midi)
@@ -610,10 +834,23 @@ void PianoRoll::mouseDown(const MouseEvent& e)
         else if (headerControlBounds(HeaderControl::Scale).contains(e.x, e.y))
         { x.scaleFold = ! x.scaleFold; if (x.scaleFold) { x.noteFold = false; x.scaleHighlight = true; } }
         else if (headerControlBounds(HeaderControl::Highlight).contains(e.x, e.y)) x.scaleHighlight = ! x.scaleHighlight;
+        else if (headerControlBounds(HeaderControl::Focus).contains(e.x, e.y)) { focusMode_ = ! focusMode_; selected_.clear(); }
         syncPitchRows(); repaint(); return;
     }
     if (! e.right && keysArea().contains(e.x, e.y)) { audition(yToPitch(e.y)); return; }
     if (! x.applyEdit) return;
+    if (! e.right && multiClip() && markerStrip().contains(e.x, e.y))
+    {
+        // UI-93: a click on a loop bar focuses that clip.
+        for (int m = (int) members_.size() - 1; m >= 0; --m)
+            if (loopBarBounds(m).reduced(0, -1).contains(e.x, e.y))
+            {
+                if (m != focusedMember() && focusMode_) selected_.clear();
+                focusMember(m);
+                break;
+            }
+        repaint(); return;
+    }
     if (! e.right && markerStrip().contains(e.x, e.y))
         if (const auto hit = markerAt(e.x); hit != MarkerDrag::None)
         {
@@ -667,11 +904,14 @@ void PianoRoll::mouseDown(const MouseEvent& e)
         repaint();
         return;
     }
-    std::erase_if(selected_, [&](int index) { return index < 0 || (size_t) index >= cl->notes.size(); });
+    std::erase_if(selected_, [&](int index) { return index < 0 || (size_t) index >= sourceNotes().size(); });
     changed_ = false;
-    working_ = cl->notes;
-    original_ = cl->notes;
+    working_ = sourceNotes();
+    original_ = working_;
     editingLocation_ = ctx().selectedClipLocation();
+    editingMembers_ = members_;
+    editingBase_ = merged_;
+    editingFocus_ = focusedMember();
     editing_ = true;
     grabbedNote_ = -1;
     mode_ = Mode::None;
@@ -686,6 +926,7 @@ void PianoRoll::mouseDown(const MouseEvent& e)
         float bestD = 6.0f;
         for (int i = 0; i < (int) working_.size(); ++i)
         {
+            if (! inFocusedClip(working_[(size_t) i])) continue; // UI-93: the lane edits the focused clip only
             const float d = std::fabs(beatToX(working_[(size_t) i].start) + 1.5f - e.x);
             if (d < bestD)
             {
@@ -725,6 +966,12 @@ void PianoRoll::mouseDown(const MouseEvent& e)
         paintNoteAt(std::floor(xToBeat(e.x) / grid() + 1e-9) * grid(), yToPitch(e.y));
         return;
     }
+    if (hit >= 0 && multiClip())
+        if (const int member = noteMember(working_[(size_t) hit]); member >= 0 && member != editingFocus_)
+        {
+            focusMember(member); // UI-93: clicking another clip's note focuses that clip
+            editingFocus_ = member;
+        }
     if (hit >= 0)
     {
         if (e.shift)
@@ -817,20 +1064,20 @@ void PianoRoll::paintNoteAt(double cellStart, int pitch)
 
 void PianoRoll::updateMarquee(const MouseEvent& e)
 {
-    const auto* cl = clip();
-    if (cl == nullptr)
+    if (clip() == nullptr)
         return;
+    const auto& ns = sourceNotes();
     const auto area = notesArea();
     marqueeBeat1_ = xToBeat(std::clamp(e.x, area.x, area.right()));
     marqueeRow1_ = std::clamp(yToRow(e.y), -1.0, 128.0);
     const double b0 = std::min(marqueeBeat0_, marqueeBeat1_), b1 = std::max(marqueeBeat0_, marqueeBeat1_);
     const double r0 = std::min(marqueeRow0_, marqueeRow1_), r1 = std::max(marqueeRow0_, marqueeRow1_);
     selected_ = marqueeBase_;
-    for (int i = 0; i < (int) cl->notes.size(); ++i)
+    for (int i = 0; i < (int) ns.size(); ++i)
     {
-        const auto& n = cl->notes[(size_t) i];
+        const auto& n = ns[(size_t) i];
         // a note occupies the pitch rows [pitch - 1, pitch] and the beats [start, start + duration]
-        if (n.start <= b1 && n.start + n.duration >= b0 && (double) pitchRow(n.pitch) >= r0 && (double) (pitchRow(n.pitch) - 1) <= r1)
+        if (editable(n) && n.start <= b1 && n.start + n.duration >= b0 && (double) pitchRow(n.pitch) >= r0 && (double) (pitchRow(n.pitch) - 1) <= r1)
             selected_.insert(i);
     }
 }
@@ -839,6 +1086,7 @@ void PianoRoll::updateMarquee(const MouseEvent& e)
 // (pointing left to the end, loop off), the loop brace's edges or its body (loop on).
 PianoRoll::MarkerDrag PianoRoll::markerAt(float px) const
 {
+    if (multiClip()) return MarkerDrag::None; // TODO(UI-93b): loop bar marker drags while editing several clips
     const auto m = markers();
     const float xs = beatToX(m.start), xe = beatToX(m.end), xl0 = beatToX(m.loopStart), xl1 = beatToX(m.loopEnd);
     if (px >= xs - 2 && px <= xs + 9) return MarkerDrag::Start;
@@ -909,9 +1157,12 @@ void PianoRoll::mouseDrag(const MouseEvent& e)
         const double beat = std::max(0.0, ui::snapToGrid(xToBeat(e.x), snapUnit(e)));
         rangeStart_ = std::min(rangeGrab_, beat); rangeEnd_ = std::max(rangeGrab_, beat);
         selected_.clear();
-        if (const auto* current = clip())
-            for (int i = 0; i < (int) current->notes.size(); ++i)
-                if (current->notes[(size_t) i].start >= rangeStart_ && current->notes[(size_t) i].start < rangeEnd_) selected_.insert(i);
+        if (clip())
+        {
+            const auto& ns = sourceNotes();
+            for (int i = 0; i < (int) ns.size(); ++i)
+                if (ns[(size_t) i].start >= rangeStart_ && ns[(size_t) i].start < rangeEnd_ && editable(ns[(size_t) i])) selected_.insert(i);
+        }
         repaint(); return;
     }
     if (mode_ == Mode::Draw && editing_)
@@ -968,6 +1219,7 @@ void PianoRoll::mouseDrag(const MouseEvent& e)
         {
             for (auto& note : working_)
             {
+                if (! inFocusedClip(note)) continue;
                 const float nx = beatToX(note.start) + 1.5f;
                 if (nx < std::min(velocityLastX_, e.x) - 2 || nx > std::max(velocityLastX_, e.x) + 2) continue;
                 const float fraction = std::fabs(e.x - velocityLastX_) < 0.01f ? 1.0f
@@ -975,7 +1227,7 @@ void PianoRoll::mouseDrag(const MouseEvent& e)
                 setValue(note, velocityLastY_ + fraction * (e.y - velocityLastY_));
             }
         }
-        else for (int i : selected_) setValue(working_[(size_t) i], e.y);
+        else for (int i : selected_) if (inFocusedClip(working_[(size_t) i])) setValue(working_[(size_t) i], e.y);
         velocityLastX_ = e.x; velocityLastY_ = e.y;
     }
     else if (mode_ == Mode::Move)
@@ -1056,15 +1308,16 @@ void PianoRoll::commit(const char* label)
         for (int i : selected_)
             if (i >= 0 && i < (int) working_.size())
                 keep.push_back(working_[(size_t) i]);
-        x.applyEdit(model::setNotes(*x.song, editingLocation_, working_, label));
-        selected_.clear();
-        const auto* after = clip();
-        if (after != nullptr)
-            for (int i = 0; i < (int) after->notes.size(); ++i)
-                for (const auto& k : keep)
-                    if (after->notes[(size_t) i].pitch == k.pitch && std::fabs(after->notes[(size_t) i].start - k.start) < 1e-9
-                        && std::fabs(after->notes[(size_t) i].duration - k.duration) < 1e-9)
-                        selected_.insert(i);
+        if (editingMembers_.size() > 1)
+        {
+            // UI-93: one undo step over every clip whose notes changed.
+            if (auto command = model::setMergedNotes(*x.song, editingMembers_, editingBase_, working_, editingFocus_, label); command.apply)
+                x.applyEdit(std::move(command));
+        }
+        else x.applyEdit(model::setNotes(*x.song, editingLocation_, working_, label));
+        editing_ = false;
+        syncMulti();
+        reselect(keep, true);
     }
     editing_ = false;
     working_.clear();
@@ -1105,6 +1358,7 @@ bool PianoRoll::mouseWheel(const MouseEvent& e)
 bool PianoRoll::keyPressed(const KeyEvent& k)
 {
     auto& x = ctx();
+    syncMulti();
     const auto* cl = clip();
     if (! visible || cl == nullptr || cl->kind != model::Clip::Kind::Midi || ! x.applyEdit)
         return false;
@@ -1114,9 +1368,11 @@ bool PianoRoll::keyPressed(const KeyEvent& k)
     { x.noteFold = ! x.noteFold; if (x.noteFold) x.scaleFold = false; syncPitchRows(); repaint(); return true; }
     if (! k.cmd && ! k.alt && ! k.ctrl && ! x.computerKeyboard && (k.textChar == 'g' || k.textChar == 'G'))
     { x.scaleFold = ! x.scaleFold; if (x.scaleFold) { x.noteFold = false; x.scaleHighlight = true; } syncPitchRows(); repaint(); return true; }
-    auto edit = [&](std::vector<model::MidiNote> ns, const char* label) {
-        x.applyEdit(model::setNotes(*x.song, x.selectedClipLocation(), std::move(ns), label));
-    };
+    // UI-93: N toggles Focus Mode while several clips are shown.
+    if (multiClip() && ! k.cmd && ! k.alt && ! k.ctrl && ! x.computerKeyboard && (k.textChar == 'n' || k.textChar == 'N'))
+    { focusMode_ = ! focusMode_; selected_.clear(); repaint(); return true; }
+    auto edit = [&](std::vector<model::MidiNote> ns, const char* label) { storeNotes(std::move(ns), label); };
+    const auto& stored = sourceNotes(); // the focused clip's notes, or every shown clip's (UI-93, Arrangement beats)
 
     if (k.cmd && ! k.alt && ! k.shift && k.textChar >= '1' && k.textChar <= '5' && ui::handleGridShortcut(x.clipGrid, (int) k.textChar))
     {
@@ -1134,23 +1390,27 @@ bool PianoRoll::keyPressed(const KeyEvent& k)
     if (k.cmd && ! k.alt && ! k.ctrl && (k.textChar == 'a' || k.textChar == 'A'))
     {
         std::set<int> selection;
-        for (int i = 0; i < (int) cl->notes.size(); ++i)
-            if (! k.shift || ! selected_.contains(i)) selection.insert(i);
+        for (int i = 0; i < (int) stored.size(); ++i)
+            if ((! k.shift || ! selected_.contains(i)) && editable(stored[(size_t) i])) selection.insert(i);
         selected_ = std::move(selection);
         timeRange_ = false;
         repaint();
         return true;
     }
-    std::erase_if(selected_, [&](int index) { return index < 0 || (size_t) index >= cl->notes.size(); });
+    std::erase_if(selected_, [&](int index) { return index < 0 || (size_t) index >= stored.size(); });
     if (k.cmd && ! k.alt && ! k.shift && (k.textChar == 'l' || k.textChar == 'L') && ! selected_.empty())
     {
         // Loop Selection: the clip's loop brace becomes the span of the selected notes, and looping is switched on.
+        // Multi-clip editing: the focused clip's selected notes, in its own content time.
         double first = 1e18, last = -1e18;
+        const double offset = multiClip() ? members_[(size_t) focusedMember()].offset : 0.0;
         for (int i : selected_)
         {
-            first = std::min(first, cl->notes[(size_t) i].start);
-            last = std::max(last, cl->notes[(size_t) i].start + cl->notes[(size_t) i].duration);
+            if (! inFocusedClip(stored[(size_t) i])) continue;
+            first = std::min(first, stored[(size_t) i].start - offset);
+            last = std::max(last, stored[(size_t) i].start + stored[(size_t) i].duration - offset);
         }
+        if (last < first) return true;
         auto changed = *cl;
         changed.loop.loopStart = first;
         changed.loop.loopEnd = last;
@@ -1172,15 +1432,15 @@ bool PianoRoll::keyPressed(const KeyEvent& k)
     {
         double first = 1e18, end = 0;
         for (int i : selected_)
-        { first = std::min(first, cl->notes[(size_t) i].start); end = std::max(end, cl->notes[(size_t) i].start + cl->notes[(size_t) i].duration); }
-        auto duplicated = cl->notes;
+        { first = std::min(first, stored[(size_t) i].start); end = std::max(end, stored[(size_t) i].start + stored[(size_t) i].duration); }
+        auto duplicated = stored;
         const double span = timeRange_ ? rangeEnd_ - rangeStart_ : std::max(grid(), end - first);
         if (span <= 1e-9) return true;
         std::vector<model::MidiNote> copies;
         const auto indices = selected_; selected_.clear();
         for (int i : indices)
         {
-            auto copy = cl->notes[(size_t) i];
+            auto copy = stored[(size_t) i];
             if (timeRange_)
             {
                 const double start = std::max(rangeStart_, copy.start), stop = std::min(rangeEnd_, copy.start + copy.duration);
@@ -1192,16 +1452,12 @@ bool PianoRoll::keyPressed(const KeyEvent& k)
         }
         edit(std::move(duplicated), "Duplicate Notes");
         if (timeRange_) { rangeStart_ = rangeEnd_; rangeEnd_ += span; }
-        if (const auto* after = clip())
-            for (int i = 0; i < (int) after->notes.size(); ++i)
-                for (const auto& copy : copies)
-                    if (after->notes[(size_t) i].pitch == copy.pitch && std::abs(after->notes[(size_t) i].start - copy.start) < 1e-9)
-                        selected_.insert(i);
+        reselect(copies, false);
         revealSelection(); repaint(); return true;
     }
     if (! k.cmd && ! k.alt && ! k.ctrl && k.textChar == '0')
     {
-        auto changed = cl->notes;
+        auto changed = stored;
         const bool enable = std::any_of(selected_.begin(), selected_.end(), [&](int i) { return ! changed[(size_t) i].enabled; });
         for (int i : selected_) changed[(size_t) i].enabled = enable;
         if (! selected_.empty()) edit(std::move(changed), "Activate/Deactivate Notes");
@@ -1211,7 +1467,7 @@ bool PianoRoll::keyPressed(const KeyEvent& k)
         // Delete with nothing selected in the note editor must not fall through and delete the whole clip.
         return k.keyCode == juce::KeyPress::deleteKey || k.keyCode == juce::KeyPress::backspaceKey;
 
-    auto ns = cl->notes;
+    auto ns = stored;
     std::vector<int> sel(selected_.begin(), selected_.end());
     if (! k.cmd && ! k.alt && ! k.ctrl && ! k.shift && (k.keyCode == juce::KeyPress::deleteKey || k.keyCode == juce::KeyPress::backspaceKey))
     {
@@ -1239,12 +1495,7 @@ bool PianoRoll::keyPressed(const KeyEvent& k)
         for (int i : sel)
             keep.push_back(ns[(size_t) i]);
         edit(std::move(ns), "Transpose Notes");
-        selected_.clear();
-        const auto* after = clip();
-        for (int i = 0; after != nullptr && i < (int) after->notes.size(); ++i)
-            for (const auto& kk : keep)
-                if (after->notes[(size_t) i].pitch == kk.pitch && std::fabs(after->notes[(size_t) i].start - kk.start) < 1e-9)
-                    selected_.insert(i);
+        reselect(keep, false);
         revealSelection(); // the transposed notes stay in view
         repaint();
         return true;
@@ -1260,12 +1511,7 @@ bool PianoRoll::keyPressed(const KeyEvent& k)
             keep.push_back(ns[(size_t) i]);
         }
         edit(std::move(ns), "Nudge Notes");
-        selected_.clear();
-        const auto* after = clip();
-        for (int i = 0; after != nullptr && i < (int) after->notes.size(); ++i)
-            for (const auto& kk : keep)
-                if (after->notes[(size_t) i].pitch == kk.pitch && std::fabs(after->notes[(size_t) i].start - kk.start) < 1e-9)
-                    selected_.insert(i);
+        reselect(keep, false);
         revealSelection();
         repaint();
         return true;
@@ -1279,12 +1525,7 @@ bool PianoRoll::keyPressed(const KeyEvent& k)
             keep.push_back(ns[(size_t) i]);
         }
         edit(std::move(ns), "Quantize Notes");
-        selected_.clear();
-        const auto* after = clip();
-        for (int i = 0; after != nullptr && i < (int) after->notes.size(); ++i)
-            for (const auto& kk : keep)
-                if (after->notes[(size_t) i].pitch == kk.pitch && std::fabs(after->notes[(size_t) i].start - kk.start) < 1e-9)
-                    selected_.insert(i);
+        reselect(keep, false);
         return true;
     }
     return false;

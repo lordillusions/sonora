@@ -2,6 +2,7 @@
 #include "ui/CollabOverlay.h"
 #include "core/TimeUtils.h"
 #include "core/DeviceCatalog.h"
+#include "core/MultiClipNotes.h"
 
 #include "ui/WheelScale.h"
 
@@ -2574,7 +2575,21 @@ void ArrangementView::mouseUp(const MouseEvent& e)
 {
     draggingRuler_ = false; // a scrub ends with the click: the speaker cursor must not stay over the lanes
     draggingWaveformZoom_ = false;
-    selectingTime_ = false;
+    if (std::exchange(selectingTime_, false))
+    {
+        // UI-93: a time selection dragged from empty space over several MIDI clips focuses the first of them, so the note
+        // editor shows them all (a drag that starts on a clip keeps that clip focused).
+        auto& c = ctx();
+        const auto& range = c.arrangementSelection;
+        if (c.song && c.selectedClipUid < 0 && range.active && range.end > range.start)
+            if (const auto members = model::midiClipsInSelection(*c.song, range.firstTrack, range.lastTrack, range.start, range.end);
+                members.size() > 1)
+            {
+                c.selectedClipTrack = members.front().location.track;
+                c.selectedClipUid = members.front().location.uid;
+                c.selectedClipScene = c.selectedTakeLane = -1;
+            }
+    }
     draggingOverview_ = false;
     rulerZoom_ = {};
     if (laneResize_ >= 0)
