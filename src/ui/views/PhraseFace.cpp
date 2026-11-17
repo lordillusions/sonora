@@ -1071,6 +1071,13 @@ std::string PhraseFace::idleHelp() const
 }
 
 // --------------------------------------------------------------------------------------------------------- paint
+std::string PhraseFace::toneRowLabel(PhrasePart part, int row)
+{
+    static constexpr std::array<const char*, 3> bassRows{"Root", "5th", "Oct"};
+    if (part == PhrasePart::Bass) return row >= 0 && row < (int) bassRows.size() ? bassRows[(size_t) row] : "";
+    return (part == PhrasePart::Stabs ? "top " : "") + std::to_string(row + 1);
+}
+
 void PhraseFace::paintBack(SkCanvas& c, Layout layout)
 {
     if (layout == Layout::Compact)
@@ -1091,15 +1098,15 @@ void PhraseFace::paintBack(SkCanvas& c, Layout layout)
     pro::sectionTitle(c, "DICE", 884, 156, kAccent);
     pro::panel(c, {14, 592, 1132, 88});
     pro::panel(c, {14, 684, 1132, 78});
-    if (part() != PhrasePart::Pad)
+    // The page is the one that was built, not the device's part: another face of the same device (the chain's next to this
+    // window) or a host can change the part between two ticks, and this paint comes before the rebuild.
+    if (builtPart_ != PhrasePart::Pad)
     {
         // The tone grid's row labels.
-        const char* bassRows[3] = {"Root", "5th", "Oct"};
         for (int r = 0; r < toneGrid_.rows; ++r)
         {
             const auto cell = toneGrid_.cellRect(0, r);
-            const std::string label = part() == PhrasePart::Bass ? bassRows[r] : (part() == PhrasePart::Stabs ? "top " : "") + std::to_string(r + 1);
-            pro::text(c, label, {24, cell.y, 72, cell.h}, pro::kDim, std::min(11.0f, cell.h * 0.7f), Align::Left, true);
+            pro::text(c, toneRowLabel(builtPart_, r), {24, cell.y, 72, cell.h}, pro::kDim, std::min(11.0f, cell.h * 0.7f), Align::Left, true);
         }
     }
     else

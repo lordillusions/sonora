@@ -161,6 +161,8 @@ constexpr HallSetting kHallSettings[Seraph::kSpaceSizes] = {
     {0.25f, 0.2157f, 1.01f}, {0.40f, 0.2850f, 0.97f}, {0.55f, 0.4303f, 0.94f}, {0.70f, 0.5185f, 0.92f}, {0.85f, 0.6709f, 0.81f},
 };
 
+constexpr float kLimiterCeiling = 0.89f; // -1 dBFS: under the soft clip's knee at 0.9
+
 float softClip(float x)
 {
     const float a = std::abs(x);
@@ -335,6 +337,8 @@ void Seraph::reset()
     gate_.reset();
     for (auto* b : {&lowCut_, &warmth_, &air_, &wetHighPass_}) b->clear();
     distanceLp_[0] = distanceLp_[1] = 0;
+    chordGain_ = 1.0f;
+    limiterEnvelope_ = 0.0f;
     hall_.reset();
     quietBlocks_ = 1 << 20;
 }
@@ -1187,10 +1191,17 @@ void Seraph::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi)
         hallSize_ = size;
         hallDistance_ = distance;
     }
-    const float wetGain = space > 0.0f ? std::sin(space * 1.5707963f) * kHallSettings[size].wet : 0.0f;
-    const float dryGain = std::cos(space * 1.5707963f) * (1.0f - 0.7f * distance);
+    float wetGain = space > 0.0f ? std::sin(space * 1.5707963f) * kHallSettings[size].wet : 0.0f;
+    float dryGain = std::cos(space * 1.5707963f) * (1.0f - 0.7f * distance);
+    // Space and Distance change the balance and the tone, not the loudness: a far choir was up to 10 dB quieter than a
+    // near one. The steady level of dry + hall (the hall's wet level is equalised to its input) is brought back to 1.
+    const float spaceMakeup = 1.0f / std::max(0.3f, std::sqrt(dryGain * dryGain + wetGain * wetGain));
+    wetGain *= spaceMakeup;
+    dryGain *= spaceMakeup;
     const float distanceCoef = (float) std::exp(-2.0 * kPi * (18000.0 - 13000.0 * distance) / sampleRate_);
     const float output = juce::Decibels::decibelsToGain(value(Output));
+    const float chordCoef = 1.0f - (float) std::exp(-1.0 / (0.060 * sampleRate_));
+    const float limiterRelease = 1.0f - (float) std::exp(-1.0 / (0.150 * sampleRate_));
     float* outLeft = audio.getWritePointer(0);
     float* outRight = audio.getNumChannels() > 1 ? audio.getWritePointer(1) : nullptr;
 
@@ -1259,10 +1270,17 @@ void Seraph::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi)
         std::fill(right_.begin(), right_.begin() + len, 0.0f);
         if (anyVoice) renderVoices(left_.data(), right_.data(), len);
 
+        // Chord compensation: sounding notes (slots still in use, the ison among them), not singers: Singers and the
+        // organum are choices of size that should be heard as louder.
+        int soundingNotes = 0;
+        for (const auto& slot : slots_) soundingNotes += slot.used ? 1 : 0;
+        const float chordTarget = std::pow((float) std::max(1, soundingNotes), -1.0f / 3.0f);
+
         const double gateBeat0 = playing ? songBeat : freeBeats_ - gateStart_;
         for (int i = 0; i < len; ++i)
         {
-            float l = left_[(size_t) i], r = right_[(size_t) i];
+            chordGain_ += chordCoef * (chordTarget - chordGain_);
+            float l = left_[(size_t) i] * chordGain_, r = right_[(size_t) i] * chordGain_;
             float g = 1.0f;
             if (gateOn)
             {
@@ -1284,8 +1302,20 @@ void Seraph::process(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi)
                 r = distanceLp_[1] * dryGain + wr * wetGain;
             }
             if (gateOn && gateAfter) { l *= g; r *= g; }
-            l = softClip(l * output);
-            r = softClip(r * output);
+            l *= output;
+            r *= output;
+            // The limiter: it follows the louder channel's peaks at once and lets go over 150 ms, so the gain barely moves
+            // within a period of the voice and nothing reaches the soft clip, which stays as a guard.
+            const float peak = std::max(std::abs(l), std::abs(r));
+            limiterEnvelope_ = std::max(peak, limiterEnvelope_ + limiterRelease * (peak - limiterEnvelope_));
+            if (limiterEnvelope_ > kLimiterCeiling)
+            {
+                const float reduce = kLimiterCeiling / limiterEnvelope_;
+                l *= reduce;
+                r *= reduce;
+            }
+            l = softClip(l);
+            r = softClip(r);
             if (outRight != nullptr)
             {
                 outLeft[start + i] += l;

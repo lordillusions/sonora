@@ -136,6 +136,8 @@ public:
 
     explicit PhraseFace(devices::Phrase& device);
     devices::Phrase& phrase() { return phrase_; }
+    // A tone grid row's label on a part's page ("Root", "top 3", "5"); empty past the part's rows.
+    static std::string toneRowLabel(model::PhrasePart part, int row);
 
     // The VST3: drag the part out as a .mid file (shown instead of To Clip when onToClip is unset).
     std::function<void()> onDragMidi;

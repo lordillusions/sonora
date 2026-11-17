@@ -65,7 +65,9 @@ class SeraphVoice
 {
 public:
     static constexpr int kControlInterval = 16;
-    static constexpr float kLevel = 0.04f; // RMS of one singer at full velocity before the section's gain
+    // RMS of one singer at full velocity before the section's gain. 0.11 since the owner's first hearing (0.1.47): at 0.04
+    // a single mezzo-forte note left the device near -32 dBFS and he needed +18 dB after it. docs/SERAPH.md "Level".
+    static constexpr float kLevel = 0.11f;
 
     void prepare(double sampleRate)
     {

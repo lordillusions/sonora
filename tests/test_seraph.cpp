@@ -919,7 +919,65 @@ TEST_CASE("seraph: the space decays in the time of each size; Distance lowers th
     };
     const double near = direct(0), far = direct(1);
     std::printf("    direct sound: near %.1f dB, far %.1f dB\n", near, far);
-    CHECK(near - far > 6.0);
+    CHECK(near - far > 4.5); // less than the dry gain's 10 dB: the whole (dry + hall) is brought back to one loudness
+}
+
+// ---------------------------------------------------------------- level (0.1.47: "the output is very, very low")
+TEST_CASE("seraph: level: a chord of the default choir sits near -15 dBFS, one soft note is heard, far is as loud as near, nothing passes the ceiling")
+{
+    constexpr double rate = 48000;
+    auto played = [&](S& s, const std::vector<Note>& notes) {
+        s.prepare(rate, 512);
+        return render(s, rate, 4.0, notes);
+    };
+    const float forte = 100.0f / 127.0f, soft = 64.0f / 127.0f;
+    {
+        S s; // the defaults: what a new device plays
+        const auto out = played(s, {{0.0, 4.0, 57, forte}, {0.0, 4.0, 60, forte}, {0.0, 4.0, 64, forte}, {0.0, 4.0, 69, forte}});
+        const double level = rmsDb(out, (int) (1.5 * rate), (int) (3.5 * rate));
+        std::printf("    default choir, A minor at velocity 100: %.1f dB RMS, peak %.2f\n", level, peak(out));
+        CHECK(level > -19.0);
+        CHECK(level < -11.0);
+        CHECK(peak(out) < 0.9);
+    }
+    {
+        S s;
+        const auto out = played(s, {{0.0, 4.0, 57, soft}});
+        const double level = rmsDb(out, (int) (1.5 * rate), (int) (3.5 * rate));
+        std::printf("    default choir, one note at velocity 64: %.1f dB RMS\n", level);
+        CHECK(level > -25.0); // it was near -32 before
+    }
+    {
+        // a chord is fuller than a note, not four times its power
+        S one, four;
+        const double a = rmsDb(played(one, {{0.0, 4.0, 57, forte}}), (int) (1.5 * rate), (int) (3.5 * rate));
+        const double b = rmsDb(played(four, {{0.0, 4.0, 57, forte}, {0.0, 4.0, 60, forte}, {0.0, 4.0, 64, forte}, {0.0, 4.0, 69, forte}}),
+                               (int) (1.5 * rate), (int) (3.5 * rate));
+        std::printf("    four notes against one: %+.1f dB\n", b - a);
+        CHECK(b - a > 0.5);
+        CHECK(b - a < 4.0);
+    }
+    {
+        S nearChoir, farChoir;
+        farChoir.setParameter(S::Distance, 1.0f);
+        nearChoir.setParameter(S::Distance, 0.0f);
+        const std::vector<Note> chord{{0.0, 4.0, 57, forte}, {0.0, 4.0, 60, forte}, {0.0, 4.0, 64, forte}};
+        const double a = rmsDb(played(nearChoir, chord), (int) (2.0 * rate), (int) (3.8 * rate));
+        const double b = rmsDb(played(farChoir, chord), (int) (2.0 * rate), (int) (3.8 * rate));
+        std::printf("    near %.1f dB, far %.1f dB\n", a, b);
+        CHECK(std::abs(a - b) < 3.0); // it was 8 dB
+    }
+    {
+        // everything at once, Output at its top: the limiter holds the ceiling and the soft clip is never reached
+        S s;
+        s.setParameter(S::Singers, 8);
+        s.setParameter(S::Output, 12);
+        std::vector<Note> notes;
+        for (int k = 0; k < 8; ++k) notes.push_back({0.0, 4.0, 45 + 3 * k, 1.0f});
+        const auto out = played(s, notes);
+        std::printf("    eight notes, eight singers, Output +12 dB: peak %.2f\n", peak(out));
+        CHECK(peak(out) <= 0.9);
+    }
 }
 
 TEST_CASE("seraph: the gate before the space leaves tails in the gaps, after the space cuts them")

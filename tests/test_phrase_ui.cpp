@@ -186,6 +186,44 @@ TEST_CASE("phrase plugin: the full face by mouse; tones, lanes, slots, form, pal
     editor.reset();
 }
 
+TEST_CASE("phrase: a part changed from outside is painted before the face rebuilds (owner's crash on Bass, 0.1.47)")
+{
+    // The device's part can change between two ticks of a face: the chain's face next to the open window, a host's
+    // automation. The window then painted Bass row names for the eight rows of the Arp page it still had.
+    for (int row = 0; row < 8; ++row)
+    {
+        CHECK(ui::PhraseFace::toneRowLabel(model::PhrasePart::Bass, row).empty() == (row >= 3));
+        CHECK(! ui::PhraseFace::toneRowLabel(model::PhrasePart::Arp, row).empty());
+        CHECK(! ui::PhraseFace::toneRowLabel(model::PhrasePart::Stabs, row).empty());
+    }
+    CHECK(ui::PhraseFace::toneRowLabel(model::PhrasePart::Bass, 0) == "Root");
+    CHECK(ui::PhraseFace::toneRowLabel(model::PhrasePart::Bass, -1).empty());
+
+    juce::ScopedJuceInitialiser_GUI init;
+    plugin::PhrasePlugin p;
+    p.prepareToPlay(48000, 512);
+    std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
+    auto* window = dynamic_cast<plugin::PhrasePluginEditor*>(editor.get());
+    REQUIRE(window != nullptr);
+    auto& view = window->view();
+    const auto size = ui::PhraseFace::kFull;
+    view.setBounds({0, 0, size.w, size.h});
+    view.layout();
+    auto& phrase = p.device();
+    for (int from = 0; from < 4; ++from)
+        for (int to = 0; to < 4; ++to)
+        {
+            phrase.setParameter(P::Part, (float) from);
+            view.tickTree();
+            view.layout();
+            phrase.setParameter(P::Part, (float) to); // no tick: the page is still `from`
+            CHECK(gfx::renderToPng(view, (int) size.w, (int) size.h, 1.0f, testFile("sonora_phrase_stale_page.png").getFullPathName().toStdString()));
+            view.tickTree(); // now it rebuilds
+            view.layout();
+            CHECK(gfx::renderToPng(view, (int) size.w, (int) size.h, 1.0f, testFile("sonora_phrase_stale_page.png").getFullPathName().toStdString()));
+        }
+}
+
 TEST_CASE("phrase plugin: MIDI out, the audition voice, state round trip and the Drag MIDI file")
 {
     juce::ScopedJuceInitialiser_GUI init;

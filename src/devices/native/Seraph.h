@@ -283,6 +283,9 @@ private:
     };
     Biquad lowCut_, warmth_, air_, wetHighPass_;
     float distanceLp_[2]{};
+    // Level (docs/SERAPH.md "Level"): every extra sounding note turns the choir down a little (notes^-1/3, smoothed), so a
+    // chord is fuller, not four times the power; a limiter rides what is still over the ceiling before the soft clip.
+    float chordGain_ = 1.0f, limiterEnvelope_ = 0.0f;
     serum_hall::Hall hall_;
     int hallSize_ = -1;
     float hallDistance_ = -1;
