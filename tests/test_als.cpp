@@ -1346,6 +1346,28 @@ TEST_CASE("als writer: a device's sidechain (source, tap, Gain, Mix, on) survive
     CHECK(checked == 3);
 }
 
+TEST_CASE("an envelope whose parameter is gone is dropped at load with a note (UI-110); live targets stay")
+{
+    auto text = juce::File(SONORA_TEST_FIXTURES).getChildFile("minimal_set.xml").loadFileAsString();
+    const juce::String orphan = "<AutomationEnvelope Id=\"9\"><EnvelopeTarget><PointeeId Value=\"987654\" /></EnvelopeTarget>"
+                                "<Automation><Events><FloatEvent Id=\"0\" Time=\"-63072000\" Value=\"0.5\" /></Events></Automation></AutomationEnvelope>";
+    REQUIRE(text.contains("<AutomationEnvelopes><Envelopes>"));
+    text = text.replaceFirstOccurrenceOf("<AutomationEnvelopes><Envelopes>", "<AutomationEnvelopes><Envelopes>" + orphan);
+    auto xml = juce::XmlDocument::parse(text); REQUIRE(xml != nullptr);
+    auto loaded = io::parseAls(*xml, "orphan.als"); REQUIRE(loaded);
+    std::set<int> ids;
+    for (const auto& e : loaded.song->tracks[0].automation) ids.insert(e.targetId);
+    CHECK(! ids.count(987654));
+    CHECK(ids.count(100)); CHECK(ids.count(104)); CHECK(ids.count(105)); // the mixer and the EQ keep theirs
+    CHECK(std::any_of(loaded.song->warnings.begin(), loaded.song->warnings.end(),
+                      [](const std::string& w) { return w.find("Removed 1 automation envelope ") != std::string::npos; }));
+    CHECK(ids.count(999)); // a parameter of a device Sonora does not run (Chorus2) is still in the set: kept
+    // The fixture alone: nothing orphaned, no note.
+    auto clean = io::loadAls(juce::File(SONORA_TEST_FIXTURES).getChildFile("minimal_set.xml")); REQUIRE(clean);
+    CHECK(std::none_of(clean.song->warnings.begin(), clean.song->warnings.end(),
+                       [](const std::string& w) { return w.find("automation envelope") != std::string::npos; }));
+}
+
 TEST_CASE("deleting a device takes its automation and clip envelopes along (UI-91); undo brings them back; save reload")
 {
     auto loaded = io::loadAls(juce::File(SONORA_TEST_FIXTURES).getChildFile("minimal_set.xml"));

@@ -75,7 +75,12 @@ public:
         ArrangementView,
     };
 
-    explicit IconButton(Icon icon) : icon_(icon) {}
+    // UI-112: opening a plug-in's window, a device's own window or folding a device still works in MIDI/Key Map mode:
+    // none of them can be mapped, and a hosted plug-in's parameters are mapped from its window (MIDI-10).
+    explicit IconButton(Icon icon) : icon_(icon)
+    {
+        bypassMapMode = icon == Icon::Wrench || icon == Icon::FloatWindow || icon == Icon::FoldOpen || icon == Icon::FoldClosed;
+    }
     Icon icon() const { return icon_; }
     void setIcon(Icon icon) { icon_ = icon; }
 

@@ -328,6 +328,7 @@ add_library(sonora_ui STATIC
     ui/Locators.cpp
     ui/InlineEdit.cpp
     ui/ValueEntry.cpp
+    ui/ValueLaw.cpp
     ui/SetView.cpp
     ui/TrackMenu.cpp
     ui/GeneratorClipUi.cpp
@@ -646,6 +647,8 @@ target_sources(Sonora PRIVATE
     app/AppRecovery.cpp
     app/AppPrivacy.cpp
     app/AppHandEdits.cpp
+    app/AppTrackAutotest.cpp
+    app/FreezeRecorder.cpp
 )
 if (SONORA_UPDATE_ALLOW_LOCAL_HTTP)
     set(_sonoraLocalTest 1)

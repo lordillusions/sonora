@@ -469,3 +469,39 @@ TEST_CASE("router: Map mode picks the parameter touched in a plug-in window")
     plugin.edit(2, true);
     CHECK(! watch.poll(&graph)); // after leaving Map mode the next poll starts from a fresh snapshot
 }
+
+TEST_CASE("midi manager: learning from a port without Remote turns Remote on for that port only (UI-113)")
+{
+    juce::ScopedJuceInitialiser_GUI juceInit;
+    midi::MidiManager mm;
+    mm.postToMessageThread = [](std::function<void()> f) { f(); };
+    juce::TemporaryFile settings(".json");
+    REQUIRE(settings.getFile().replaceWithText(
+        R"({"inputs":[{"id":"ui97-keys","name":"Keys","track":true,"remote":false},)"
+        R"({"id":"ui97-hui","name":"HUI","track":true,"remote":false}]})"));
+    REQUIRE(mm.loadSettings(settings.getFile()));
+    juce::StringArray turnedOn;
+    mm.onRemoteTurnedOn = [&](const juce::String& name) { turnedOn.add(name); };
+    const auto keys = model::midiPortToken("ui97-keys");
+    const auto remoteOf = [&](const char* id) {
+        juce::TemporaryFile out(".json");
+        REQUIRE(mm.saveSettings(out.getFile()));
+        const auto parsed = juce::JSON::parse(out.getFile());
+        for (const auto& input : *parsed["inputs"].getArray())
+            if (input["id"].toString() == id) return (bool) input["remote"];
+        return false;
+    };
+
+    // Not learning: a track-only port's CC maps nothing and changes no role.
+    mm.handleMessage(juce::MidiMessage::controllerEvent(1, 20, 90), true, false, keys);
+    CHECK(mm.mappings().empty()); CHECK(turnedOn.isEmpty()); CHECK(! remoteOf("ui97-keys"));
+
+    // Learning: the knob on that port is learned and its Remote role turns on; the other port is untouched.
+    ControlTarget vol{Kind::TrackVolume, 0, 0, 0, {}};
+    mm.beginLearn(vol);
+    mm.handleMessage(juce::MidiMessage::controllerEvent(1, 21, 90), true, false, keys);
+    REQUIRE(mm.mappings().size() == 1);
+    CHECK(mm.mappings()[0].number == 21);
+    CHECK(turnedOn == juce::StringArray{"Keys"});
+    CHECK(remoteOf("ui97-keys")); CHECK(! remoteOf("ui97-hui"));
+}

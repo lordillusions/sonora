@@ -681,11 +681,9 @@ TEST_CASE("device faces: EQ Eight display selects, drags and switches off bands;
     eq->setParameter(E::bandParam(1, E::On), 1);
     const auto knob = knobs[0]->boundsInRoot();
     ui::MouseEvent k; k.x = knob.centreX(); k.y = knob.centreY(); root.dispatchMouseDown(k); k.y -= 20; root.dispatchMouseDrag(k); root.dispatchMouseUp(k);
-    // UI-93: 800 * 2200^0.1 = 1727 Hz, snapped to the knob's three-digit step ("1.73 kHz"). Where exactly the value lands
-    // inside that step depends on the platform's float rounding when the log law is read from the knob's text (clang arm64
-    // 1730, MSVC x64 1725 in the v0.1.50 CI), so the test checks the step, not the last digit.
-    const float freq = eq->getParameter(E::bandParam(1, E::Freq));
-    CHECK(freq >= 1724.9f && freq < 1735.0f);
+    // UI-93: 800 * 2200^0.1 = 1727 Hz, snapped to the middle of the knob's three-digit step ("1.73 kHz") on every CPU
+    // (v0.1.50's x64 CI landed on the step's lower edge, 1725 Hz, until readings became exact: test_value_law.cpp).
+    CHECK_NEAR(eq->getParameter(E::bandParam(1, E::Freq)), 1730, 0.05);
     CHECK(knobs[0]->formatValue(knobs[0]->source().get()).find("kHz") != std::string::npos);
     const auto folder = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora-device-faces"); REQUIRE(folder.createDirectory().wasOk());
     REQUIRE(gfx::renderToPng(root, (int) face->width(), (int) face->height(), 2, folder.getChildFile("EqEight-reference.png").getFullPathName().toStdString()));

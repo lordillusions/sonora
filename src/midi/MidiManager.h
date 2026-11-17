@@ -68,6 +68,8 @@ public:
     void removeMapping(const ControlTarget& target, bool keyboard = false);
     // Called (message thread) after the mapping list changed (learn, add, remove).
     std::function<void()> onMappingsChanged;
+    // Called (message thread) after a learn turned the Remote role on for the port it came from (UI-113).
+    std::function<void(const juce::String& portName)> onRemoteTurnedOn;
 
     // How callbacks reach the message thread (default: MessageManager::callAsync). Tests run them inline.
     std::function<void(std::function<void()>)> postToMessageThread = [](std::function<void()> f) {

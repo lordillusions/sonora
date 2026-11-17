@@ -983,6 +983,37 @@ std::vector<uint8_t> decodeHexBlob(const std::string& text)
     return out;
 }
 
+// UI-110: an envelope whose target is nowhere in the set (its device was deleted by an older Sonora, before UI-91, or by
+// a hand-edited file) can never play and shows as an "Unmapped Target" lane that comes back every time all lanes are
+// shown. The loader drops it and says so in the load notes; the next save writes the set without it.
+static void dropOrphanEnvelopes(const XmlElement& liveSet, Song& song)
+{
+    std::set<int> targets;
+    std::function<void(const XmlElement&)> collect = [&](const XmlElement& e) {
+        if (isPointeeElement(e)) targets.insert(e.getIntAttribute("Id", -1));
+        for (const auto* child : e.getChildIterator()) collect(*child);
+    };
+    collect(liveSet);
+    size_t dropped = 0;
+    const auto clean = [&](std::vector<AutomationEnvelope>& envelopes) {
+        dropped += (size_t) std::erase_if(envelopes, [&](const AutomationEnvelope& e) {
+            return e.targetId >= 0 && ! isMidiController(e.midiController) && ! targets.contains(e.targetId);
+        });
+    };
+    const auto track = [&](Track& t) {
+        clean(t.automation);
+        for (auto& clip : t.arrangementClips) clean(clip.envelopes);
+        for (auto& slot : t.slots) if (slot.clip) clean(slot.clip->envelopes);
+        for (auto& lane : t.takeLanes) for (auto& clip : lane.clips) clean(clip.envelopes);
+    };
+    for (auto& t : song.tracks) track(t);
+    for (auto& t : song.returns) track(t);
+    track(song.main);
+    if (dropped > 0)
+        song.warnings.push_back("Removed " + std::to_string(dropped) + " automation envelope" + (dropped == 1 ? "" : "s")
+                                + " whose parameter is no longer in the set");
+}
+
 AlsLoadResult parseAls(const XmlElement& root, const std::string& sourcePath)
 {
     AlsLoadResult result;
@@ -1082,6 +1113,7 @@ AlsLoadResult parseAls(const XmlElement& root, const std::string& sourcePath)
         for (const auto* descendant : element->getChildIterator()) findTargetIds(descendant);
     };
     findTargetIds(liveSet);
+    dropOrphanEnvelopes(*liveSet, *song);
 
     if (const auto* tr = liveSet->getChildByName("Transport"))
     {

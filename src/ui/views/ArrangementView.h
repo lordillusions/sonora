@@ -115,6 +115,11 @@ private:
     void insertMidiClip(int track, double beat);
     void optimizeHeight();
     void optimizeWidth();
+    // UI-31b: H and W stay on while lit and keep fitting as the window, the visible tracks or the song length change.
+    void keepOptimized();
+    double fittedPixelsPerBeat() const;
+    float fittedLaneHeight() const;
+    void applyFittedHeight(float height);
     Rect waveformZoomBounds() const;
     void showWaveformZoomMenu();
     void commitWaveformZoom();
@@ -126,6 +131,8 @@ private:
     float waveformGrabY_ = 0, waveformBefore_ = 1, savedTrackScroll_ = 0;
     double savedPixelsPerBeat_ = 14, savedScrollBeats_ = 0;
     std::vector<float> savedLaneHeights_;
+    double fittedPixelsPerBeat_ = 0; // what W set: another zoom found here was made by hand and ends W
+    const model::Song* optimizedFor_ = nullptr; // H/W end with another document, not when the UI briefly has none
     Widget* waveformButton_ = nullptr;
     Widget* heightButton_ = nullptr;
     Widget* widthButton_ = nullptr;

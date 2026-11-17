@@ -197,24 +197,6 @@
 							<BoolEvent Id="1" Time="16" Value="false" />
 						</Events></Automation>
 					</AutomationEnvelope>
-					<AutomationEnvelope Id="2">
-						<EnvelopeTarget><PointeeId Value="104" /></EnvelopeTarget>
-						<Automation><Events>
-							<FloatEvent Id="0" Time="-63072000" Value="0" />
-							<FloatEvent Id="1" Time="0" Value="-6" />
-						</Events></Automation>
-					</AutomationEnvelope>
-					<AutomationEnvelope Id="3">
-						<EnvelopeTarget><PointeeId Value="105" /></EnvelopeTarget>
-						<Automation><Events>
-							<BoolEvent Id="0" Time="-63072000" Value="true" />
-							<BoolEvent Id="1" Time="2" Value="false" />
-						</Events></Automation>
-					</AutomationEnvelope>
-					<AutomationEnvelope Id="4">
-						<EnvelopeTarget><PointeeId Value="999" /></EnvelopeTarget>
-						<Automation><Events><FloatEvent Id="0" Time="-63072000" Value="3" /><FloatEvent Id="1" Time="8" Value="4" /></Events></Automation>
-					</AutomationEnvelope>
 				</Envelopes></AutomationEnvelopes>
 			</MidiTrack>
 			<ReturnTrack Id="2">

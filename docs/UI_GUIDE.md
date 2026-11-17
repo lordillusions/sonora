@@ -1009,8 +1009,10 @@ Nested track groups remain supported, as in the reference app and its documented
   All Track Heights resize every track at once (UI-59). Clips stay drawn at every lane height, down to an 18 px name strip.
   Option-click a group's fold triangle folds or unfolds every group; View > Show All Grouped Tracks unfolds them all.
   H fits visible track heights (minimum 18 px), W fits
-  the song horizontally; pressing again restores prior geometry. H/W keyboard shortcuts apply with Arrangement focus
-  and the computer MIDI keyboard off. Persistent display state and resize-aware fitting remain UI-31b.
+  the song horizontally; pressing again restores prior geometry. While lit they keep fitting as the window, the
+  visible tracks (added, removed, a group unfolded) or the song's length change; a zoom of that direction by hand
+  (Option+wheel, a lane edge drag, Cmd+wheel, Z, the ruler) turns them off and keeps the new zoom (UI-31b). H/W
+  keyboard shortcuts apply with Arrangement focus and the computer MIDI keyboard off.
 - Session and Arrangement icons sit side by side at the far top right (vertical bars then horizontal bars), with hover
   tooltips. MIDI tracks with no instrument show MIDI activity dots, MIDI To/No Output, activator/solo/MIDI arm and input
   routing. They hide audio volume/pan/sends/readouts/meters. Instrument racks and hosted instruments restore audio

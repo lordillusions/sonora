@@ -9,6 +9,7 @@
 //  - Before a new graph is installed, plugin windows are closed and views are told via
 //    UiContext::modelChanged so nothing points into the old graph.
 
+#include "app/FreezeRecorder.h"
 #include "collab/CollabSession.h"
 #include "collab/Net.h"
 #include "collab/Video.h"
@@ -447,7 +448,9 @@ private:
     void markHandEdited();
     void resetHandEdits(); // a set was loaded or saved
     void runHandEditAutotest(); // SONORA_HAND_EDIT_AUTOTEST=<seconds>[,beat]
-    struct HandPluginSeen { uint32_t window = 0, panel = 0; };
+    void runTrackSwapAutotest(); // SONORA_TRACK_SWAP_AUTOTEST=<track name> (UI-111)
+    std::unique_ptr<FreezeRecorder> freezeRecorder_; // UI-111: stacks of a frozen message thread, <data folder>/Freezes
+    struct HandPluginSeen { uint64_t window = 0; uint32_t panel = 0; };
     bool handEdited_ = false;
     double handCheckedAt_ = 0;
     const engine::EngineGraph* handGraph_ = nullptr;

@@ -829,6 +829,33 @@ void ArrangementView::zoomToWholeArrangement()
     repaint();
 }
 
+double ArrangementView::fittedPixelsPerBeat() const
+{
+    return std::clamp((timelineArea().w - 12) / arrangementEndBeat(), 0.01, 2400.0);
+}
+
+float ArrangementView::fittedLaneHeight() const
+{
+    const auto& x = ctx();
+    float fixed = 4;
+    int count = 0;
+    for (const auto& lane : lanes_)
+    {
+        const bool collapsed = std::find(x.collapsedTracks.begin(), x.collapsedTracks.end(), lane.controlIndex) != x.collapsedTracks.end();
+        if (lane.takeLaneId >= 0 || collapsed) fixed += lane.h;
+        else { ++count; fixed += x.automationHeight(lane.controlIndex); }
+    }
+    return std::max(18.0f, (timelineArea().h - fixed) / (float) std::max(1, count));
+}
+
+void ArrangementView::applyFittedHeight(float height)
+{
+    auto& x = ctx();
+    x.laneHeights.resize((size_t) x.numControlTracks(), 0);
+    for (const auto& lane : lanes_) if (lane.takeLaneId < 0) x.laneHeights[(size_t) lane.controlIndex] = height;
+    x.scrollTracksY = 0;
+}
+
 void ArrangementView::optimizeWidth()
 {
     auto& x = ctx();
@@ -841,7 +868,8 @@ void ArrangementView::optimizeWidth()
     {
         savedPixelsPerBeat_ = x.pixelsPerBeat; savedScrollBeats_ = x.scrollBeats;
         x.scrollBeats = 0;
-        x.pixelsPerBeat = std::clamp((timelineArea().w - 12) / arrangementEndBeat(), 0.01, 2400.0);
+        x.pixelsPerBeat = fittedPixelsPerBeat_ = fittedPixelsPerBeat();
+        optimizedFor_ = x.song;
     }
     widthOptimized_ = ! widthOptimized_;
     repaint();
@@ -858,21 +886,47 @@ void ArrangementView::optimizeHeight()
     else
     {
         savedLaneHeights_ = x.laneHeights; savedTrackScroll_ = x.scrollTracksY;
-        float fixed = 4;
-        int count = 0;
-        for (const auto& lane : lanes_)
-        {
-            const bool collapsed = std::find(x.collapsedTracks.begin(), x.collapsedTracks.end(), lane.controlIndex) != x.collapsedTracks.end();
-            if (lane.takeLaneId >= 0 || collapsed) fixed += lane.h;
-            else { ++count; fixed += x.automationHeight(lane.controlIndex); }
-        }
-        const float fitted = std::max(18.0f, (timelineArea().h - fixed) / (float) std::max(1, count));
-        x.laneHeights.resize((size_t) x.numControlTracks(), 0);
-        for (const auto& lane : lanes_) if (lane.takeLaneId < 0) x.laneHeights[(size_t) lane.controlIndex] = fitted;
-        x.scrollTracksY = 0;
+        applyFittedHeight(fittedLaneHeight());
+        optimizedFor_ = x.song;
     }
     heightOptimized_ = ! heightOptimized_;
     layout(); repaint();
+}
+
+// UI-31b: while lit, H and W follow the window, the visible tracks (added, removed, folded) and the song's length. A zoom
+// of that direction made any other way (Option+wheel, a header drag, Z, Cmd+wheel...) ends them and keeps the new zoom;
+// the paths that zoom also clear the flag themselves, this catches the rest.
+void ArrangementView::keepOptimized()
+{
+    auto& x = ctx();
+    if (! x.song || lanes_.empty()) return;
+    if (widthOptimized_)
+    {
+        if (std::abs(x.pixelsPerBeat - fittedPixelsPerBeat_) > 1e-9) widthOptimized_ = false;
+        else if (const double fit = fittedPixelsPerBeat(); std::abs(fit - x.pixelsPerBeat) > 1e-9)
+        {
+            x.pixelsPerBeat = fittedPixelsPerBeat_ = fit;
+            x.scrollBeats = 0;
+        }
+    }
+    if (heightOptimized_)
+    {
+        // Every lane on screen gets the fitted height: a new track, a group unfolded (its tracks kept their own heights)
+        // or a new window size. Height zooms by hand end H where they happen (zoomTrackHeight, the lane edge drag).
+        bool stale = false;
+        const float fitted = fittedLaneHeight();
+        for (const auto& lane : lanes_)
+        {
+            if (lane.takeLaneId >= 0) continue;
+            const float h = (size_t) lane.controlIndex < x.laneHeights.size() ? x.laneHeights[(size_t) lane.controlIndex] : 0.0f;
+            stale |= std::abs(h - fitted) > 0.01f;
+        }
+        if (stale)
+        {
+            applyFittedHeight(fitted);
+            computeLanes();
+        }
+    }
 }
 
 float ArrangementView::beatToX(double beat) const
@@ -981,8 +1035,9 @@ void ArrangementView::rebuild()
     {
         takeRange_ = {}; ctx().arrangementSelection = {}; ctx().arrangementCursor = -1; renaming_ = false;
         ctx().selectedLocator = renameLocator_ = locatorDrag_.id = -1; // locator ids belong to the previous document
-        heightOptimized_ = widthOptimized_ = draggingWaveformZoom_ = editingWaveformZoom_ = false;
+        draggingWaveformZoom_ = editingWaveformZoom_ = false;
     }
+    if (ctx().song != nullptr && ctx().song != optimizedFor_) heightOptimized_ = widthOptimized_ = false; // another document
     regionDrag_ = {};
     builtFor_ = ctx().song;
     builtStructure_ = ctx().trackStructure();
@@ -1008,6 +1063,7 @@ void ArrangementView::layout()
         rebuild();
     laidOutLocatorRow_ = hasLocatorRow();
     computeLanes();
+    keepOptimized(); // UI-31b
     const auto zoom = waveformZoomBounds();
     waveformButton_->setBounds({zoom.x - 28, zoom.y, 24, zoom.h});
     heightButton_->setBounds({zoom.right() + 10, zoom.y, 20, zoom.h});
@@ -2272,6 +2328,7 @@ void ArrangementView::scrub(const MouseEvent& e, bool start)
 void ArrangementView::zoomTimeSelection(bool back)
 {
     auto& x = ctx();
+    widthOptimized_ = false; // Z is a zoom by hand
     if (back)
     {
         if (! selectionZoomed_) return;

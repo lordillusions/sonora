@@ -13,6 +13,7 @@
 #include "ui/views/MonitorPanel.h"
 #include "ui/views/PianoRoll.h"
 #include "ui/views/SessionView.h"
+#include "ui/widgets/Buttons.h"
 
 #include <juce_core/juce_core.h>
 
@@ -1485,6 +1486,62 @@ TEST_CASE("velocity line: fast forward and reverse drags interpolate every cross
     rig.root->dispatchMouseDown(point(4, 20)); rig.root->dispatchMouseDrag(point(0, 100)); rig.root->dispatchMouseUp(point(0, 100));
     CHECK_NEAR(clip.notes[0].velocity, 90, 0.1); CHECK_NEAR(clip.notes[4].velocity, 40, 0.1);
     CHECK_NEAR(clip.notes[5].velocity, 90, 0.1);
+}
+
+TEST_CASE("Arrangement display controls: H and W stay lit and keep fitting until pressed again or zoomed by hand (UI-31b)")
+{
+    RollRig rig;
+    rig.ctx.detailVisible = false; rig.root->layout();
+    auto* arrangement = findWidget<ui::ArrangementView>(*rig.root); REQUIRE(arrangement);
+    const auto button = [&](const std::string& label) -> ui::TextButton* {
+        for (auto& child : arrangement->children())
+            if (auto* b = dynamic_cast<ui::TextButton*>(child.get()); b && b->label() == label) return b;
+        return nullptr;
+    };
+    REQUIRE(button("H")); REQUIRE(button("W")); // rebuilt with the view, so looked up each time
+    const auto lit = [&](const std::string& label) { return button(label)->isOn(); };
+    const auto press = [&](const std::string& label) {
+        const auto r = button(label)->boundsInRoot(); const auto e = mouseAt(r.centreX(), r.centreY());
+        rig.root->dispatchMouseDown(e); rig.root->dispatchMouseUp(e);
+    };
+    rig.ctx.pixelsPerBeat = 60; rig.ctx.scrollBeats = 2; rig.ctx.laneHeights = {100, 150}; rig.root->layout();
+    const auto before = rig.ctx.laneHeights;
+    CHECK(! lit("H")); CHECK(! lit("W"));
+
+    // H: a taller window, a new track and a moment without a song (a device edit) keep it fitting.
+    press("H"); CHECK(lit("H")); const float fitted = rig.ctx.laneHeights[0];
+    CHECK_NEAR(rig.ctx.laneHeights[1], fitted, 0);
+    rig.root->setBounds({0, 0, 1200, 900}); rig.root->layout();
+    CHECK(lit("H")); CHECK(rig.ctx.laneHeights[0] > fitted); CHECK_NEAR(rig.ctx.laneHeights[1], rig.ctx.laneHeights[0], 0);
+    const float tall = rig.ctx.laneHeights[0];
+    auto extra = rig.song.tracks[1]; extra.id = 900; extra.name = "Extra"; extra.arrangementClips.clear();
+    rig.song.tracks.push_back(extra); rig.root->layout();
+    CHECK(lit("H")); CHECK(rig.ctx.laneHeights[0] < tall);
+    CHECK_NEAR(rig.ctx.laneHeights[2], rig.ctx.laneHeights[0], 0); // the new track joins the fit
+    rig.ctx.song = nullptr; rig.root->layout(); rig.ctx.song = &rig.song; rig.root->layout();
+    CHECK(lit("H"));
+    rig.song.tracks.pop_back(); rig.root->layout();
+    press("H"); CHECK(! lit("H")); CHECK(rig.ctx.laneHeights == before); // off restores what was there
+
+    // W: a wider window and a longer song keep it fitting; Cmd+wheel ends it and keeps the new zoom.
+    press("W"); CHECK(lit("W")); const double wide = rig.ctx.pixelsPerBeat; CHECK_NEAR(rig.ctx.scrollBeats, 0, 0);
+    rig.root->setBounds({0, 0, 1500, 900}); rig.root->layout();
+    CHECK(lit("W")); CHECK(rig.ctx.pixelsPerBeat > wide);
+    const double wider = rig.ctx.pixelsPerBeat;
+    auto& last = rig.song.tracks[0].arrangementClips.back();
+    last.currentEnd += 64; rig.root->layout();
+    CHECK(lit("W")); CHECK(rig.ctx.pixelsPerBeat < wider);
+    const auto b = arrangement->boundsInRoot();
+    auto zoom = mouseAt(b.x + 200, b.y + 100); zoom.cmd = true; zoom.wheelDeltaY = 0.2f;
+    rig.root->dispatchMouseWheel(zoom); CHECK(! lit("W"));
+    const double manual = rig.ctx.pixelsPerBeat; rig.root->layout(); CHECK_NEAR(rig.ctx.pixelsPerBeat, manual, 0);
+
+    // Option+wheel (UI-74: the track under the pointer) ends H and keeps that track's new height.
+    press("H"); CHECK(lit("H"));
+    auto option = mouseAt(b.x + 200, b.y + rig.ctx.theme.metrics.arrangementRulerHeight + 20); option.alt = true; option.wheelDeltaY = 0.2f;
+    rig.root->dispatchMouseWheel(option); CHECK(! lit("H"));
+    const auto zoomed = rig.ctx.laneHeights; rig.root->layout(); CHECK(rig.ctx.laneHeights == zoomed);
+    CHECK(std::abs(rig.ctx.laneHeights[0] - rig.ctx.laneHeights[1]) > 1.0f); // only the hovered track, not every track (UI-74)
 }
 
 TEST_CASE("Arrangement display controls: H W restore previous geometry and waveform zoom edits no audio gain")

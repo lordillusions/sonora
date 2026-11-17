@@ -250,6 +250,25 @@ void MidiManager::handleMessage(const juce::MidiMessage& msg, bool trackRole, bo
 {
     if (! trackRole && ! remoteRole)
         return;
+    // UI-113: a control moved while a mapping waits to be learned, on a port whose Remote role is off, turns Remote on for
+    // that port (and only that one) and teaches the mapping. Without it the move went to the armed tracks and nothing
+    // was learned.
+    if (! remoteRole && learning_.load() && (msg.isController() || msg.isNoteOn()))
+    {
+        remoteRole = true;
+        postToMessageThread([this, port] {
+            for (const auto& r : remembered_)
+                if (model::midiPortToken(r.id.toStdString()) == port)
+                {
+                    auto roles = r.roles;
+                    roles.remote = true;
+                    const auto id = r.id, name = r.name; // setInputRoles may reorder remembered_
+                    setInputRoles(id, name, roles);
+                    if (onRemoteTurnedOn) onRemoteTurnedOn(name);
+                    break;
+                }
+        });
+    }
     if (onActivity)
         postToMessageThread([this] { if (onActivity) onActivity(); });
 

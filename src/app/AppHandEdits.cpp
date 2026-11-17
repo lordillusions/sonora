@@ -31,15 +31,18 @@ void AppController::watchHandEdits()
     bool moved = ! fresh && fingerprint != handFingerprint_;
     std::map<const plugins::PluginDevice*, HandPluginSeen> seen;
     forEachHostedPlugin([&](model::Device&, plugins::PluginDevice& plugin) {
-        const HandPluginSeen counts{plugin.handEditTotal(), plugin.panelEdits()};
-        if (! fresh)
-            if (const auto before = handPlugins_.find(&plugin); before != handPlugins_.end())
-            {
-                if (counts.panel != before->second.panel) moved = true;
-                // Some plug-ins report parameters on their own (programs, internal modulation): their window being open is
-                // what tells a person's edit apart.
-                if (counts.window != before->second.window && pluginEditorOpen(&plugin.instance())) moved = true;
-            }
+        // stateSerial: parameter edits and the plug-in's other state changes (a wavetable, a preset, routing), which it
+        // reports as "state changed" instead of as a parameter.
+        const HandPluginSeen counts{plugin.stateSerial(), plugin.panelEdits()};
+        // Compared even after a graph rebuild (an edit that changes the plug-in's latency rebuilds the graph): the same
+        // plug-in instance keeps its counters; a new instance is a new key.
+        if (const auto before = handPlugins_.find(&plugin); before != handPlugins_.end())
+        {
+            if (counts.panel != before->second.panel) moved = true;
+            // Some plug-ins report parameters on their own (programs, internal modulation): their window being open is
+            // what tells a person's edit apart.
+            if (counts.window != before->second.window && pluginEditorOpen(&plugin.instance())) moved = true;
+        }
         seen[&plugin] = counts;
         return true;
     });
@@ -162,8 +165,72 @@ void AppController::runHandEditAutotest()
                             juce::Timer::callAfterDelay(800, [this, alive, state] {
                                 if (alive.expired() || ! song_) return;
                                 state("after the knob");
-                                ui_.documentDirty = false; // a verification run never asks to save
-                                juce::JUCEApplicationBase::quit();
+                                // A hosted plug-in's own window: open it, take the set as saved, then let the plug-in
+                                // report a knob move itself (gesture begin, value, gesture end), as its UI does.
+                                int track = -1, device = -1;
+                                plugins::PluginDevice* hosted = nullptr;
+                                const auto wanted = juce::SystemStats::getEnvironmentVariable("SONORA_HAND_EDIT_PLUGIN", {}).toStdString();
+                                if (auto* live = engine_.latestGraph())
+                                    for (size_t t = 0; t < live->nodes.size() && hosted == nullptr; ++t)
+                                        for (size_t d = 0; d < live->nodes[t].processorForModelDevice.size(); ++d)
+                                            if (auto* candidate = dynamic_cast<plugins::PluginDevice*>(live->nodes[t].processorForModelDevice[d]);
+                                                candidate != nullptr && ! candidate->instance().getParameters().isEmpty()
+                                                && (wanted.empty() || candidate->name() == wanted))
+                                            {
+                                                hosted = candidate; track = (int) t; device = (int) d;
+                                                break;
+                                            }
+                                if (hosted == nullptr)
+                                {
+                                    logf("hand edit autotest: no hosted plug-in with parameters");
+                                    ui_.documentDirty = false;
+                                    juce::JUCEApplicationBase::quit();
+                                    return;
+                                }
+                                openPluginEditor(track, device);
+                                logf("hand edit autotest: opened %s (window %s)", hosted->name().c_str(),
+                                     pluginEditorOpen(&hosted->instance()) ? "open" : "missing");
+                                juce::Timer::callAfterDelay(1500, [this, alive, state, hosted] {
+                                    if (alive.expired() || ! song_) return;
+                                    resetHandEdits();
+                                    history_.markSaved();
+                                    ui_.documentDirty = false;
+                                    // Playing with the window open and nothing touched must not count either.
+                                    engine_.transport().setPosition(200.0);
+                                    engine_.transport().play();
+                                    juce::Timer::callAfterDelay(6000, [this, alive, state, hosted] {
+                                        if (alive.expired() || ! song_) return;
+                                        state("plug-in window open, 6 s of playback, nothing touched");
+                                        engine_.transport().stop();
+                                        auto* param = hosted->instance().getParameters()[0];
+                                        const float v = param->getValue();
+                                        param->beginChangeGesture();
+                                        param->setValueNotifyingHost(v > 0.5f ? v - 0.25f : v + 0.25f);
+                                        param->endChangeGesture();
+                                        logf("hand edit autotest: the plug-in moved \"%s\"", param->getName(64).toRawUTF8());
+                                        juce::Timer::callAfterDelay(800, [this, alive, state, hosted] {
+                                            if (alive.expired() || ! song_) return;
+                                            state("after the plug-in knob");
+                                            resetHandEdits();
+                                            history_.markSaved();
+                                            ui_.documentDirty = false;
+                                            juce::Timer::callAfterDelay(800, [this, alive, state, hosted] {
+                                                if (alive.expired() || ! song_) return;
+                                                state("marked saved again");
+                                                // A change that is not a parameter (a wavetable, a preset): the plug-in
+                                                // reports its state as changed.
+                                                hosted->instance().updateHostDisplay(
+                                                    juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged(true));
+                                                juce::Timer::callAfterDelay(800, [this, alive, state] {
+                                                    if (alive.expired() || ! song_) return;
+                                                    state("after the plug-in's own state change");
+                                                    ui_.documentDirty = false; // a verification run never asks to save
+                                                    juce::JUCEApplicationBase::quit();
+                                                });
+                                            });
+                                        });
+                                    });
+                                });
                             });
                         });
                     });

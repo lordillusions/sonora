@@ -476,6 +476,11 @@ AppController::AppController() : engine_(host_, midi_)
         if (ui_.requestRepaint)
             ui_.requestRepaint();
     };
+    midi_.onRemoteTurnedOn = [this](const juce::String& name) {
+        midi_.saveSettings(midiSettingsFile());
+        ui_.statusText = "Remote turned on for " + name.toStdString() + " so its controls can be mapped";
+        if (ui_.requestRepaint) ui_.requestRepaint();
+    };
     if (midiSettingsFile().existsAsFile())
         midi_.loadSettings(midiSettingsFile());
     midi_.enableAllInputs(); // new devices get both roles, remembered roles are kept
@@ -492,6 +497,7 @@ AppController::AppController() : engine_(host_, midi_)
     initialiseCollab();
     startRecovery();
     startTimerHz(10);
+    freezeRecorder_ = std::make_unique<FreezeRecorder>(core::appDataDirectory().getChildFile("Freezes")); // UI-111
 }
 
 AppController::~AppController()
@@ -614,6 +620,7 @@ void AppController::clearRecentSets(bool unavailableOnly)
 
 void AppController::timerCallback()
 {
+    if (freezeRecorder_) freezeRecorder_->beat(); // UI-111
     finishRecording();
     watchHandEdits(); // UI-92b, before the autosave looks at the edited state
     autosaveTick();
@@ -974,6 +981,7 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     runDeviceDragAutotest();
     runAutomationAutotest();
     runHandEditAutotest();
+    runTrackSwapAutotest();
     runSampleDropAutotest();
     runPresetAutotest();
 }
