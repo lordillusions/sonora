@@ -755,7 +755,8 @@ void PhraseFace::buildPattern()
         bass.choices = basses; bass.maxValue = (float) basses.size() - 1;
         bass.get = [this] { return (float) pattern().padBass; };
         bass.set = [this](float v) { pattern().padBass = (model::PadBass) std::lround(v); };
-        const std::array<std::tuple<const char*, int, int, int, uint8_t model::PhrasePattern::*, const char*>, 5> percents{{
+        using PatternByte = decltype(&model::PhrasePattern::colour); // a uint8_t member; spelled this way for MSVC
+        const std::array<std::tuple<const char*, int, int, int, PatternByte, const char*>, 5> percents{{
             {"Colour", 0, 100, 30, &model::PhrasePattern::colour, "Colour: the chance per chord of an add9, sus2, 7th or 11th."},
             {"Overlap", 0, 100, 25, &model::PhrasePattern::overlap, "Overlap: legato into the next chord, in % of a beat."},
             {"Strum ms", 0, 250, 0, &model::PhrasePattern::padStrumMs, "Strum: the notes of a chord spread over this many ms."},
@@ -866,7 +867,8 @@ void PhraseFace::buildDice()
                  "Accents: Off Beat puts them on steps 3, 7, 11 and 14.");
         styleBox(i++, "Glide", {"Off", "On"}, 0, 1, [](const PS& s) { return s.arp.accentGlide ? 1.0f : 0.0f; },
                  [](PS& s, float v) { s.arp.accentGlide = v >= 0.5f; }, "Accent Glide: long accented notes that slide, short others.");
-        for (const auto& [name, member, hi, tip] : std::array<std::tuple<const char*, uint8_t model::ArpStyle::*, float, const char*>, 6>{{
+        using StyleByte = decltype(&model::ArpStyle::tension); // a uint8_t member; spelled this way for MSVC
+        for (const auto& [name, member, hi, tip] : std::array<std::tuple<const char*, StyleByte, float, const char*>, 6>{{
                  {"Tension", &model::ArpStyle::tension, 100, "Tension: chance of an accented 2nd on step 7 or 15 that falls to the root."},
                  {"Range", &model::ArpStyle::range, 3, "Range in octaves."},
                  {"Passing", &model::ArpStyle::passing, 100, "Passing: scale-step neighbours on the weak steps."},

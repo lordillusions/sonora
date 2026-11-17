@@ -23,7 +23,9 @@
 #include <functional>
 #include <map>
 #include <memory>
-#include <pthread.h>
+#if ! defined(_WIN32)
+ #include <pthread.h> // the small-stack checks; Windows has no pthreads and runs the same code on macOS and Linux
+#endif
 #include <random>
 #include <string>
 
@@ -1087,6 +1089,7 @@ struct SmallStackRender
 TEST_CASE("seraph: processing fits a 256 KB thread stack")
 {
     SmallStackRender run;
+#if ! defined(_WIN32) // no pthreads there; the stack use is the same code as on macOS and Linux
     pthread_attr_t attributes;
     pthread_attr_init(&attributes);
     CHECK(pthread_attr_setstacksize(&attributes, 256 * 1024) == 0);
@@ -1095,6 +1098,10 @@ TEST_CASE("seraph: processing fits a 256 KB thread stack")
     pthread_join(thread, nullptr);
     pthread_attr_destroy(&attributes);
     CHECK(run.ok);
+#else
+    SmallStackRender::entry(&run);
+    CHECK(run.ok);
+#endif
 }
 
 // ---------------------------------------------------------------- presets

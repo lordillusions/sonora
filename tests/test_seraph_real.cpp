@@ -18,7 +18,9 @@
 #include <cmath>
 #include <complex>
 #include <memory>
-#include <pthread.h>
+#if ! defined(_WIN32)
+ #include <pthread.h> // the small-stack checks; Windows has no pthreads and runs the same code on macOS and Linux
+#endif
 
 using namespace sonora;
 namespace
@@ -592,6 +594,7 @@ TEST_CASE("seraph real: 64 Real singers fit a 256 KB stack, a bank change while 
     SmallStackReal run;
     run.voice = analyse(sungTone(S::SoloTenor, 52, 0), "tenor", reason);
     REQUIRE(run.voice != nullptr);
+#if ! defined(_WIN32) // no pthreads there; the stack use is the same code as on macOS and Linux
     pthread_attr_t attributes;
     pthread_attr_init(&attributes);
     CHECK(pthread_attr_setstacksize(&attributes, 256 * 1024) == 0);
@@ -600,6 +603,10 @@ TEST_CASE("seraph real: 64 Real singers fit a 256 KB stack, a bank change while 
     pthread_join(thread, nullptr);
     pthread_attr_destroy(&attributes);
     CHECK(run.ok);
+#else
+    SmallStackReal::entry(&run);
+    CHECK(run.ok);
+#endif
 
     auto s = realSinger({run.voice}, S::Mixed);
     s->setParameter(S::MenOctave, 1);
