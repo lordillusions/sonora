@@ -64,7 +64,7 @@ TEST_CASE("correlation plugin: the verdict, meter, scope and bands in the full f
     juce::ScopedJuceInitialiser_GUI init;
     plugin::CorrelationPlugin p;
     CHECK(p.getParameters().size() == C::NumParams);
-    CHECK(p.getBusCount(true) == 1);
+    CHECK(p.getBusCount(true) == 2); // the main input and the sidechain (Kick x Bass, PLG-24c)
     p.prepareToPlay(kRate, 512);
     CHECK(p.getLatencySamples() == 0);
     std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());

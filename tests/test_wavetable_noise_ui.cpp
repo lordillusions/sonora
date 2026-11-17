@@ -154,7 +154,7 @@ TEST_CASE("wavetable Noise UI: file picker clones immutable PCM and native scala
     REQUIRE(rig.synth->noiseSample()); CHECK(rig.synth->noiseSampleName() == "Own Stereo Noise"); CHECK(rig.editor->parameterCell(W::NoiseColor).isEmpty()); CHECK_NEAR(rig.synth->getParameter(W::NoiseOn), 1, 0);
     for (int parameter : {W::NoisePitch, W::NoiseFine, W::NoiseKeytrack, W::NoisePhase, W::NoiseRandom}) REQUIRE(! rig.editor->parameterCell(parameter).isEmpty());
     rig.drag(W::NoisePitch, 20); CHECK_NEAR(rig.synth->getParameter(W::NoisePitch), 24, 0.00002);
-    rig.drag(W::NoiseFine, 10, true); CHECK_NEAR(rig.synth->getParameter(W::NoiseFine), 1.92, 0.00002);
+    rig.drag(W::NoiseFine, 10, true); CHECK_NEAR(rig.synth->getParameter(W::NoiseFine), 2, 0.00002); // UI-93: whole cents (1.92 raw)
     rig.drag(W::NoisePhase, 50); CHECK_NEAR(rig.synth->getParameter(W::NoisePhase), .25, 0.000001);
     rig.drag(W::NoiseRandom, 20); CHECK_NEAR(rig.synth->getParameter(W::NoiseRandom), .1, 0.000001);
     rig.click(rig.editor->parameterCell(W::NoiseKeytrack)); CHECK_NEAR(rig.synth->getParameter(W::NoiseKeytrack), 1, 0);

@@ -1,6 +1,7 @@
 #include "ui/views/ProFace.h"
 
 #include "gfx/Fonts.h"
+#include <juce_gui_basics/juce_gui_basics.h>
 #include "ui/views/ProFaceParts.h"
 
 #include "include/core/SkPathBuilder.h"
@@ -310,13 +311,108 @@ float ProFace::normalised(const Control& c) const
     return span > 0 ? std::clamp((v - i.minValue) / span, 0.0f, 1.0f) : 0.0f;
 }
 
-void ProFace::setNormalised(const Control& c, float t)
+float ProFace::valueAtNorm(const Control& c, float t) const
 {
     t = std::clamp(t, 0.0f, 1.0f);
-    if (c.fromNorm) { setValue(c.param, c.fromNorm(t)); return; }
+    if (c.fromNorm) return c.fromNorm(t);
     const auto& i = info(c.param);
-    if ((i.unit == "ms" || i.unit == "Hz") && i.minValue > 0) setValue(c.param, i.minValue * std::pow(i.maxValue / i.minValue, t));
-    else setValue(c.param, i.minValue + t * (i.maxValue - i.minValue));
+    if ((i.unit == "ms" || i.unit == "Hz") && i.minValue > 0) return i.minValue * std::pow(i.maxValue / i.minValue, t);
+    return i.minValue + t * (i.maxValue - i.minValue);
+}
+
+void ProFace::setNormalised(const Control& c, float t) { setValue(c.param, valueAtNorm(c, t)); }
+
+// ---- UI-93: typed values and unit steps
+const ProFace::Control* ProFace::knobFor(int param) const
+{
+    for (const auto& c : controls_)
+        if (c.kind == Kind::Knob && c.param == param) return &c;
+    return nullptr;
+}
+
+ValueLaw ProFace::knobLaw(int param) const
+{
+    const auto& i = info(param);
+    DialRange range;
+    range.format = [this, param](float v) { return valueText(param, v); };
+    range.minValue = i.minValue;
+    range.maxValue = i.maxValue;
+    range.hint = valueUnitFromName(i.unit);
+    if (const auto* c = knobFor(param); c != nullptr && c->fromNorm) range.fromNorm = c->fromNorm;
+    else range.logarithmic = (i.unit == "ms" || i.unit == "Hz") && i.minValue > 0; // as valueAtNorm
+    if (i.unit == "int" || ! i.choices.empty() || i.isToggle)
+    {
+        auto plain = range.fromNorm;
+        const bool log = range.logarithmic;
+        range.fromNorm = [plain, log, lo = i.minValue, hi = i.maxValue](float t) {
+            return std::round(plain ? plain(t) : log ? lo * std::pow(hi / lo, t) : lo + t * (hi - lo));
+        };
+    }
+    return ValueLaw::detect(range);
+}
+
+Rect ProFace::valueRect(const Control& k) const
+{
+    // The same geometry paintKnob prints the value in.
+    const auto& r = k.r;
+    const bool small = k.small || r.h < 70.0f;
+    const float textBlock = small ? 26.0f : 36.0f;
+    const float radius = std::max(8.0f, std::min(r.w * 0.5f - 3.0f, (r.h - textBlock) * 0.5f));
+    const float cx = r.x + r.w * 0.5f, cy = r.y + radius + 1.0f;
+    if (! small && radius >= 19.0f)
+    {
+        const float size = std::clamp(radius * 0.36f, 10.0f, 17.0f);
+        return {cx - radius * 0.86f, cy - size * 0.7f, radius * 1.72f, size * 1.4f};
+    }
+    const float y = cy + radius + 3.0f;
+    return {r.x - 6, y + 11, r.w + 12, 13};
+}
+
+std::optional<Rect> ProFace::knobValueRect(int param) const
+{
+    if (const auto* c = knobFor(param)) return valueRect(*c);
+    return std::nullopt;
+}
+
+void ProFace::openValueEntry(int param, uint32_t firstChar)
+{
+    const auto* c = knobFor(param);
+    if (c == nullptr) return;
+    const float s = scale();
+    const auto d = valueRect(*c);
+    const float v = c->shown ? c->shown() : value(param);
+    typingParam_ = param;
+    beginValueEntry(*this, {d.x * s, d.y * s, d.w * s, d.h * s}, valueText(param, v),
+                    [this, param](const std::string& text) {
+                        if (knobFor(param) == nullptr) return;
+                        if (const auto typed = knobLaw(param).fromText(text, value(param)))
+                        {
+                            willEdit(param);
+                            setValue(param, *typed);
+                        }
+                    },
+                    firstChar, std::max(9.0f, d.h * 0.72f) * s);
+}
+
+bool ProFace::wantsKey(const KeyEvent& k) const { return typingParam_ >= 0 && knobFor(typingParam_) && startsValueEntry(k); }
+
+bool ProFace::keyPressed(const KeyEvent& k)
+{
+    if (typingParam_ < 0 || knobFor(typingParam_) == nullptr) return false;
+    if (startsValueEntry(k)) { openValueEntry(typingParam_, k.textChar); return true; }
+    if (k.cmd || k.alt || k.ctrl) return false;
+    if (k.keyCode == juce::KeyPress::returnKey) { openValueEntry(typingParam_); return true; }
+    if (k.keyCode == juce::KeyPress::upKey || k.keyCode == juce::KeyPress::downKey)
+    {
+        const auto& c = *knobFor(typingParam_);
+        willEdit(c.param);
+        const int direction = k.keyCode == juce::KeyPress::upKey ? 1 : -1;
+        const float stepped = knobLaw(c.param).nudge(value(c.param), direction, k.shift);
+        if (std::isfinite(stepped)) setValue(c.param, stepped);
+        else setNormalised(c, normalised(c) + (k.shift ? 0.002f : 0.01f) * (float) direction);
+        return true;
+    }
+    return false;
 }
 
 std::string ProFace::valueText(int param, float v) const
@@ -412,6 +508,12 @@ void ProFace::mouseDown(const MouseEvent& raw)
             willEdit(c.param);
             active_ = index;
             dragNorm_ = normalised(c);
+            typingParam_ = c.param;
+            downY_ = e.y;
+            moved_ = false;
+            pressInValue_ = valueRect(c).contains(e.x, e.y);
+            dragLaw_ = knobLaw(c.param);
+            wheelParam_ = -1;
             return;
         case Kind::Toggle:
             setValue(c.param, value(c.param) >= 0.5f ? 0.0f : 1.0f);
@@ -441,6 +543,10 @@ void ProFace::mouseDrag(const MouseEvent& raw)
     const auto e = toDesign(raw);
     mouseX_ = e.x;
     mouseY_ = e.y;
+    if (active_ >= 0 && (size_t) active_ < controls_.size() && controls_[(size_t) active_].kind == Kind::Knob && pressInValue_
+        && ! moved_ && std::abs(e.y - downY_) < 3)
+        return; // a click on the value opens the field; it only turns the knob once it really moves (UI-93)
+    moved_ = true;
     const float dy = e.y - lastY_;
     lastY_ = e.y;
     if (active_ < 0 || (size_t) active_ >= controls_.size()) return;
@@ -448,7 +554,7 @@ void ProFace::mouseDrag(const MouseEvent& raw)
     if (c.kind == Kind::Knob)
     {
         dragNorm_ = std::clamp(dragNorm_ - dy / (e.shift ? 900.0f : 220.0f), 0.0f, 1.0f);
-        setNormalised(c, dragNorm_);
+        setValue(c.param, dragLaw_.quantize(valueAtNorm(c, dragNorm_), e.shift)); // UI-93: the unit's steps
     }
     else if (c.kind == Kind::Area && c.drag)
         c.drag(e);
@@ -462,13 +568,17 @@ void ProFace::mouseUp(const MouseEvent& raw)
         const auto& c = controls_[(size_t) pressedPad_];
         if (c.press) c.press(false);
     }
+    int typeInto = -1;
     if (active_ >= 0 && (size_t) active_ < controls_.size())
     {
         const auto& c = controls_[(size_t) active_];
         if (c.kind == Kind::Area && c.up) c.up(e);
+        if (c.kind == Kind::Knob && pressInValue_ && ! moved_ && ! e.right) typeInto = c.param;
     }
     pressedPad_ = -1;
     active_ = -1;
+    pressInValue_ = false;
+    if (typeInto >= 0) openValueEntry(typeInto);
     repaint();
 }
 
@@ -513,7 +623,13 @@ bool ProFace::mouseWheel(const MouseEvent& raw)
     if (index < 0 || controls_[(size_t) index].kind != Kind::Knob) return false;
     const auto& c = controls_[(size_t) index];
     willEdit(c.param);
-    setNormalised(c, normalised(c) + e.wheelDeltaY * (e.shift ? 0.02f : 0.08f));
+    // UI-93: the wheel keeps its unrounded position so small deltas add up to a unit step.
+    const float now = value(c.param);
+    if (wheelParam_ != c.param || std::abs(now - wheelSet_) > 1e-6f * std::max(1.0f, std::abs(now))) wheelNorm_ = normalised(c);
+    wheelNorm_ = std::clamp(wheelNorm_ + e.wheelDeltaY * (e.shift ? 0.02f : 0.08f), 0.0f, 1.0f);
+    setValue(c.param, knobLaw(c.param).quantize(valueAtNorm(c, wheelNorm_), e.shift));
+    wheelParam_ = c.param;
+    wheelSet_ = value(c.param);
     return true;
 }
 

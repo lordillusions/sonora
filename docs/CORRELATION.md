@@ -8,6 +8,11 @@ Correlation, not Correlometer: that is a third-party product's name.
 
 Audio passes through untouched (bit-exact) while Listen is Stereo. No latency, no tail.
 
+**Measure** (PLG-24c, 2026-11-17): **L x R** (the stereo meter below) or **Kick x Bass** (further down): is the bass in phase
+with the kick where they meet? Requested for psytrance basslines, to replace a manual check (a group with the kick panned
+left and the bass right, Integration 30-50 ms, reading the low bands one by one), together with Integration in note values
+(1/4, 1/16 at the tempo) and the readings that matter shown big, with decimals.
+
 ## Measurements (`src/devices/native/Correlation.cpp`, all on the audio thread, no allocation)
 
 - **Correlation** = sum(L R) / sqrt(sum(L^2) sum(R^2)) over an exponential window of **Integration** (30 ms - 3 s, 300 ms):
@@ -30,6 +35,44 @@ Audio passes through untouched (bit-exact) while Listen is Stereo. No latency, n
 - **Listen**: Stereo (untouched), Mono ((L+R)/2 on both), Side ((L-R)/2 on both), Left, Right; a switch crossfades over
   10 ms. The face lights the check modes amber and says "the output is not the input".
 
+- **Integration** can follow the tempo: **Sync** (face: ms / note) and **Integration Note** (1/64, 1/32, 1/16, 1/8, 1/4, 1/2,
+  1 bar, 2 bars; a bar from the host's time signature). Window = beats x 60000 / tempo ms, 5 ms - 10 s. The engine and the
+  VST3 (`AudioPlayHead`) pass the tempo through `setHostInfo`.
+
+## Kick x Bass (PLG-24c, `Correlation::pairStep`, all on the audio thread)
+
+Where: the bass track, with the kick track chosen in the device's **Sidechain** section (the app; `takesSidechain()`, saved
+in the .als `<SideChain>`) or the VST3's sidechain bus. **Kick From Left** keeps the old pan trick: on a group, the kick
+left and the bass right. Kick = sidechain (L+R)/2 x the Sidechain Gain; bass = input (L+R)/2 (Left: kick = L, bass = R).
+
+- Both through a 25 Hz high-pass and a Linkwitz-Riley low-pass at 160 Hz (the same filters: their relative phase is kept),
+  then every Nth sample (~3 kHz).
+- **Overlap weight**: rho = smooth(2 |k b|) / smooth(k^2 + b^2) over 10 ms (1 = equal levels, ~2x the quieter one's amplitude
+  ratio when far below). Smoothing the product, not each signal, leaves no memory of a kick that stopped before the bass came
+  in (a product of envelopes did: the bass's fading envelope met the next kick's loud body and diluted the reading to 0.1
+  for a bass exactly in phase). Then a ramp: w = 0 at rho 0.06 (the quieter one ~30 dB down: it moves the sum by 0.3 dB at
+  most, and a loud kick over a trace of bass would swamp the real overlap), 1 at rho 0.5 (~12 dB down).
+- Over Integration: **correlation** = sum(w k b) / sqrt(sum(w k^2) sum(w b^2)) (the meter, needle, holds and history show
+  it); **sounding together** = sum(w (k^2 + b^2)) / sum(k^2 + b^2); the **sum where they meet** = 10 log10(1 + 2 sum(w k b) /
+  sum(w (k^2 + b^2))) and the same with the bass inverted (1 - ...), dB, floor -40. Under 1 % together: "take turns" (no
+  reading). Kick or bass below -70 dBFS: not playing.
+- **Best shift**: the weighted correlation of the kick against the bass delayed by every step within +-12 ms (window at
+  least 160 ms), the smallest shift within 0.01 of the best, refined by a parabola. A shift of half a period is the same as
+  a polarity flip: the face then says so.
+- The **bands** compare the kick with the bass with the same weight (their own windows ring ~8 periods, longer than an
+  overlap, so they read less extreme than the main value: 50 Hz +0.6 when the low end reads +0.88). A band measures only
+  where they meet in it (>= 1 % of its energy).
+- **Beat view**: a ring of the filtered kick, bass and weight (8192 points, ~2.7 s). Kick onsets: a peak follower (30 ms
+  release) that rises 6 dB within 8 ms to at least half the loudest recent kick, 70 ms apart. `beat()` returns one beat
+  (at the tempo) from 10 ms before the last onset whose beat is complete (else the newest beat), max-magnitude per point.
+- **Listen Bass Inverted** (value 5): the bass's polarity flipped (Sidechain: both channels; Left: the right one), to hear it
+  against the kick track. With Kick From Left the face offers Stereo / Mono / Mono with the bass inverted (= Side).
+- The sidechain pointer is used for one block and forgotten (the engine sets it before every block that has one).
+
+Verdict (`CorrelationFace::pairVerdict`): no kick (says how to route it) / waiting for the bass / take turns (good) / in
+phase (>= +0.3: "nothing to fix") / out of phase (<= -0.3: flip the bass, with the dB it gains; minor when the sum moves
+less than 0.5 dB) / unrelated (different notes: normal), each with the best shift when it helps by 0.25.
+
 ## Verdict (the face, `CorrelationFace::verdict`)
 
 In order: off / waiting for audio / only one side has sound / Mono (>= 0.97, width < 5 %) / Out of phase (wideband < -0.2,
@@ -38,6 +81,19 @@ phase (< -0.1) or too wide (< 0.2), naming the worst low band / Phasey (< 0) / V
 worst band is the lowest correlation among the bands within 40 dB of the loudest.
 
 ## Face (`src/ui/views/CorrelationFace.cpp`, ProFace kit: docs/PRO_FACES.md, accent violet)
+
+Top: MEASURE (L x R / Kick x Bass), LISTEN, Freeze, Reset. The METER panel has ms / note (Sync) over Integration (the note
+knob shows "207 ms at 145 BPM"). Numbers carry two decimals; the main value is drawn at 50 px (L x R) and 66 px (Kick x
+Bass); the band under the pointer gets a callout with its value at 24 px; the history legend shows the values now.
+
+Kick x Bass, full: KICK x BASS (the value, its word: in phase / out of phase / unrelated / take turns, held range, the
+verdict on two lines, the meter from "cancels" to "adds up"); ONE BEAT FROM THE KICK (both low ends over each other, kick
+orange filled, bass violet, the overlap lit by its weight, a strip under them green where they add up and red where they
+cancel, 16ths dashed); WHERE THEY MEET (sounding together, the sum there, with the bass inverted, the best shift, levels,
+Kick From + "sidechain connected"); HISTORY (the reading + how much sounded together); LOW BANDS 25-250 Hz with their values;
+METER (Sync, Integration, Hold). Compact: the beat view, the value and word, sum / bass inverted, meter, low bands with values,
+Listen, L x R / K x B, Integration, Hold, Freeze, Reset, ms / note (the L x R compact face moved Lissajous / Polar to the
+window for ms / note).
 
 Full (1120 x 720, the window and the VST3): the wordmark, LISTEN (Stereo, Mono, Side, L, R), Freeze, Reset; the VERDICT;
 CORRELATION (the value big, coloured red -> amber -> green; a bar from 0, the needle, the held range with a marker at each
@@ -50,6 +106,15 @@ Hold, Zoom). Compact (760 x 170, the chain): the scope, the value and verdict, t
 Integration, Hold, Freeze, Reset, Lissajous / Polar. The chain's window icon opens the full face.
 
 ## Verification
+
+PLG-24c: `sonora_tests "kick x bass"` (a synthetic K-B-B-B beat at 145 BPM, 50 Hz kick tail under the bass): in phase
++0.88 / sum +0.8 dB / inverted -1.0 dB, inverted -0.88, 90 degrees ~0 with a 5 ms shift found, a bass 4 ms late found at
+-4 ms (+0.94), a short kick "takes turns", no sidechain = no kick, Kick From Left, Sync note values (4/4, 7/8, 3/4),
+Listen Bass Inverted (both sources), the beat view from the onset; the VST3 with the kick on its sidechain bus and a 145 BPM
+play head (verdicts, band callout, Listen, Sync drag, take turns, Kick From, state); the compact face in the chain; through
+the engine with the kick track routed (`test_correlation_kickbass_engine.cpp`); the .als `<SideChain>` round trip. PNGs:
+`sonora_correlation_kickbass_in_phase.png`, `sonora_correlation_kickbass_plugin.png` (out of phase, the site's screenshot),
+`sonora_correlation_kickbass_turns.png`, `sonora_correlation_kickbass_chain.png`.
 
 - `sonora_tests correlation`: mono (> 0.999, width 0, mono sum 0 dB), inverted (< -0.999, mono sum at the floor), unrelated
   noise (|c| < 0.1, mono sum -3 dB, width 1), 90 degrees (|c| < 0.02), balance -6.02 dB for half the level on the right,

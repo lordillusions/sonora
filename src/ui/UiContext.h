@@ -14,6 +14,7 @@
 #include "midi/ControlTarget.h"
 #include "ui/GridModel.h"
 #include "ui/InlineEdit.h"
+#include "ui/ValueEntry.h"
 #include "ui/Rect.h"
 #include "ui/Theme.h"
 #include "ui/BrowserDrag.h"
@@ -910,6 +911,7 @@ struct UiContext
     std::function<void()> insertReturnTrack; // TRK-2: Option+Cmd+T
     std::function<void()> renameSelection;
     TrackRename trackRename; // UI-58: the track name being edited in place
+    ValueEntry valueEntry;   // UI-93: a value typed into a dial
     std::function<void(const std::string&)> setWindowTitle;
     std::function<void()> layoutChanged; // a panel size was changed by dragging a divider (persisted by the app)
     std::function<bool()> canUndo, canRedo;

@@ -258,6 +258,10 @@ TEST_CASE("correlation: catalog, the built-in device for the VST3's class id, an
     a.setParameter(C::ScopeAuto, 0.0f);
     a.setParameter(C::ScopeZoom, 12.0f);
     a.setParameter(C::Listen, (float) C::ListenSide);
+    a.setParameter(C::Mode, (float) C::MeasureKickBass); // PLG-24c
+    a.setParameter(C::KickFrom, (float) C::KickLeft);
+    a.setParameter(C::Sync, 1.0f);
+    a.setParameter(C::IntegrationNote, 2.0f);
     const auto bytes = plugins::encodeParameterState(a, "SonoraCorrelation");
     C b;
     std::string error;

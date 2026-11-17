@@ -681,7 +681,8 @@ TEST_CASE("device faces: EQ Eight display selects, drags and switches off bands;
     eq->setParameter(E::bandParam(1, E::On), 1);
     const auto knob = knobs[0]->boundsInRoot();
     ui::MouseEvent k; k.x = knob.centreX(); k.y = knob.centreY(); root.dispatchMouseDown(k); k.y -= 20; root.dispatchMouseDrag(k); root.dispatchMouseUp(k);
-    CHECK_NEAR(eq->getParameter(E::bandParam(1, E::Freq)), 800 * std::pow(2200.0, 0.1), 2);
+    // UI-93: 800 * 2200^0.1 = 1727 Hz, in the knob's three-digit steps (10 Hz at 1.73 kHz).
+    CHECK_NEAR(eq->getParameter(E::bandParam(1, E::Freq)), 1730, 0.05);
     const auto folder = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora-device-faces"); REQUIRE(folder.createDirectory().wasOk());
     REQUIRE(gfx::renderToPng(root, (int) face->width(), (int) face->height(), 2, folder.getChildFile("EqEight-reference.png").getFullPathName().toStdString()));
 }

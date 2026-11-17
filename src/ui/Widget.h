@@ -114,6 +114,8 @@ public:
     virtual bool keyPressed(const KeyEvent&) { return false; }   // true == consumed
     // True while the widget is collecting typed text (search field, rename box): letters are text then, never shortcuts or notes.
     virtual bool wantsTextInput() const { return false; }
+    // UI-93: a key this widget takes before shortcuts and the computer MIDI keyboard (a digit typed on a selected dial).
+    virtual bool wantsKey(const KeyEvent&) const { return false; }
     // A mouse press landed on `leaf` (this widget or one of its descendants); lets containers track "the thing the user is on".
     // `press` is the event in root coordinates: read its buttons and modifiers (DEV-15d: Shift / Cmd extend a selection).
     virtual void descendantPressed(Widget* /*leaf*/, const MouseEvent& /*press*/) {}

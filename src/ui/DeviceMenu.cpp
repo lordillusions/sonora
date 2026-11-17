@@ -118,7 +118,8 @@ std::vector<MenuAction> deviceContextActions(UiContext& ctx, int track, const st
 bool deviceTakesSidechain(const model::Device& device)
 {
     const auto& t = device.type;
-    return t == "SonoraHush" || t == "Compressor2" || t == "GlueCompressor" || t == "Gate" || t == "SonoraPhaseAlign";
+    return t == "SonoraHush" || t == "Compressor2" || t == "GlueCompressor" || t == "Gate" || t == "SonoraPhaseAlign"
+           || t == "SonoraCorrelation"; // PLG-24c: Kick x Bass listens to the kick
 }
 
 std::vector<MenuAction> sidechainActions(UiContext& ctx, int track, int deviceIndex)

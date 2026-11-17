@@ -153,6 +153,11 @@ public:
     std::function<bool()> dim;
     bool bipolar = false; // Str/Body: the arc from the middle, marked by a triangle outside the ring
     static constexpr float kRingX = 22, kRingY = 40; // ring centre, capture px from the widget's top left
+    Rect valueBounds() const override // UI-93: the value at the ring's lower right
+    {
+        const float u = unit_(), left = (kRingX + 14) * u;
+        return {left, (kRingY + 5.5f) * u, std::max(10.0f, width() - left), 20 * u};
+    }
 
     void paint(SkCanvas& c, const Theme& t) override
     {
@@ -192,7 +197,7 @@ public:
         }
         // The value starts 14 px right of the ring centre, or ends 72 px right of it when longer ("0.0 dB").
         const float size = fontSize > 0 ? fontSize : t.metrics.smallFontSize;
-        const auto value = source_.format ? source_.format(0) : std::string();
+        const auto value = source_.format ? source_.format(source_.get ? source_.get() : 0.0f) : std::string();
         const float w = gfx::measureText(value, size), left = std::max(0.0f, std::min((kRingX + 14) * u, (kRingX + 72) * u - w));
         paint::text(c, value, {left, (kRingY + 5.5f) * u, w + 2, 20 * u}, t.color("ControlForeground"), size);
     }
@@ -682,7 +687,7 @@ private:
         s.get = [this, p] { return std::clamp(value(p), 0.0f, 1.0f); };
         s.set = [this, p](float n) { set(p, std::clamp(n, 0.0f, 1.0f)); };
         s.defaultValue = synth_->parameters()[(size_t) p].defaultValue;
-        s.format = [this, p](float) { return tensionValueText(*synth_, p, value(p)); };
+        s.format = [this, p](float v) { return tensionValueText(*synth_, p, v); }; // UI-93: the text at any position
         auto* widget = add<Dial>(std::move(s), unitFn());
         widget->style = Knob::Style::Device;
         widget->dim = std::move(dim);

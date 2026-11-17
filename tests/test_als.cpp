@@ -1312,7 +1312,7 @@ TEST_CASE("als writer: a device's sidechain (source, tap, Gain, Mix, on) survive
     REQUIRE(loaded);
     model::Song& song = *loaded.song;
     REQUIRE(song.tracks.size() >= 2);
-    for (const char* type : {"SonoraHush", "Compressor2"})
+    for (const char* type : {"SonoraHush", "Compressor2", "SonoraCorrelation"}) // PLG-24c: Kick x Bass listens to the kick
     {
         auto device = devices::nativeDeviceModel(type);
         model::allocateDeviceIds(song, device);
@@ -1332,7 +1332,7 @@ TEST_CASE("als writer: a device's sidechain (source, tap, Gain, Mix, on) survive
     REQUIRE(again);
     int checked = 0;
     for (const auto& d : again.song->tracks[1].devices)
-        if (d.type == "SonoraHush" || d.type == "Compressor2")
+        if (d.type == "SonoraHush" || d.type == "Compressor2" || d.type == "SonoraCorrelation")
         {
             std::printf("    %s: routed %d source %d tap %d gain %.2f mix %.2f\n", d.type.c_str(), (int) d.sidechain.routed(),
                         d.sidechain.sourceTrackId, (int) d.sidechain.tap, d.sidechain.gain, d.sidechain.mix);
@@ -1343,7 +1343,7 @@ TEST_CASE("als writer: a device's sidechain (source, tap, Gain, Mix, on) survive
             CHECK_NEAR(d.sidechain.mix, 0.25, 1e-6);
             ++checked;
         }
-    CHECK(checked == 2);
+    CHECK(checked == 3);
 }
 
 TEST_CASE("deleting a device takes its automation and clip envelopes along (UI-91); undo brings them back; save reload")

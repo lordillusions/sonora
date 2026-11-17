@@ -11,7 +11,8 @@ namespace sonora::plugin
 CorrelationPlugin::CorrelationPlugin()
     : AudioProcessor(BusesProperties()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
-                         .withOutput("Output", juce::AudioChannelSet::stereo(), true))
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)
+                         .withInput("Sidechain", juce::AudioChannelSet::stereo(), true)) // PLG-24c: the kick for Kick x Bass
 {
     device_.setBypassed(false); // the host has its own bypass
     const auto& infos = device_.parameters();
@@ -37,7 +38,13 @@ bool CorrelationPlugin::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
     const auto output = layouts.getMainOutputChannelSet();
     if (output != juce::AudioChannelSet::stereo() && output != juce::AudioChannelSet::mono()) return false;
-    return layouts.getMainInputChannelSet() == output;
+    if (layouts.getMainInputChannelSet() != output) return false;
+    if (layouts.inputBuses.size() > 1)
+    {
+        const auto sc = layouts.getChannelSet(true, 1);
+        return sc.isDisabled() || sc == juce::AudioChannelSet::stereo() || sc == juce::AudioChannelSet::mono();
+    }
+    return true;
 }
 
 void CorrelationPlugin::setParameterValue(int index, float plainValue)
@@ -63,8 +70,10 @@ void CorrelationPlugin::reportEditorChanges()
 
 void CorrelationPlugin::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
+    sampleRate_ = sampleRate;
     device_.prepare(sampleRate, samplesPerBlock);
     stereo_.setSize(2, std::max(1, samplesPerBlock));
+    sidechain_.setSize(2, std::max(1, samplesPerBlock));
     setLatencySamples(0);
 }
 
@@ -81,6 +90,16 @@ void CorrelationPlugin::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
             processBlock(view, midi);
         }
         return;
+    }
+    device_.setHostInfo(hostInfo(getPlayHead(), sampleRate_)); // Sync: Integration as a note value at the host's tempo
+    // The sidechain (the kick, for Kick x Bass): copied, a mono bus on both sides; the device forgets it after the block.
+    juce::AudioBuffer<float> key(sidechain_.getArrayOfWritePointers(), 2, 0, n); // refers to sidechain_: no allocation
+    if (const auto* bus = getBus(true, 1); bus != nullptr && bus->isEnabled() && bus->getNumberOfChannels() > 0
+        && getChannelIndexInProcessBlockBuffer(true, 1, bus->getNumberOfChannels() - 1) < buffer.getNumChannels()) // a short buffer: none
+    {
+        auto sc = getBusBuffer(buffer, true, 1);
+        for (int ch = 0; ch < 2; ++ch) sidechain_.copyFrom(ch, 0, sc, std::min(ch, sc.getNumChannels() - 1), 0, n);
+        device_.setSidechain(&key, 1.0f);
     }
     auto main = getBusBuffer(buffer, true, 0);
     const int channels = std::max(1, std::min(main.getNumChannels(), getMainBusNumInputChannels()));

@@ -5,6 +5,7 @@
 #include "include/effects/SkGradientShader.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 
@@ -26,6 +27,32 @@ std::string format(const char* pattern, double value)
 std::string signedValue(float v) { return std::abs(v) < 0.005f ? std::string("0.00") : format("%+.2f", v); }
 std::string decibels(float d) { return format(std::abs(d) < 0.05f ? "%.1f dB" : "%+.1f dB", d); }
 
+std::string percent(float share) { return format(share < 0.1f ? "%.1f %%" : "%.0f %%", (double) share * 100.0); }
+
+// Words that fit `width` at `size`, line by line (at most `lines`; the last one keeps the rest).
+std::vector<std::string> wrap(const std::string& text, float width, float size, int lines)
+{
+    std::vector<std::string> out;
+    std::string line;
+    size_t at = 0;
+    while (at < text.size())
+    {
+        size_t end = text.find(' ', at);
+        if (end == std::string::npos) end = text.size();
+        const std::string word = text.substr(at, end - at);
+        const std::string tried = line.empty() ? word : line + " " + word;
+        if (! line.empty() && pro::textWidth(tried, size) > width && (int) out.size() < lines - 1)
+        {
+            out.push_back(line);
+            line = word;
+        }
+        else line = tried;
+        at = end + 1;
+    }
+    if (! line.empty()) out.push_back(line);
+    return out;
+}
+
 SkColor mix(SkColor a, SkColor b, float t)
 {
     t = std::clamp(t, 0.0f, 1.0f);
@@ -37,8 +64,12 @@ SkColor mix(SkColor a, SkColor b, float t)
 } // namespace
 
 CorrelationFace::CorrelationFace(devices::Correlation& device)
-    : ProFace(device, kFull, kCompact, kAccent), meter_(device), x_((size_t) kScopeRead), y_((size_t) kScopeRead), pts_((size_t) kScopeRead)
+    : ProFace(device, kFull, kCompact, kAccent), meter_(device), x_((size_t) kScopeRead), y_((size_t) kScopeRead), pts_((size_t) kScopeRead),
+      beatKick_((size_t) kBeatRead), beatBass_((size_t) kBeatRead), beatWeight_((size_t) kBeatRead)
 {
+    pair_ = std::lround(value(C::Mode)) == C::MeasureKickBass;
+    kickLeft_ = std::lround(value(C::KickFrom)) == C::KickLeft;
+    sync_ = value(C::Sync) >= 0.5f;
 }
 
 SkColor CorrelationFace::colourFor(float c)
@@ -89,6 +120,15 @@ std::string CorrelationFace::bandReadout(int index) const
     const std::string name = C::bandLabel(index) + " Hz";
     if (! b.active) return name + ": above this sample rate's range.";
     if (! b.signal) return name + ": no signal in this band.";
+    if (pair_)
+    {
+        if (! b.measured) return name + ": the kick and the bass do not meet in this band.";
+        std::string s = name + ": kick \xC3\x97 bass " + signedValue(b.correlation) + " where they meet";
+        if (b.minHeld < b.correlation - 0.02f) s += " (held low " + signedValue(b.minHeld) + ")";
+        s += ", level " + format("%.0f dBFS", b.levelDb) + ". ";
+        s += b.correlation >= 0.3f ? "They add up here." : b.correlation <= -0.3f ? "They cancel here." : "Unrelated here: neither adds up nor cancels.";
+        return s;
+    }
     std::string s = name + ": correlation " + signedValue(b.correlation);
     if (b.minHeld < b.correlation - 0.02f) s += " (held low " + signedValue(b.minHeld) + ")";
     s += ", level " + format("%.0f dBFS", b.levelDb) + ". ";
@@ -98,6 +138,7 @@ std::string CorrelationFace::bandReadout(int index) const
 
 CorrelationFace::Verdict CorrelationFace::verdict() const
 {
+    if (pair_) return pairVerdict();
     const auto& r = reading_;
     const std::string mono = decibels(r.monoDb);
     if (bypassed_) return {"Correlation is off", "Turn the device on to measure the stereo image.", pro::kDim};
@@ -139,15 +180,85 @@ CorrelationFace::Verdict CorrelationFace::verdict() const
     return {"Mono-compatible (" + signedValue(r.correlation) + ")", detail + ".", kGood};
 }
 
+std::string CorrelationFace::pairWord() const
+{
+    const auto& r = reading_;
+    if (! pair_) return {};
+    if (bypassed_) return "off";
+    if (! r.kick) return "no kick";
+    if (! r.bass) return "no bass";
+    if (! r.overlap) return "take turns";
+    return r.correlation >= 0.3f ? "in phase" : r.correlation <= -0.3f ? "out of phase" : "unrelated";
+}
+
+CorrelationFace::Verdict CorrelationFace::pairVerdict() const
+{
+    const auto& r = reading_;
+    if (bypassed_) return {"Correlation is off", "Turn the device on to compare the kick with the bass.", pro::kDim};
+    if (! r.kick)
+    {
+        if (kickLeft_)
+            return {"Waiting for the kick (left channel)\xE2\x80\xA6",
+                    "Kick From Left: on a group, pan the kick fully left and the bass fully right, each in mono. Or put this on the bass "
+                    "track and take the kick from the sidechain.",
+                    pro::kDim};
+        if (! r.sidechain)
+            return {"No kick: send it to the sidechain",
+                    "Put this on the bass track and choose the kick track in its Sidechain section (the arrow on the device's title "
+                    "bar); in another DAW, route the kick to the plug-in's sidechain input. Or use Kick From Left on a group.",
+                    kWarn};
+        return {"Waiting for the kick\xE2\x80\xA6", "The sidechain is connected but silent: play the kick.", pro::kDim};
+    }
+    const std::string levels = "kick " + format("%.0f", r.kickDb) + ", bass " + format("%.0f", r.bassDb) + " dBFS below 160 Hz";
+    if (! r.bass) return {"Waiting for the bass\xE2\x80\xA6", "The kick is here (" + levels + "): play the bass through this track.", pro::kDim};
+    if (! r.overlap)
+        return {"Kick and bass take turns",
+                "They barely sound together (" + percent(r.shared) + " of the low end), so nothing can cancel. Clean K-B-B-B: "
+                    "nothing to fix.",
+                kGood};
+    const float c = r.correlation;
+    const bool shiftHelps = r.shiftCorrelation > c + 0.25f && std::abs(r.shiftMs) >= 0.3f;
+    const std::string shift = std::abs(r.shiftMs) < 0.05f ? std::string()
+                              : r.shiftMs > 0 ? "Delaying the bass by " + format("%.1f ms", r.shiftMs)
+                                              : "Moving the bass " + format("%.1f ms", -r.shiftMs) + " earlier";
+    const std::string where = " (" + percent(r.shared) + " of the low end sounds together)";
+    if (c <= -0.3f)
+    {
+        const bool minor = r.sumDb > -0.5f;
+        std::string detail = "Where the kick's tail meets the bass they cancel: " + decibels(r.sumDb) + " there" + where +
+                             ". Flip the bass's polarity (hear it with Listen > Bass \xC3\x98; then Utility \xC3\x98 L + \xC3\x98 R): " +
+                             decibels(r.invertedDb) + ".";
+        if (shiftHelps && r.shiftCorrelation > -c + 0.1f) detail += " Or: " + shift + " gives " + signedValue(r.shiftCorrelation) + ".";
+        if (minor) detail += " Minor: the overlap is quiet.";
+        return {"Out of phase where they meet (" + signedValue(c) + ")", detail, minor ? kWarn : kBad};
+    }
+    if (c >= 0.3f)
+    {
+        std::string detail = "Where the kick's tail meets the bass they add up: " + decibels(r.sumDb) + " there" + where + ". Nothing to fix.";
+        if (shiftHelps) detail += " " + shift + " would give " + signedValue(r.shiftCorrelation) + ".";
+        return {"In phase where they meet (" + signedValue(c) + ")", detail, kGood};
+    }
+    std::string detail = "Different pitches or a phase offset: they neither add up nor cancel (" + decibels(r.sumDb) + " there)" + where + ".";
+    if (shiftHelps) detail += " " + shift + " would give " + signedValue(r.shiftCorrelation) + " (Track Delay).";
+    else detail += " Normal when the kick and the bass sit on different notes.";
+    return {"Unrelated where they meet (" + signedValue(c) + ")", detail, kWarn};
+}
+
 std::string CorrelationFace::valueText(int param, float v) const
 {
     if (param == C::Integration && v >= 995.0f) return format("%.1f s", v / 1000.0f);
     return ProFace::valueText(param, v);
 }
 
+std::pair<int, int> CorrelationFace::bandSpan() const
+{
+    return pair_ ? std::pair<int, int>{1, 11} : std::pair<int, int>{0, C::kBands}; // Kick x Bass: 25 .. 250 Hz
+}
+
 Rect CorrelationFace::bandsPlot() const
 {
-    return layoutMode() == Layout::Full ? Rect{380, 262, 712, 254} : Rect{178, 70, 314, 86};
+    if (layoutMode() == Layout::Full) return pair_ ? Rect{440, 560, 398, 120} : Rect{380, 262, 712, 254};
+    return Rect{178, 70, 314, 86};
 }
 
 int CorrelationFace::bandAt(float x, float y) const
@@ -156,7 +267,8 @@ int CorrelationFace::bandAt(float x, float y) const
     const float left = layoutMode() == Layout::Full ? 30.0f : 4.0f, bottom = layoutMode() == Layout::Full ? 20.0f : 4.0f;
     const Rect p{r.x + left, r.y + 6, r.w - left - 6, r.h - 6 - bottom};
     if (x < p.x || x >= p.x + p.w || y < r.y || y >= r.y + r.h) return -1;
-    return std::clamp((int) ((x - p.x) / (p.w / (float) C::kBands)), 0, C::kBands - 1);
+    const auto [first, count] = bandSpan();
+    return first + std::clamp((int) ((x - p.x) / (p.w / (float) count)), 0, count - 1);
 }
 
 std::string CorrelationFace::idleHelp() const
@@ -177,6 +289,17 @@ void CorrelationFace::willEdit(int param)
 bool CorrelationFace::animate()
 {
     bool dirty = false;
+    // Measure, Kick From and Sync change the controls (the layout is rebuilt for them).
+    const bool pair = std::lround(value(C::Mode)) == C::MeasureKickBass, kickLeft = std::lround(value(C::KickFrom)) == C::KickLeft,
+               sync = value(C::Sync) >= 0.5f;
+    if (pair != pair_ || kickLeft != kickLeft_ || sync != sync_)
+    {
+        pair_ = pair;
+        kickLeft_ = kickLeft;
+        sync_ = sync;
+        rebuild();
+        dirty = true;
+    }
     if (const bool bypassed = meter_.isBypassed(); bypassed != bypassed_) { bypassed_ = bypassed; dirty = true; }
     const uint64_t seen = meter_.samplesSeen();
     const auto reading = meter_.reading();
@@ -187,6 +310,8 @@ bool CorrelationFace::animate()
         reading_ = reading;
         for (int b = 0; b < C::kBands; ++b) bands_[(size_t) b] = meter_.band(b);
         points_ = meter_.scope(x_.data(), y_.data(), kScopeRead);
+        if (pair_)
+            beatPoints_ = meter_.beat(beatKick_.data(), beatBass_.data(), beatWeight_.data(), kBeatRead, kBeatPreMs, 0.0f, beatMs_, beatFromOnset_);
         if (reading_.signal && points_ > 0)
         {
             float peak = 0;
@@ -199,60 +324,113 @@ bool CorrelationFace::animate()
     return dirty;
 }
 
-void CorrelationFace::addListen(const Rect& r, const std::vector<std::string>& labels, bool vertical, float gap, const std::string& tip)
+void CorrelationFace::addListen(const Rect& r, const std::vector<std::pair<std::string, int>>& cells, bool vertical, float gap,
+                                const std::string& tip)
 {
     // Like addSegments, with the check modes lit amber: the output is not the input while one of them is on.
-    const int n = (int) labels.size();
+    const int n = (int) cells.size();
     const float cell = ((vertical ? r.h : r.w) - gap * (float) (n - 1)) / (float) n;
     for (int i = 0; i < n; ++i)
     {
         const float at = (cell + gap) * (float) i;
-        auto& s = addSegment(vertical ? Rect{r.x, r.y + at, r.w, cell} : Rect{r.x + at, r.y, cell, r.h}, C::Listen, (float) i, labels[(size_t) i], tip);
-        if (i != C::ListenStereo) s.colour = kWarn;
+        const auto& [label, mode] = cells[(size_t) i];
+        auto& s = addSegment(vertical ? Rect{r.x, r.y + at, r.w, cell} : Rect{r.x + at, r.y, cell, r.h}, C::Listen, (float) mode, label, tip);
+        if (mode != C::ListenStereo) s.colour = kWarn;
     }
+}
+
+void CorrelationFace::addIntegration(const Rect& k, const Rect& sync, bool compact)
+{
+    addSegment({sync.x, sync.y, sync.w * 0.5f - 2, sync.h}, C::Sync, 0, "ms", "Integration in milliseconds.");
+    addSegment({sync.x + sync.w * 0.5f + 2, sync.y, sync.w * 0.5f - 2, sync.h}, C::Sync, 1, "note",
+               "Sync: Integration as a note value at the song's tempo (1/4 = one beat: a kick and its bass).");
+    if (sync_)
+    {
+        auto& note = addKnob(k, C::IntegrationNote, compact ? "INTEGR." : "INTEGRATION",
+                             "Integration as a note value at the song's tempo: 1/16 follows each note, 1/4 averages a whole beat.");
+        note.fromNorm = [](float t) { return std::round(t * (float) (C::kNotes - 1)); };
+        note.caption = [this] { return format("%.0f ms", meter_.integrationMs()) + format(" at %.0f BPM", meter_.tempo()); };
+        return;
+    }
+    auto& ms = addKnob(k, C::Integration, compact ? "INTEGR." : "INTEGRATION", "Integration: how long the readings average (short = lively, long = steady).");
+    ms.caption = [this] {
+        const float v = value(C::Integration);
+        return std::string(v <= 120.0f ? "fast" : v <= 700.0f ? "averaging" : "slow average");
+    };
 }
 
 void CorrelationFace::build(Layout layout)
 {
-    const std::string listenTip =
+    using Cells = std::vector<std::pair<std::string, int>>;
+    const std::string bassInverted = "Bass \xC3\x98";
+    Cells listen = {{"Stereo", C::ListenStereo}, {"Mono", C::ListenMono}, {"Side", C::ListenSide}, {"L", C::ListenLeft}, {"R", C::ListenRight}};
+    std::string listenTip =
         "Listen: Stereo passes the input untouched. Mono, Side, Left and Right replace the output to check the mix by ear; turn it back to Stereo.";
+    if (pair_ && kickLeft_)
+    {
+        listen = {{"Stereo", C::ListenStereo}, {"Mono", C::ListenMono}, {"Mono, bass \xC3\x98", C::ListenSide}};
+        listenTip = "Listen: Stereo passes the input untouched. Mono sums the kick and the bass; Mono, bass \xC3\x98 sums them with the bass's "
+                    "polarity flipped. Turn it back to Stereo.";
+    }
+    else if (pair_)
+    {
+        listen = {{"Bass", C::ListenStereo}, {bassInverted, C::ListenBassInverted}};
+        listenTip = "Listen: Bass passes this track untouched. Bass \xC3\x98 flips its polarity, to hear the other choice against the kick "
+                    "track. Turn it back to Bass.";
+    }
+    const std::string modeTip = "Measure: L \xC3\x97 R compares left with right (does the mix survive mono). Kick \xC3\x97 Bass compares the kick "
+                                "(the sidechain, or the left channel) with the bass where they meet.";
+    const std::string beatTip = "One beat from the kick's onset, below 160 Hz: the kick (orange) and the bass (violet) over each other, the "
+                                "16ths dashed. The strip under them: where they meet, green adds up and red cancels.";
     const auto freeze = [this] { meter_.setFrozen(! meter_.frozen()); };
     const auto reset = [this] { meter_.requestReset(); };
     if (layout == Layout::Full)
     {
-        addListen({600, 16, 324, 30}, {"Stereo", "Mono", "Side", "L", "R"}, false, 4, listenTip);
+        addSegments({250, 16, 236, 30}, C::Mode, {"L \xC3\x97 R", "Kick \xC3\x97 Bass"}, false, 4, modeTip);
+        addListen({600, 16, 324, 30}, listen, false, 4, listenTip);
         addButton({936, 16, 80, 30}, "Freeze", freeze, "Freeze: holds every reading on screen (the audio keeps passing). Click again to follow the input.")
             .lit = [this] { return meter_.frozen(); };
         addButton({1024, 16, 80, 30}, "Reset", reset, "Reset: clears the held extremes, the band minimums and the history.");
+        const float kw = 76, kh = 108;
+        if (pair_)
+        {
+            addArea({28, 262, 712, 252}, beatTip);
+            addSegments({776, 486, 316, 28}, C::KickFrom, {"Sidechain", "Left (bass right)"}, false, 4,
+                        "Kick From: the sidechain (this device on the bass track, the kick track routed to it) or the left channel (a "
+                        "group with the kick panned left and the bass right, both mono).");
+            addArea(bandsPlot(), ""); // the pointer reads the band under it
+            addIntegration({897, 562, kw, kh}, {960, 538, 136, 20}, false);
+            addKnob({993, 562, kw, kh}, C::Hold, "HOLD", "Hold: how long the lowest and highest readings stay marked (Infinite: until Reset).")
+                .caption = [] { return std::string("extremes"); };
+            return;
+        }
         addArea({28, 260, 316, 226}, "The scope: every sample of the last 85 ms. Mono is a vertical line, a side alone leans to it, unrelated sides "
                                      "fill a disc, and anything horizontal cancels in mono.");
         addSegments({28, 492, 150, 26}, C::ScopeMode, {"Lissajous", "Polar"}, false, 4,
                     "Lissajous: the classic goniometer. Polar: the same folded into a half disc (in phase up, out of phase to the sides).");
         addToggle({186, 492, 158, 26}, C::ScopeAuto, "Auto zoom", "Auto zoom: scales the scope to the signal (the Zoom knob takes over when you turn it).");
         addArea(bandsPlot(), ""); // the pointer reads the band under it (help line)
-        const float row = 558, kw = 76, kh = 108;
-        addKnob({870, row, kw, kh}, C::Integration, "INTEGRATION", "Integration: how long the readings average (short = lively, long = steady).")
-            .caption = [this] {
-            const float v = value(C::Integration);
-            return std::string(v <= 120.0f ? "fast" : v <= 700.0f ? "averaging" : "slow average");
-        };
-        addKnob({870 + kw, row, kw, kh}, C::Hold, "HOLD", "Hold: how long the lowest and highest readings stay marked (Infinite: until Reset).")
+        addIntegration({870, 562, kw, kh}, {960, 538, 136, 20}, false);
+        addKnob({870 + kw, 562, kw, kh}, C::Hold, "HOLD", "Hold: how long the lowest and highest readings stay marked (Infinite: until Reset).")
             .caption = [] { return std::string("extremes"); };
-        auto& zoom = addKnob({870 + 2 * kw, row, kw, kh}, C::ScopeZoom, "ZOOM", "Zoom: the scope's gain. Turning it switches Auto zoom off.");
+        auto& zoom = addKnob({870 + 2 * kw, 562, kw, kh}, C::ScopeZoom, "ZOOM", "Zoom: the scope's gain. Turning it switches Auto zoom off.");
         zoom.driven = [this] { return value(C::ScopeAuto) >= 0.5f; };
         zoom.shown = [this] { return zoomDb(); };
         zoom.caption = [this] { return std::string(value(C::ScopeAuto) >= 0.5f ? "auto" : "scope gain"); };
         return;
     }
     // Compact: the device chain.
-    addArea({8, 8, 154, 154}, "The scope: mono is vertical, unrelated sides fill a disc, horizontal cancels in mono.");
+    if (pair_) addArea({8, 8, 154, 154}, beatTip);
+    else addArea({8, 8, 154, 154}, "The scope: mono is vertical, unrelated sides fill a disc, horizontal cancels in mono.");
     addArea(bandsPlot(), "");
-    addListen({508, 8, 92, 154}, {"Stereo", "Mono", "Side", "Left", "Right"}, true, 3, listenTip);
-    addKnob({608, 4, 74, 80}, C::Integration, "INTEGR.", "Integration: how long the readings average.");
+    if (! pair_) listen = {{"Stereo", 0}, {"Mono", 1}, {"Side", 2}, {"Left", 3}, {"Right", 4}};
+    else if (kickLeft_) listen = {{"Stereo", 0}, {"Mono", 1}, {"Mono \xC3\x98", 2}};
+    addListen({508, 8, 92, 118}, listen, true, 3, listenTip);
+    addSegments({508, 132, 92, 30}, C::Mode, {"L\xC3\x97R", "K\xC3\x97" "B"}, false, 3, modeTip);
+    addIntegration({608, 4, 74, 80}, {610, 130, 146, 30}, true); // the scope's Lissajous / Polar is in the full window
     addKnob({684, 4, 74, 80}, C::Hold, "HOLD", "Hold: how long the extremes stay marked.");
     addButton({610, 92, 70, 30}, "Freeze", freeze, "Freeze: holds every reading on screen.").lit = [this] { return meter_.frozen(); };
     addButton({686, 92, 70, 30}, "Reset", reset, "Reset: clears the held extremes and the history.");
-    addSegments({610, 130, 146, 30}, C::ScopeMode, {"Lissajous", "Polar"}, false, 3, "The scope: Lissajous or Polar.");
 }
 
 // ------------------------------------------------------------------ paint
@@ -406,9 +584,9 @@ void CorrelationFace::paintMeter(SkCanvas& c, const Rect& t, bool labels)
     const std::pair<float, const char*> marks[5] = {{-1.0f, "-1"}, {-0.5f, "-0.5"}, {0.0f, "0"}, {0.5f, "+0.5"}, {1.0f, "+1"}};
     for (const auto& [v, text] : marks)
         pro::text(c, text, {xOf(v) - 30, t.y + t.h + 4, 60, 14}, pro::kDim, 10.5f, Align::Centre, true);
-    pro::text(c, "out of phase", {t.x, t.y + t.h + 18, 160, 13}, paint::withAlpha(kBad, 200), 9.5f, Align::Left, true);
+    pro::text(c, pair_ ? "cancels" : "out of phase", {t.x, t.y + t.h + 18, 160, 13}, paint::withAlpha(kBad, 200), 9.5f, Align::Left, true);
     pro::text(c, "unrelated", {xOf(0) - 80, t.y + t.h + 18, 160, 13}, paint::withAlpha(kWarn, 200), 9.5f, Align::Centre, true);
-    pro::text(c, "mono", {t.x + t.w - 160, t.y + t.h + 18, 160, 13}, paint::withAlpha(kGood, 200), 9.5f, Align::Right, true);
+    pro::text(c, pair_ ? "adds up" : "mono", {t.x + t.w - 160, t.y + t.h + 18, 160, 13}, paint::withAlpha(kGood, 200), 9.5f, Align::Right, true);
 }
 
 void CorrelationFace::paintBands(SkCanvas& c, const Rect& r, bool compact)
@@ -417,29 +595,31 @@ void CorrelationFace::paintBands(SkCanvas& c, const Rect& r, bool compact)
     const float left = compact ? 4.0f : 30.0f, bottom = compact ? 4.0f : 20.0f;
     const Rect p{r.x + left, r.y + 6, r.w - left - 6, r.h - 6 - bottom};
     const float zero = p.y + p.h * 0.5f, scale = p.h * 0.5f;
-    const float slot = p.w / (float) C::kBands;
-    // The low end, where a mono sum hurts most.
+    const auto [first, count] = bandSpan();
+    const float slot = p.w / (float) count;
+    // The low end, where a mono sum hurts most (Kick x Bass: where the kick and the bass live).
     int lowBands = 0;
-    while (lowBands < C::kBands && C::bandCentre(lowBands) <= C::kLowEndHz * 1.01f) ++lowBands;
+    while (lowBands < count && C::bandCentre(first + lowBands) <= C::kLowEndHz * 1.01f) ++lowBands;
     c.drawRect(SkRect::MakeXYWH(p.x, p.y, slot * (float) lowBands, p.h), pro::fill(paint::withAlpha(kLow, 12)));
-    if (! compact) pro::text(c, "LOW END", {p.x + 4, p.y + 2, slot * (float) lowBands - 8, 12}, paint::withAlpha(kLow, 170), 9, Align::Left, true);
+    if (! compact && ! pair_) pro::text(c, "LOW END", {p.x + 4, p.y + 2, slot * (float) lowBands - 8, 12}, paint::withAlpha(kLow, 170), 9, Align::Left, true);
     for (int step = 2; step >= -2; --step) // +1, +0.5, 0, -0.5, -1
     {
         const float v = (float) step * 0.5f, y = zero - v * scale;
         c.drawLine(p.x, y, p.x + p.w, y, pro::stroke(step == 0 ? 0xFF2C323C : 0xFF1A1E25, 1.0f));
-        if (! compact) pro::text(c, step == 0 ? "0" : format("%+.1g", v), {r.x + 2, y - 7, left - 6, 14}, pro::kFaint, 9, Align::Right);
+        if (! compact) pro::text(c, step == 0 ? "0" : format("%+.1f", v), {r.x + 2, y - 7, left - 6, 14}, pro::kFaint, 9, Align::Right);
     }
     // Levels: a faint spectrum behind the bars (-90 .. 0 dBFS over the plot's height).
     float loudest = -200.0f;
-    for (const auto& b : bands_)
-        if (b.signal) loudest = std::max(loudest, b.levelDb);
+    for (int i = first; i < first + count; ++i)
+        if (bands_[(size_t) i].signal) loudest = std::max(loudest, bands_[(size_t) i].levelDb);
     if (loudest > -150.0f && ! bypassed_)
     {
         SkPathBuilder level;
         level.moveTo(p.x, p.y + p.h);
-        for (int i = 0; i < C::kBands; ++i)
+        for (int i = 0; i < count; ++i)
         {
-            const float db = bands_[(size_t) i].active ? std::clamp(bands_[(size_t) i].levelDb, -90.0f, 0.0f) : -90.0f;
+            const auto& b = bands_[(size_t) (first + i)];
+            const float db = b.active ? std::clamp(b.levelDb, -90.0f, 0.0f) : -90.0f;
             level.lineTo(p.x + slot * ((float) i + 0.5f), p.y + p.h - (db + 90.0f) / 90.0f * p.h);
         }
         level.lineTo(p.x + p.w, p.y + p.h);
@@ -451,12 +631,13 @@ void CorrelationFace::paintBands(SkCanvas& c, const Rect& r, bool compact)
         c.drawPath(level.detach(), shade);
     }
     const int hover = bandAt(designMouseX(), designMouseY());
-    for (int i = 0; i < C::kBands; ++i)
+    for (int i = 0; i < count; ++i)
     {
-        const auto& b = bands_[(size_t) i];
-        const float x = p.x + slot * (float) i, w = std::max(2.0f, slot * 0.62f), bx = x + (slot - w) * 0.5f;
-        if (i == hover) pro::rounded(c, {x + 1, p.y, slot - 2, p.h}, 3, 0x14FFFFFF);
-        if (! b.active || ! b.signal || bypassed_)
+        const int index = first + i;
+        const auto& b = bands_[(size_t) index];
+        const float x = p.x + slot * (float) i, w = std::max(2.0f, slot * (pair_ ? 0.5f : 0.62f)), bx = x + (slot - w) * 0.5f;
+        if (index == hover) pro::rounded(c, {x + 1, p.y, slot - 2, p.h}, 3, 0x14FFFFFF);
+        if (! b.active || ! b.measured || bypassed_)
         {
             c.drawCircle(x + slot * 0.5f, zero, compact ? 1.2f : 1.8f, pro::fill(b.active ? 0xFF3A404B : 0xFF262B33));
             continue;
@@ -471,11 +652,43 @@ void CorrelationFace::paintBands(SkCanvas& c, const Rect& r, bool compact)
             const float m = zero - std::clamp(b.minHeld, -1.0f, 1.0f) * scale;
             c.drawLine(bx - 1, m, bx + w + 1, m, pro::stroke(paint::withAlpha(colourFor(b.minHeld), (uint8_t) (200.0f * strength)), compact ? 1.2f : 1.8f));
         }
+        // The value with its decimals on every band in Kick x Bass (wide slots; L x R's 31 bands show it under the pointer).
+        if (pair_ && strength > 0.3f)
+        {
+            const float size = compact ? 7.5f : 10.0f, h = size + 3;
+            const bool up = b.correlation >= 0;
+            float ty = up ? top - h - 1 : bottomY + 1;
+            ty = std::clamp(ty, p.y, p.y + p.h - h);
+            pro::text(c, signedValue(b.correlation), {x - 4, ty, slot + 8, h}, colour, size, Align::Centre, true);
+        }
     }
     if (compact) return;
-    for (int i = 0; i < C::kBands; i += 3)
-        pro::text(c, C::bandLabel(i), {p.x + slot * ((float) i + 0.5f) - 24, p.y + p.h + 4, 48, 13}, i == hover ? pro::kText : pro::kFaint, 9.5f,
-                  Align::Centre, true);
+    const int every = pair_ ? 1 : 3;
+    for (int i = 0; i < count; i += every)
+        pro::text(c, C::bandLabel(first + i), {p.x + slot * ((float) i + 0.5f) - 24, p.y + p.h + 4, 48, 13}, first + i == hover ? pro::kText : pro::kFaint,
+                  9.5f, Align::Centre, true);
+}
+
+void CorrelationFace::paintBandCallout(SkCanvas& c)
+{
+    // The band under the pointer: its value big, with decimals (the help line says the rest).
+    const int index = bandAt(designMouseX(), designMouseY());
+    if (index < 0 || bypassed_) return;
+    const auto& b = bands_[(size_t) index];
+    if (! b.measured) return;
+    const auto r = bandsPlot();
+    const float left = 30.0f, bottom = 20.0f;
+    const Rect p{r.x + left, r.y + 6, r.w - left - 6, r.h - 6 - bottom};
+    const auto [first, count] = bandSpan();
+    const float slot = p.w / (float) count, cx = p.x + slot * ((float) (index - first) + 0.5f);
+    const float w = 92, h = 46, zero = p.y + p.h * 0.5f;
+    // On the other side of the zero line from the bar, so the bar stays visible.
+    const float y = b.correlation >= 0 ? zero + 6 : zero - h - 6;
+    const Rect box{std::clamp(cx - w * 0.5f, r.x + 2, r.x + r.w - w - 2), std::clamp(y, r.y + 2, r.y + r.h - h - 2), w, h};
+    pro::rounded(c, box, 6, 0xF0151820);
+    pro::roundedStroke(c, box, 6, paint::withAlpha(colourFor(b.correlation), 160), 1.0f);
+    pro::text(c, C::bandLabel(index) + " Hz", {box.x, box.y + 3, box.w, 13}, pro::kDim, 10, Align::Centre, true);
+    pro::text(c, signedValue(b.correlation), {box.x, box.y + 15, box.w, 28}, colourFor(b.correlation), 24, Align::Centre, true);
 }
 
 void CorrelationFace::paintHistory(SkCanvas& c, const Rect& r)
@@ -491,6 +704,14 @@ void CorrelationFace::paintHistory(SkCanvas& c, const Rect& r)
     }
     const int count = (int) meter_.historyCount();
     const float step = p.w / (float) (C::kHistory - 1);
+    if (pair_) // Kick x Bass: how much sounded together, as faint columns from the floor (30 % = a third of the height)
+        for (int i = count - 1; i >= 0; --i)
+        {
+            const auto h = meter_.history(i);
+            if (h.shared <= 0.001f) continue;
+            const float x = p.x + p.w - (float) i * step, height = std::min(1.0f, h.shared / 0.3f) * p.h * 0.33f;
+            c.drawRect(SkRect::MakeXYWH(x - step * 0.5f, p.y + p.h - height, step + 0.5f, height), pro::fill(paint::withAlpha(kAccent, 46)));
+        }
     SkPathBuilder line, area, low;
     bool open = false, lowOpen = false;
     float runStart = 0, lastX = 0;
@@ -524,7 +745,7 @@ void CorrelationFace::paintHistory(SkCanvas& c, const Rect& r)
             lastX = x;
         }
         else closeArea();
-        if (h.lowSignal)
+        if (h.lowSignal && ! pair_)
         {
             const float y = zero - std::clamp(h.lowEnd, -1.0f, 1.0f) * scale;
             if (! lowOpen) low.moveTo(x, y);
@@ -596,33 +817,130 @@ void CorrelationFace::paintListenWarning(SkCanvas& c, const Rect& r, float size)
 {
     const int listen = (int) std::lround(value(C::Listen));
     if (listen == C::ListenStereo) return;
-    static const char* const names[] = {"", "MONO", "SIDE", "LEFT", "RIGHT"};
-    const std::string text = std::string("LISTENING: ") + names[std::clamp(listen, 0, 4)] + "  \xC2\xB7  the output is not the input";
+    static const char* const names[] = {"", "MONO", "SIDE", "LEFT", "RIGHT", "BASS INVERTED"};
+    std::string name = names[std::clamp(listen, 0, 5)];
+    if (pair_ && kickLeft_ && listen == C::ListenMono) name = "KICK + BASS";
+    if (pair_ && kickLeft_ && listen == C::ListenSide) name = "KICK + BASS INVERTED";
+    const std::string text = "LISTENING: " + name + "  \xC2\xB7  the output is not the input";
     pro::rounded(c, r, 5, paint::withAlpha(kWarn, 34));
     pro::roundedStroke(c, r, 5, paint::withAlpha(kWarn, 150), 1.0f);
     pro::text(c, text, r, kWarn, size, Align::Centre, true);
 }
 
-void CorrelationFace::paintBack(SkCanvas& c, Layout layout)
+void CorrelationFace::paintBeat(SkCanvas& c, const Rect& r, bool compact)
 {
-    const auto v = verdict();
-    const auto& r = reading_;
-    const bool live = r.signal && ! bypassed_;
-    if (layout == Layout::Compact)
+    pro::well(c, r, compact ? 4.0f : 6.0f);
+    const float pad = compact ? 5.0f : 8.0f, axis = compact ? 0.0f : 16.0f, strip = compact ? 8.0f : 14.0f;
+    const Rect wave{r.x + pad, r.y + pad, r.w - 2 * pad, r.h - 2 * pad - axis - strip - 4};
+    const Rect meet{wave.x, wave.y + wave.h + 4, wave.w, strip};
+    const auto& v = reading_;
+    if (bypassed_ || beatPoints_ < 2 || ! (v.kick || v.bass))
     {
-        paintScope(c, {8, 8, 154, 154}, true);
-        pro::well(c, {170, 8, 330, 154}, 6);
-        pro::text(c, live ? signedValue(r.correlation) : "-", {178, 10, 92, 30}, live ? colourFor(r.correlation) : pro::kFaint, 23, Align::Left, true);
-        pro::text(c, v.title, {268, 13, 226, 15}, v.colour, 10.5f, Align::Left, true);
-        const std::string sub = live ? "mono sum " + decibels(r.monoDb) + "  \xC2\xB7  held " + signedValue(r.minHeld) + " \xE2\x80\xA6 " + signedValue(r.maxHeld)
-                                     : std::string("correlation");
-        pro::text(c, sub, {268, 28, 226, 13}, pro::kDim, 9, Align::Left);
-        paintMeter(c, {178, 46, 314, 16}, false);
-        paintBands(c, bandsPlot(), true);
+        pro::text(c, bypassed_ ? "off" : "waiting for the kick and the bass", wave, pro::kFaint, compact ? 9.0f : 12.0f, Align::Centre, true);
         return;
     }
-    pro::wordmark(c, "correlation", 24, 10, 28, kAccent, version);
-    pro::text(c, "LISTEN", {600, 2, 100, 13}, pro::kFaint, 9, Align::Left, true);
+    const float total = beatMs_ * (float) beatPoints_;
+    const auto xOf = [&](float ms) { return wave.x + (ms + kBeatPreMs) / total * wave.w; };
+    // The 16ths from the kick (dashed), labelled under the strip.
+    const double sixteenth = 15000.0 / std::max(1.0, meter_.tempo());
+    for (int q = 0; q < 64; ++q)
+    {
+        const float ms = (float) (q * sixteenth);
+        if (ms > total - kBeatPreMs) break;
+        const float x = xOf(ms);
+        for (float y = wave.y; y < meet.y + meet.h; y += 6)
+            c.drawLine(x, y, x, std::min(y + 3, meet.y + meet.h), pro::stroke(q % 4 == 0 ? 0xFF3A404B : 0xFF262B33, 1.0f));
+        if (! compact)
+            pro::text(c, q == 0 ? std::string("kick") : q % 4 == 0 ? std::string("next beat") : std::to_string(q) + "/16",
+                      {x - 40, meet.y + meet.h + 3, 80, 13}, q == 0 ? kLow : pro::kFaint, 9.5f, Align::Centre, true);
+    }
+    float peak = 1.0e-6f, meetPeak = 1.0e-12f;
+    for (int i = 0; i < beatPoints_; ++i)
+    {
+        peak = std::max({peak, std::abs(beatKick_[(size_t) i]), std::abs(beatBass_[(size_t) i])});
+        meetPeak = std::max(meetPeak, std::abs(beatWeight_[(size_t) i] * beatKick_[(size_t) i] * beatBass_[(size_t) i]));
+    }
+    const float mid = wave.y + wave.h * 0.5f, gain = wave.h * 0.46f / peak, dx = wave.w / (float) (beatPoints_ - 1);
+    // Where they meet: a light band behind the waves, as strong as the overlap weight.
+    for (int i = 0; i < beatPoints_; ++i)
+        if (const float w = beatWeight_[(size_t) i]; w > 0.02f)
+            c.drawRect(SkRect::MakeXYWH(wave.x + dx * ((float) i - 0.5f), wave.y, dx + 0.5f, wave.h), pro::fill(paint::withAlpha(0xFFFFFFFF, (uint8_t) (w * 26.0f))));
+    c.drawLine(wave.x, mid, wave.x + wave.w, mid, pro::stroke(0xFF2C323C, 1.0f));
+    SkPathBuilder kickArea, kickLine, bassLine;
+    kickArea.moveTo(wave.x, mid);
+    for (int i = 0; i < beatPoints_; ++i)
+    {
+        const float x = wave.x + dx * (float) i, yk = mid - beatKick_[(size_t) i] * gain, yb = mid - beatBass_[(size_t) i] * gain;
+        kickArea.lineTo(x, yk);
+        if (i == 0) { kickLine.moveTo(x, yk); bassLine.moveTo(x, yb); }
+        else { kickLine.lineTo(x, yk); bassLine.lineTo(x, yb); }
+    }
+    kickArea.lineTo(wave.x + wave.w, mid);
+    kickArea.close();
+    c.save();
+    c.clipRect(SkRect::MakeXYWH(wave.x, wave.y, wave.w, wave.h));
+    c.drawPath(kickArea.detach(), pro::fill(paint::withAlpha(kLow, 46)));
+    c.drawPath(kickLine.detach(), pro::stroke(paint::withAlpha(kLow, 230), compact ? 1.0f : 1.4f));
+    c.drawPath(bassLine.detach(), pro::stroke(kAccent, compact ? 1.2f : 1.8f));
+    c.restore();
+    // The strip: green where they add up, red where they cancel, as strong as what they share there.
+    pro::rounded(c, meet, 3, 0xFF0E1115);
+    for (int i = 0; i < beatPoints_; ++i)
+    {
+        const float m = beatWeight_[(size_t) i] * beatKick_[(size_t) i] * beatBass_[(size_t) i];
+        const float strength = std::sqrt(std::abs(m) / meetPeak);
+        if (strength < 0.04f) continue;
+        c.drawRect(SkRect::MakeXYWH(wave.x + dx * ((float) i - 0.5f), meet.y + 1, dx + 0.5f, meet.h - 2),
+                   pro::fill(paint::withAlpha(m > 0 ? kGood : kBad, (uint8_t) (std::min(1.0f, strength) * 230.0f))));
+    }
+    if (! compact && ! beatFromOnset_)
+        pro::text(c, "no kick onset found: the newest beat", {wave.x + 6, wave.y + 2, 300, 13}, pro::kFaint, 9.5f, Align::Left, true);
+}
+
+void CorrelationFace::paintMeet(SkCanvas& c, const Rect& r)
+{
+    const auto& v = reading_;
+    const bool live = v.overlap && ! bypassed_;
+    const float x = r.x + 12, w = r.w - 24;
+    const auto row = [&](float y, const char* title, const std::string& value, SkColor colour, const std::string& note) {
+        pro::text(c, title, {x, y, w, 14}, pro::kFaint, 9.5f, Align::Left, true);
+        pro::text(c, value, {x, y - 4, w, 22}, colour, 17, Align::Right, true);
+        if (! note.empty()) pro::text(c, note, {x, y + 16, w, 13}, pro::kFaint, 9.5f, Align::Left);
+    };
+    const auto dbColour = [](float db) { return db > 0.1f ? kGood : db < -0.1f ? kBad : pro::kText; };
+    float y = r.y + 30;
+    const bool any = v.kick && v.bass && ! bypassed_;
+    row(y, "SOUNDING TOGETHER", any ? percent(v.shared) : "-", pro::kText, "of the low end (the rest takes turns)");
+    y += 44;
+    row(y, "THE SUM WHERE THEY MEET", live ? decibels(v.sumDb) : "-", live ? dbColour(v.sumDb) : pro::kDim, "against the kick and the bass apart");
+    y += 44;
+    row(y, "WITH THE BASS INVERTED", live ? decibels(v.invertedDb) : "-", live ? dbColour(v.invertedDb) : pro::kDim,
+        live ? (v.invertedDb > v.sumDb + 0.2f ? "better: flip the bass (Listen > Bass \xC3\x98)" : "worse: keep the polarity") : "");
+    y += 44;
+    std::string shift = "-", note;
+    SkColor shiftColour = pro::kDim;
+    if (live)
+    {
+        const bool helps = v.shiftCorrelation > v.correlation + 0.05f && std::abs(v.shiftMs) >= 0.1f;
+        // Half a period of the shared note is the same as flipping the bass: then the flip is the simpler fix.
+        const bool flipInstead = helps && v.correlation < 0.0f && -v.correlation >= v.shiftCorrelation - 0.05f;
+        shift = helps ? format("%+.1f ms", v.shiftMs) + " \xE2\x86\x92 " + signedValue(v.shiftCorrelation) : std::string("0 ms");
+        shiftColour = helps ? colourFor(v.shiftCorrelation) : pro::kText;
+        note = flipInstead ? "half a period: the same as flipping the bass"
+               : helps     ? (v.shiftMs > 0 ? "delay the bass (Track Delay)" : "move the bass earlier (Track Delay)")
+                           : "already the best alignment (+-12 ms)";
+    }
+    row(y, "BEST SHIFT OF THE BASS", shift, shiftColour, note);
+    y += 44;
+    const auto level = [](float db) { return db <= -119.0f ? std::string("-inf") : format("%.1f", db); };
+    pro::text(c, "BELOW 160 HZ", {x, y, w, 14}, pro::kFaint, 9.5f, Align::Left, true);
+    pro::text(c, "kick " + level(v.kickDb) + "   bass " + level(v.bassDb) + " dBFS", {x, y, w, 14}, pro::kDim, 11, Align::Right, true);
+}
+
+void CorrelationFace::paintFullStereo(SkCanvas& c, const Verdict& v)
+{
+    const auto& r = reading_;
+    const bool live = r.signal && ! bypassed_;
     // Verdict.
     pro::panel(c, {16, 64, 1088, 60});
     pro::rounded(c, {16, 64, 5, 60}, 2, v.colour);
@@ -631,8 +949,8 @@ void CorrelationFace::paintBack(SkCanvas& c, Layout layout)
     // The meter.
     pro::panel(c, {16, 132, 1088, 96});
     pro::sectionTitle(c, "CORRELATION", 28, 138, kAccent);
-    pro::text(c, live ? signedValue(r.correlation) : "-", {28, 158, 180, 46}, live ? colourFor(r.correlation) : pro::kFaint, 40, Align::Left, true);
-    pro::text(c, live ? "held " + signedValue(r.minHeld) + "  \xE2\x80\xA6  " + signedValue(r.maxHeld) : std::string("held -"), {30, 204, 190, 16},
+    pro::text(c, live ? signedValue(r.correlation) : "-", {26, 152, 196, 54}, live ? colourFor(r.correlation) : pro::kFaint, 50, Align::Left, true);
+    pro::text(c, live ? "held " + signedValue(r.minHeld) + "  \xE2\x80\xA6  " + signedValue(r.maxHeld) : std::string("held -"), {30, 206, 190, 16},
               pro::kDim, 10.5f, Align::Left, true);
     paintMeter(c, {226, 160, 862, 26}, true);
     // Scope.
@@ -657,12 +975,14 @@ void CorrelationFace::paintBack(SkCanvas& c, Layout layout)
     pro::panel(c, {16, 534, 560, 156});
     pro::sectionTitle(c, "HISTORY", 28, 540, kAccent);
     {
-        float lx = 350;
-        for (const auto& [name, colour] : {std::pair<const char*, SkColor>{"all", kGood}, {"low end", kLow}})
+        float lx = 300;
+        const std::string all = "all " + (live ? signedValue(r.correlation) : std::string("-"));
+        const std::string low = "low end " + (r.lowSignal && ! bypassed_ ? signedValue(r.lowEnd) : std::string("-"));
+        for (const auto& [name, colour] : {std::pair<std::string, SkColor>{all, kGood}, {low, kLow}})
         {
             c.drawCircle(lx + 3, 549, 3, pro::fill(colour));
-            pro::text(c, name, {lx + 9, 541, 90, 16}, pro::kDim, 9.5f, Align::Left, true);
-            lx += pro::textWidth(name, 9.5f, true) + 24;
+            pro::text(c, name, {lx + 9, 541, 120, 16}, pro::kText, 10, Align::Left, true);
+            lx += pro::textWidth(name, 10, true) + 24;
         }
         pro::text(c, format("(below %.0f Hz)", C::kLowEndHz), {lx - 11, 541, 110, 16}, pro::kFaint, 9.5f, Align::Left, true);
     }
@@ -674,6 +994,106 @@ void CorrelationFace::paintBack(SkCanvas& c, Layout layout)
     // Meter controls.
     pro::panel(c, {862, 534, 242, 156});
     pro::sectionTitle(c, "METER", 874, 540, kAccent);
+}
+
+void CorrelationFace::paintFullPair(SkCanvas& c, const Verdict& v)
+{
+    const auto& r = reading_;
+    const bool live = r.overlap && ! bypassed_;
+    // The reading: the value big, its word, the verdict with what to do, the meter.
+    pro::panel(c, {16, 64, 1088, 164});
+    pro::rounded(c, {16, 64, 5, 164}, 2, v.colour);
+    pro::sectionTitle(c, "KICK \xC3\x97 BASS", 30, 70, kAccent);
+    pro::text(c, "where the kick's tail meets the bass, below 160 Hz", {140, 70, 420, 18}, pro::kFaint, 10, Align::Left, true);
+    const SkColor valueColour = live ? colourFor(r.correlation) : pro::kFaint;
+    pro::text(c, live ? signedValue(r.correlation) : "-", {28, 90, 244, 74}, valueColour, 66, Align::Left, true);
+    std::string word = pairWord();
+    std::transform(word.begin(), word.end(), word.begin(), [](char ch) { return (char) std::toupper((unsigned char) ch); });
+    pro::text(c, word, {32, 166, 240, 18}, live ? valueColour : v.colour, 13, Align::Left, true);
+    pro::text(c, live ? "held " + signedValue(r.minHeld) + "  \xE2\x80\xA6  " + signedValue(r.maxHeld) : std::string("held -"), {32, 188, 240, 16},
+              pro::kDim, 10.5f, Align::Left, true);
+    pro::text(c, v.title, {284, 86, 806, 28}, v.colour, 20, Align::Left, true);
+    const auto lines = wrap(v.detail, 804, 12.5f, 2);
+    for (size_t i = 0; i < lines.size(); ++i) pro::text(c, lines[i], {284, 115 + 17 * (float) i, 806, 17}, pro::kDim, 12.5f, Align::Left);
+    paintMeter(c, {284, 162, 804, 22}, true);
+    // One beat.
+    pro::panel(c, {16, 236, 736, 290});
+    pro::sectionTitle(c, "ONE BEAT FROM THE KICK", 28, 242, kAccent);
+    {
+        float lx = 446;
+        for (const auto& [name, colour] : {std::pair<const char*, SkColor>{"kick", kLow}, {"bass", kAccent}, {"adds up", kGood}, {"cancels", kBad}})
+        {
+            c.drawCircle(lx + 3, 251, 3, pro::fill(colour));
+            pro::text(c, name, {lx + 9, 243, 80, 16}, pro::kDim, 9.5f, Align::Left, true);
+            lx += pro::textWidth(name, 9.5f, true) + 22;
+        }
+    }
+    paintBeat(c, {28, 262, 712, 252}, false);
+    // Where they meet.
+    pro::panel(c, {764, 236, 340, 290});
+    pro::sectionTitle(c, "WHERE THEY MEET", 776, 242, kAccent);
+    paintMeet(c, {764, 236, 340, 290});
+    pro::text(c, "KICK FROM", {776, 470, 120, 13}, pro::kFaint, 9, Align::Left, true);
+    pro::text(c, r.sidechain ? "sidechain connected" : (kickLeft_ ? "" : "no sidechain"), {900, 470, 192, 13},
+              r.sidechain ? kGood : pro::kFaint, 9, Align::Right, true);
+    // History.
+    pro::panel(c, {16, 534, 400, 156});
+    pro::sectionTitle(c, "HISTORY", 28, 540, kAccent);
+    {
+        const std::string now = "kick \xC3\x97 bass " + (live ? signedValue(r.correlation) : std::string("-"));
+        float lx = 150;
+        c.drawCircle(lx + 3, 549, 3, pro::fill(kGood));
+        pro::text(c, now, {lx + 9, 541, 150, 16}, pro::kText, 10, Align::Left, true);
+        lx += pro::textWidth(now, 10, true) + 24;
+        c.drawCircle(lx + 3, 549, 3, pro::fill(paint::withAlpha(kAccent, 140)));
+        pro::text(c, "together", {lx + 9, 541, 90, 16}, pro::kDim, 9.5f, Align::Left, true);
+    }
+    paintHistory(c, {28, 562, 376, 120});
+    // Low bands.
+    pro::panel(c, {428, 534, 422, 156});
+    pro::sectionTitle(c, "LOW BANDS", 440, 540, kAccent);
+    pro::text(c, "kick \xC3\x97 bass per third octave", {540, 541, 300, 16}, pro::kFaint, 9.5f, Align::Left, true);
+    paintBands(c, bandsPlot(), false);
+    // Meter controls.
+    pro::panel(c, {862, 534, 242, 156});
+    pro::sectionTitle(c, "METER", 874, 540, kAccent);
+}
+
+void CorrelationFace::paintBack(SkCanvas& c, Layout layout)
+{
+    const auto v = verdict();
+    const auto& r = reading_;
+    if (layout == Layout::Compact)
+    {
+        const bool live = (pair_ ? r.overlap : r.signal) && ! bypassed_;
+        if (pair_) paintBeat(c, {8, 8, 154, 154}, true);
+        else paintScope(c, {8, 8, 154, 154}, true);
+        pro::well(c, {170, 8, 330, 154}, 6);
+        pro::text(c, live ? signedValue(r.correlation) : "-", {176, 8, 104, 36}, live ? colourFor(r.correlation) : pro::kFaint, 29, Align::Left, true);
+        std::string title = v.title, sub;
+        if (pair_)
+        {
+            title = pairWord();
+            std::transform(title.begin(), title.end(), title.begin(), [](char ch) { return (char) std::toupper((unsigned char) ch); });
+            title = "KICK \xC3\x97 BASS: " + title;
+            if (live) sub = "sum " + decibels(r.sumDb) + "  \xC2\xB7  bass \xC3\x98 " + decibels(r.invertedDb);
+            else if (r.kick && r.bass && ! bypassed_) sub = percent(r.shared) + " together";
+            else sub = r.kick || kickLeft_ ? "waiting for the bass" : "route the kick to the sidechain";
+        }
+        else
+            sub = live ? "mono sum " + decibels(r.monoDb) + "  \xC2\xB7  held " + signedValue(r.minHeld) + " \xE2\x80\xA6 " + signedValue(r.maxHeld)
+                       : std::string("correlation");
+        pro::text(c, title, {282, 12, 214, 15}, pair_ ? (live ? colourFor(r.correlation) : v.colour) : v.colour, 10.5f, Align::Left, true);
+        pro::text(c, sub, {282, 28, 214, 13}, pro::kDim, 9, Align::Left);
+        paintMeter(c, {178, 48, 314, 14}, false);
+        paintBands(c, bandsPlot(), true);
+        return;
+    }
+    pro::wordmark(c, "correlation", 24, 10, 28, kAccent, version);
+    pro::text(c, "MEASURE", {250, 2, 100, 13}, pro::kFaint, 9, Align::Left, true);
+    pro::text(c, "LISTEN", {600, 2, 100, 13}, pro::kFaint, 9, Align::Left, true);
+    if (pair_) paintFullPair(c, v);
+    else paintFullStereo(c, v);
     c.drawLine(16, 696, 1104, 696, pro::stroke(pro::kLineSoft, 1.0f));
 }
 
@@ -684,13 +1104,14 @@ void CorrelationFace::paintFront(SkCanvas& c, Layout layout)
         if (reading_.frozen) pro::text(c, "FROZEN", {178, 140, 80, 14}, kWarn, 9, Align::Left, true);
         return;
     }
-    paintListenWarning(c, {250, 18, 336, 26}, 10.5f);
+    paintListenWarning(c, pair_ ? Rect{752, 68, 336, 18} : Rect{752, 136, 336, 20}, 10.5f);
     if (reading_.frozen)
     {
-        const Rect chip{226, 136, 80, 18};
+        const Rect chip = pair_ ? Rect{564, 68, 80, 18} : Rect{226, 136, 80, 18};
         pro::rounded(c, chip, 4, paint::withAlpha(kWarn, 40));
         pro::text(c, "FROZEN", chip, kWarn, 10, Align::Centre, true);
     }
+    paintBandCallout(c);
     paintHelp(c, {20, 700, 1080, 18});
 }
 } // namespace sonora::ui

@@ -59,6 +59,7 @@ public:
     // Default value text: three significant digits with the parameter's unit ("80.0 Hz", "1.00 kHz", "30.0 ms").
     static std::string significant(float value);
     std::string formatted(int parameter) const;
+    std::string formatted(int parameter, float value) const; // UI-93: the text of any value (typed values, unit laws)
 
 protected:
     // ---- controls (all bound to real processor parameters; `x0..y1` are capture boxes)

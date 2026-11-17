@@ -31,6 +31,21 @@ void RootWidget::dispatchMouseDown(MouseEvent e)
         commitTrackRename(ctx_);
         markDirty();
     }
+    if (ctx_.valueEntry.active())
+    {
+        // UI-93: a click in a dial's value field moves the caret; anywhere else commits the value, then acts as usual.
+        if (const auto field = ctx_.valueEntry.boundsInRoot(); field.contains(e.x, e.y))
+        {
+            auto& edit = ctx_.valueEntry.edit;
+            edit.click(edit.offsetAt(e.x, field, ctx_.valueEntry.fontSize), e.clicks, e.shift);
+            captured_ = nullptr;
+            markDirty();
+            return;
+        }
+        commitValueEntry(ctx_);
+        markDirty();
+    }
+    else if (ctx_.valueEntry.owner != nullptr) ctx_.valueEntry = {};
     ctx_.browserDrag.reset();
     ctx_.trackDrag.reset(); trackDrop_.reset(); movingTracks_ = false;
     downX_ = e.x; downY_ = e.y;
@@ -320,9 +335,9 @@ void RootWidget::setKeyboardFocus(Widget* widget)
 
 bool RootWidget::dispatchUserKey(const KeyEvent& k)
 {
-    bool typing = ctx_.trackRename.active();
+    bool typing = ctx_.trackRename.active() || ctx_.valueEntry.active();
     if (isAlive(keyboardFocus_))
-        for (auto* w = keyboardFocus_; w != nullptr; w = w->parent()) typing |= w->wantsTextInput();
+        for (auto* w = keyboardFocus_; w != nullptr; w = w->parent()) typing |= w->wantsTextInput() || w->wantsKey(k);
     const bool plain = ! k.cmd && ! k.alt && ! k.ctrl;
     if (ctx_.userShortcut && ! typing && ! ctx_.preferencesOpen && ! ctx_.exportOpen && ! ctx_.collabOpen && ! ctx_.midiMapMode && ! ctx_.keyMapMode
         && ! ctx_.trackDrag && ! (ctx_.computerKeyboard && plain) && ctx_.userShortcut(k))
@@ -339,7 +354,7 @@ bool RootWidget::dispatchKey(const KeyEvent& k)
     { ctx_.trackDrag.reset(); trackDrop_.reset(); captured_ = nullptr; movingTracks_ = false; cursor_ = Cursor::Default; markDirty(); return true; }
     // COL-7: hold ` (backquote) to talk while push-to-talk is on in a session; not while a name is typed.
     if (ctx_.collab.active() && ctx_.collab.pushToTalk && ctx_.collabPushToTalkKey && ! k.cmd && ! k.alt && ! k.ctrl
-        && (k.textChar == '`' || k.keyCode == '`') && ! ctx_.trackRename.active())
+        && (k.textChar == '`' || k.keyCode == '`') && ! ctx_.trackRename.active() && ! ctx_.valueEntry.active())
     {
         if (pttKey_ == 0)
         {
@@ -349,6 +364,8 @@ bool RootWidget::dispatchKey(const KeyEvent& k)
         }
         return true;
     }
+    // UI-93: an open value field takes every key, in a modal panel too.
+    if (ctx_.valueEntry.active()) { valueEntryKey(ctx_, k); markDirty(); return true; }
     if (ctx_.preferencesOpen || ctx_.exportOpen || ctx_.collabOpen) return keyPressed(k);
     // UI-58: an open in-place name field takes every key (letters are text, never notes or shortcuts).
     if (ctx_.trackRename.active()) { trackRenameKey(ctx_, k); markDirty(); return true; }
@@ -356,7 +373,7 @@ bool RootWidget::dispatchKey(const KeyEvent& k)
     {
         bool typing = false;
         if (isAlive(keyboardFocus_))
-            for (auto* w = keyboardFocus_; w != nullptr; w = w->parent()) typing |= w->wantsTextInput();
+            for (auto* w = keyboardFocus_; w != nullptr; w = w->parent()) typing |= w->wantsTextInput() || w->wantsKey(k);
         if (! typing && handleComputerKeyboard(k))
             return true;
     }
@@ -500,6 +517,7 @@ std::vector<int> RootWidget::heldLaunchKeys() const
 
 void RootWidget::paintOverChildren(SkCanvas& canvas, const Theme& theme)
 {
+    paintValueEntry(canvas, ctx_, theme); // UI-93, over every control (drawn last below the drag / tooltip layers)
     if (movingTracks_ && trackDrop_)
     {
         const auto& r = trackDrop_->indicator;

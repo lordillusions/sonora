@@ -220,7 +220,8 @@ int takePointeeId() { return newPointeeIds != nullptr ? (*newPointeeIds)++ : 0; 
 
 bool takesSidechainXml(const std::string& type)
 {
-    return type == "PluginDevice" || type == "AuPluginDevice" || type == "SonoraHush" || type == "SonoraPhaseAlign" || type == "Compressor2"
+    return type == "PluginDevice" || type == "AuPluginDevice" || type == "SonoraHush" || type == "SonoraPhaseAlign"
+           || type == "SonoraCorrelation" || type == "Compressor2"
            || type == "GlueCompressor" || type == "Gate";
 }
 

@@ -1235,3 +1235,20 @@ with the `ReferenceFace` kit
   after 30 s.
 - Guests' window title reads "<set> (shared session)"; Save, Save As and Collect All write a copy with the downloaded samples.
 - Check with `ui_snapshot out.png --collab share|host|guest|presence [--session]`.
+
+## Typed values and unit steps on dials (UI-93)
+
+Every dial (device faces, Wavetable/Prism, Operator, Tension, Curve LFO, Kickstract, the ProFace devices and their VST3
+windows, Hush) takes a typed value: click its value text without dragging, or select the dial and type a digit, '-', '+',
+'.' or ','. A field opens over the value with the shown text selected (`ui/ValueEntry.h`); Return or a click elsewhere
+commits, Escape cancels. A bare number is read in the unit the dial shows now ("2" on "1.20 kHz" is 2 kHz), a written unit
+wins ("1.5 s", "2k", "500 Hz", "-inf", "20L", "C", "40S"), a comma is a decimal point, and words pick one of the dial's
+texts ("Saw", "1/16"). Semitones, cents and pan round to whole numbers; values outside the range stop at the end.
+
+Drags, the wheel and the arrow keys move in the unit's steps, found from the dial's own text: st / ct / pan 1 (Shift too),
+BPM / degrees 1 (Shift 0.1), ms 0.01 below 1 ms, 0.1 below 10, 1 below 1 s, 10 from 1 s (Shift a tenth), Hz three
+significant digits, dB 0.1, % 1, whole-number readouts 1. Dials whose text is not a number (sync divisions, modes) and
+ranges of fewer than three steps stay continuous. A new dial gets all of this as long as its `format` prints the value it
+is given (not only the current one); give `Knob::Source::unit` when the text has no unit. Subclasses that print the value
+somewhere else override `Knob::valueBounds()` (and `formatValue()` when they print other text than the source's format).
+

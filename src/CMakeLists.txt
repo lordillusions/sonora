@@ -327,6 +327,7 @@ add_library(sonora_ui STATIC
     ui/GridMenu.cpp
     ui/Locators.cpp
     ui/InlineEdit.cpp
+    ui/ValueEntry.cpp
     ui/SetView.cpp
     ui/TrackMenu.cpp
     ui/GeneratorClipUi.cpp

@@ -14,6 +14,7 @@
 
 #include "devices/DeviceProcessor.h"
 #include "ui/Painter.h"
+#include "ui/ValueEntry.h"
 #include "ui/Widget.h"
 
 #include <functional>
@@ -89,6 +90,8 @@ public:
     void mouseExit() override;
     void mouseDoubleClick(const MouseEvent&) override;
     bool mouseWheel(const MouseEvent&) override;
+    bool keyPressed(const KeyEvent&) override;
+    bool wantsKey(const KeyEvent&) const override;
     std::optional<midi::ControlTarget> mappingTargetAt(float x, float y) const override;
     void tick() override;
 
@@ -100,6 +103,10 @@ public:
     std::string helpLine() const; // the help text shown now (hovered control or the face's own)
     void hoverDesign(float x, float y); // tests: moves the pointer to a design-grid point
     MouseEvent designToLocal(float x, float y) const;
+    // UI-93: the unit law of a knob's value text, where the value is printed (design grid), and the value field.
+    ValueLaw knobLaw(int param) const;
+    std::optional<Rect> knobValueRect(int param) const;
+    void openValueEntry(int param, uint32_t firstChar = 0);
 
 protected:
     enum class Kind { Knob, Toggle, Segment, Button, Pad, Area };
@@ -176,6 +183,9 @@ protected:
 private:
     MouseEvent toDesign(const MouseEvent&) const;
     int hit(float x, float y) const;
+    float valueAtNorm(const Control&, float) const;
+    Rect valueRect(const Control&) const;
+    const Control* knobFor(int param) const;
     void paintControl(SkCanvas&, const Control&, int index);
 
     Size full_, compact_;
@@ -186,6 +196,13 @@ private:
     int hover_ = -1, active_ = -1, pressedPad_ = -1;
     float lastY_ = 0, mouseX_ = -1, mouseY_ = -1;
     float dragNorm_ = 0;
+    // UI-93: a press on a knob's value that has not dragged opens the field; the knob typed digits go to.
+    float downY_ = 0;
+    bool pressInValue_ = false, moved_ = false;
+    int typingParam_ = -1;
+    ValueLaw dragLaw_;
+    int wheelParam_ = -1;
+    float wheelNorm_ = 0, wheelSet_ = 0;
     int ticks_ = 0;
     std::vector<float> lastValues_;
 };

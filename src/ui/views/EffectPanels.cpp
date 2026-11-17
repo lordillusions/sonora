@@ -26,10 +26,9 @@ std::string number(float v, const char* format)
     std::snprintf(buffer, sizeof(buffer), format, (double) v);
     return buffer;
 }
-std::string parameterText(Processor* p, int index)
+std::string parameterText(Processor* p, int index, float v)
 {
     const auto& info = p->parameters()[(size_t) index];
-    const float v = p->getParameter(index);
     if (! info.choices.empty()) return info.choices[(size_t) std::clamp((int) std::lround(v), 0, (int) info.choices.size() - 1)];
     if (dynamic_cast<R*>(p))
     {
@@ -44,6 +43,7 @@ std::string parameterText(Processor* p, int index)
     if (info.unit == "lin") return v <= 0 ? "-inf dB" : number(20 * std::log10(v), "%.1f dB");
     return number(v, "%.2f");
 }
+std::string parameterText(Processor* p, int index) { return parameterText(p, index, p->getParameter(index)); }
 void set(Processor* p, int index, float value)
 {
     const auto& info = p->parameters()[(size_t) index];
@@ -228,9 +228,9 @@ Widget* EffectPanel::control(int param, std::string label, Rect rect, bool knob,
         s.set = [this, param](float v) { set(processor_, param, v); };
         s.minValue = info.minValue; s.maxValue = info.maxValue; s.defaultValue = info.defaultValue;
         s.logarithmic = info.unit == "Hz"; s.bipolar = info.minValue < 0;
-        s.format = [this, param](float) {
-            if (! delay_ && (param == R::RoomSize || param == R::StereoSeparation)) return number(processor_->getParameter(param), "%.2f");
-            return parameterText(processor_, param);
+        s.format = [this, param](float v) {
+            if (! delay_ && (param == R::RoomSize || param == R::StereoSeparation)) return number(v, "%.2f");
+            return parameterText(processor_, param, v);
         };
         w = add<Knob>(std::move(label), std::move(s));
     }

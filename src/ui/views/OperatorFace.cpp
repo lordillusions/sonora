@@ -222,6 +222,11 @@ public:
     std::function<bool()> dim;
     bool bipolar = false;
     static constexpr float kRingX = 24, kRingY = 50; // ring centre, capture px from the widget's top left
+    Rect valueBounds() const override // UI-93: the value at the ring's lower right
+    {
+        const float u = unit_(), left = (kRingX + (bipolar ? 10 : 8)) * u;
+        return {left, (kRingY + 4) * u, std::max(10.0f, width() - left), 24 * u};
+    }
 
     void paint(SkCanvas& c, const Theme& t) override
     {
@@ -261,7 +266,7 @@ public:
             fill.setColor(std::abs(norm - 0.5f) > 0.002f && ! off ? lit : off ? t.color("ControlDisabled") : ink);
             c.drawPath(tri.detach(), fill);
         }
-        const auto value = source_.format ? source_.format(0) : std::string();
+        const auto value = source_.format ? source_.format(source_.get ? source_.get() : 0.0f) : std::string();
         const float left = cx + (bipolar ? 10 : 8) * u;
         paint::text(c, value, {left, cy + 4 * u, std::max(width() - left, gfx::measureText(value, size) + 2), 24 * u}, t.color("ControlForeground"), size);
     }
@@ -848,7 +853,11 @@ private:
             set(p, info.choices.empty() && ! info.isToggle && ! integral(p) ? v : std::round(v));
         };
         s.defaultValue = std::clamp(law.toNorm(synth_->parameters()[(size_t) p].defaultValue), 0.0f, 1.0f);
-        s.format = [this, p](float) { return operatorValueText(*synth_, p, value(p)); };
+        s.format = [this, p, law](float n) { // UI-93: the text at any position
+            const auto& info = synth_->parameters()[(size_t) p];
+            const float v = std::clamp(law.fromNorm(std::clamp(n, 0.0f, 1.0f)), info.minValue, info.maxValue);
+            return operatorValueText(*synth_, p, info.choices.empty() && ! info.isToggle && ! integral(p) ? v : std::round(v));
+        };
         auto* widget = add<Dial>(std::move(name), std::move(s), unitFn(), sizeFn());
         widget->style = Knob::Style::Device;
         widget->dim = std::move(dim);

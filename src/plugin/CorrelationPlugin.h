@@ -2,6 +2,7 @@
 // Sonora Correlation as a VST3 audio effect (PLG-24): the same Correlation device and face the app uses. Put it anywhere
 // in a chain (a bus, the master) to see whether the stereo image survives a mono sum. Audio passes through untouched
 // unless Listen is on a check mode. Every control is a host parameter (Integration on a log scale). No latency.
+// PLG-24c: a sidechain input carries the kick for Kick x Bass (on the bass track); the host's tempo drives Sync.
 
 #include "devices/native/Correlation.h"
 #include "plugin/PluginCommon.h"
@@ -59,6 +60,7 @@ private:
     devices::Correlation device_;
     std::vector<juce::AudioProcessorParameter*> hostParameters_;
     std::unique_ptr<std::atomic<float>[]> reported_;
-    juce::AudioBuffer<float> stereo_;
+    juce::AudioBuffer<float> stereo_, sidechain_;
+    double sampleRate_ = 44100.0;
 };
 } // namespace sonora::plugin

@@ -6,6 +6,7 @@
 #include "gfx/Fonts.h"
 #include "ui/DeviceMenu.h"
 #include "ui/Painter.h"
+#include "ui/ValueEntry.h"
 
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkRRect.h"
@@ -262,11 +263,23 @@ void HushFace::dragValue(int param, float dy, bool fine)
     const auto& info = session_.hush().parameters()[(size_t) param];
     const float amount = -dy / (fine ? 1500.0f : 180.0f);
     const bool logarithmic = HushSession::isLogarithmic(info);
-    float v = value(param);
+    const float now = value(param);
+    float v = rawParam_ == param && std::abs(now - rawSet_) <= 1e-6f * std::max(1.0f, std::abs(now)) ? raw_ : now;
     if (logarithmic) v = info.minValue * std::pow(info.maxValue / info.minValue,
                                                    std::clamp(std::log(v / info.minValue) / std::log(info.maxValue / info.minValue) + amount, 0.0f, 1.0f));
     else v = std::clamp(v + amount * (info.maxValue - info.minValue), info.minValue, info.maxValue);
-    setValue(param, v);
+    // UI-93: the steps of the unit the value shows.
+    ui::DialRange range;
+    range.format = [&info](float x) { return HushSession::formatValue(info, x).toStdString(); };
+    range.minValue = info.minValue;
+    range.maxValue = info.maxValue;
+    range.logarithmic = logarithmic;
+    range.hint = ui::valueUnitFromName(info.unit);
+    const float stepped = info.choices.empty() && ! info.isToggle ? ui::ValueLaw::detect(range).quantize(v, fine) : v;
+    setValue(param, stepped);
+    rawParam_ = param;
+    raw_ = v;
+    rawSet_ = value(param);
 }
 
 void HushFace::resetValue(int param)
@@ -633,6 +646,9 @@ void HushFace::mouseDown(const ui::MouseEvent& raw)
             return;
         }
         beginEdit(c->param); // knob, box, tilt: vertical drag
+        boxPress_ = c->kind == Kind::Box ? c->param : -1; // UI-93: a click without a drag types into the box
+        boxMoved_ = false;
+        downY_ = e.y;
         return;
     }
     if (contains(graph_, e.x, e.y))
@@ -682,6 +698,8 @@ void HushFace::mouseDrag(const ui::MouseEvent& raw)
         return;
     }
     if (dragParam_ < 0) return;
+    if (boxPress_ >= 0 && ! boxMoved_ && std::abs(e.y - downY_) < 3) return;
+    boxMoved_ = true;
     for (const auto& control : controls_)
         if (control.param == dragParam_ && control.kind == Kind::FocusPair)
         {
@@ -702,6 +720,13 @@ void HushFace::mouseUp(const ui::MouseEvent&)
         dragBand_ = -1;
     }
     endEdit();
+    if (boxPress_ >= 0 && ! boxMoved_)
+    {
+        editing_ = boxPress_; // UI-93: typed like a double-click
+        editText_.clear();
+        repaint();
+    }
+    boxPress_ = -1;
 }
 
 void HushFace::mouseDoubleClick(const ui::MouseEvent& raw)

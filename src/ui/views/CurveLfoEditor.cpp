@@ -85,6 +85,7 @@ class RouteAmount final : public Knob
 public:
     RouteAmount(Source source, SkColor colour)
         : Knob({}, source), get_(source.get), format_(source.format), min_(source.minValue), max_(source.maxValue), colour_(colour) {}
+    Rect valueBounds() const override { return localBounds(); } // UI-93: the value is printed across the bar
     void paint(SkCanvas& c, const Theme& t) override
     {
         const auto r = localBounds();
@@ -114,7 +115,7 @@ private:
 class RouteGraph final : public Knob
 {
 public:
-    RouteGraph(Source source, L* lfo, int destination) : Knob({}, source), lfo_(lfo), destination_(destination) {}
+    RouteGraph(Source source, L* lfo, int destination) : Knob({}, source), lfo_(lfo), destination_(destination) { typeable = false; }
     void paint(SkCanvas& c, const Theme& t) override
     {
         const auto r = localBounds();

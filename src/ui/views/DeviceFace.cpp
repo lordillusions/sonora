@@ -48,10 +48,9 @@ std::string significant(float v)
     const float a = std::abs(v);
     return number(v, a >= 99.95f ? "%.0f" : a >= 9.995f ? "%.1f" : "%.2f");
 }
-std::string formatted(P* p, int index)
+std::string formatted(P* p, int index, float v)
 {
     const auto& info = p->parameters()[(size_t) index];
-    const float v = p->getParameter(index);
     if (! info.choices.empty()) return info.choices[(size_t) std::clamp((int) std::lround(v), 0, (int) info.choices.size() - 1)];
     if (dynamic_cast<S*>(p) && index == S::ConstPowerFade) return v > 0.5f ? "Power" : "Linear";
     if (dynamic_cast<S*>(p) && ! info.isToggle)
@@ -90,6 +89,7 @@ std::string formatted(P* p, int index)
     if (info.unit == "st" || info.unit == "ct") return number(v, "%.0f") + " " + info.unit;
     return number(v, "%.2f");
 }
+std::string formatted(P* p, int index) { return formatted(p, index, p->getParameter(index)); }
 bool logarithmic(const devices::ParameterInfo& info)
 {
     return info.minValue > 0 && (info.unit == "Hz" || info.unit == "ms" || info.unit == "lin");
@@ -1003,7 +1003,7 @@ Widget* DeviceFace::control(int index, std::string label, Rect rect, bool knob, 
         source.set = [p = processor_, index, discrete = ! info.choices.empty()](float v) { p->setParameter(index, discrete ? std::round(v) : v); };
         source.minValue = info.minValue; source.maxValue = info.maxValue; source.defaultValue = info.defaultValue;
         source.logarithmic = logarithmic(info); source.bipolar = info.minValue < 0 && info.maxValue > 0;
-        source.format = [p = processor_, index](float) { return formatted(p, index); };
+        source.format = [p = processor_, index](float v) { return formatted(p, index, v); };
         Knob* dial;
         if (! info.choices.empty()) dial = add<ChoiceKnob>(std::move(label), std::move(source), processor_, index);
         else dial = add<Knob>(std::move(label), std::move(source));
@@ -1495,13 +1495,13 @@ Widget* DeviceFace::utilityKnob(int which, Rect rect)
             if (p->getParameter(U::MidSideOn) > 0.5f) p->setParameter(U::MidSideBalance, pos * 2);
             else p->setParameter(U::StereoWidth, pos <= 0.5f ? pos * 2 : 1 + (pos - 0.5f) * 6);
         };
-        source.format = [p](float) {
+        source.format = [p](float pos) { // UI-93: the text at any position
             if (p->getParameter(U::MidSideOn) > 0.5f)
             {
-                const float v = p->getParameter(U::MidSideBalance) - 1;
+                const float v = pos * 2 - 1;
                 return std::abs(v) < 0.005f ? std::string("C") : number(std::abs(v) * 100, "%.0f") + (v < 0 ? "M" : "S");
             }
-            return number(p->getParameter(U::StereoWidth) * 100, "%.0f %%");
+            return number((pos <= 0.5f ? pos * 2 : 1 + (pos - 0.5f) * 6) * 100, "%.0f %%");
         };
     }
     else if (which == 1)
@@ -1519,8 +1519,9 @@ Widget* DeviceFace::utilityKnob(int which, Rect rect)
             pos = std::clamp(pos, 0.0f, 1.0f);
             p->setParameter(U::Gain, pos >= 0.025f ? dsp::dbToGain((pos - 0.5f) * 70) : dsp::dbToGain(-33.25f) * pos / 0.025f);
         };
-        source.format = [p](float) {
-            const float g = p->getParameter(U::Gain);
+        source.format = [](float pos) {
+            pos = std::clamp(pos, 0.0f, 1.0f);
+            const float g = pos >= 0.025f ? dsp::dbToGain((pos - 0.5f) * 70) : dsp::dbToGain(-33.25f) * pos / 0.025f;
             return g <= 0.0001f ? std::string("-inf dB") : number(dsp::gainToDb(g), "%.2f dB");
         };
     }
@@ -1529,8 +1530,8 @@ Widget* DeviceFace::utilityKnob(int which, Rect rect)
         label = "Balance"; parameter = U::Balance;
         source.get = [p] { return (p->getParameter(U::Balance) + 1) * 0.5f; };
         source.set = [p](float pos) { p->setParameter(U::Balance, pos * 2 - 1); };
-        source.format = [p](float) {
-            const float v = p->getParameter(U::Balance);
+        source.format = [](float pos) {
+            const float v = pos * 2 - 1;
             return std::abs(v) < 0.01f ? std::string("C") : number(std::abs(v) * 50, "%.0f") + (v < 0 ? "L" : "R");
         };
     }

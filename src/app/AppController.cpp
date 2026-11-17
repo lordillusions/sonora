@@ -891,6 +891,7 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     }
     ++documentGeneration_;
     ui_.trackRename = {}; // track ids belong to the previous document
+    ui_.valueEntry = {};
     controlEndpoint_.disable();
     controlDocumentId_ = juce::Uuid().toString().toStdString();
     closePluginWindows();

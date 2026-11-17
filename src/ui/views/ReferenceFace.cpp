@@ -229,10 +229,11 @@ std::string ReferenceFace::significant(float v)
     return printed(v, a >= 99.95f ? "%.0f" : a >= 9.995f ? "%.1f" : "%.2f");
 }
 
-std::string ReferenceFace::formatted(int parameter) const
+std::string ReferenceFace::formatted(int parameter) const { return formatted(parameter, processor_->getParameter(parameter)); }
+
+std::string ReferenceFace::formatted(int parameter, float v) const
 {
     const auto& info = processor_->parameters()[(size_t) parameter];
-    const float v = processor_->getParameter(parameter);
     if (! info.choices.empty()) return info.choices[(size_t) std::clamp((int) std::lround(v), 0, (int) info.choices.size() - 1)];
     if (info.unit == "Hz") return v >= 1000 ? significant(v / 1000) + " kHz" : significant(v) + " Hz";
     if (info.unit == "ms") return v >= 1000 ? significant(v / 1000) + " s" : significant(v) + " ms";
@@ -329,7 +330,13 @@ Knob* ReferenceFace::knob(std::function<int()> parameterOf, std::string label, f
         p->setParameter(parameter, info.choices.empty() ? v : std::round(v));
     };
     source.defaultValue = std::clamp(law.toNorm(p->parameters()[(size_t) parameterOf()].defaultValue), 0.0f, 1.0f);
-    source.format = [this, parameterOf, format](float) { return format ? format(processor_->getParameter(parameterOf())) : formatted(parameterOf()); };
+    // UI-93: the text of the value at a knob position (not only the current one), so typed values and unit steps work.
+    source.format = [this, parameterOf, format, law](float n) {
+        const int parameter = parameterOf();
+        const auto& info = processor_->parameters()[(size_t) parameter];
+        const float v = std::clamp(law.fromNorm(std::clamp(n, 0.0f, 1.0f)), info.minValue, info.maxValue);
+        return format ? format(v) : formatted(parameter, v);
+    };
     auto* widget = add<Knob>(std::move(label), std::move(source));
     widget->style = Knob::Style::Device;
     place(widget, x0, y0, x1, y1);

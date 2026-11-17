@@ -294,6 +294,13 @@ public:
     {
         return valueText ? valueText(value) : source_.format ? source_.format(value) : number("%.2f", value);
     }
+    std::string formatValue(float value) const override { return text(value); }
+    Rect valueBounds() const override // UI-93: the row under the knob (label, value while hovered), or the box
+    {
+        if (compact) return localBounds();
+        if (stepper) return stepperBox();
+        return geometry().label;
+    }
     void paint(SkCanvas& canvas, const Theme&) override
     {
         auto r = localBounds();
@@ -432,6 +439,7 @@ public:
         const bool ring = ringSlot_ >= 0;
         ringSlot_ = -1; dragging_ = false; repaint();
         if (ring && onRingHover) { hoverSlot_ = ringAt(event.x, event.y); onRingHover(hoverSlot_); }
+        if (! ring) Knob::mouseUp(event); // a click on the value row opens the value field (UI-93)
     }
     bool mouseWheel(const MouseEvent& event) override
     {

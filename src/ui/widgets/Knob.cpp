@@ -267,15 +267,107 @@ void Knob::paint(SkCanvas& c, const Theme& t)
     }
 }
 
+std::string Knob::formatValue(float v) const
+{
+    if (src_.format) return src_.format(v);
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.2f", v);
+    return buf;
+}
+
+ValueLaw Knob::valueLaw() const
+{
+    DialRange range;
+    range.format = [this](float v) { return formatValue(v); };
+    range.minValue = src_.minValue;
+    range.maxValue = src_.maxValue;
+    range.logarithmic = src_.logarithmic;
+    range.hint = src_.unit;
+    return ValueLaw::detect(range);
+}
+
+Rect Knob::valueBounds() const
+{
+    const auto r = localBounds();
+    if (! showValue && style != Style::Poti) return {};
+    switch (style)
+    {
+        case Style::Poti: return r; // no value text: the field opens over the ring
+        case Style::Compact:
+        {
+            const float d = std::min(13.0f, r.h - 14);
+            return {d + 3, r.h - 11, std::max(0.0f, r.w - d - 3), 11};
+        }
+        case Style::Ring:
+        {
+            const float k = r.h / 51.0f;
+            return {0, 40.5f * k, r.w, 11 * k};
+        }
+        case Style::Device:
+        {
+            const bool triangle = marker >= 0 && markerTriangle;
+            const float q = r.h / (triangle ? 71.5f : 63.5f), shift = triangle ? 8.0f * q : 0.0f;
+            return {0, 49.5f * q + shift, r.w, 14 * q};
+        }
+        case Style::Arc: break;
+    }
+    return {0, r.h - 12, r.w, 12};
+}
+
+bool Knob::canType() const
+{
+    return typeable && src_.set && ! (mapped && mapped()) && (! isEnabled || isEnabled());
+}
+
+void Knob::openValueEntry(uint32_t firstChar)
+{
+    if (! canType()) return;
+    auto field = valueBounds();
+    if (field.w <= 0 || field.h <= 0) field = localBounds();
+    const auto shown = formatValue(current());
+    float size = fontSize > 0 ? fontSize : 0.0f;
+    if (style == Style::Device) size = std::max(size, field.h * 0.62f);
+    beginValueEntry(*this, field, shown, [this](const std::string& text) { applyTypedValue(text); }, firstChar, size);
+}
+
+void Knob::applyTypedValue(const std::string& text)
+{
+    if (! canType()) return;
+    if (const auto v = valueLaw().fromText(text, current()))
+        src_.set(*v);
+    repaint();
+}
+
+bool Knob::wantsKey(const KeyEvent& key) const
+{
+    return canType() && startsValueEntry(key);
+}
+
 bool Knob::keyPressed(const KeyEvent& key)
 {
     if (key.cmd || key.alt || key.ctrl || ! src_.set || (mapped && mapped())) return false;
+    if (startsValueEntry(key) && canType())
+    {
+        openValueEntry(key.textChar);
+        return true;
+    }
+    if (key.keyCode == juce::KeyPress::returnKey && canType())
+    {
+        openValueEntry();
+        return true;
+    }
     if (key.keyCode == juce::KeyPress::deleteKey || key.keyCode == juce::KeyPress::backspaceKey)
         src_.set(src_.defaultValue);
     else if (key.keyCode == juce::KeyPress::upKey || key.keyCode == juce::KeyPress::downKey)
     {
-        const float step = (key.shift ? 0.001f : 0.01f) * (key.keyCode == juce::KeyPress::upKey ? 1.0f : -1.0f);
-        src_.set(fromNorm(std::clamp(toNorm(src_.get ? src_.get() : src_.defaultValue) + step, 0.0f, 1.0f)));
+        const int direction = key.keyCode == juce::KeyPress::upKey ? 1 : -1;
+        const float stepped = valueLaw().nudge(current(), direction, key.shift);
+        if (std::isfinite(stepped)) src_.set(stepped);
+        else
+        {
+            const float step = (key.shift ? 0.001f : 0.01f) * (float) direction;
+            src_.set(fromNorm(std::clamp(toNorm(current()) + step, 0.0f, 1.0f)));
+        }
     }
     else return false;
     repaint(); return true;
@@ -292,25 +384,35 @@ void Knob::mouseDown(const MouseEvent& e)
     labelPressed_ = style == Style::Ring && onLabelClick && e.y < height() * 11.4f / 51.0f;
     if (labelPressed_)
         return;
+    const auto field = style == Style::Poti ? Rect{} : valueBounds();
+    pressInValue_ = canType() && field.w > 0 && field.contains(e.x, e.y);
+    moved_ = false;
+    wheeling_ = false;
+    dragLaw_ = valueLaw();
     dragStartY_ = e.y;
-    dragStartNorm_ = std::clamp(toNorm(src_.get ? src_.get() : src_.defaultValue), 0.0f, 1.0f);
+    dragStartNorm_ = std::clamp(toNorm(current()), 0.0f, 1.0f);
 }
 
 void Knob::mouseUp(const MouseEvent& e)
 {
     if (labelPressed_ && ! e.right && localBounds().contains(e.x, e.y) && onLabelClick)
         onLabelClick();
-    labelPressed_ = false;
+    const bool open = pressInValue_ && ! moved_ && ! e.right && localBounds().contains(e.x, e.y);
+    labelPressed_ = pressInValue_ = false;
+    if (open) openValueEntry();
     repaint();
 }
 
 void Knob::mouseDrag(const MouseEvent& e)
 {
     if (e.right || labelPressed_ || (mapped && mapped())) return;
+    // A press on the value text only turns the knob once it has really moved (a click there opens the field).
+    if (! moved_ && pressInValue_ && std::abs(e.y - dragStartY_) < 3) return;
+    moved_ = true;
     const float sensitivity = e.shift ? 1000.0f : 200.0f; // pixels for full range
     const float n = dragStartNorm_ + (dragStartY_ - e.y) / sensitivity;
     if (src_.set)
-        src_.set(fromNorm(n));
+        src_.set(dragLaw_.quantize(fromNorm(n), e.shift));
     repaint();
 }
 
@@ -328,7 +430,13 @@ bool Knob::mouseWheel(const MouseEvent& e)
         return false;
     if (std::abs(e.wheelDeltaX) > std::abs(e.wheelDeltaY))
         return false; // a sideways swipe over a knob scrolls the device chain, it does not turn the knob
-    src_.set(fromNorm(toNorm(src_.get()) + e.wheelDeltaY * 0.05f));
+    // The wheel keeps its own unrounded position so small trackpad deltas add up to a step instead of rounding away.
+    const float now = src_.get();
+    if (! wheeling_ || std::abs(now - wheelSet_) > 1e-6f * std::max(1.0f, std::abs(now))) wheelNorm_ = toNorm(now);
+    wheelNorm_ = std::clamp(wheelNorm_ + e.wheelDeltaY * 0.05f, 0.0f, 1.0f);
+    src_.set(valueLaw().quantize(fromNorm(wheelNorm_), e.shift));
+    wheelSet_ = src_.get();
+    wheeling_ = true;
     repaint();
     return true;
 }

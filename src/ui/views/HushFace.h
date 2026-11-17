@@ -136,6 +136,13 @@ private:
     bool dragListen_ = false;
     int editing_ = -1;
     std::string editText_;
+    // UI-93: a press on a value box that has not dragged opens it for typing; drags keep an unrounded value so the
+    // unit's steps (ms, Hz, dB, %) do not swallow small moves.
+    int boxPress_ = -1;
+    bool boxMoved_ = false;
+    float downY_ = 0;
+    int rawParam_ = -1;
+    float raw_ = 0, rawSet_ = 0;
     unsigned lastRevision_ = 0;
     int ticks_ = 0;
     float mouseX_ = -1, mouseY_ = -1; // design grid, for tooltips and the frequency readout
