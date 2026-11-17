@@ -10,6 +10,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace sonora::devices { class DeviceProcessor; }
 
@@ -22,6 +23,9 @@ ProFace* addProFace(Widget& parent, devices::DeviceProcessor* processor);
 void wireProFace(ProFace&, std::function<UiContext*()> context, int trackIndex, int deviceIndex);
 // Sweep: puts a sample path into the device's native content (saved with the set), one undoable edit.
 void loadSweepSample(UiContext&, int trackIndex, int deviceIndex, const std::string& path);
+class SeraphFace;
+// PLG-27b: sung notes into a Seraph as Real voices, one undoable edit ("Load Voice"; `clear`: "Clear Voices").
+void loadSeraphVoices(UiContext&, SeraphFace&, int trackIndex, int deviceIndex, const std::vector<std::string>& paths, bool clear);
 
 class ProFaceWindowView final : public RootWidget
 {

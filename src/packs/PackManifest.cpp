@@ -52,6 +52,14 @@ bool readInfo(const juce::var& object, PackInfo& info, std::string& error)
         || ! juce::String(info.version).containsOnly("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-"))
     { error = info.id + ": bad version"; return false; }
     if (! licenceAllowed(info.licence)) { error = info.id + ": licence \"" + info.licence + "\" is not allowed"; return false; }
+    const auto attribution = object.getProperty("attribution", {});
+    info.attribution = {text(attribution, "title"), text(attribution, "authors"), text(attribution, "sourceUrl"), text(attribution, "licenceUrl"),
+                        text(attribution, "changes")};
+    if (attributionRequired(info.licence) && ! info.attribution.complete())
+    {
+        error = info.id + ": " + info.licence + " needs an attribution block (title, authors, sourceUrl, licenceUrl, changes)";
+        return false;
+    }
     if (info.description.size() > 2000) { error = info.id + ": description too long"; return false; }
     std::string listError;
     if (! readLabels(object, "styles", info.styles, listError) || ! readLabels(object, "types", info.types, listError)
@@ -79,6 +87,16 @@ juce::DynamicObject::Ptr infoObject(const PackInfo& info)
     object->setProperty("styles", labels(info.styles));
     object->setProperty("types", labels(info.types));
     if (! info.tags.empty()) object->setProperty("tags", labels(info.tags));
+    if (! info.attribution.empty())
+    {
+        juce::DynamicObject::Ptr credit = new juce::DynamicObject();
+        credit->setProperty("title", juce::String::fromUTF8(info.attribution.title.c_str()));
+        credit->setProperty("authors", juce::String::fromUTF8(info.attribution.authors.c_str()));
+        credit->setProperty("sourceUrl", juce::String::fromUTF8(info.attribution.sourceUrl.c_str()));
+        credit->setProperty("licenceUrl", juce::String::fromUTF8(info.attribution.licenceUrl.c_str()));
+        credit->setProperty("changes", juce::String::fromUTF8(info.attribution.changes.c_str()));
+        object->setProperty("attribution", credit.get());
+    }
     return object;
 }
 
@@ -96,9 +114,18 @@ std::optional<juce::var> parseRoot(const std::string& json, std::string& error)
 
 const std::vector<std::string>& allowedLicences()
 {
-    // CC0 only: no attribution chain to keep and no share-alike terms on what users make with the samples.
-    static const std::vector<std::string> licences{"CC0-1.0"};
+    // CC0: no attribution chain and no share-alike terms on what users make with the samples. CC-BY-4.0 (PLG-27h): only with
+    // a complete attribution block in pack.json and ATTRIBUTION.txt in the archive, and the app tells the user before the
+    // download that music made with the files needs the credit line. Never share-alike or non-commercial.
+    static const std::vector<std::string> licences{"CC0-1.0", "CC-BY-4.0"};
     return licences;
+}
+
+bool attributionRequired(std::string_view spdx) { return spdx == "CC-BY-4.0"; }
+
+std::string Attribution::creditLine() const
+{
+    return "\"" + title + "\" by " + authors + " (" + sourceUrl + "), licensed under CC BY 4.0 (" + licenceUrl + "). " + changes;
 }
 
 bool licenceAllowed(std::string_view spdx)

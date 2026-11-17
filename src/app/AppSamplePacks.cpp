@@ -113,6 +113,7 @@ void AppController::publishSamplePacks()
         pack.version = row.info.version;
         pack.description = row.info.description;
         pack.licence = row.info.licence;
+        if (packs::attributionRequired(row.info.licence)) pack.credit = row.info.attribution.creditLine();
         pack.styles = row.info.styles;
         pack.types = row.info.types;
         pack.bytes = row.total;

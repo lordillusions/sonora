@@ -19,10 +19,10 @@ for starting new tracks, especially electronic music, and it can also open and s
 > breaks: the idea is to build it together with the people who use it.
 
 - Website: <https://sonoradaw.com>
-- Latest version: **0.1.46** — [macOS](https://github.com/lordillusions/sonora/releases/download/v0.1.46/Sonora-0.1.46.dmg) ·
-  [Windows](https://github.com/lordillusions/sonora/releases/download/v0.1.46/Sonora-0.1.46-windows-x64-setup.exe) ·
-  [Linux .deb](https://github.com/lordillusions/sonora/releases/download/v0.1.46/sonora_0.1.46_amd64.deb) ·
-  [AppImage](https://github.com/lordillusions/sonora/releases/download/v0.1.46/Sonora-0.1.46-x86_64.AppImage)
+- Latest version: **0.1.47** — [macOS](https://github.com/lordillusions/sonora/releases/download/v0.1.47/Sonora-0.1.47.dmg) ·
+  [Windows](https://github.com/lordillusions/sonora/releases/download/v0.1.47/Sonora-0.1.47-windows-x64-setup.exe) ·
+  [Linux .deb](https://github.com/lordillusions/sonora/releases/download/v0.1.47/sonora_0.1.47_amd64.deb) ·
+  [AppImage](https://github.com/lordillusions/sonora/releases/download/v0.1.47/Sonora-0.1.47-x86_64.AppImage)
 - Older downloads: [Releases](https://github.com/lordillusions/sonora/releases)
 - Everything it does today: [docs/ROADMAP.md](docs/ROADMAP.md)
 - User guide: [docs/UI_GUIDE.md](docs/UI_GUIDE.md)
@@ -72,6 +72,12 @@ Sonora is licensed under the GNU Affero General Public License v3.0 or later (se
 with JUCE under its AGPL option. VST2 hosting uses FST (git.iem.at/zmoelnig/FST, GPL-3.0-or-later), interface headers
 written without Steinberg's SDK. VST is a trademark of Steinberg Media Technologies GmbH. Updates use Sparkle (macOS)
 and WinSparkle (Windows), both MIT-licensed, and Monocypher (CC0 / BSD-2-Clause) to check signatures on Linux.
+
+The optional Seraph Voices sample pack (downloaded only when you ask, from the Browser's Packs) holds a selection of
+recordings from "VocalSet: A Singing Voice Dataset" by Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo
+(https://doi.org/10.5281/zenodo.1193957), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/),
+selected, trimmed and levelled. Music made with these voices needs the same credit where credits go; Seraph shows the
+line, ready to copy, whenever a pack voice sings.
 
 Ableton and Live are trademarks of Ableton AG. Sonora is an independent project, not affiliated with or endorsed
 by Ableton. Sonora contains no Ableton code or content; it reads and writes

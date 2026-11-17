@@ -37,7 +37,7 @@ namespace
 {
 const juce::StringArray kAudioExtensions{".wav", ".aif", ".aiff", ".flac", ".ogg", ".mp3"};
 // Files a source folder may hold besides audio; pack-source.json is read, not shipped.
-const juce::StringArray kShippedText{"LICENSE.txt", "README.txt", "SOURCES.txt"};
+const juce::StringArray kShippedText{"LICENSE.txt", "README.txt", "SOURCES.txt", "ATTRIBUTION.txt"};
 
 int fail(const juce::String& message)
 {
@@ -137,6 +137,12 @@ bool buildPack(const juce::File& folder, const juce::File& out, const juce::Stri
     if (info->source.empty()) { fail(info->info.id + ": \"source\" must say where the files came from or how they were made"); return false; }
     const auto licence = folder.getChildFile("LICENSE.txt");
     if (! licence.existsAsFile() || licence.getSize() < 100) { fail(info->info.id + ": LICENSE.txt (the full licence text) is missing"); return false; }
+    if (packs::attributionRequired(info->info.licence)) // PLG-27h: a CC BY pack carries its credit in the archive too
+    {
+        const auto credit = folder.getChildFile(packs::kAttributionFile);
+        if (! credit.existsAsFile() || credit.getSize() < 100)
+        { fail(info->info.id + ": " + info->info.licence + " needs ATTRIBUTION.txt (title, authors, source, licence, changes made)"); return false; }
+    }
 
     std::map<std::string, std::vector<std::pair<std::string, std::string>>> folderTags, fileTags;
     if (const auto* object = source.getProperty("folderTags", {}).getDynamicObject())

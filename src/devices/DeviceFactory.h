@@ -36,6 +36,10 @@ void installSonoraVst3StateEncoder();
 // `capturePlugin` (PRJ-4 autosave, audio running): hosted plug-ins whose state it declines keep the model's copy.
 using PluginCaptureFilter = std::function<bool(plugins::PluginDevice&)>;
 void captureDeviceState(model::Device& device, DeviceProcessor* processor, const PluginCaptureFilter* capturePlugin = nullptr);
+// PLG-25a: a pattern generator's saved state (model::NativeContent in its stateFormat()) into the device; a failure adds a
+// warning and keeps the defaults. createNative calls it for every MidiGenerator.
+class MidiGenerator;
+void restoreGeneratorState(MidiGenerator& generator, const model::Device& device, std::vector<std::string>* warnings);
 
 struct BuildContext
 {

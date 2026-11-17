@@ -7,10 +7,23 @@ Download button, its menu or a double-click.
 
 ## The licence rule
 
-Every file in a pack must be one that **anyone may redistribute and use commercially with no attribution or share-alike
-terms**. In practice this means **CC0 1.0**, the only licence `packs::allowedLicences()` accepts. The rule is enforced in
-three places: `pack_tool build` refuses the source folder, the app skips the catalogue entry, and the installer refuses
-the archive.
+Every file in a pack must be one that **anyone may redistribute and use commercially with no share-alike terms**. In
+practice this means **CC0 1.0**, and, since PLG-27h (owner's decision 2026-11-17), **CC BY 4.0 with its credit carried
+along**. `packs::allowedLicences()` accepts exactly these two. The rule is enforced in three places: `pack_tool build`
+refuses the source folder, the app skips the catalogue entry, and the installer refuses the archive.
+
+- **CC BY 4.0** is accepted only when `pack.json` (and so `pack-source.json` and the catalogue entry) carries a complete
+  `attribution` block and the archive holds `ATTRIBUTION.txt` (100 bytes or more) beside `LICENSE.txt`:
+  ```json
+  "licence": "CC-BY-4.0",
+  "attribution": { "title": "...", "authors": "...", "sourceUrl": "https://doi.org/...", "licenceUrl": "https://creativecommons.org/licenses/by/4.0/",
+                   "changes": "A selection of ..., trimmed and levelled." }
+  ```
+  `pack_tool build`, the catalogue reader and the installer all refuse a CC BY pack without them (`packs::attributionRequired`).
+  The Browser shows "Credit required" on the pack's row and the credit line in the footer; the first Download click shows
+  it and turns the button into **Agree**, the second downloads. The pack's menu has **Copy Credit Line**. Music made with
+  such a pack needs the credit line (`Attribution::creditLine()`), and the app says so wherever the pack's sounds are used
+  (Seraph's face). Released apps that only know CC0 skip the entry, as for any unknown licence.
 
 - Each pack ships its full licence text as `LICENSE.txt` at the top of the archive (≥ 100 bytes; `pack_tool` checks).
 - `pack.json`'s `source` says where the files came from or how they were made (a commit, a URL per file, a recording session).
@@ -48,6 +61,16 @@ under CC0.
 | `sonora-synth-multisamples` | Electronic | Instruments, Multisamples, Bass (sub bass C1–C4, pluck C2–C5) | 26 | 6.1 MB |
 
 All files are 24-bit / 44.1 kHz WAV, normalised to −1 dBFS. A full render takes about 70 s.
+
+## The Seraph Voices pack (PLG-27h)
+
+`sonora-seraph-voices`: recorded singers for Seraph's Real voices, a selection from VocalSet (CC BY 4.0, see
+docs/LEGAL_REVIEW.md 2.9). Made by `scripts/packs/make_seraph_voices.py` from a local copy of the dataset (downloaded
+outside the repository, never committed): for each of three men and three women, long tones on A, O and U at three or
+four pitches across the singer's range, each cut to its attack and about three seconds of sustain, levelled, 44.1 kHz
+FLAC, every file's VocalSet path in `source` and SOURCES.txt. The script checks each note with Seraph's own analysis
+(`seraph_demo --pack-check`) and drops the ones it would refuse. Layout: `<Singer>/<Singer> <vowel> <note>.flac`
+("Female 2/Female 2 ah A4.flac"); Seraph lists the singers as Real sources and its "Real Choir" presets load them.
 
 ## How to add or update a pack
 
@@ -93,7 +116,9 @@ All files are 24-bit / 44.1 kHz WAV, normalised to −1 dBFS. A full render take
 4. **Publish (owner's go-ahead only):**
    - Upload the zips as assets of the `packs` release on `lordillusions/sonora`, created with `make_latest=false` so the
      app's `releases/latest/download/...` links keep pointing at the app.
-   - Copy `packs.json` and `packs.json.sig` into the website repo next to the appcasts (`https://sonoradaw.com/packs.json`).
+   - Copy `packs.json` and `packs.json.sig` into `site/` (commit them: the website sync deletes what `site/` does not
+     have), then into the website repo next to the appcasts (`https://sonoradaw.com/packs.json`). The catalogue lists
+     every published pack: merge a new pack's entry into the published file and sign the whole file again.
    - Always publish the zips first, then the catalogue.
    - An old zip may stay until no catalogue points to it.
 
@@ -111,9 +136,10 @@ The real key was made on 2026-11-05. The private key is `~/.sonora/pack-signing.
 file 0600, backed up offline by the owner). Its public key `oS+ffbaQwtk/fsetxAHVsfUnGWtm14rq/zdXPJu46lI=` is the default of CMake's
 `SONORA_PACKS_PUBLIC_KEY` (src/CMakeLists.txt). A build folder configured before that keeps an empty cached value:
 `cmake -U SONORA_PACKS_PUBLIC_KEY <build>`. A new key means changing that default in an app release. The feed is `SONORA_PACKS_FEED_URL`:
-empty by default until the first catalogue is hosted (LIB-1b; 0.1.10 shipped with downloads off), then
-`https://sonoradaw.com/packs.json`. While the feed or the key is empty, the Packs list says the packs come in a later
-version (local tests set `SONORA_PACKS_FEED`). Keep the private key out of the repository and back it up: losing it means shipping a new public key in an app
+`https://sonoradaw.com/packs.json` since 0.1.47, when the first catalogue went up with the Seraph Voices pack (LIB-1b,
+PLG-27h); 0.1.10 to 0.1.46 shipped with an empty feed (downloads off). The catalogue is `site/packs.json` and
+`site/packs.json.sig` in this repository, so a website sync carries it. While the feed or the key is empty, the Packs
+list says the packs come in a later version (local tests set `SONORA_PACKS_FEED`). Keep the private key out of the repository and back it up: losing it means shipping a new public key in an app
 release.
 
 ## How it works

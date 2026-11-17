@@ -1,6 +1,7 @@
 #include "ui/views/ProFace.h"
 
 #include "gfx/Fonts.h"
+#include "ui/views/ProFaceParts.h"
 
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkRRect.h"
@@ -274,6 +275,18 @@ ProFace::Control& ProFace::addArea(const Rect& r, std::string tip)
     return controls_.back();
 }
 
+ProFace::Control& ProFace::addPart(FacePart& part, const Rect& r, std::string tip)
+{
+    part.bounds = r;
+    auto& c = addArea(r, std::move(tip));
+    c.part = &part;
+    c.label = part.name;
+    c.down = [this, &part](const MouseEvent& e) { part.mouseDown(e); repaint(); };
+    c.drag = [this, &part](const MouseEvent& e) { part.mouseDrag(e); repaint(); };
+    c.up = [this, &part](const MouseEvent& e) { part.mouseUp(e); repaint(); };
+    return c;
+}
+
 float ProFace::value(int param) const { return device_.getParameter(param); }
 
 void ProFace::setValue(int param, float v)
@@ -336,6 +349,8 @@ std::string ProFace::valueText(int param, float v) const
 
 int ProFace::hit(float x, float y) const
 {
+    for (int i = (int) controls_.size() - 1; i >= 0; --i) // an open part overlay (a menu) takes every click
+        if (controls_[(size_t) i].part != nullptr && controls_[(size_t) i].part->overlayOpen()) return i;
     for (int i = (int) controls_.size() - 1; i >= 0; --i)
     {
         const auto& r = controls_[(size_t) i].r;
@@ -536,6 +551,8 @@ void ProFace::paint(SkCanvas& c, const Theme&)
     paintBack(c, mode_);
     for (size_t i = 0; i < controls_.size(); ++i) paintControl(c, controls_[i], (int) i);
     paintFront(c, mode_);
+    for (const auto& control : controls_)
+        if (control.part != nullptr && control.part->overlayOpen()) control.part->paintOverlay(c);
     c.restore();
 }
 
@@ -548,7 +565,9 @@ void ProFace::paintControl(SkCanvas& c, const Control& control, int index)
         case Kind::Button:
         case Kind::Pad: paintButton(c, control); break;
         case Kind::Toggle: paintToggle(c, control); break;
-        case Kind::Area: break;
+        case Kind::Area:
+            if (control.part != nullptr) control.part->paint(c);
+            break;
     }
     (void) index;
 }

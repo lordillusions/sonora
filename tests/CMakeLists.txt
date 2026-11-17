@@ -57,7 +57,13 @@ set(SONORA_TEST_SOURCES
     test_phase_align.cpp
     test_correlation.cpp
     test_sweep.cpp
+    test_seraph.cpp
+    test_seraph_real.cpp
+    test_trance_gate.cpp
     test_drum_fill.cpp
+    test_harmony.cpp
+    test_midi_generator.cpp
+    test_phrase.cpp
     test_hush_builtin.cpp
     test_midi.cpp
     test_midi_release.cpp
@@ -114,6 +120,7 @@ if(SONORA_WITH_UI)
     list(APPEND SONORA_TEST_SOURCES test_hush_builtin_ui.cpp) # PLG-14g: the face in the device chain and its window
     list(APPEND SONORA_TEST_SOURCES test_sidechain_menu_ui.cpp) # PLG-14i: choosing the sidechain source
     list(APPEND SONORA_TEST_SOURCES test_clip_menu_creative_ui.cpp) # PLG-19/20: Make Riser, Generate Drum Fill
+    list(APPEND SONORA_TEST_SOURCES test_face_parts_ui.cpp test_generator_ui.cpp) # PLG-25a: generator face parts, To Clip, VST3 MIDI out
     list(APPEND SONORA_TEST_SOURCES test_sidechain_panel_ui.cpp) # PLG-22: hosted plug-in sidechain, the Sidechain panel
     list(APPEND SONORA_TEST_SOURCES test_device_groups_ui.cpp test_device_groups_plugins_ui.cpp) # DEV-15c/d: device Group / Ungroup (selection, Cmd+G, plug-in handover)
     list(APPEND SONORA_TEST_SOURCES test_hush_sidechain_engine.cpp) # PLG-22: Hush hears and shows its sidechain
@@ -134,6 +141,14 @@ if(SONORA_WITH_UI)
     list(APPEND SONORA_TEST_SOURCES test_correlation_ui.cpp ../src/plugin/CorrelationPlugin.cpp ../src/plugin/CorrelationPluginEditor.cpp)
     set_source_files_properties(../src/plugin/CorrelationPlugin.cpp PROPERTIES COMPILE_DEFINITIONS SONORA_PLUGIN_NO_ENTRY=1)
     set_source_files_properties(../src/plugin/CorrelationPluginEditor.cpp PROPERTIES COMPILE_DEFINITIONS JucePlugin_VersionString="${PROJECT_VERSION}")
+    # PLG-25: Sonora Phrase's VST3 processor/editor and its face.
+    list(APPEND SONORA_TEST_SOURCES test_phrase_ui.cpp ../src/plugin/PhrasePlugin.cpp ../src/plugin/PhrasePluginEditor.cpp)
+    set_source_files_properties(../src/plugin/PhrasePlugin.cpp PROPERTIES COMPILE_DEFINITIONS SONORA_PLUGIN_NO_ENTRY=1)
+    set_source_files_properties(../src/plugin/PhrasePluginEditor.cpp PROPERTIES COMPILE_DEFINITIONS JucePlugin_VersionString="${PROJECT_VERSION}")
+    # PLG-27: Seraph's VST3 processor/editor and its face in the device chain.
+    list(APPEND SONORA_TEST_SOURCES test_seraph_ui.cpp ../src/plugin/SeraphPlugin.cpp ../src/plugin/SeraphPluginEditor.cpp)
+    set_source_files_properties(../src/plugin/SeraphPlugin.cpp PROPERTIES COMPILE_DEFINITIONS SONORA_PLUGIN_NO_ENTRY=1)
+    set_source_files_properties(../src/plugin/SeraphPluginEditor.cpp PROPERTIES COMPILE_DEFINITIONS JucePlugin_VersionString="${PROJECT_VERSION}")
     # PLG-19: Sweep's VST3 processor/editor and its face in the device chain.
     list(APPEND SONORA_TEST_SOURCES test_sweep_ui.cpp ../src/plugin/SweepPlugin.cpp ../src/plugin/SweepPluginEditor.cpp)
     set_source_files_properties(../src/plugin/SweepPlugin.cpp PROPERTIES COMPILE_DEFINITIONS SONORA_PLUGIN_NO_ENTRY=1)

@@ -50,6 +50,9 @@ add_library(sonora_core STATIC
     core/Edit.cpp
     core/DeviceGroups.cpp
     core/DrumFill.cpp
+    core/Harmony.cpp
+    core/GeneratorClip.cpp
+    core/PhraseEngine.cpp
     core/AutomationEdits.cpp
     core/ClipOperations.cpp
     core/ClipGeometry.cpp
@@ -156,6 +159,11 @@ add_library(sonora_engine STATIC
     devices/native/PhaseAlign.cpp
     devices/native/Correlation.cpp
     devices/native/Sweep.cpp
+    devices/native/Seraph.cpp
+    devices/native/SeraphVoice.cpp
+    devices/native/SeraphGlottis.cpp
+    devices/native/SeraphReal.cpp
+    devices/native/SeraphPresets.cpp
     devices/native/Compressor.cpp
     devices/native/Limiter.cpp
     devices/native/Bands.cpp
@@ -163,6 +171,9 @@ add_library(sonora_engine STATIC
     devices/native/Delay.cpp
     devices/native/MidiNoteEffects.cpp
     devices/native/Arpeggiator.cpp
+    devices/MidiGenerator.cpp
+    devices/native/Phrase.cpp
+    devices/native/PhrasePresets.cpp
     devices/native/NoteLength.cpp
     devices/native/ClassicEffects.cpp
     devices/native/Redux.cpp
@@ -294,11 +305,14 @@ add_library(sonora_ui STATIC
     ui/views/HushFace.cpp
     ui/views/KickstractFace.cpp
     ui/views/ProFace.cpp
+    ui/views/ProFaceParts.cpp
     ui/views/ProFaceWindow.cpp
     ui/views/StutterFace.cpp
     ui/views/PhaseAlignFace.cpp
     ui/views/CorrelationFace.cpp
+    ui/views/SeraphFace.cpp
     ui/views/SweepFace.cpp
+    ui/views/PhraseFace.cpp
     ui/views/SidechainPanel.cpp
     ui/views/KickstractTimeline.cpp
     ui/views/WavetableEditor.cpp
@@ -314,6 +328,7 @@ add_library(sonora_ui STATIC
     ui/InlineEdit.cpp
     ui/SetView.cpp
     ui/TrackMenu.cpp
+    ui/GeneratorClipUi.cpp
     ui/ClipAutomation.cpp
     ui/DeviceMenu.cpp
     ui/Shortcuts.cpp
@@ -389,6 +404,11 @@ function(sonora_add_native_vst3 target)
     endif()
 endfunction()
 
+# PLG-25a: pattern generators (Sonora Phrase, Pulse) ship as VST3 instruments that send MIDI: the reference host does not load
+# VST3 MIDI effects, but another track can take "MIDI From" an instrument's output (docs/TRANCE_SUITE.md "Decisions" 2).
+# Pass these to sonora_add_native_vst3; the processor uses plugin::GeneratorMidiBridge (plugin/PluginCommon.h).
+set(SONORA_GENERATOR_VST3_ARGS IS_SYNTH TRUE NEEDS_MIDI_INPUT TRUE NEEDS_MIDI_OUTPUT TRUE IS_MIDI_EFFECT FALSE
+    VST3_CATEGORIES Instrument Generator)
 option(SONORA_BUILD_PRISM_VST3 "Build Sonora Prism as a VST3 instrument" ${APPLE})
 option(SONORA_BUILD_CURVE_LFO_VST3 "Build Sonora Curve LFO as a VST3 effect" ${APPLE})
 option(SONORA_BUILD_HUSH_VST3 "Build Sonora Hush (resonance suppressor) as a VST3 effect" ${APPLE})
@@ -397,9 +417,11 @@ option(SONORA_BUILD_STUTTER_VST3 "Build Sonora Stutter (vocal stutter / retrigge
 option(SONORA_BUILD_PHASE_ALIGN_VST3 "Build Sonora Phase Align (kick / bass phase aligner) as a VST3 effect" ${APPLE})
 option(SONORA_BUILD_SWEEP_VST3 "Build Sonora Sweep (risers / downlifters) as a VST3 instrument" ${APPLE})
 option(SONORA_BUILD_CORRELATION_VST3 "Build Sonora Correlation (stereo correlation meter) as a VST3 effect" ${APPLE})
+option(SONORA_BUILD_SERAPH_VST3 "Build Sonora Seraph (choir) as a VST3 instrument" ${APPLE})
+option(SONORA_BUILD_PHRASE_VST3 "Build Sonora Phrase (melody generator) as a VST3 instrument that sends MIDI" ${APPLE})
 if (APPLE AND (SONORA_BUILD_PRISM_VST3 OR SONORA_BUILD_CURVE_LFO_VST3 OR SONORA_BUILD_HUSH_VST3 OR SONORA_BUILD_KICKSTRACT_VST3
                OR SONORA_BUILD_STUTTER_VST3 OR SONORA_BUILD_PHASE_ALIGN_VST3 OR SONORA_BUILD_SWEEP_VST3
-               OR SONORA_BUILD_CORRELATION_VST3))
+               OR SONORA_BUILD_CORRELATION_VST3 OR SONORA_BUILD_PHRASE_VST3 OR SONORA_BUILD_SERAPH_VST3))
     set_property(SOURCE gfx/MetalLayerView.mm APPEND PROPERTY COMPILE_OPTIONS -fobjc-arc) # not JUCE's own .mm files
 endif()
 if (SONORA_BUILD_PRISM_VST3)
@@ -491,6 +513,26 @@ if (SONORA_BUILD_CORRELATION_VST3) # PLG-24
         VST3_CATEGORIES Fx Analyzer
         SOURCES plugin/CorrelationPlugin.cpp plugin/CorrelationPluginEditor.cpp)
 endif()
+if (SONORA_BUILD_PHRASE_VST3) # PLG-25
+    sonora_add_native_vst3(SonoraPhrase
+        METAL_VIEW SonoraPhraseMetalView
+        PRODUCT_NAME "Sonora Phrase"
+        BUNDLE_ID "org.sonora.phrase"
+        PLUGIN_CODE SnPh
+        ${SONORA_GENERATOR_VST3_ARGS}
+        SOURCES plugin/PhrasePlugin.cpp plugin/PhrasePluginEditor.cpp)
+endif()
+if (SONORA_BUILD_SERAPH_VST3) # PLG-27
+    sonora_add_native_vst3(SonoraSeraph
+        METAL_VIEW SonoraSeraphMetalView
+        PRODUCT_NAME "Sonora Seraph"
+        BUNDLE_ID "org.sonora.seraph"
+        PLUGIN_CODE SnSe
+        IS_SYNTH TRUE
+        NEEDS_MIDI_INPUT TRUE
+        VST3_CATEGORIES Instrument Synth
+        SOURCES plugin/SeraphPlugin.cpp plugin/SeraphPluginEditor.cpp)
+endif()
 
 # ------------------------------------------------------------------ app
 # COM-4 release identity and updates (docs/UPDATES.md). scripts/release/make_release.sh sets these; a plain developer build
@@ -503,8 +545,10 @@ set(SONORA_UPDATE_PUBLIC_KEY "" CACHE STRING "Sparkle SUPublicEDKey (base64 EdDS
 # LIB-1 sample packs (docs/SAMPLE_PACKS.md): the signed catalogue and the Ed25519 public key of the pack-signing key
 # (tools/pack_tool keygen; not the update key). An empty feed or key turns pack downloads off. The private key was made on
 # 2026-11-05 and lives on the owner's machine (~/.sonora/pack-signing.key), never in the repository.
-# TODO(LIB-1b): default the feed to https://sonoradaw.com/packs.json in the release after the packs are uploaded (0.1.10 ships off).
-set(SONORA_PACKS_FEED_URL "" CACHE STRING "Sample-pack catalogue (packs.json; packs.json.sig next to it)")
+# The feed is on since 0.1.47 (LIB-1b): the first hosted catalogue lists the Seraph Voices pack (PLG-27h). 0.1.10 .. 0.1.46
+# shipped with an empty feed (downloads off). A build folder configured before 0.1.47 keeps the empty cached value:
+# cmake -U SONORA_PACKS_FEED_URL <build>.
+set(SONORA_PACKS_FEED_URL "https://sonoradaw.com/packs.json" CACHE STRING "Sample-pack catalogue (packs.json; packs.json.sig next to it)")
 set(SONORA_PACKS_PUBLIC_KEY "oS+ffbaQwtk/fsetxAHVsfUnGWtm14rq/zdXPJu46lI=" CACHE STRING "base64 Ed25519 public key that signs packs.json (empty = pack downloads off)")
 set(SONORA_UPDATE_ALLOW_LOCAL_HTTP OFF CACHE BOOL "Allow a plain-HTTP localhost feed (local update tests only, never for releases)")
 set(SONORA_BUNDLE_ID "" CACHE STRING "Bundle id override (local update tests use their own so they never touch the real app's defaults)")

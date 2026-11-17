@@ -12,10 +12,10 @@
 #include <string>
 #include <vector>
 
-namespace sonora::devices { class CurveLfo; class Kickstract; class NativeDevice; class Stutter; }
+namespace sonora::devices { class CurveLfo; class Kickstract; class MidiGenerator; class NativeDevice; class Stutter; }
 namespace sonora::plugins
 {
-enum class SonoraPlugin { None, Prism, CurveLfo, Hush, Kickstract, Stutter, PhaseAlign, Sweep, Correlation };
+enum class SonoraPlugin { None, Prism, CurveLfo, Hush, Kickstract, Stutter, PhaseAlign, Sweep, Correlation, Phrase, Seraph };
 
 // Which Sonora VST3 this plug-in reference is, by class id only.
 SonoraPlugin sonoraPluginFor(const model::PluginInfo& info, model::DeviceKind kind);
@@ -40,6 +40,13 @@ std::vector<uint8_t> encodeParameterState(const devices::NativeDevice& device, c
                                           const std::map<std::string, std::string>& attributes = {});
 bool decodeParameterState(const void* data, size_t size, devices::NativeDevice& device, const char* rootTag,
                           const char* displayName, std::string& error, std::map<std::string, std::string>* attributes = nullptr);
+
+// PLG-25 pattern generators (Sonora Phrase; Pulse can use it too): the parameters as above and the generator's own state
+// (MidiGenerator::saveState: patterns, progression) as base64 in the root attribute "state". Decode refuses a state whose
+// patterns cannot be read and leaves the device as it was.
+std::vector<uint8_t> encodeGeneratorState(const devices::MidiGenerator& device, const char* rootTag);
+bool decodeGeneratorState(const void* data, size_t size, devices::MidiGenerator& device, const char* rootTag, const char* displayName,
+                          std::string& error);
 
 // PLG-18 Stutter state (parameters by id, root "SonoraStutter").
 std::vector<uint8_t> encodeStutterState(const devices::Stutter& device);

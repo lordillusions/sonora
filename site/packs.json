@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "packs": [
+    {
+      "id": "sonora-seraph-voices",
+      "name": "Seraph Voices",
+      "version": "1.0",
+      "description": "Recorded singers for Sonora Seraph's Real voices: three women and three men holding A, O and U at several pitches. From VocalSet (CC BY 4.0): music made with them needs the credit line.",
+      "author": "VocalSet: Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo; selection by Sonora contributors",
+      "licence": "CC-BY-4.0",
+      "styles": [
+        "Choir"
+      ],
+      "types": [
+        "Vocals"
+      ],
+      "tags": [
+        "Seraph",
+        "Real voices"
+      ],
+      "attribution": {
+        "title": "VocalSet: A Singing Voice Dataset",
+        "authors": "Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo",
+        "sourceUrl": "https://doi.org/10.5281/zenodo.1193957",
+        "licenceUrl": "https://creativecommons.org/licenses/by/4.0/",
+        "changes": "A selection of long tones, trimmed and levelled, in Sonora's Seraph Voices pack."
+      },
+      "archive": {
+        "url": "https://github.com/lordillusions/sonora/releases/download/packs/sonora-seraph-voices-1.0.zip",
+        "bytes": 14029366,
+        "sha256": "01b84d2e418adc1efb472bfe96a4d470db5c61c1c74631b6bfb2fb505a206d6e"
+      },
+      "installedBytes": 14041032,
+      "files": 54
+    }
+  ]
+}

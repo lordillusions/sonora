@@ -1,24 +1,31 @@
 #include "ui/views/ProFaceWindow.h"
 
 #include "core/DeviceCatalog.h"
+#include "devices/MidiGenerator.h"
 #include "devices/RackProcessor.h"
 #include "devices/native/Correlation.h"
+#include "devices/native/Seraph.h"
 #include "devices/native/PhaseAlign.h"
 #include "devices/native/Stutter.h"
 #include "devices/native/Sweep.h"
+#include "devices/native/Phrase.h"
 #include "engine/EngineGraph.h"
 #include "ui/DeviceMenu.h"
+#include "ui/GeneratorClipUi.h"
 #include "ui/Painter.h"
 #include "ui/views/CorrelationFace.h"
+#include "ui/views/SeraphFace.h"
 #include "ui/views/PhaseAlignFace.h"
 #include "ui/views/StutterFace.h"
 #include "ui/views/SweepFace.h"
+#include "ui/views/PhraseFace.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <sstream>
 
 namespace sonora::ui
 {
@@ -28,6 +35,8 @@ ProFace* addProFace(Widget& parent, devices::DeviceProcessor* processor)
     if (auto* sweep = dynamic_cast<devices::Sweep*>(processor)) return parent.add<SweepFace>(*sweep);
     if (auto* phase = dynamic_cast<devices::PhaseAlign*>(processor)) return parent.add<PhaseAlignFace>(*phase);
     if (auto* meter = dynamic_cast<devices::Correlation*>(processor)) return parent.add<CorrelationFace>(*meter);
+    if (auto* phrase = dynamic_cast<devices::Phrase*>(processor)) return parent.add<PhraseFace>(*phrase); // PLG-25
+    if (auto* seraph = dynamic_cast<devices::Seraph*>(processor)) return parent.add<SeraphFace>(*seraph);
     return nullptr;
 }
 
@@ -53,6 +62,51 @@ void loadSweepSample(UiContext& x, int trackIndex, int deviceIndex, const std::s
     }, "Load Sample");
 }
 
+// PLG-27b: Real voices into a Seraph as one undoable edit: its content (the live gate and preset name, plus the files) and
+// Source = Real. Files that cannot sing are refused with the reason before any edit.
+void loadSeraphVoices(UiContext& x, SeraphFace& face, int trackIndex, int deviceIndex, const std::vector<std::string>& paths, bool clear)
+{
+    if (! x.editDevice) return;
+    auto& seraph = face.seraph();
+    face.realMessage.clear();
+    std::vector<std::string> keep = clear ? std::vector<std::string>{} : seraph.realPaths();
+    int added = 0;
+    for (const auto& path : paths)
+    {
+        std::string error;
+        if (devices::Seraph::analyseFile(path, error) == nullptr) { face.realMessage = error; continue; }
+        if (std::find(keep.begin(), keep.end(), path) == keep.end()) { keep.push_back(path); ++added; }
+    }
+    if (added == 0 && ! clear) return;
+    // the content as the device has it now, with the new list of files
+    std::string text;
+    {
+        std::istringstream in(seraph.encodeContent());
+        std::string line;
+        while (std::getline(in, line))
+            if (line.rfind("real ", 0) != 0) text += line + "\n";
+        for (const auto& path : keep) text += "real " + path + "\n";
+    }
+    x.editDevice(trackIndex, deviceIndex, [text, clear](model::Device& d) {
+        auto content = std::make_shared<model::NativeContent>();
+        content->format = devices::Seraph::kContentFormat;
+        content->data.assign(text.begin(), text.end());
+        d.nativeContent = std::move(content);
+        d.nativeContentEdited = true;
+        if (clear) return;
+        bool found = false;
+        for (auto& p : d.parameters)
+            if (p.path == "Source") { p.value = devices::Seraph::RealSource; found = true; }
+        if (! found)
+        {
+            model::Parameter p;
+            p.path = "Source";
+            p.value = devices::Seraph::RealSource;
+            d.parameters.push_back(std::move(p));
+        }
+    }, clear ? "Clear Voices" : "Load Voice");
+}
+
 void wireProFace(ProFace& face, std::function<UiContext*()> context, int trackIndex, int deviceIndex)
 {
     auto* processor = &face.device();
@@ -61,6 +115,39 @@ void wireProFace(ProFace& face, std::function<UiContext*()> context, int trackIn
         return midi::ControlTarget{midi::ControlTarget::Kind::DeviceParameter, trackIndex, deviceIndex, 0,
                                    processor->parameters()[(size_t) parameter].id};
     };
+    if (dynamic_cast<devices::MidiGenerator*>(processor) != nullptr) // PLG-25a: generator faces' To Clip button
+        face.onToClip = [context, trackIndex, deviceIndex] {
+            if (auto* x = context()) generatorToClipFromFace(*x, trackIndex, deviceIndex);
+        };
+    if (auto* seraph = dynamic_cast<SeraphFace*>(&face)) // PLG-27b: Real voices from the Browser, the Finder or Load...
+    {
+        // PLG-27h: the Seraph Voices pack from the app's Packs folder, downloaded through the Browser's pack store (the
+        // catalogue is fetched first: the store runs its jobs in order). The face showed the credit line before this click.
+        if (auto* x = context()) seraph->packsRoot = x->samplePacksRoot;
+        seraph->onGetPack = [context] {
+            auto* x = context();
+            if (x == nullptr) return;
+            if (x->showSamplePackList && x->samplePackList != UiContext::SamplePackList::Off) x->showSamplePackList();
+            if (x->downloadSamplePack) x->downloadSamplePack(devices::Seraph::kPackId);
+        };
+        seraph->onVoicesDropped = [context, seraph, trackIndex, deviceIndex](const std::vector<std::string>& paths) {
+            if (auto* x = context()) loadSeraphVoices(*x, *seraph, trackIndex, deviceIndex, paths, false);
+        };
+        seraph->onClearVoices = [context, seraph, trackIndex, deviceIndex] {
+            if (auto* x = context()) loadSeraphVoices(*x, *seraph, trackIndex, deviceIndex, {}, true);
+        };
+        seraph->onChooseVoices = [context, seraph, trackIndex, deviceIndex] {
+            auto chooser = std::make_shared<juce::FileChooser>("Load sung notes into Sonora Seraph", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
+            chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                                     | juce::FileBrowserComponent::canSelectMultipleItems,
+                                 [context, chooser, seraph, alive = seraph->lifetime(), trackIndex, deviceIndex](const juce::FileChooser& fc) {
+                if (alive.expired()) return; // the face went away while the chooser was open
+                std::vector<std::string> paths;
+                for (const auto& file : fc.getResults()) paths.push_back(file.getFullPathName().toStdString());
+                if (auto* x = context(); x != nullptr && ! paths.empty()) loadSeraphVoices(*x, *seraph, trackIndex, deviceIndex, paths, false);
+            });
+        };
+    }
     if (auto* sweep = dynamic_cast<SweepFace*>(&face))
     {
         sweep->onSampleDropped = [context, trackIndex, deviceIndex](const std::string& path) {
@@ -99,7 +186,8 @@ void wireProFace(ProFace& face, std::function<UiContext*()> context, int trackIn
 // ---------------------------------------------------------------------------------------------------------------------
 bool ProFaceWindowView::isProFaceDevice(const std::string& type)
 {
-    return type == "SonoraStutter" || type == "SonoraSweep" || type == "SonoraPhaseAlign" || type == "SonoraCorrelation";
+    return type == "SonoraStutter" || type == "SonoraSweep" || type == "SonoraPhaseAlign" || type == "SonoraCorrelation"
+           || type == "SonoraPhrase" || type == "SonoraSeraph";
 }
 
 std::optional<ProFaceWindowView::Site> ProFaceWindowView::find(const UiContext& x, const UiContext::WavetableKey& key)

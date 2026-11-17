@@ -627,6 +627,12 @@ std::vector<AboutLine> aboutLines(const AboutState& state, float width)
         for (size_t i = 0; i < names.size(); ++i) joined += (i ? "   " : "") + names[i];
         for (const auto& line : wrapText(joined, aboutNameSize, aboutTextWidth(width))) lines.push_back({line, aboutNameSize, light, false, 0});
     }
+    // PLG-27h: the optional Seraph Voices pack's recordings (CC BY 4.0 asks for this credit; devices::Seraph::kPackCredit)
+    lines.push_back({"Acknowledgements", aboutTitleSize, aboutDim, true, 18});
+    for (const auto& line : wrapText("Seraph Voices pack: recordings from \"VocalSet: A Singing Voice Dataset\" by Julia Wilkins, Prem Seetharaman, "
+                                     "Alison Wahl and Bryan Pardo (doi.org/10.5281/zenodo.1193957), CC BY 4.0, selected, trimmed and levelled.",
+                                     11.0f, aboutTextWidth(width)))
+        lines.push_back({line, 11.0f, aboutDim, false, 0});
     return lines;
 }
 

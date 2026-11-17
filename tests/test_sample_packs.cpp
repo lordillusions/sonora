@@ -280,7 +280,9 @@ TEST_CASE("packs: catalogue round trip keeps every field and skips packs that br
 TEST_CASE("packs: licence rule, ids and archive paths")
 {
     CHECK(packs::licenceAllowed("CC0-1.0"));
-    CHECK(! packs::licenceAllowed("CC-BY-4.0"));
+    CHECK(packs::licenceAllowed("CC-BY-4.0")); // PLG-27h: only with an attribution block (see the CC BY test)
+    CHECK(packs::attributionRequired("CC-BY-4.0"));
+    CHECK(! packs::attributionRequired("CC0-1.0"));
     CHECK(! packs::licenceAllowed("CC-BY-SA-3.0"));
     CHECK(! packs::licenceAllowed(""));
     CHECK(packs::validPackId("sonora-house-kit"));
@@ -309,6 +311,61 @@ TEST_CASE("packs: licence rule, ids and archive paths")
     CHECK(platform::contentRangeStart("bytes 5-9/*", total) == 5);
     CHECK(total == 0);
     CHECK(platform::contentRangeStart("items 1-2/3", total) == -1);
+}
+
+TEST_CASE("packs: CC BY 4.0 is accepted only with an attribution block and ATTRIBUTION.txt (PLG-27h)")
+{
+    auto credited = fixtureContents("sonora-credited-voices");
+    credited.info.licence = "CC-BY-4.0";
+    credited.info.attribution = {"VocalSet: A Singing Voice Dataset", "Julia Wilkins, Prem Seetharaman, Alison Wahl, Bryan Pardo",
+                                 "https://doi.org/10.5281/zenodo.1193957", "https://creativecommons.org/licenses/by/4.0/",
+                                 "A selection of long tones, trimmed and levelled."};
+    std::string error;
+    const auto parsed = packs::parsePackContents(packs::packContentsToJson(credited), error);
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->info.attribution.authors == credited.info.attribution.authors);
+    CHECK(parsed->info.attribution.creditLine().find("CC BY 4.0") != std::string::npos);
+    // without the block, or with part of it: refused
+    auto bare = credited;
+    bare.info.attribution = {};
+    CHECK(! packs::parsePackContents(packs::packContentsToJson(bare), error).has_value());
+    CHECK(error.find("attribution") != std::string::npos);
+    auto partial = credited;
+    partial.info.attribution.changes.clear();
+    CHECK(! packs::parsePackContents(packs::packContentsToJson(partial), error).has_value());
+    // share-alike and non-commercial stay out
+    auto shareAlike = credited;
+    shareAlike.info.licence = "CC-BY-SA-4.0";
+    CHECK(! packs::parsePackContents(packs::packContentsToJson(shareAlike), error).has_value());
+    // the catalogue keeps the credited pack and skips the bare one, with the reason
+    packs::Catalogue catalogue;
+    catalogue.packs.push_back(entryFor(credited, "x", "a.zip"));
+    auto bareEntry = entryFor(bare, "y", "b.zip");
+    bareEntry.info.id = "sonora-bare-voices";
+    catalogue.packs.push_back(bareEntry);
+    const auto read = packs::parseCatalogue(packs::catalogueToJson(catalogue), error);
+    REQUIRE(read.has_value());
+    REQUIRE(read->packs.size() == 1);
+    CHECK(read->packs[0].info.attribution.complete());
+    CHECK(read->warnings.size() == 1);
+    // the installer: ATTRIBUTION.txt must be in the archive
+    TempFolder temp;
+    const packs::PackLibrary library(temp.folder.getChildFile("Packs"));
+    std::atomic<bool> cancelled{false};
+    const auto withoutCredit = packArchive(credited);
+    const auto archive = temp.folder.getChildFile("voices.zip");
+    archive.replaceWithData(withoutCredit.data(), withoutCredit.size());
+    const auto refused = library.install(archive, entryFor(credited, withoutCredit, "voices.zip"), cancelled);
+    CHECK(! refused.ok);
+    CHECK(refused.error.find("ATTRIBUTION.txt") != std::string::npos);
+    const auto withCredit = zipOf({{"pack.json", packs::packContentsToJson(credited)},
+                                   {"Kicks/Kick 01.wav", pseudoRandom(40000, 1)},
+                                   {"Hats/Hat 01.wav", pseudoRandom(30000, 2)},
+                                   {"LICENSE.txt", "Creative Commons Attribution 4.0 International"},
+                                   {"ATTRIBUTION.txt", parsed->info.attribution.creditLine()}});
+    archive.replaceWithData(withCredit.data(), withCredit.size());
+    const auto accepted = library.install(archive, entryFor(credited, withCredit, "voices.zip"), cancelled);
+    CHECK(accepted.ok);
 }
 
 TEST_CASE("packs: the catalogue signature covers every byte")

@@ -25,6 +25,7 @@ class SkPath;
 
 namespace sonora::ui
 {
+class FacePart; // ProFaceParts.h (PLG-25a): step lanes, note roll, preset bar, chord strip
 namespace pro
 {
 constexpr SkColor kBackground = 0xFF111317, kPanel = 0xFF191C22, kRaised = 0xFF21252D, kWell = 0xFF0B0D10,
@@ -74,6 +75,9 @@ public:
     std::function<std::optional<midi::ControlTarget>(int parameter)> mappingTarget; // MIDI/key map target of a parameter
     std::function<void()> onOpenWindow;  // compact layout: the "open the big editor" button; unset hides it
     std::string version;                 // shown next to the wordmark (the VST3 passes its own)
+    // PLG-25a, pattern generator faces: the To Clip button (ui/GeneratorClipUi.h). wireProFace sets it for every
+    // devices::MidiGenerator in the app; unset (the VST3) the face shows Drag MIDI instead.
+    std::function<void()> onToClip;
 
     // ---- Widget
     void layout() override;
@@ -117,6 +121,7 @@ protected:
         std::function<void(const MouseEvent&)> down, drag, up; // Area (design-grid events)
         SkColor colour = 0;                            // 0 = the face's accent
         float textSize = 0;                            // Button/Segment label size (0 = default)
+        FacePart* part = nullptr;                      // Area drawn and driven by a face part (addPart)
     };
 
     // Adds the layout's controls (design grid). Called whenever the layout changes or rebuild() asks for it.
@@ -142,6 +147,9 @@ protected:
     Control& addButton(const Rect&, std::string label, std::function<void()> click, std::string tip = {});
     Control& addPad(const Rect&, std::string label, std::function<void(bool)> press, std::string tip = {});
     Control& addArea(const Rect&, std::string tip = {});
+    // PLG-25a: a face part (owned by the face, alive as long as the layout) on the design grid: an Area that forwards the
+    // mouse to the part and paints it in control order; its label is the part's name (tests find it by that).
+    Control& addPart(FacePart& part, const Rect&, std::string tip = {});
 
     float value(int param) const;
     void setValue(int param, float value); // clamped to the parameter's range

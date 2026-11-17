@@ -1082,6 +1082,7 @@ void BrowserPanel::paint(SkCanvas& canvas, const Theme& theme)
         for (const auto& pack : ctx().samplePacks)
             if (pack.id == entries[(size_t) selectedItem_].packId)
                 footerText = ! pack.message.empty() ? pack.message
+                             : ! pack.credit.empty() ? "Credit required (" + pack.licence + "): music made with it must credit " + pack.credit
                              : megabytes(pack.bytes) + (pack.licence == "CC0-1.0" ? ", free to use, no credit needed (CC0)" : ", " + pack.licence);
     paint::text(canvas, footerText,
                 {button.right() + 6, footer.y, std::max(0.0f, footer.right() - button.right() - 12), footer.h},
@@ -1945,8 +1946,10 @@ void BrowserPanel::paintPack(SkCanvas& canvas, const Theme& theme, const Item& i
     switch (pack->state)
     {
         case State::Available:
-            status(pack->received > 0 ? percent + " of " + megabytes(pack->bytes) : megabytes(pack->bytes), dim);
-            drawButton(pack->received > 0 ? "Resume" : "Download", 0);
+            status(pack->received > 0 ? percent + " of " + megabytes(pack->bytes)
+                   : ! pack->credit.empty() ? "Credit required, " + megabytes(pack->bytes) : megabytes(pack->bytes), dim);
+            // PLG-27h: a pack whose licence asks for credit says so first; the second click agrees and downloads
+            drawButton(pack->received > 0 ? "Resume" : ! pack->credit.empty() && creditShown_ == pack->id ? "Agree" : "Download", 0);
             break;
         case State::Queued:
             status("Waiting...", dim);
@@ -1988,6 +1991,16 @@ void BrowserPanel::packAction(const Item& item)
     switch (pack->state)
     {
         case State::Available: case State::Update: case State::Failed:
+            if (! pack->credit.empty() && pack->received == 0 && creditShown_ != pack->id)
+            {
+                // PLG-27h: tell the credit before the download; the footer shows it, the button now says Agree
+                creditShown_ = pack->id;
+                const auto& entries = items();
+                for (size_t i = 0; i < entries.size(); ++i)
+                    if (entries[i].packId == pack->id) selectedItem_ = (int) i;
+                repaint();
+                break;
+            }
             if (context.downloadSamplePack) context.downloadSamplePack(pack->id);
             break;
         case State::Queued: case State::Downloading:
@@ -2013,6 +2026,8 @@ void BrowserPanel::showPackMenu(const Item& item)
     };
     const std::string id = pack->id, folder = pack->folder;
     if (! folder.empty()) add("Open Pack", true, [this, folder] { navigate(folder); repaint(); });
+    if (! pack->credit.empty()) // PLG-27h: the line music made with this pack must carry, ready to paste
+        add("Copy Credit Line", true, [credit = pack->credit] { juce::SystemClipboard::copyTextToClipboard(juce::String::fromUTF8(credit.c_str())); });
     const bool busy = pack->state == State::Queued || pack->state == State::Downloading;
     if (busy) add("Cancel Download", true, [this, id] { if (ctx().cancelSamplePack) ctx().cancelSamplePack(id); });
     else if (pack->state != State::Installed && pack->state != State::Verifying && pack->state != State::Installing)

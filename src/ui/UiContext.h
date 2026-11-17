@@ -727,6 +727,7 @@ struct UiContext
         std::vector<std::string> styles, types;
         int64_t bytes = 0, received = 0; // archive size; downloaded so far (a paused download keeps it)
         State state = State::Available;
+        std::string credit = {}; // PLG-27h: the credit line music made with this pack needs (CC BY); empty: none needed
     };
     // Off: no feed/key in this build. Hidden: nothing fetched until the user asks ("Get Packs...").
     enum class SamplePackList { Off, Hidden, Loading, Ready, Failed };

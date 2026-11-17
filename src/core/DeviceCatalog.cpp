@@ -56,6 +56,8 @@ constexpr std::array kCatalog{
     CatalogEntry{"SonoraPhaseAlign", "Sonora Phase Align", R::AudioEffect, true},
     CatalogEntry{"SonoraCorrelation", "Sonora Correlation", R::AudioEffect, true},
     CatalogEntry{"SonoraSweep", "Sonora Sweep", R::Instrument, true},
+    CatalogEntry{"SonoraPhrase", "Sonora Phrase", R::MidiEffect, true}, // PLG-25
+    CatalogEntry{"SonoraSeraph", "Sonora Seraph", R::Instrument, true},
     CatalogEntry{"SonoraVelocity", "Sonora Velocity", R::MidiEffect, true},
     CatalogEntry{"InstrumentGroupDevice", "Sonora Instrument Rack", R::Instrument, true},
     CatalogEntry{"DrumGroupDevice", "Sonora Drum Rack", R::Instrument, true},
@@ -153,6 +155,7 @@ std::string_view deviceCategory(const CatalogEntry& entry)
     if (isRackTag(tag)) return "Racks";
     if (entry.role == DeviceRole::Instrument)
         return tag == "OriginalSimpler" || tag == "MultiSampler" || tag == "SonoraImpulse" ? "Sampling" : "Synthesis";
+    if (tag == "SonoraPhrase") return "Generators"; // PLG-25
     if (entry.role == DeviceRole::MidiEffect) return "Note & Velocity";
     if (tag == "Eq8" || tag == "FilterEQ3" || tag == "ChannelEq" || tag == "AutoFilter" || tag == "AutoFilter2"
         || tag == "SonoraKickstract")

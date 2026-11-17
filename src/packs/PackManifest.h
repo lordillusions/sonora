@@ -19,6 +19,16 @@ namespace sonora::packs
 
 constexpr int kManifestFormat = 1;
 
+// PLG-27h: the credit a CC-BY-4.0 pack carries (the licence asks it of whoever shares the files or music made with them).
+struct Attribution
+{
+    std::string title, authors, sourceUrl, licenceUrl, changes;
+    bool empty() const { return title.empty() && authors.empty() && sourceUrl.empty() && licenceUrl.empty() && changes.empty(); }
+    bool complete() const { return ! title.empty() && ! authors.empty() && ! sourceUrl.empty() && ! licenceUrl.empty() && ! changes.empty(); }
+    // One line to paste where credits go: "<title>" by <authors> (<source>), CC BY 4.0 (<licence URL>). <changes>.
+    std::string creditLine() const;
+};
+
 // What a pack is: shared by the catalogue entry and the pack.json that ships inside the archive.
 struct PackInfo
 {
@@ -26,6 +36,7 @@ struct PackInfo
     std::string name, version, description, author;
     std::string licence; // SPDX identifier; only allowedLicences() pass
     std::vector<std::string> styles, types, tags;
+    Attribution attribution = {}; // required (complete) for a licence attributionRequired() names
 };
 
 struct PackEntry
@@ -57,9 +68,12 @@ struct PackContents
     std::vector<PackFile> files;
 };
 
-// The licence rule: content anyone may redistribute and use commercially without attribution (docs/SAMPLE_PACKS.md).
+// The licence rule (docs/SAMPLE_PACKS.md): CC0, and CC-BY-4.0 only for a pack that carries a complete attribution block
+// and ATTRIBUTION.txt (PLG-27h, owner's decision 2026-11-17). Released apps that only know CC0 skip CC-BY packs.
 const std::vector<std::string>& allowedLicences();
 bool licenceAllowed(std::string_view spdx);
+bool attributionRequired(std::string_view spdx);
+constexpr const char* kAttributionFile = "ATTRIBUTION.txt";
 bool validPackId(std::string_view id);
 bool validSha256(std::string_view hex);
 // A relative pack path inside an archive: no absolute path, drive, backslash, "." / ".." part or empty part.

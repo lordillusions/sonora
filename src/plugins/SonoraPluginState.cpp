@@ -1,5 +1,6 @@
 #include "plugins/SonoraPluginState.h"
 
+#include "devices/MidiGenerator.h"
 #include "devices/native/CurveLfo.h"
 #include "devices/native/Kickstract.h"
 #include "devices/native/Stutter.h"
@@ -42,6 +43,8 @@ SonoraPlugin sonoraPluginFor(const model::PluginInfo& info, model::DeviceKind ki
         case fourCC("SnPa"): return SonoraPlugin::PhaseAlign;
         case fourCC("SnSw"): return SonoraPlugin::Sweep;
         case fourCC("SnCo"): return SonoraPlugin::Correlation;
+        case fourCC("SnPh"): return SonoraPlugin::Phrase;
+        case fourCC("SnSe"): return SonoraPlugin::Seraph;
         default: return SonoraPlugin::None;
     }
 }
@@ -184,5 +187,28 @@ std::vector<uint8_t> encodeStutterState(const devices::Stutter& device)
 bool decodeStutterState(const void* data, size_t size, devices::Stutter& device, std::string& error)
 {
     return decodeParameterState(data, size, device, "SonoraStutter", "Sonora Stutter", error);
+}
+std::vector<uint8_t> encodeGeneratorState(const devices::MidiGenerator& device, const char* rootTag)
+{
+    const auto bytes = device.saveState();
+    std::map<std::string, std::string> attributes;
+    if (! bytes.empty()) attributes["state"] = juce::Base64::toBase64(bytes.data(), bytes.size()).toStdString();
+    return encodeParameterState(device, rootTag, attributes);
+}
+
+bool decodeGeneratorState(const void* data, size_t size, devices::MidiGenerator& device, const char* rootTag, const char* displayName,
+                          std::string& error)
+{
+    std::map<std::string, std::string> attributes;
+    if (! decodeParameterState(data, size, device, rootTag, displayName, error, &attributes)) return false;
+    const auto found = attributes.find("state");
+    if (found == attributes.end() || found->second.empty()) return true; // parameters only: the patterns keep their defaults
+    juce::MemoryOutputStream decoded;
+    if (! juce::Base64::convertFromBase64(decoded, juce::String(found->second)))
+    {
+        error = std::string(displayName) + ": the saved patterns are damaged";
+        return false;
+    }
+    return device.loadState(static_cast<const uint8_t*>(decoded.getData()), decoded.getDataSize(), error);
 }
 } // namespace sonora::plugins

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include "devices/MidiGenerator.h"
 #include "devices/PlaceholderSynth.h"
 #include "devices/RackProcessor.h"
 #include "devices/native/AutoFilter.h"
@@ -41,7 +42,9 @@
 #include "devices/native/BeatRepeat.h"
 #include "devices/native/PhaseAlign.h"
 #include "devices/native/Correlation.h"
+#include "devices/native/Seraph.h"
 #include "devices/native/Sweep.h"
+#include "devices/native/Phrase.h"
 #include "devices/native/MidiVelocity.h"
 #include "devices/native/MidiNoteEffects.h"
 #include "devices/native/Arpeggiator.h"
@@ -253,6 +256,23 @@ std::unique_ptr<DeviceProcessor> createSonoraStandIn(const model::Device& d, Bui
             note(ctx, d.plugin->name + ": the saved settings could not be read (" + error + "), using the defaults");
         dev = std::move(meter);
     }
+    else if (which == SonoraPlugin::Phrase) // PLG-25: parameters + patterns
+    {
+        auto phrase = std::make_unique<Phrase>();
+        if (! body.empty() && ! plugins::decodeGeneratorState(body.data(), body.size(), *phrase, "SonoraPhrase", "Sonora Phrase", error))
+            note(ctx, d.plugin->name + ": the saved settings could not be read (" + error + "), using the defaults");
+        dev = std::move(phrase);
+    }
+    else if (which == SonoraPlugin::Seraph) // PLG-27: parameters + the custom gate and the preset name
+    {
+        auto seraph = std::make_unique<Seraph>();
+        std::map<std::string, std::string> attributes;
+        if (! body.empty() && ! plugins::decodeParameterState(body.data(), body.size(), *seraph, "SonoraSeraph", "Sonora Seraph", error, &attributes))
+            note(ctx, d.plugin->name + ": the saved settings could not be read (" + error + "), using the defaults");
+        seraph->applyStateAttributes(attributes);
+        for (const auto& problem : seraph->realErrors) note(ctx, d.plugin->name + ": Real voice: " + problem);
+        dev = std::move(seraph);
+    }
     else // COL-4e: the VST3's state body is the built-in device's session state
     {
         auto hush = std::make_unique<HushDevice>();
@@ -421,6 +441,16 @@ std::unique_ptr<DeviceProcessor> createNative(const model::Device& d, std::vecto
         dev = std::make_unique<PhaseAlign>();
     else if (d.type == "SonoraCorrelation") // PLG-24
         dev = std::make_unique<Correlation>();
+    else if (d.type == "SonoraSeraph") // PLG-27: the custom gate and the preset name are native content "SonoraSeraph/State"
+    {
+        auto seraph = std::make_unique<Seraph>();
+        if (d.nativeContent && d.nativeContent->format == Seraph::kContentFormat
+            && ! seraph->decodeContent(std::string(d.nativeContent->data.begin(), d.nativeContent->data.end())) && warnings)
+            warnings->push_back("Sonora Seraph: its gate pattern could not be read; parameters kept");
+        if (warnings)
+            for (const auto& problem : seraph->realErrors) warnings->push_back("Sonora Seraph: Real voice: " + problem); // never fails the load
+        dev = std::move(seraph);
+    }
     else if (d.type == "SonoraSweep") // PLG-19: the Sample source's file is native content "SonoraSweep/Sample" (a path)
     {
         auto sweep = std::make_unique<Sweep>();
@@ -434,10 +464,13 @@ std::unique_ptr<DeviceProcessor> createNative(const model::Device& d, std::vecto
     }
     else if (d.type == "SonoraVelocity")
         dev = std::make_unique<MidiVelocity>();
+    else if (d.type == "SonoraPhrase") // PLG-25 (patterns restored below like every MidiGenerator)
+        dev = std::make_unique<Phrase>();
 
     if (dev)
     {
         dev->loadFromModel(d);
+        if (auto* generator = dynamic_cast<MidiGenerator*>(dev.get())) restoreGeneratorState(*generator, d, warnings); // PLG-25a
         if (warnings)
         {
             if (dynamic_cast<MidiNoteEffects*>(dev.get()) && (d.param("UseCurrentScale", 0) > 0.5 || std::abs(d.param("Strum", 0)) > 1e-9))
@@ -461,7 +494,7 @@ std::vector<uint8_t> sonoraVst3State(const model::Device& d)
 {
     if (d.type == "SonoraWavetable") return plugins::encodePrismPreset(d);
     if (d.type != "SonoraCurveLfo" && d.type != "SonoraHush" && d.type != "SonoraKickstract" && d.type != "SonoraStutter" && d.type != "SonoraPhaseAlign" && d.type != "SonoraSweep"
-        && d.type != "SonoraCorrelation")
+        && d.type != "SonoraCorrelation" && d.type != "SonoraPhrase" && d.type != "SonoraSeraph")
         return {};
     const auto dev = createNative(d);
     if (const auto* lfo = dynamic_cast<const CurveLfo*>(dev.get())) return plugins::encodeCurveLfoState(*lfo);
@@ -470,8 +503,11 @@ std::vector<uint8_t> sonoraVst3State(const model::Device& d)
     if (const auto* stutter = dynamic_cast<const Stutter*>(dev.get())) return plugins::encodeStutterState(*stutter);
     if (const auto* phase = dynamic_cast<const PhaseAlign*>(dev.get())) return plugins::encodeParameterState(*phase, "SonoraPhaseAlign");
     if (const auto* meter = dynamic_cast<const Correlation*>(dev.get())) return plugins::encodeParameterState(*meter, "SonoraCorrelation");
+    if (const auto* seraph = dynamic_cast<const Seraph*>(dev.get()))
+        return plugins::encodeParameterState(*seraph, "SonoraSeraph", seraph->stateAttributes());
     if (const auto* sweep = dynamic_cast<const Sweep*>(dev.get()))
         return plugins::encodeParameterState(*sweep, "SonoraSweep", {{"samplePath", sweep->samplePath()}});
+    if (const auto* phrase = dynamic_cast<const Phrase*>(dev.get())) return plugins::encodeGeneratorState(*phrase, "SonoraPhrase");
     return {};
 }
 } // namespace
@@ -557,6 +593,15 @@ model::Device nativeDeviceModel(const std::string& type)
     return d;
 }
 
+void restoreGeneratorState(MidiGenerator& generator, const model::Device& d, std::vector<std::string>* warnings)
+{
+    const auto format = generator.stateFormat();
+    if (format.empty() || ! d.nativeContent || d.nativeContent->format != format) return;
+    std::string error;
+    if (! generator.loadState(d.nativeContent->data.data(), d.nativeContent->data.size(), error) && warnings)
+        warnings->push_back(generator.name() + ": its patterns could not be read (" + error + "); defaults used");
+}
+
 void captureDeviceState(model::Device& d, DeviceProcessor* processor, const PluginCaptureFilter* capturePlugin)
 {
     if (! processor) return;
@@ -604,6 +649,34 @@ void captureDeviceState(model::Device& d, DeviceProcessor* processor, const Plug
         auto content = hushContent(hush->session());
         if (! d.nativeContent || d.nativeContent->format != content->format || d.nativeContent->data != content->data)
             d.nativeContent = std::move(content);
+    }
+    if (const auto* seraph = dynamic_cast<const Seraph*>(processor)) // PLG-27: replaced only when it changed
+    {
+        const auto text = seraph->encodeContent();
+        if (! d.nativeContent || d.nativeContent->format != Seraph::kContentFormat
+            || std::string(d.nativeContent->data.begin(), d.nativeContent->data.end()) != text)
+        {
+            auto content = std::make_shared<model::NativeContent>();
+            content->format = Seraph::kContentFormat;
+            content->data.assign(text.begin(), text.end());
+            d.nativeContent = std::move(content);
+        }
+    }
+    if (const auto* generator = dynamic_cast<MidiGenerator*>(processor))
+    {
+        // PLG-25a: a pattern generator's non-parameter state (patterns, progression); replaced only when it changed.
+        if (const auto format = generator->stateFormat(); ! format.empty())
+        {
+            auto bytes = generator->saveState();
+            if (! d.nativeContent || d.nativeContent->format != format || d.nativeContent->data != bytes)
+            {
+                auto content = std::make_shared<model::NativeContent>();
+                content->format = format;
+                content->data = std::move(bytes);
+                d.nativeContent = std::move(content);
+                d.nativeContentEdited = true;
+            }
+        }
     }
     if (const auto* rack = dynamic_cast<RackProcessor*>(processor))
         for (size_t ci = 0; ci < d.chains.size() && ci < rack->chains().size(); ++ci)

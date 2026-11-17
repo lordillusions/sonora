@@ -1,6 +1,8 @@
 #include "ui/TrackMenu.h"
 
 #include "core/DrumFill.h"
+#include "devices/MidiGenerator.h"
+#include "ui/GeneratorClipUi.h"
 #include "ui/ClipAutomation.h"
 #include "ui/SampleFiles.h"
 #include "ui/views/AutomationEditor.h"
@@ -454,6 +456,14 @@ std::vector<MenuAction> clipContextActions(UiContext& ctx, model::ClipLocation l
         }
         result.push_back({"", {}, false});
         result.push_back(std::move(fill));
+        // PLG-25a: every pattern generator on the track (Sonora Phrase, Pulse) can write its part into the clip.
+        for (const int device : generatorDevices(ctx, location.track))
+        {
+            const auto* generator = generatorAt(ctx, location.track, device);
+            result.push_back({"Apply " + generator->name() + " to Clip", [&ctx, valid, location, device] {
+                if (valid()) applyGeneratorToClip(ctx, location.track, device, location);
+            }, editable});
+        }
     }
     if (clip && clip->kind == model::Clip::Kind::Audio)
     {

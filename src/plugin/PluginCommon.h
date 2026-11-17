@@ -6,6 +6,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace sonora::plugin
@@ -132,5 +133,53 @@ inline devices::HostInfo hostInfo(juce::AudioPlayHead* head, double sampleRate)
         }
     return info;
 }
+
+// PLG-25a: MIDI out of a pattern generator plug-in (Sonora Phrase, Sonora Pulse). These ship as VST3 instruments that send
+// MIDI (TRANCE_SUITE.md "Decisions" 2; the juce_add_plugin flags are SONORA_GENERATOR_VST3_ARGS in src/CMakeLists.txt), so
+// the processor's acceptsMidi() and producesMidi() return true and isMidiEffect() false. The bridge hands the host's MIDI
+// to the device and puts the device's MIDI in its place, running the device in chunks of at most the block size it was
+// prepared for (hosts may send more than they announced), with the transport advanced and wrapped at the loop per chunk.
+// Audio thread; no allocation after prepare().
+class GeneratorMidiBridge
+{
+public:
+    void prepare(int maxChunk, int outputBytes = 72 * 1024)
+    {
+        chunk_ = std::max(1, maxChunk);
+        in_.ensureSize(16 * 1024);
+        out_.ensureSize((size_t) outputBytes);
+    }
+
+    void process(devices::DeviceProcessor& device, juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi, devices::HostInfo info)
+    {
+        out_.clear();
+        const int total = audio.getNumSamples();
+        const double rate = info.sampleRate > 0 ? info.sampleRate : 44100.0;
+        for (int start = 0; start < total; start += chunk_)
+        {
+            const int length = std::min(chunk_, total - start);
+            in_.clear();
+            for (const auto event : midi)
+                if (event.samplePosition >= start && event.samplePosition < start + length)
+                    in_.addEvent(event.data, event.numBytes, event.samplePosition - start);
+            juce::AudioBuffer<float> part(audio.getArrayOfWritePointers(), audio.getNumChannels(), start, length);
+            device.setHostInfo(info);
+            device.process(part, in_);
+            for (const auto event : in_) out_.addEvent(event.data, event.numBytes, event.samplePosition + start);
+            if (info.playing)
+            {
+                info.beats += length / rate * info.tempo / 60.0;
+                if (info.looping && info.loopEnd > info.loopStart && info.beats >= info.loopEnd)
+                    info.beats = info.loopStart + (info.beats - info.loopEnd);
+            }
+        }
+        midi.clear();
+        midi.addEvents(out_, 0, -1, 0);
+    }
+
+private:
+    int chunk_ = 512;
+    juce::MidiBuffer in_, out_;
+};
 
 } // namespace sonora::plugin

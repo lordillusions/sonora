@@ -1,13 +1,13 @@
 # ProFace kit (PLG-23)
 
-The face kit of Sonora's own creative devices: Stutter, Sweep, Phase Align and Correlation (`src/ui/views/ProFace.h/.cpp`). It
+The face kit of Sonora's own creative devices: Stutter, Sweep, Phase Align, Correlation, Phrase and Seraph (`src/ui/views/ProFace.h/.cpp`). It
 replaced their first faces (0.1.32), which reused the device chain's small knobs and grey panels and were hard to read. These devices are Sonora's own, with no reference device, so AGENTS rule 7
 does not apply.
 
 ## Look
 
-Graphite panels on near black (`pro::kBackground`, `kPanel`, `kWell`), one accent per device (Stutter pink, Sweep amber,
-Phase Align cyan, Correlation violet), big knobs with the value inside, the label under it and a caption that says what the value means
+Graphite panels on near black (`pro::kBackground`, `kPanel`, `kWell`), one accent per device (Phrase teal, Stutter pink, Sweep amber,
+Phase Align cyan, Correlation violet, Seraph gold `0xFFE7C26B`), big knobs with the value inside, the label under it and a caption that says what the value means
 ("4.9x slower", "overlap x1.9", "rises"), segmented choices, pads, a help line at the bottom that explains the control
 under the pointer (or, idle, what the device is doing), and a wordmark ("stutter." with "sonora" and the version).
 
@@ -32,6 +32,24 @@ app saves them from the running device (`captureDeviceState`), the VST3s report 
 
 ## Verification
 
-`sonora_tests "stutter plugin"`, `"sweep plugin"`, `"phase align plugin"`, `"correlation plugin"` drive the VST3 windows with real clicks and
+`sonora_tests "stutter plugin"`, `"sweep plugin"`, `"phase align plugin"`, `"correlation plugin"`, `"seraph plugin"` drive the VST3 windows with real clicks and
 drags at design-grid points (`tests/ProFaceTestKit.h`); the chain tests render the compact faces and the window views.
 PNGs land in the test temp folder (`sonora_*_plugin.png`, `*_chain.png`): look at them after any change.
+
+## Face parts (PLG-25a)
+
+`src/ui/views/ProFaceParts.h`: `StepLane` (Toggle / Bar / Choice cells with drag-paint and Alt-click reset), `NoteRoll`,
+`PresetBar` (arrows, a category menu drawn in the face, dice) and `ChordStrip` (progression chips, length by edge drag).
+A face owns them as members and places them with `ProFace::addPart(part, rect, tip)` in `build()`; values that are not
+parameters go through `get` / `set` callbacks. Pattern generator faces (Sonora Phrase, Pulse) also get `onToClip` from
+`wireProFace` in the app. `sonora_tests "face parts"` drives them with real mouse events and writes
+`sonora_face_parts_full.png`, `_compact.png` and `_menu.png`.
+
+## Seraph (PLG-27)
+
+`SeraphFace` (1160 x 750 full, 760 x 170 compact; docs/SERAPH.md "Face"). Besides knobs and segments it uses small
+horizontal sliders (an Area that sets the value from x; Alt-click resets) for secondary controls (Hum, Motion, Rate, Ison
+Level and the gate's Length, Smooth, Depth, Swing), and custom areas for the vowel strip, the stalls, the spectrum, the
+phrase, scale and pattern choosers. Its gate lane is a `StepLane` and its preset row a `PresetBar` (PLG-25a). Tests: `sonora_tests "seraph plugin"` and
+`"seraph: the compact face"` (`sonora_seraph_plugin.png`, `sonora_seraph_chain.png`, `sonora_seraph_window.png`,
+`sonora_seraph_site.png`).

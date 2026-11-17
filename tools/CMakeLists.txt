@@ -31,6 +31,10 @@ target_link_libraries(parity_probe PRIVATE sonora_engine)
 add_executable(engine_probe engine_probe/main.cpp)
 target_link_libraries(engine_probe PRIVATE sonora_engine)
 
+# PLG-27: Sonora Seraph demo renders for the owner's ears, its CPU, and a set for engine_probe --profile.
+add_executable(seraph_demo seraph_demo/main.cpp)
+target_link_libraries(seraph_demo PRIVATE sonora_engine)
+
 add_executable(resynth_probe resynth_probe/main.cpp)
 target_link_libraries(resynth_probe PRIVATE sonora_engine)
 

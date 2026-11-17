@@ -171,6 +171,7 @@ private:
 
     class Splitter* splitter_ = nullptr;
     int selectedCategory_ = Projects, selectedItem_ = -1;
+    std::string creditShown_; // PLG-27h: the pack whose credit was shown; its next Download click agrees and downloads
     float scroll_ = 0;
     bool folderMode_ = false, searchFocused_ = false, keyboardFocused_ = false;
     std::string query_;

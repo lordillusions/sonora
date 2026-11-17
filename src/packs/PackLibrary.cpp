@@ -98,7 +98,7 @@ PackLibrary::Result PackLibrary::install(const juce::File& archive, const PackEn
     if (count > kMaxEntries) { result.error = "the archive holds too many files"; return result; }
     const int64_t limit = expected.installedBytes > 0 ? std::min(kMaxUnpackedBytes, expected.installedBytes * 2 + (1 << 20)) : kMaxUnpackedBytes;
     int64_t total = 0;
-    bool hasManifest = false, hasLicence = false;
+    bool hasManifest = false, hasLicence = false, hasAttribution = false;
     std::vector<int> wanted;
     for (int i = 0; i < count; ++i)
     {
@@ -111,9 +111,12 @@ PackLibrary::Result PackLibrary::install(const juce::File& archive, const PackEn
         if (total > limit) { result.error = "the archive unpacks to more than its catalogue size"; return result; }
         hasManifest |= name == "pack.json";
         hasLicence |= name == "LICENSE.txt";
+        hasAttribution |= name == kAttributionFile;
         wanted.push_back(i);
     }
     if (! hasManifest || ! hasLicence) { result.error = "the archive has no pack.json or LICENSE.txt at its top level"; return result; }
+    if (attributionRequired(expected.info.licence) && ! hasAttribution)
+    { result.error = "the archive has no ATTRIBUTION.txt, which its licence (" + expected.info.licence + ") needs"; return result; }
     if (! root_.createDirectory()) { result.error = "cannot create " + root_.getFullPathName().toStdString(); return result; }
 
     const auto stagingRoot = privateFolder().getChildFile("staging");
