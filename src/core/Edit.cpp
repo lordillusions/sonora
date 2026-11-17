@@ -30,6 +30,14 @@ void markAsCopy(Clip& copy, const Song& song, int originalTrack)
     copy.xmlId = -1;
     copy.linkGroup = -1; // TRK-5: only Duplicate as Linked links clips
 }
+// Every clip of a track: Arrangement, Session slots and take lanes.
+template <typename Visit>
+void forEachTrackClip(Track& t, Visit&& visit)
+{
+    for (auto& clip : t.arrangementClips) visit(clip);
+    for (auto& slot : t.slots) if (slot.clip) visit(*slot.clip);
+    for (auto& lane : t.takeLanes) for (auto& clip : lane.clips) visit(clip);
+}
 } // namespace
 
 void EditHistory::perform(Song& song, EditCommand cmd)
@@ -892,8 +900,15 @@ EditCommand removeDevice(const Song& song, int track, int deviceId)
     command.tracks = {track};
     command.devicesChanged = true;
     // The removed device is captured when the command runs (after the engine state was copied into the model), so undo
-    // restores plugin state edited since the set was loaded.
-    struct Removed { Device device; size_t index = 0; };
+    // restores plugin state edited since the set was loaded. UI-91: its automation and clip envelopes go with it, like the
+    // reference (a lane left behind had no control to drive), and come back on undo.
+    struct Removed
+    {
+        Device device;
+        size_t index = 0;
+        std::vector<AutomationEnvelope> automation;            // the track's lanes before the delete
+        std::map<int, std::vector<AutomationEnvelope>> clips;  // clip uid -> its envelopes before the delete
+    };
     const auto removed = std::make_shared<Removed>();
     command.apply = [track, deviceId, removed](Song& s) {
         auto* t = trackAt(s, track);
@@ -902,11 +917,28 @@ EditCommand removeDevice(const Song& song, int track, int deviceId)
         if (it == t->devices.end()) return;
         removed->device = *it;
         removed->index = (size_t) (it - t->devices.begin());
+        const auto ids = deviceTargetIds(*it);
         t->devices.erase(it);
+        const auto targeted = [&ids](const AutomationEnvelope& e) {
+            return e.midiController < 0 && std::find(ids.begin(), ids.end(), e.targetId) != ids.end();
+        };
+        removed->automation = t->automation;
+        std::erase_if(t->automation, targeted);
+        removed->clips.clear();
+        forEachTrackClip(*t, [&](Clip& clip) {
+            if (std::none_of(clip.envelopes.begin(), clip.envelopes.end(), targeted)) return;
+            removed->clips[clip.uid] = clip.envelopes;
+            std::erase_if(clip.envelopes, targeted);
+        });
     };
     command.revert = [track, removed](Song& s) {
-        if (auto* t = trackAt(s, track))
-            t->devices.insert(t->devices.begin() + (std::ptrdiff_t) std::min(removed->index, t->devices.size()), removed->device);
+        auto* t = trackAt(s, track);
+        if (! t) return;
+        t->devices.insert(t->devices.begin() + (std::ptrdiff_t) std::min(removed->index, t->devices.size()), removed->device);
+        t->automation = removed->automation;
+        forEachTrackClip(*t, [&](Clip& clip) {
+            if (const auto saved = removed->clips.find(clip.uid); saved != removed->clips.end()) clip.envelopes = saved->second;
+        });
     };
     return command;
 }

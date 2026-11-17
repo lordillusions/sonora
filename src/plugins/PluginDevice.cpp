@@ -292,6 +292,7 @@ void PluginDevice::setParameter(int index, float value)
     const auto& params = instance_->getParameters();
     if (index >= 0 && index < params.size())
         params[index]->setValue(value); // automation / MIDI: no host round trip
+    if (std::this_thread::get_id() == ownerThread_) panelEdits_.fetch_add(1, std::memory_order_release); // UI-92b
 }
 
 bool PluginDevice::hostParameter(int index, int& id, std::string& name) const

@@ -3,24 +3,24 @@
   <channel>
     <title>Sonora</title>
     <item>
-      <title>Sonora 0.1.46</title>
-      <pubDate>Mon, 16 Nov 2026 20:43:17 GMT</pubDate>
+      <title>Sonora 0.1.47</title>
+      <pubDate>Tue, 17 Nov 2026 05:39:18 GMT</pubDate>
       <link>https://sonoradaw.com/download.html</link>
-      <sparkle:version>0.1.46</sparkle:version>
-      <sparkle:shortVersionString>0.1.46</sparkle:shortVersionString>
-      <description><![CDATA[<p>Sonora 0.1.46. <a href="https://github.com/lordillusions/sonora/releases/tag/v0.1.46">What is new in this version</a>.</p>]]></description>
-      <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.46/Sonora-0.1.46-x86_64.AppImage" length="24099320" type="application/octet-stream" sparkle:os="linux-x64-appimage"
-                 sparkle:edSignature="dITvyYPPamXct5QAX8uBgHX8wfTZYPbkkzleTVNhK+dmbkBIaEbP43pkFOEoNfIdUuDMTRAK63hDqfNLVm3YDA=="/>
+      <sparkle:version>0.1.47</sparkle:version>
+      <sparkle:shortVersionString>0.1.47</sparkle:shortVersionString>
+      <description><![CDATA[<p>Sonora 0.1.47. <a href="https://github.com/lordillusions/sonora/releases/tag/v0.1.47">What is new in this version</a>.</p>]]></description>
+      <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.47/Sonora-0.1.47-x86_64.AppImage" length="24484344" type="application/octet-stream" sparkle:os="linux-x64-appimage"
+                 sparkle:edSignature="yjZGG+J+9CBofAzOl8Ic6WF92JGu2ja96mXJUXoQ5vFzg38CQ11nNg/VfJ63ZBCXJzUT9MYLMfhjmk1oOBAMAg=="/>
     </item>
     <item>
-      <title>Sonora 0.1.46</title>
-      <pubDate>Mon, 16 Nov 2026 20:43:17 GMT</pubDate>
+      <title>Sonora 0.1.47</title>
+      <pubDate>Tue, 17 Nov 2026 05:39:18 GMT</pubDate>
       <link>https://sonoradaw.com/download.html</link>
-      <sparkle:version>0.1.46</sparkle:version>
-      <sparkle:shortVersionString>0.1.46</sparkle:shortVersionString>
-      <description><![CDATA[<p>Sonora 0.1.46. <a href="https://github.com/lordillusions/sonora/releases/tag/v0.1.46">What is new in this version</a>.</p>]]></description>
-      <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.46/sonora_0.1.46_amd64.deb" length="14814756" type="application/octet-stream" sparkle:os="linux-x64-deb"
-                 sparkle:edSignature="7dN+9W755i4dgWZIGSe6p9PTPNEPuRLYtV0svUIDwtet83UzyZpHZ12WAjhlOXSUjHAgBvJu0GXJhnJyruSSBQ=="/>
+      <sparkle:version>0.1.47</sparkle:version>
+      <sparkle:shortVersionString>0.1.47</sparkle:shortVersionString>
+      <description><![CDATA[<p>Sonora 0.1.47. <a href="https://github.com/lordillusions/sonora/releases/tag/v0.1.47">What is new in this version</a>.</p>]]></description>
+      <enclosure url="https://github.com/lordillusions/sonora/releases/download/v0.1.47/sonora_0.1.47_amd64.deb" length="15152012" type="application/octet-stream" sparkle:os="linux-x64-deb"
+                 sparkle:edSignature="oKyErdazKI4x5OdX0Ld0l5Jo+agAfJ4KEDmI11v4e57xkk/ivKzvOJEdJFgZtfbUiprhN106zLblz67cIoswBw=="/>
     </item>
   </channel>
 </rss>

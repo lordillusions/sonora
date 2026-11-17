@@ -1345,3 +1345,49 @@ TEST_CASE("als writer: a device's sidechain (source, tap, Gain, Mix, on) survive
         }
     CHECK(checked == 2);
 }
+
+TEST_CASE("deleting a device takes its automation and clip envelopes along (UI-91); undo brings them back; save reload")
+{
+    auto loaded = io::loadAls(juce::File(SONORA_TEST_FIXTURES).getChildFile("minimal_set.xml"));
+    REQUIRE(loaded); auto& song = *loaded.song;
+    model::EditHistory history;
+    auto& track = song.tracks[0];
+    const auto eq = track.devices[1];
+    REQUIRE(eq.type == "Eq8"); REQUIRE(eq.enabledTargetId == 105);
+    auto targets = [](const model::Track& t) { std::set<int> ids; for (const auto& e : t.automation) ids.insert(e.targetId); return ids; };
+    REQUIRE(targets(track).count(104)); REQUIRE(targets(track).count(105)); REQUIRE(targets(track).count(100));
+    // A clip envelope on the EQ's gain, and one on the mixer volume that must stay.
+    model::Clip* clip = ! track.arrangementClips.empty() ? &track.arrangementClips.front() : nullptr;
+    for (auto& slot : track.slots) if (clip == nullptr && slot.clip) clip = &*slot.clip;
+    REQUIRE(clip != nullptr);
+    const int clipUid = clip->uid;
+    model::AutomationEnvelope gainEnvelope; gainEnvelope.targetId = 104; gainEnvelope.points = {{-63072000.0, 0.0}, {1.0, 0.5}};
+    model::AutomationEnvelope volumeEnvelope; volumeEnvelope.targetId = 100; volumeEnvelope.points = {{-63072000.0, 0.8}, {1.0, 0.4}};
+    clip->envelopes = {gainEnvelope, volumeEnvelope};
+    auto clipTargets = [&](const model::Song& s) {
+        std::set<int> ids;
+        if (const auto* c = model::findClip(s, 0, clipUid)) for (const auto& e : c->envelopes) ids.insert(e.targetId);
+        for (const auto& slot : s.tracks[0].slots) if (slot.clip && slot.clip->uid == clipUid) for (const auto& e : slot.clip->envelopes) ids.insert(e.targetId);
+        return ids;
+    };
+    REQUIRE(clipTargets(song) == (std::set<int>{100, 104}));
+
+    history.perform(song, model::removeDevice(song, 0, eq.id));
+    CHECK(song.tracks[0].devices.size() == 1);
+    CHECK(! targets(song.tracks[0]).count(104)); CHECK(! targets(song.tracks[0]).count(105));
+    CHECK(targets(song.tracks[0]).count(100)); // the mixer's lane stays
+    CHECK(clipTargets(song) == (std::set<int>{100}));
+
+    juce::TemporaryFile file(".als");
+    auto saved = io::saveAls(song, file.getFile()); REQUIRE(saved.ok);
+    auto read = io::loadAls(file.getFile()); REQUIRE(read);
+    CHECK(! targets(read.song->tracks[0]).count(104)); CHECK(! targets(read.song->tracks[0]).count(105));
+    CHECK(targets(read.song->tracks[0]).count(100));
+
+    REQUIRE(history.undo(song));
+    REQUIRE(song.tracks[0].devices.size() == 2); CHECK(song.tracks[0].devices[1].id == eq.id);
+    CHECK(targets(song.tracks[0]).count(104)); CHECK(targets(song.tracks[0]).count(105));
+    CHECK(clipTargets(song) == (std::set<int>{100, 104}));
+    REQUIRE(history.redo(song));
+    CHECK(! targets(song.tracks[0]).count(104)); CHECK(clipTargets(song) == (std::set<int>{100}));
+}

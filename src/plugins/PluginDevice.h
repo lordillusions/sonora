@@ -10,6 +10,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 namespace sonora::plugins
@@ -56,6 +57,9 @@ public:
     void setParameter(int index, float value) override;
     bool hostParameter(int index, int& id, std::string& name) const override;
     uint32_t handEditTotal() const override { return handTotal_.load(std::memory_order_acquire); }
+    // UI-92b: setParameter calls made on the thread that created the device (the message thread: Sonora's own plug-in
+    // panel, value prompts). Automation and MIDI play on other threads and do not count.
+    uint32_t panelEdits() const { return panelEdits_.load(std::memory_order_acquire); }
     HandEdit handEdit(int index) const override;
     bool takeHandEdit(int index) override;
 
@@ -117,6 +121,8 @@ private:
     std::vector<std::string> names_; // full names
     std::atomic<uint32_t> handTotal_{0};
     std::atomic<uint64_t> stateChanges_{0};
+    std::atomic<uint32_t> panelEdits_{0};
+    std::thread::id ownerThread_ = std::this_thread::get_id();
 };
 
 } // namespace sonora::plugins

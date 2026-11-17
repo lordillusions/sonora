@@ -383,6 +383,7 @@ private:
     void dropBrowserItem(const ui::BrowserDrag&, int track, double beat, int scene);
     void dropTrackDevice(const ui::BrowserDrag&, int track); // UI-7c: a device dragged to a track (Opt copies)
     void runDeviceDragAutotest(); // SONORA_DEVICE_DRAG_AUTOTEST (UI-7c verification without driving the UI)
+    void runAutomationAutotest(); // SONORA_AUTOMATION_AUTOTEST (UI-91/UI-92: edited state and device delete)
     void runSampleDropAutotest(); // SONORA_SAMPLE_DROP_AUTOTEST (DEV-4c: a sample loaded into a Simpler, then saved)
     // LIB-2 (AppDevicePresets.cpp): the reference library's device presets in the Browser; loading one onto a track
     // (replaceIndex >= 0: replaces that top-level device in place when the preset is of its type).
@@ -441,6 +442,20 @@ private:
     // autosave is pending, so the autosave itself rarely has one left to read.
     struct PluginCapture { uint64_t serial = 0; double at = 0; };
     std::map<const plugins::PluginDevice*, PluginCapture> autosavePlugins_; // stateSerial() and time of each one's last read
+    // UI-92b (AppHandEdits.cpp): controls moved by hand mark the set edited. watchHandEdits runs from the timer.
+    void watchHandEdits();
+    void markHandEdited();
+    void resetHandEdits(); // a set was loaded or saved
+    void runHandEditAutotest(); // SONORA_HAND_EDIT_AUTOTEST=<seconds>[,beat]
+    struct HandPluginSeen { uint32_t window = 0, panel = 0; };
+    bool handEdited_ = false;
+    double handCheckedAt_ = 0;
+    const engine::EngineGraph* handGraph_ = nullptr;
+    const model::Song* handSong_ = nullptr;
+    int handVersion_ = -1;
+    uint64_t handFingerprint_ = 0;
+    engine::HandEditPlan handPlan_;
+    std::map<const plugins::PluginDevice*, HandPluginSeen> handPlugins_;
     bool pluginNeedsCapture(plugins::PluginDevice& plugin, double now);
     void forEachHostedPlugin(const std::function<bool(model::Device&, plugins::PluginDevice&)>& fn); // false stops
     void refreshOnePluginState();

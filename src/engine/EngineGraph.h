@@ -23,6 +23,8 @@
 #include <memory>
 #include <vector>
 
+namespace sonora::devices { class RackProcessor; }
+
 namespace sonora::engine
 {
 
@@ -233,6 +235,32 @@ struct GraphBuildResult
 // is soloed, it or one of its parent groups is soloed, or (a group) one of its members is. A TRK-1 deactivated track
 // never plays. Returns and main are not affected by solo here. Audio thread safe.
 bool isTrackAudible(const EngineGraph& graph, const ControlBank& controls, const TrackNode& node, bool anySolo);
+// UI-92b: a fingerprint of the values a person can move by hand (mixer, native devices, rack chain mixers), leaving out
+// everything automation, clip envelopes or rack macros drive. It changes when someone moves a control; the app compares
+// successive values while nothing was edited through the history. planHandEdits works out what to read (once per graph
+// and song version); handFingerprint(graph, plan) only reads atomics. Message thread; the plan holds the graph's pointers.
+struct HandEditPlan
+{
+    struct Mixer
+    {
+        int controlIndex = -1;
+        bool volume = true, pan = true, active = true;
+        std::vector<int> sends;
+    };
+    struct Device
+    {
+        const devices::DeviceProcessor* processor = nullptr;
+        std::vector<int> params; // the parameter indices nothing drives
+        bool bypass = true;
+        const devices::RackProcessor* rack = nullptr; // its chain mixers
+    };
+    std::vector<Mixer> mixers;
+    std::vector<Device> devices;
+};
+HandEditPlan planHandEdits(const EngineGraph& graph, const model::Song& song);
+uint64_t handFingerprint(const EngineGraph& graph, const HandEditPlan& plan);
+uint64_t handFingerprint(const EngineGraph& graph, const model::Song& song); // plan + fingerprint (tests)
+
 // UI-73: a track left out by solo inside a group that is itself left out still feeds that group, so the group's meter
 // shows its level (grey, like any other left-out track) while the group, not the member, is what goes silent.
 // The mix is the same as muting each member. Audio thread safe.

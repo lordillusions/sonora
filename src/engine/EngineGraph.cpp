@@ -4,8 +4,11 @@
 
 #include "engine/SampleCache.h"
 #include "io/als/AlsReader.h"
+#include "devices/RackProcessor.h"
 
 #include <algorithm>
+#include <cstring>
+#include <functional>
 #include <map>
 
 namespace sonora::engine
@@ -350,6 +353,133 @@ void initControls(TrackControls& c, const model::Track& t)
         c.sends[i].store(i < t.mixer.sends.size() ? (float) t.mixer.sends[i] : 0.0f);
 }
 } // namespace
+
+// UI-92b: what a person can move by hand in the running set (a fader, a knob on a native device, a rack's chain mixer, a
+// MIDI-mapped control), so the app can tell that the set changed without an edit command. Values that play back on their
+// own are left out: anything a track or clip envelope drives, and rack parameters a macro drives. Hosted plug-ins are left
+// out too (some expose meters as parameters); the app watches their own edit counters.
+HandEditPlan planHandEdits(const EngineGraph& graph, const model::Song& song)
+{
+    HandEditPlan plan;
+    using Kind = AutomationBinding::Kind;
+    struct Driven
+    {
+        Kind kind;
+        int index;
+        const devices::DeviceProcessor* device;
+    };
+    const auto trackFor = [&song](size_t node) -> const model::Track* {
+        if (node < song.tracks.size()) return &song.tracks[node];
+        node -= song.tracks.size();
+        if (node < song.returns.size()) return &song.returns[node];
+        return node == song.returns.size() ? &song.main : nullptr;
+    };
+    std::function<void(const devices::DeviceProcessor&, const std::vector<Driven>&)> device;
+    device = [&](const devices::DeviceProcessor& proc, const std::vector<Driven>& driven) {
+        if (proc.isHostedPlugin()) return;
+        const auto isDriven = [&](Kind kind, int index) {
+            return std::any_of(driven.begin(), driven.end(),
+                               [&](const Driven& d) { return d.device == &proc && d.kind == kind && d.index == index; });
+        };
+        HandEditPlan::Device entry;
+        entry.processor = &proc;
+        entry.bypass = ! isDriven(Kind::DeviceOn, 0);
+        entry.rack = dynamic_cast<const devices::RackProcessor*>(&proc);
+        auto inner = driven;
+        if (entry.rack != nullptr)
+            for (const auto& link : entry.rack->macroLinks()) inner.push_back({Kind::DeviceParam, link.paramIndex, link.target});
+        for (int i = 0; i < (int) proc.parameters().size(); ++i)
+            if (! isDriven(Kind::DeviceParam, i)) entry.params.push_back(i);
+        const auto* rack = entry.rack;
+        plan.devices.push_back(std::move(entry));
+        if (rack == nullptr) return;
+        for (const auto& chain : rack->chains())
+            for (const auto* child : chain.processorForModelDevice)
+                if (child != nullptr) device(*child, inner);
+    };
+    for (size_t n = 0; n < graph.nodes.size(); ++n)
+    {
+        const auto& node = graph.nodes[n];
+        const auto* track = trackFor(n);
+        if (track == nullptr) continue;
+        // Targets an envelope of the track or of any of its clips drives.
+        std::vector<int> ids;
+        const auto collect = [&ids](const std::vector<model::AutomationEnvelope>& envelopes) {
+            for (const auto& e : envelopes)
+                if (e.targetId >= 0 && ! e.points.empty() && ! model::isMidiController(e.midiController)) ids.push_back(e.targetId);
+        };
+        collect(track->automation);
+        for (const auto& clip : track->arrangementClips) collect(clip.envelopes);
+        for (const auto& slot : track->slots) if (slot.clip) collect(slot.clip->envelopes);
+        for (const auto& lane : track->takeLanes) for (const auto& clip : lane.clips) collect(clip.envelopes);
+        std::vector<Driven> driven;
+        if (! ids.empty())
+        {
+            const auto targets = collectTargets(node, *track);
+            for (int id : ids)
+                if (const auto it = targets.find(id); it != targets.end()) driven.push_back({it->second.kind, it->second.index, it->second.device});
+        }
+        const auto drives = [&driven](Kind kind, int index) {
+            return std::any_of(driven.begin(), driven.end(), [&](const Driven& d) { return d.device == nullptr && d.kind == kind && d.index == index; });
+        };
+        if (graph.controls && node.controlIndex >= 0 && (size_t) node.controlIndex < graph.controls->size())
+        {
+            HandEditPlan::Mixer mixer;
+            mixer.controlIndex = node.controlIndex;
+            mixer.volume = ! drives(Kind::Volume, 0);
+            mixer.pan = ! drives(Kind::Pan, 0);
+            mixer.active = ! drives(Kind::Active, 0);
+            for (int s = 0; s < TrackControls::kMaxSends; ++s) if (! drives(Kind::Send, s)) mixer.sends.push_back(s);
+            plan.mixers.push_back(std::move(mixer));
+        }
+        for (const auto* proc : node.processorForModelDevice)
+            if (proc != nullptr) device(*proc, driven);
+    }
+    return plan;
+}
+
+uint64_t handFingerprint(const EngineGraph& graph, const HandEditPlan& plan)
+{
+    uint64_t hash = 1469598103934665603ull;
+    const auto mix = [&hash](uint64_t value) { hash = (hash ^ value) * 1099511628211ull; };
+    const auto mixFloat = [&mix](float value) {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        mix(bits);
+    };
+    if (graph.controls)
+        for (const auto& m : plan.mixers)
+        {
+            if (m.controlIndex < 0 || (size_t) m.controlIndex >= graph.controls->size()) continue;
+            const auto& c = (*graph.controls)[(size_t) m.controlIndex];
+            mix((uint64_t) m.controlIndex);
+            if (m.volume) mixFloat(c.volume.load(std::memory_order_relaxed));
+            if (m.pan) mixFloat(c.pan.load(std::memory_order_relaxed));
+            if (m.active) mix(c.active.load(std::memory_order_relaxed) ? 7u : 8u);
+            mix(c.solo.load(std::memory_order_relaxed) ? 9u : 10u);
+            for (int s : m.sends) mixFloat(c.sends[(size_t) s].load(std::memory_order_relaxed));
+        }
+    for (const auto& d : plan.devices)
+    {
+        if (d.bypass) mix(d.processor->isBypassed() ? 1u : 2u);
+        for (int i : d.params) mixFloat(d.processor->getParameter(i));
+        if (d.rack != nullptr)
+            for (size_t c = 0; c < d.rack->chains().size(); ++c)
+                if (const auto* chainMix = d.rack->chainMix((int) c))
+                {
+                    mixFloat(chainMix->volume.load(std::memory_order_relaxed));
+                    mixFloat(chainMix->pan.load(std::memory_order_relaxed));
+                    mix(chainMix->active.load(std::memory_order_relaxed) ? 3u : 4u);
+                    mix(chainMix->solo.load(std::memory_order_relaxed) ? 5u : 6u);
+                }
+    }
+    return hash;
+}
+
+uint64_t handFingerprint(const EngineGraph& graph, const model::Song& song)
+{
+    return handFingerprint(graph, planHandEdits(graph, song));
+}
 
 namespace
 {

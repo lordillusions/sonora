@@ -643,6 +643,7 @@ target_sources(Sonora PRIVATE
     app/AppStems.cpp
     app/AppRecovery.cpp
     app/AppPrivacy.cpp
+    app/AppHandEdits.cpp
 )
 if (SONORA_UPDATE_ALLOW_LOCAL_HTTP)
     set(_sonoraLocalTest 1)

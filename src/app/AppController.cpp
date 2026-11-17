@@ -615,6 +615,7 @@ void AppController::clearRecentSets(bool unavailableOnly)
 void AppController::timerCallback()
 {
     finishRecording();
+    watchHandEdits(); // UI-92b, before the autosave looks at the edited state
     autosaveTick();
     if (ui_.recordingRequested && ! inputPermissionPending_) ensureAudioInputs();
     ui_.cpuUsage = engine_.cpuUsage();
@@ -912,6 +913,7 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
         song_->midiClipTemplate = std::make_shared<const std::string>(io::midiClipTemplate());
     history_.clear();
     history_.markSaved();
+    resetHandEdits();
     ui_.documentDirty = false;
     if (! song_->patchSourcePath.empty())
     {
@@ -969,6 +971,8 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     runAutosaveAutotest();
     runPlayAutotest();
     runDeviceDragAutotest();
+    runAutomationAutotest();
+    runHandEditAutotest();
     runSampleDropAutotest();
     runPresetAutotest();
 }
@@ -1357,7 +1361,7 @@ void AppController::afterEdit(const std::vector<int>& tracks, bool songLevel, bo
         ui_.selectedClipTrack = ui_.selectedClipUid = ui_.selectedClipScene = ui_.selectedTakeLane = -1;
     if (ui_.selectedTakeLane >= 0 && ! model::findTakeLane(*song_, ui_.selectedClipTrack, ui_.selectedTakeLane))
         ui_.selectedTakeLane = -1;
-    ui_.documentDirty = history_.isDirty();
+    ui_.documentDirty = history_.isDirty() || handEdited_; // UI-92b: an undo does not take back a hand move
     updateWindowTitle();
     if (ui_.modelChanged)
         ui_.modelChanged();
@@ -2407,6 +2411,7 @@ bool AppController::writeSet(const juce::File& destination, const io::AlsSaveOpt
         song_->patchSourcePath.clear(); // a recovered set now lives in its own file (PRJ-4)
         io::refreshClipIdentities(*song_);
         history_.markSaved();
+        resetHandEdits();
         ui_.documentDirty = false;
         recoveryDocumentSaved();
         std::string text = "Saved " + destination.getFileName().toStdString() + " ("
@@ -3438,6 +3443,65 @@ void AppController::runDeviceDragAutotest()
         }
         saveFile();
         logf("device drag: saved, status \"%s\"", ui_.statusText.c_str());
+    });
+}
+
+// SONORA_AUTOMATION_AUTOTEST=1 (UI-91/UI-92): 4 s after the set loads, adds a breakpoint to the first automation lane
+// through the same applyEdit the lanes use and logs whether the set counts as edited, then deletes the first device that
+// has automation, logs what is left of its lanes, undoes it and quits without saving. Use a copy of a set.
+void AppController::runAutomationAutotest()
+{
+    if (juce::SystemStats::getEnvironmentVariable("SONORA_AUTOMATION_AUTOTEST", {}).isEmpty() || ! song_) return;
+    const std::weak_ptr<bool> alive = alive_;
+    juce::Timer::callAfterDelay(4000, [this, alive] {
+        if (alive.expired() || ! song_) return;
+        auto state = [this](const char* when) {
+            logf("automation autotest: %s: edited %s, history %s, autosave pending %s", when, ui_.documentDirty ? "yes" : "no",
+                 history_.isDirty() ? "dirty" : "saved", autosavePending() ? "yes" : "no");
+        };
+        state("loaded");
+        const int count = (int) (song_->tracks.size() + song_->returns.size() + 1);
+        for (int t = 0; t < count; ++t)
+        {
+            const auto* track = model::trackAt(*song_, t);
+            if (track == nullptr || track->automation.empty()) continue;
+            auto envelope = track->automation.front();
+            const double last = envelope.points.empty() ? 0.0 : std::max(0.0, envelope.points.back().time);
+            envelope.points.push_back({last + 4.0, envelope.points.empty() ? 0.0 : envelope.points.back().value});
+            const auto result = applyEdit(model::setAutomation(*song_, t, envelope));
+            logf("automation autotest: added a breakpoint to target %d on \"%s\": %s", envelope.targetId, track->name.c_str(),
+                 result.ok ? "applied" : result.message.c_str());
+            state("after the breakpoint");
+            break;
+        }
+        for (int t = 0; t < count; ++t)
+        {
+            const auto* track = model::trackAt(*song_, t);
+            if (track == nullptr) continue;
+            for (const auto& device : track->devices)
+            {
+                const auto ids = model::deviceTargetIds(device);
+                const auto lanes = [&] {
+                    int n = 0;
+                    if (const auto* now = model::trackAt(*song_, t))
+                        for (const auto& e : now->automation) n += std::find(ids.begin(), ids.end(), e.targetId) != ids.end();
+                    return n;
+                };
+                const int before = lanes();
+                if (before == 0) continue;
+                const auto name = device.displayName, trackName = track->name;
+                const int id = device.id;
+                const auto result = applyEdit(model::removeDevice(*song_, t, id)); // `device` and `track` are stale after this
+                logf("automation autotest: deleted \"%s\" (%d lanes) on \"%s\": %s, %d of its lanes left", name.c_str(), before,
+                     trackName.c_str(), result.ok ? "applied" : result.message.c_str(), lanes());
+                undo();
+                logf("automation autotest: undo: %d of its lanes back", lanes());
+                t = count;
+                break;
+            }
+        }
+        ui_.documentDirty = false; // a verification run never asks to save
+        juce::JUCEApplicationBase::quit();
     });
 }
 
