@@ -441,7 +441,8 @@ TEST_CASE("seraph: the Seraph Voices pack: its singers on the face, Real Choir p
         s.packsRoot = root.getFullPathName().toStdString();
         s.applyPreset(indexOf("Recorded Men"));
         CHECK(s.realVoices().size() == 2);
-        for (const auto& v : s.realVoices()) CHECK(v->path.find("/Male 1/") != std::string::npos);
+        for (const auto& v : s.realVoices()) // the folder name, not a "/" search: Windows paths use "\\"
+            CHECK(juce::File(juce::String::fromUTF8(v->path.c_str())).getParentDirectory().getFileName() == "Male 1");
         CHECK(s.packVoicesLoaded());
         CHECK(s.matchingPreset() == indexOf("Recorded Men"));
         s.applyPreset(indexOf("Recorded Choir"));
