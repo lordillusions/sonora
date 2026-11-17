@@ -13,6 +13,7 @@
 #include <map>
 #include <set>
 #include <random>
+#include <chrono>
 #include <thread>
 
 using namespace sonora;
@@ -479,7 +480,9 @@ TEST_CASE("pattern slot: the audio side takes the newest published copy, wait-fr
     });
     bool whole = true;
     int seen = 0, last = 0;
-    for (int i = 0; i < 200000; ++i)
+    // At least 200000 looks and 100 copies (a slow CI runner may not have started the writer yet), 10 s at most.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    for (int i = 0; (i < 200000 || seen < 100) && std::chrono::steady_clock::now() < deadline; ++i)
         if (slot.update())
         {
             const auto& v = slot.live().values;
