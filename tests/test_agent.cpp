@@ -63,7 +63,7 @@ TEST_CASE("agent: Responses framing preserves encrypted continuation and maps to
 {
     agent::Conversation c(agent::preset("openai"), "Set tempo to 128");
     const auto request = c.request(); CHECK(! static_cast<bool>(request["store"])); CHECK(request["input"][0]["role"].toString() == "user");
-    REQUIRE(request["tools"].isArray()); CHECK(request["tools"].size() == 11);
+    REQUIRE(request["tools"].isArray()); CHECK(request["tools"].size() == 29);
     CHECK(! juce::JSON::toString(request["tools"]).contains("$ref"));
     const auto response = object({{"status", "completed"}, {"output", juce::Array<juce::var>{
         object({{"type", "reasoning"}, {"encrypted_content", "opaque-state"}}),

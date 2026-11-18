@@ -13,11 +13,12 @@ installation. It adds a new MIDI track at bar 1, keeps the current tempo, create
 and prepares an original seven-voice supersaw configuration using the plugin's initialized Default Shapes wavetable.
 No vendor preset or wavetable data is copied into the repository. This is the real hosted plugin.
 
-Both external MCP agents and the optional native LLM reason over the same typed tools. MCP exposes general MIDI note add/update/delete/replace in Arrangement, Session and takes, plus exact hosted VST3
-parameter batches with undo. Native devices and rack controls use those same tools, with actual unit/range/choice metadata.
-Agents can discover and insert implemented native devices/scanned VST3 plugins on existing tracks, or remove devices with
-captured-live undo. Parameter commits rebuild the affected processor and return a new device ID. Unexposed/nested controls,
-media/content authoring and broader track operations remain incremental work; inspect the tool descriptions.
+Both external MCP agents and the optional native LLM reason over the same typed tools (31 in MCP 0.6, 29 in the native
+adapter). The surface covers the whole project: song settings, creating/grouping/moving/deleting tracks, clip properties,
+splits and regions, take lanes, automation (tracks, returns, main and tempo), MIDI notes, locators, native and plug-in devices
+(VST3, VST2, Audio Units) on tracks, returns and main, the live mixer, transport, Session launching, recording, in-place save,
+plug-in scan, save a copy, audio export, view control, plug-in editor windows, clip/track media jobs (freeze, bounce, reverse, crop, warp, audio to MIDI, strip silence) and audio import. Undoable edits come back with an undo token; live actions say they are not undoable. Save-as, open/new project, scenes, stem separation and Resynth are not exposed: CONTROL_API.md "Not exposed" lists them with the reasons.
+Inspect the tool descriptions, they state units, ID sources and what is asynchronous.
 
 ## Connect an MCP client
 
@@ -85,8 +86,10 @@ inspect it without edits. An empty instance list means no enabled project was di
 
 ## Verification
 
+The real app is exercised by `node packages/mcp-server/app-smoke.mjs` (Debug build, disposable set; see CONTROL_API.md "Testing the app hooks").
+
 ```bash
-./build/tests/sonora_tests 'control:'
+./build/tests/sonora_tests 'control'                  # includes "control coverage" (AGT-7e)
 ./build/tests/sonora_tests 'agent:'
 ./build/tools/control_probe
 ./build/tools/control_probe --vital                    # second-vendor generic VST3 check
@@ -117,7 +120,7 @@ Authored automation is rejected. Arbitrary GUI-only controls/preset dialogs are 
 
 The offline probe and MCP integration test save/reload their own edited disposable projects and verify note data and
 real Serum parameter values, including undo/redo. The optional `--vital` probe separately verifies generic
-Vital 1.5.5 Volume control, save/reload and undo/redo (requires the scanned plugin). Save/export commands are not exposed to external clients yet.
+Vital 1.5.5 Volume control, save/reload and undo/redo (requires the scanned plugin). `sonora_project_save` saves in place, `sonora_project_save_copy` and `sonora_project_export_audio` write new files; save-as is not exposed.
 Restart/reload the stdio bridge after updating it and open the rebuilt app to load the new native service.
 
 ## Native controls and device insertion

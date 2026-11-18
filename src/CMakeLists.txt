@@ -223,7 +223,7 @@ set_target_properties(sonora_plugin_scanner PROPERTIES RUNTIME_OUTPUT_DIRECTORY 
 add_dependencies(sonora_engine sonora_plugin_scanner)
 
 # ------------------------------------------------------------------ ui
-add_library(sonora_control STATIC control/ControlService.cpp control/DeviceControl.cpp control/SerumLead.cpp control/HostedParameters.cpp)
+add_library(sonora_control STATIC control/ControlService.cpp control/Inspect.cpp control/EditCommands.cpp control/LiveActions.cpp control/DeviceControl.cpp control/SerumLead.cpp control/HostedParameters.cpp)
 if(WIN32)
     target_sources(sonora_control PRIVATE control/LocalEndpointUnsupported.cpp)
 else()

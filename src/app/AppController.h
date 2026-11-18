@@ -205,6 +205,13 @@ private:
 
     void initialiseControl();
     control::State controlState();
+    control::ApplyResult controlSaveInPlace(juce::var& receipt); // AGT-7e: project.save without a dialog
+    io::AlsSaveResult writeCopy(const juce::File& destination);  // Save a Copy: the document keeps its path and saved state
+    // AGT-7e: what status.get reports of the last export and the last media job started through the control API.
+    struct ControlExport { std::string phase = "idle", error; std::vector<std::string> files; } controlExport_;
+    struct ControlMedia { bool started = false; std::string action; int version = 0; juce::int64 startedMs = 0; } controlMedia_;
+    juce::var controlMediaStatus();
+    void installControlActions(control::Backend& backend);
     std::unique_ptr<control::ControlService> control_;
     control::LocalEndpoint controlEndpoint_;
     std::string controlDocumentId_;
@@ -427,6 +434,7 @@ private:
     void recoveryDocumentSaved();     // writeSet succeeded: the document's copies go
     void openRecovered(io::recovery::Entry entry);
     void runPlayAutotest();           // SONORA_PLAY_AUTOTEST=<seconds>[,beat]: play, log engine load, quit
+    void runControlAutotest();        // Debug builds: SONORA_CONTROL_AUTOTEST=1 grants local control once the set is installed
     bool playAutotestDone_ = false;
     void runAutosaveAutotest();       // SONORA_AUTOSAVE_AUTOTEST=<bpm>: a real edit once a set is open (verification)
     io::recovery::Store recovery_{juce::File()};

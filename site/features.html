@@ -106,10 +106,10 @@
         <ul>
           <li><strong>Built-in assistant</strong> with OpenAI, Anthropic, Gemini, DeepSeek, GLM, OpenRouter or a custom compatible endpoint. You pay your provider directly; the key is stored in the macOS Keychain.</li>
           <li><strong>MCP control:</strong> Claude, Codex and other MCP clients attach to one open project, after you allow it.</li>
-          <li><strong>What they can do:</strong> inspect the project, add, edit and delete MIDI notes, insert and remove devices, and change native, rack and VST3 parameters.</li>
-          <li><strong>Guard rails:</strong> every change is checked against the current project, reported with a result, and can be undone. Access ends when you switch projects or quit.</li>
+          <li><strong>What they can do:</strong> create and arrange tracks, write MIDI and automation, edit clips, insert native, VST3, VST2 and Audio Unit devices and change their parameters, mix, play, launch clips, record, save and export.</li>
+          <li><strong>Guard rails:</strong> every change is checked against the current project and reported with a result. Edits can be undone; mixer and transport moves report the values they replaced. Saving a copy and exporting never overwrite a file. Access ends when you switch projects or quit.</li>
         </ul>
-        <p class="small faint">Connecting an MCP client is a developer setup for now (Node.js and the bridge from the repository). Export, recording and some track operations aren't exposed to agents yet.</p>
+        <p class="small faint">Connecting an MCP client is a developer setup for now (Node.js and the bridge from the repository). Scene editing, stem separation and Resynth aren't exposed to agents yet.</p>
       </div>
       <figure class="shot tall"><img src="assets/img/assistant.webp" width="840" height="1560" alt="Agent Control with a configured assistant, a prompt box, Run and Undo agent edit." loading="lazy"></figure>
     </div>

@@ -146,8 +146,11 @@ Sonora is an open-source (AGPL-3.0) digital audio workstation for macOS. This pa
   it on explicitly.
 - Optional built-in chat, using your own API key for OpenAI, Anthropic, Google Gemini, DeepSeek, Z.ai GLM, OpenRouter
   or any OpenAI-compatible endpoint. Keys are stored in the macOS Keychain.
-- Agents can read the project and edit MIDI notes. They can also change native-device and VST3 parameters, and add
-  or remove devices. Every change can be undone.
+- Agents can read the project, create and arrange tracks, edit clips and MIDI notes, write automation, add, move and
+  remove native, VST3, VST2 and Audio Unit devices and change their parameters. Every edit can be undone.
+- Agents can also mix (volume, pan, mute, solo, sends), play, launch clips, record, save, save a copy and export
+  audio. These report the values they replaced; saving a copy and exporting never overwrite a file.
+- Not exposed to agents yet: scene editing, stem separation and Resynth.
 
 ## Stem separation & audio-to-MIDI
 

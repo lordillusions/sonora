@@ -163,6 +163,32 @@ TEST_CASE("control: native normalized values use declared linear ranges and rack
     REQUIRE(static_cast<bool>(removed["ok"])); REQUIRE(static_cast<bool>(h.undo(removed)["ok"]));
     CHECK_NEAR(h.song->tracks[0].devices[0].chains[0].devices[0].param("Gain", -1), .77, 1e-6);
 }
+TEST_CASE("control: a native device nested in a rack is read by its own ID and written through the isolated rack")
+{
+    DeviceHarness h;
+    auto rack = devices::nativeDeviceModel("AudioEffectGroupDevice"); model::Device::Chain chain;
+    chain.devices.push_back(devices::nativeDeviceModel("StereoGain")); rack.chains.push_back(chain);
+    model::allocateDeviceIds(*h.song, rack); h.song->tracks[0].devices = {rack}; h.engine.loadSong(*h.song);
+    const int childId = rack.chains[0].devices[0].id; REQUIRE(childId >= 0);
+    const auto read = h.parameters(childId); REQUIRE(static_cast<bool>(read["ok"])); bool hasGain = false;
+    for (int i = 0; i < read["data"].size(); ++i) hasGain |= read["data"][i]["parameterId"].toString() == "Gain";
+    CHECK(hasGain);
+    const auto gain = [](double value) { return juce::Array<juce::var>{object({{"parameterId", "Gain"}, {"name", "Gain"}, {"value", value}})}; };
+    const auto written = h.set(childId, gain(.6)); REQUIRE(static_cast<bool>(written["ok"]));
+    CHECK(static_cast<int>(written["data"]["nestedDeviceId"]) == childId); CHECK(static_cast<int>(written["data"]["previousDeviceId"]) == rack.id);
+    CHECK(static_cast<int>(written["data"]["deviceId"]) != rack.id);
+    CHECK_NEAR(h.song->tracks[0].devices[0].chains[0].devices[0].param("Gain", -1), .6, 1e-6);
+    auto* liveRack = dynamic_cast<devices::RackProcessor*>(h.processor(written["data"]["deviceId"])); REQUIRE(liveRack);
+    CHECK_NEAR(liveRack->chains()[0].processorForModelDevice[0]->getParameter(0), .6, 1e-6);
+    REQUIRE(static_cast<bool>(h.undo(written)["ok"]));
+    CHECK(h.song->tracks[0].devices[0].id == rack.id);
+    CHECK(! static_cast<bool>(h.set(childId, juce::Array<juce::var>{object({{"parameterId", "Gain"}, {"name", "Wrong"}, {"value", .2}})})["ok"]));
+    model::AutomationEnvelope envelope; envelope.targetId = h.song->tracks[0].devices[0].chains[0].devices[0].parameters[0].automationTargetId; envelope.points = {{0, .5}};
+    h.song->tracks[0].automation = {envelope};
+    CHECK(h.set(childId, gain(.4))["error"]["code"].toString() == "automation_conflict");
+    h.song->tracks[0].automation.clear();
+    CHECK(h.set(987654, gain(.4))["error"]["code"].toString() == "target_replaced");
+}
 TEST_CASE("control: device insertion ordering and removal retain live state across save undo redo")
 {
     DeviceHarness h; auto effect = h.insert("StereoGain"); REQUIRE(static_cast<bool>(effect["ok"]));

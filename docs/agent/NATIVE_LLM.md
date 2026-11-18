@@ -60,12 +60,12 @@ and remove a top-level device with captured-live undo. Native writes accept proc
 VST3 writes accept normalized only. Read descriptors first. Insertion never silently replaces an existing instrument.
 See [CONTROL_API.md](CONTROL_API.md) for units, IDs, automation restrictions and remaining coverage gaps.
 
-The eleven native tools use the same request schema and service as MCP. The native adapter supplies its bound instance/document
+The 29 native tools (the 31 of MCP minus the session/instance tools) use the same request schema and service as MCP. Live-action tools (mixer, transport, launching, recording, device switch, plug-in scan, save) take no revision and are not undoable; the adapter sends them without an idempotency key. The native adapter supplies its bound instance/document
 and fresh per-call idempotency keys; the model must supply the inspected revision for writes. A stale revision/document,
 undo conflict or uncertain outcome stops the run. No automatic HTTP or write retries occur. The interface displays
 actual receipts separately from model prose. Parameter replacement returns a new device ID; subsequent calls must use it.
 
-Native context is bounded: project overview returns up to 32 tracks and four clips per container; focused `trackId`
+Native context is bounded: project overview returns up to 32 tracks and four clips per container (nested rack contents and long lists are left out; a focused `trackId` returns them); focused `trackId`
 inspection pages up to 64 clips per container using `clipOffset`. `trackOffset` pages tracks. The service's existing
 512-summary-per-container ceiling still applies. Parameter reads add case-insensitive `filter`, `offset` and `limit`
 (default 64, maximum 128). Note reads retain the shared paged API. Tool output is capped at 128 KiB; oversized committed
@@ -81,8 +81,7 @@ nonstreaming integration. There is no usage/cost estimator yet; provider charges
 inside a plugin constructor. Already applied edits remain unsaved. Switching projects cancels the run, and every tool
 also checks the original document before executing. **Undo agent edit** refuses to erase intervening manual changes.
 Use normal application history deliberately if that guard refuses. Closing the app cancels outstanding network work.
-The native runtime cannot run arbitrary shell commands or write files. Save, playback, export and audio upload are not
-available model tools; a model reply is not proof of saved state or audible quality.
+The native runtime cannot run arbitrary shell commands or write files. In-place save, save a copy, audio export (new files only, destination must not exist), playback, the mixer, Session launching, view changes, media jobs and audio import (reading named files) are model tools since AGT-7e; save-as and audio upload are not; a model reply is not proof of saved state or audible quality.
 
 ## Credential and data handling
 

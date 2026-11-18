@@ -2,6 +2,7 @@
 #include "control/HostedParameters.h"
 #include "control/SerumLead.h"
 #include "core/DeviceCatalog.h"
+#include "core/Op.h"
 #include "devices/DeviceFactory.h"
 #include "devices/NativeDevice.h"
 #include "devices/RackProcessor.h"
@@ -71,7 +72,22 @@ ApplyResult prepareNative(const model::Device& before, const std::vector<Backend
     auto processor = devices::createDevice(before, context);
     if (! nativeProcessor(processor.get())) return ApplyResult::failure("unsupported_device", "Native processor is unavailable");
     processor->prepare(context.sampleRate, context.blockSize);
-    const auto& infos = processor->parameters();
+    // AGT-7e: a write below the rack is applied to that child's processor; the whole top-level device is captured afterwards.
+    const auto path = writes.empty() ? std::vector<int>{} : writes.front().path;
+    devices::DeviceProcessor* editing = processor.get();
+    const auto descend = [](devices::DeviceProcessor* from, const std::vector<int>& steps) -> devices::DeviceProcessor* {
+        for (size_t i = 0; i + 1 < steps.size() && from; i += 2)
+        {
+            const auto* rack = dynamic_cast<devices::RackProcessor*>(from);
+            if (! rack || static_cast<size_t>(steps[i]) >= rack->chains().size()) return nullptr;
+            const auto& children = rack->chains()[static_cast<size_t>(steps[i])].processorForModelDevice;
+            from = static_cast<size_t>(steps[i + 1]) < children.size() ? children[static_cast<size_t>(steps[i + 1])] : nullptr;
+        }
+        return from;
+    };
+    if (! path.empty()) editing = descend(processor.get(), path);
+    if (! editing || ! nativeProcessor(editing)) return ApplyResult::failure("unsupported_device", "The nested device has no running native processor (unsupported children are skipped by the graph)");
+    const auto& infos = editing->parameters();
     for (const auto& write : writes)
     {
         const auto found = std::find_if(infos.begin(), infos.end(), [&](const auto& p) { return p.id == write.parameterId && p.name == write.name; });
@@ -83,8 +99,8 @@ ApplyResult prepareNative(const model::Device& before, const std::vector<Backend
             return ApplyResult::failure("invalid_parameter_value", "Native value is outside its range or discrete choices");
         if (found->isToggle || ! found->choices.empty()) value = std::round(value);
         const int index = static_cast<int>(found - infos.begin());
-        processor->setParameter(index, static_cast<float>(value));
-        if (std::abs(processor->getParameter(index) - value) > 1e-4 * std::max(1.0, std::abs(value)))
+        editing->setParameter(index, static_cast<float>(value));
+        if (std::abs(editing->getParameter(index) - value) > 1e-4 * std::max(1.0, std::abs(value)))
             return ApplyResult::failure("plugin_write_failed", "Native processor did not retain the requested value");
     }
     after = before; if (const auto captured = captureChecked(after, processor.get()); ! captured.ok) return captured;
@@ -92,7 +108,11 @@ ApplyResult prepareNative(const model::Device& before, const std::vector<Backend
     auto restored = devices::createDevice(after, context);
     if (! nativeProcessor(restored.get())) return ApplyResult::failure("plugin_state_failed", "Native state could not be restored");
     restored->prepare(context.sampleRate, context.blockSize);
-    const auto all = describeDeviceParameters(after, restored.get()); juce::Array<juce::var> selected;
+    auto* restoredEditing = path.empty() ? restored.get() : descend(restored.get(), path);
+    if (! restoredEditing) return ApplyResult::failure("plugin_state_failed", "The nested device did not survive state reload");
+    const model::Device* modelEditing = &after;
+    for (size_t i = 0; i + 1 < path.size(); i += 2) modelEditing = &modelEditing->chains[static_cast<size_t>(path[i])].devices[static_cast<size_t>(path[i + 1])];
+    const auto all = describeDeviceParameters(*modelEditing, restoredEditing); juce::Array<juce::var> selected;
     for (const auto& write : writes)
         for (const auto& p : *all.getArray()) if (p["parameterId"].toString().toStdString() == write.parameterId)
         {
@@ -152,14 +172,43 @@ bool sameDeviceState(const model::Device& a, const model::Device& b)
     }
     return true;
 }
+namespace
+{
+// The live processor of `deviceId` anywhere inside `devices` (top level or nested in rack chains, any depth).
+devices::DeviceProcessor* findProcessor(const std::vector<model::Device>& list, const std::vector<devices::DeviceProcessor*>& processors,
+                                        int deviceId, model::Device& copy, int depth = 0)
+{
+    for (size_t d = 0; d < list.size() && d < processors.size() && depth < 16; ++d)
+    {
+        if (list[d].id == deviceId) { copy = list[d]; return processors[d]; }
+        if (const auto* rack = dynamic_cast<devices::RackProcessor*>(processors[d]))
+            for (size_t c = 0; c < list[d].chains.size() && c < rack->chains().size(); ++c)
+                if (auto* inner = findProcessor(list[d].chains[c].devices, rack->chains()[c].processorForModelDevice, deviceId, copy, depth + 1)) return inner;
+    }
+    return nullptr;
+}
+const model::Track* trackById(const model::Song& song, int id)
+{
+    for (const auto* list : {&song.tracks, &song.returns})
+        for (const auto& track : *list) if (track.id == id) return &track;
+    return model::mainTrackId(song) == id ? &song.main : nullptr;
+}
+const char* formatPrefix(const juce::String& format)
+{
+    return format == "VST3" ? "vst3" : format == "VST" ? "vst2" : format == "AudioUnit" ? "au" : nullptr;
+}
+}
 void configureDeviceBackend(Backend& backend, plugins::PluginHost& host, engine::AudioEngine& engine, std::function<const model::Song*()> song)
 {
+    // Graph nodes follow the control order: tracks, then returns, then main. Nested rack children are found too (read access).
     const auto find = [&engine, song](int trackId, int deviceId, model::Device& copy) -> devices::DeviceProcessor* {
         const auto* s = song(); const auto* graph = engine.latestGraph();
-        for (size_t t = 0; s && graph && t < s->tracks.size() && t < graph->nodes.size(); ++t)
-            if (s->tracks[t].id == trackId)
-                for (size_t d = 0; d < s->tracks[t].devices.size() && d < graph->nodes[t].processorForModelDevice.size(); ++d)
-                    if (s->tracks[t].devices[d].id == deviceId) { copy = s->tracks[t].devices[d]; return graph->nodes[t].processorForModelDevice[d]; }
+        if (! s || ! graph) return nullptr;
+        for (size_t t = 0; t < s->tracks.size() + s->returns.size() + 1 && t < graph->nodes.size(); ++t)
+        {
+            const auto& track = t < s->tracks.size() ? s->tracks[t] : t < s->tracks.size() + s->returns.size() ? s->returns[t - s->tracks.size()] : s->main;
+            if (track.id == trackId) return findProcessor(track.devices, graph->nodes[t].processorForModelDevice, deviceId, copy);
+        }
         return nullptr;
     };
     backend.parameters = [find](int track, int device) { model::Device model; auto* p = find(track, device, model); return describeDeviceParameters(model, p); };
@@ -167,7 +216,7 @@ void configureDeviceBackend(Backend& backend, plugins::PluginHost& host, engine:
         const juce::ScopedLock lock(engine.deviceManager().getAudioCallbackLock());
         auto* p = find(track, device, captured); if (! p) return ApplyResult::failure("target_replaced", "Actual device instance is unavailable");
         const auto original = captured; if (const auto result = captureChecked(captured, p); ! result.ok) return result;
-        if (const auto* s = song()) for (const auto& t : s->tracks) if (t.id == track) preserveAutomatedBases(t, original, captured);
+        if (const auto* s = song()) if (const auto* t = trackById(*s, track)) preserveAutomatedBases(*t, original, captured);
         return ApplyResult::success();
     };
     const auto capture = backend.captureDevice;
@@ -191,9 +240,10 @@ void configureDeviceBackend(Backend& backend, plugins::PluginHost& host, engine:
             list.add(object({{"catalogId", "native:" + std::string(entry.xmlTag)}, {"name", std::string(entry.displayName)}, {"kind", "native"},
                 {"type", std::string(entry.xmlTag)}, {"role", role(entry.role)},
                 {"contentRequired", entry.xmlTag == "OriginalSimpler" || entry.xmlTag == "MultiSampler" || entry.xmlTag == "SonoraImpulse" || entry.xmlTag == "SonoraResynth"}}));
-        for (const auto& entry : host.knownPlugins().getTypes()) if (entry.pluginFormatName == "VST3")
-            list.add(object({{"catalogId", "vst3:" + entry.createIdentifierString()}, {"name", entry.name}, {"kind", "vst3"},
-                {"vendor", entry.manufacturerName}, {"version", entry.version}, {"role", entry.isInstrument ? "instrument" : "audioEffect"}}));
+        for (const auto& entry : host.knownPlugins().getTypes())
+            if (const char* prefix = formatPrefix(entry.pluginFormatName))
+                list.add(object({{"catalogId", juce::String(prefix) + ":" + entry.createIdentifierString()}, {"name", entry.name}, {"kind", prefix},
+                    {"vendor", entry.manufacturerName}, {"version", entry.version}, {"role", entry.isInstrument ? "instrument" : "audioEffect"}}));
         return juce::var(list);
     };
     backend.prepareDevice = [&host, &engine](const std::string& id, model::Device& device, juce::var& report) {
@@ -206,11 +256,32 @@ void configureDeviceBackend(Backend& backend, plugins::PluginHost& host, engine:
         }
         const auto types = host.knownPlugins().getTypes();
         const auto found = std::find_if(types.begin(), types.end(), [&](const auto& d) {
-            return d.pluginFormatName == "VST3" && ("vst3:" + d.createIdentifierString()).toStdString() == id;
+            const char* prefix = formatPrefix(d.pluginFormatName);
+            return prefix && (juce::String(prefix) + ":" + d.createIdentifierString()).toStdString() == id;
         });
-        if (found == types.end()) return ApplyResult::failure("missing_plugin", "Select an exact VST3 catalogId from devices.catalog");
+        if (found == types.end()) return ApplyResult::failure("missing_plugin", "Select an exact catalogId from devices.catalog");
         juce::String error; auto instance = host.formats().createPluginInstance(*found, engine.sampleRate(), engine.blockSize(), error);
         if (! instance) return ApplyResult::failure("plugin_load_failed", error.toStdString());
+        if (found->pluginFormatName != "VST3")
+        {
+            // VST2 and Audio Units: the same model capture as a browser drop (PLG-15); no isolated parameter round-trip exists for them.
+            const bool au = found->pluginFormatName == "AudioUnit";
+            const auto kind = au ? model::DeviceKind::PluginAu : model::DeviceKind::PluginVst2;
+            model::PluginInfo info;
+            info.name = found->name.toStdString(); info.vendor = found->manufacturerName.toStdString(); info.isInstrument = found->isInstrument;
+            if (! au) { info.vst2UniqueId = found->uniqueId; info.path = found->fileOrIdentifier.toStdString(); }
+            else
+            {
+                const auto codes = juce::StringArray::fromTokens(found->fileOrIdentifier.fromLastOccurrenceOf("/", false, false), ",", "");
+                const auto code = [&](int i) { uint32_t v = 0; for (const auto c : codes[i].toStdString().substr(0, 4)) v = v << 8 | static_cast<uint8_t>(c); return v; };
+                if (codes.size() == 3) { info.auType = code(0); info.auSubType = code(1); info.auManufacturer = code(2); }
+            }
+            plugins::capturePluginInfo(*instance, kind, info);
+            device.type = au ? "AuPluginDevice" : "PluginDevice"; device.kind = kind; device.plugin = std::move(info);
+            device.displayName = found->name.toStdString();
+            report = object({{"kind", au ? "au" : "vst2"}, {"role", found->isInstrument ? "instrument" : "audioEffect"}, {"stateVerified", false}});
+            return ApplyResult::success();
+        }
         device.kind = model::DeviceKind::PluginVst3; device.type = "PluginDevice"; device.displayName = found->name.toStdString(); device.plugin.emplace();
         device.plugin->name = found->name.toStdString(); device.plugin->vendor = found->manufacturerName.toStdString(); device.plugin->isInstrument = found->isInstrument;
         plugins::PluginDevice initial(std::move(instance)); initial.prepare(engine.sampleRate(), engine.blockSize());

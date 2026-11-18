@@ -979,6 +979,7 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     runAutosaveAutotest();
     runPlayAutotest();
     runDeviceDragAutotest();
+    runControlAutotest();
     runAutomationAutotest();
     runHandEditAutotest();
     runTrackSwapAutotest();
@@ -2824,6 +2825,20 @@ void AppController::exportMidiClip()
                           });
 }
 
+io::AlsSaveResult AppController::writeCopy(const juce::File& f)
+{
+    syncModelFromEngine();
+    song_->inKey = ui_.scaleHighlight;
+    ui::captureSetView(ui_, *song_);
+    io::AlsSaveOptions options;
+    options.portableReferences = true;
+    options.copyProjectSamples = true;
+    const auto result = io::saveAls(*song_, f, options);
+    ui_.statusText = result.ok ? "Saved a copy as " + f.getFileName().toStdString() : "Could not save a copy: " + result.error;
+    if (ui_.requestRepaint) ui_.requestRepaint();
+    return result;
+}
+
 void AppController::saveCopy()
 {
     if (! song_)
@@ -2839,15 +2854,7 @@ void AppController::saveCopy()
                               if (f == juce::File()) return;
                               if (! f.hasFileExtension("als")) f = f.withFileExtension("als");
                               if (editingDevices_ || syncingModel_) { ui_.statusText = "Wait until the device operation has finished"; return; }
-                              syncModelFromEngine();
-                              song_->inKey = ui_.scaleHighlight;
-                              ui::captureSetView(ui_, *song_);
-                              io::AlsSaveOptions options;
-                              options.portableReferences = true;
-                              options.copyProjectSamples = true;
-                              const auto result = io::saveAls(*song_, f, options);
-                              ui_.statusText = result.ok ? "Saved a copy as " + f.getFileName().toStdString() : "Could not save a copy: " + result.error;
-                              if (ui_.requestRepaint) ui_.requestRepaint();
+                              writeCopy(f);
                           });
 }
 
@@ -3379,6 +3386,17 @@ void AppController::dropTrackDevice(const ui::BrowserDrag& item, int trackIndex)
 // each drop 4 s after the set loads, logs both chains ("[sonora] device drag:"), then saves the set in place. Use a copy.
 // SONORA_PLAY_AUTOTEST=<seconds>[,from-beat]: plays the open set on the real audio device, logs the engine's load once a
 // second (ENG-14e / UI-82 verification without driving the UI) and quits. Nothing is saved.
+// Debug builds only: SONORA_CONTROL_AUTOTEST=1 does what "Allow MCP access to this project" does, once the set passed on the
+// command line has installed, so a script can drive the running app through the MCP bridge. Release builds do not contain it.
+void AppController::runControlAutotest()
+{
+#if JUCE_DEBUG
+    if (juce::SystemStats::getEnvironmentVariable("SONORA_CONTROL_AUTOTEST", {}).isEmpty() || ! song_) return;
+    const auto granted = enableLocalControl(true);
+    logf("control autotest: local control %s%s", granted.ok ? "enabled" : "refused: ", granted.ok ? "" : granted.message.c_str());
+#endif
+}
+
 void AppController::runPlayAutotest()
 {
     const auto spec = juce::SystemStats::getEnvironmentVariable("SONORA_PLAY_AUTOTEST", {});

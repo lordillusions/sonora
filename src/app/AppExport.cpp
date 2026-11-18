@@ -110,12 +110,14 @@ void AppController::beginExport(engine::ExportOptions options)
         return;
     ui_.exportState = {};
     ui_.exportOpen = true;
+    controlExport_ = {"running", {}, {}};
     engine_.transport().stop();
     if (autosavePending()) autosaveNow("before an export"); // PRJ-4: a render is the riskiest edit
     if (! engine_.beginOffline())
     {
         ui_.exportState.phase = ui::ExportState::Phase::Failed;
         ui_.exportState.message = "The audio engine is not ready.";
+        controlExport_ = {"failed", ui_.exportState.message, {}};
         return;
     }
     exporting_ = true;
@@ -163,11 +165,13 @@ void AppController::finishExport(const engine::ExportResult& result)
         st.samplePeakDb = result.samplePeakDb;
         st.seconds = result.seconds;
         ui_.statusText = "Exported " + std::to_string(result.files.size()) + " file(s)";
+        controlExport_ = {"done", {}, st.files};
     }
     else if (result.cancelled)
     {
         ui_.exportOpen = false;
         ui_.statusText = "Export cancelled";
+        controlExport_ = {"cancelled", {}, {}};
     }
     else
     {
@@ -175,6 +179,7 @@ void AppController::finishExport(const engine::ExportResult& result)
         st.message = result.error;
         ui_.statusText = "Export failed: " + result.error;
         logf("export failed: %s", result.error.c_str());
+        controlExport_ = {"failed", result.error, {}};
     }
     if (ui_.modelChanged)
         ui_.modelChanged();

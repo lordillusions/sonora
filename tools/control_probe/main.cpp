@@ -11,6 +11,7 @@
 #include "io/als/AlsReader.h"
 #include "io/als/AlsWriter.h"
 #include "io/als/AlsTemplates.h"
+#include "io/als/SampleDrop.h"
 #include "midi/MidiManager.h"
 #include "plugins/PluginDevice.h"
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -33,22 +34,118 @@ int main(int argc, char** argv)
     const auto folder = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("sonora-control-" + juce::Uuid().toString());
     folder.createDirectory();
     const auto source = folder.getChildFile("Source.als"); std::string error;
+    if (const int at = args.indexOf("--write-set"); at >= 0 && at + 1 < args.size())
+    {
+        // A disposable fresh set for the real-app smoke run (packages/mcp-server/app-smoke.mjs); nothing else runs.
+        const juce::File destination(args[at + 1]);
+        const bool written = destination.getParentDirectory().isDirectory() && ! destination.exists() && io::writeAlsDom(*io::createNewSetDom(), destination, error);
+        folder.deleteRecursively();
+        return written ? 0 : 1;
+    }
     if (! io::writeAlsDom(*io::createNewSetDom(), source, error)) return 1;
     auto loaded = io::loadAls(source); if (! loaded) return 1;
     auto song = std::move(loaded.song);
     plugins::PluginHost host; host.loadCache(); midi::MidiManager midi;
     engine::AudioEngine engine(host, midi); engine.loadSong(*song);
     model::EditHistory history;
+    int handEdits = 0; // mixer moves are live values: they advance the revision like the app's fingerprint does
     auto document = juce::Uuid().toString().toStdString();
     control::Backend backend;
     backend.state = [&] { control::State s; s.song = song.get(); s.documentId = document;
-        s.revision = std::to_string(history.version()); return s; };
+        s.revision = std::to_string(history.version()) + ":" + std::to_string(handEdits);
+        s.path = song->sourcePath; s.dirty = history.isDirty();
+        s.history = {history.canUndo(), history.canRedo(), history.undoLabel(), history.redoLabel()};
+        if (auto controls = engine.controls())
+            for (size_t i = 0; i < controls->size(); ++i)
+            {
+                const auto& c = (*controls)[i]; control::LiveMixer m;
+                m.volume = c.volume.load(); m.pan = c.pan.load(); m.active = c.active.load(); m.solo = c.solo.load(); m.armed = c.armed.load();
+                m.monitoring = c.monitoring.load();
+                for (size_t send = 0; send < song->returns.size() && send < c.sends.size(); ++send) m.sends.push_back(c.sends[send].load());
+                s.liveMixer.push_back(std::move(m)); s.liveGains.push_back(c.volume.load());
+            }
+        return s; };
     backend.apply = [&](model::EditCommand command) {
         history.perform(*song, std::move(command));
         for (const auto& note : engine.loadSong(*song)) std::fprintf(stderr, "Graph: %s\n", note.c_str());
         return control::ApplyResult::success();
     };
     backend.undo = [&] { history.undo(*song); engine.loadSong(*song); return control::ApplyResult::success(); };
+    // AGT-7e: the hooks a headless engine can honour. They exist so the MCP tests exercise the live-action family end to end.
+    const auto syncMixer = [&] {
+        auto controls = engine.controls(); if (! controls) return;
+        size_t index = 0;
+        const auto sync = [&](model::Track& t) {
+            if (index >= controls->size()) return;
+            const auto& c = (*controls)[index++];
+            t.mixer.volume = c.volume.load(); t.mixer.pan = c.pan.load(); t.mixer.speakerOn = c.active.load(); t.mixer.solo = c.solo.load();
+        };
+        for (auto& t : song->tracks) sync(t);
+        for (auto& t : song->returns) sync(t);
+        sync(song->main);
+    };
+    backend.syncModel = syncMixer;
+    backend.historyStep = [&](bool undo, std::string& label) {
+        label = undo ? history.undoLabel() : history.redoLabel();
+        if (undo) history.undo(*song); else history.redo(*song);
+        engine.loadSong(*song); return control::ApplyResult::success();
+    };
+    backend.status = [&] {
+        auto& transport = engine.transport();
+        return control::object({{"transport", control::object({{"playing", transport.isPlaying()}, {"positionBeats", transport.positionBeats()},
+            {"tempo", transport.tempo()}, {"metronome", transport.metronomeOn()},
+            {"loop", control::object({{"enabled", transport.loopEnabled()}, {"startBeat", transport.loopStart()}, {"lengthBeats", transport.loopLength()}})}})},
+            {"recording", control::object({{"recording", false}, {"requested", false}})},
+            {"export", control::object({{"running", false}, {"progress", 0.0}})}, {"pluginScan", control::object({{"running", false}})}});
+    };
+    backend.live["mixer.set"] = [&](const juce::var& a, juce::var& receipt) {
+        auto controls = engine.controls(); const int index = a["trackIndex"];
+        if (! controls || index < 0 || static_cast<size_t>(index) >= controls->size()) return control::ApplyResult::failure("target_replaced", "No mixer for that track");
+        auto& c = (*controls)[static_cast<size_t>(index)];
+        const auto linear = [](double db) { return db <= -70.0 ? 0.0f : static_cast<float>(std::pow(10.0, db / 20.0)); };
+        const auto db = [](float v) { return v <= 0.000316f ? -70.0 : 20.0 * std::log10(static_cast<double>(v)); };
+        const auto previous = control::object({{"gainDb", db(c.volume.load())}, {"pan", static_cast<double>(c.pan.load())}, {"muted", ! c.active.load()}});
+        if (a.hasProperty("gainDb")) c.volume.store(linear(a["gainDb"]));
+        if (a.hasProperty("pan")) c.pan.store(static_cast<float>(static_cast<double>(a["pan"])));
+        if (a.hasProperty("muted")) c.active.store(! static_cast<bool>(a["muted"]));
+        if (a.hasProperty("solo")) c.solo.store(static_cast<bool>(a["solo"]));
+        if (a.hasProperty("armed")) c.armed.store(static_cast<bool>(a["armed"]));
+        if (const auto* sends = a["sends"].getArray())
+            for (const auto& send : *sends) { const auto slot = static_cast<size_t>(static_cast<int>(send["sendIndex"])); if (slot < c.sends.size()) c.sends[slot].store(linear(send["gainDb"])); }
+        ++handEdits;
+        receipt = control::object({{"previous", previous}, {"undoable", false}});
+        return control::ApplyResult::success();
+    };
+    backend.live["transport.set"] = [&](const juce::var& a, juce::var& receipt) {
+        auto& transport = engine.transport();
+        if (a.hasProperty("metronome")) transport.setMetronome(static_cast<bool>(a["metronome"]));
+        if (a.hasProperty("positionBeats")) transport.setPosition(static_cast<double>(a["positionBeats"]));
+        receipt = control::object({{"requested", a}, {"undoable", false}});
+        return control::ApplyResult::success();
+    };
+    backend.live["project.save"] = [&](const juce::var&, juce::var& receipt) {
+        syncMixer();
+        const auto saved = io::saveAls(*song, source);
+        if (! saved.ok) return control::ApplyResult::failure("save_failed", saved.error);
+        history.markSaved(); receipt = control::object({{"saved", true}, {"path", source.getFullPathName()}});
+        return control::ApplyResult::success();
+    };
+    backend.importAudio = [&](const std::vector<std::string>& paths, int trackId, double startBeat, int scene, juce::var& receipt) {
+        juce::AudioFormatManager formats; formats.registerBasicFormats(); std::vector<io::DroppedSample> samples;
+        for (const auto& path : paths)
+        {
+            const std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(juce::File(juce::String::fromUTF8(path.c_str()))));
+            samples.push_back({path, reader ? reader->sampleRate : 0.0, reader ? static_cast<int64_t>(reader->lengthInSamples) : 0});
+        }
+        int trackIndex = -1;
+        for (size_t i = 0; i < song->tracks.size(); ++i) if (song->tracks[i].id == trackId) trackIndex = static_cast<int>(i);
+        auto plan = io::placeSamples(*song, samples, io::SampleDropTarget{trackIndex, startBeat, scene, false});
+        if (! plan.command.apply) return control::ApplyResult::failure("invalid_request", plan.error);
+        const int placed = plan.placed;
+        history.perform(*song, std::move(plan.command)); engine.loadSong(*song);
+        receipt = control::object({{"placed", placed}});
+        return control::ApplyResult::success();
+    };
     backend.prepareSerum = [&](model::Device& device, juce::var& report) {
         return control::prepareSerumLead(host, engine.sampleRate(), engine.blockSize(), device, report);
     };

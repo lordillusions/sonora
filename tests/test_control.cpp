@@ -335,7 +335,9 @@ TEST_CASE("control: edits address stale tracks consistently as target_replaced t
     CHECK(missing(control::object({{"type", "notes.delete"}, {"trackId", 987654}, {"clipId", 1}, {"noteIndices", juce::Array<juce::var>{0}}}), "delete") == "target_replaced");
     CHECK(missing(control::object({{"type", "notes.add"}, {"trackId", 987654}, {"clipId", 1},
         {"notes", juce::Array<juce::var>{control::object({{"pitch", 60}, {"startBeat", 0}, {"durationBeats", 1}, {"velocity", 90}})}}}), "add") == "target_replaced");
-    CHECK(missing(control::object({{"type", "track.rename"}, {"trackId", h.song->tracks[0].id}, {"name", "x"}}), "rename") == "unsupported_operation");
+    // AGT-7e: track.rename is exposed now; an unknown type stays unsupported and a stale track is target_replaced.
+    CHECK(missing(control::object({{"type", "track.explode"}, {"trackId", h.song->tracks[0].id}}), "unknown") == "unsupported_operation");
+    CHECK(missing(control::object({{"type", "track.rename"}, {"trackId", 987654}, {"name", "x"}}), "rename") == "target_replaced");
     CHECK(! h.history.canUndo());
 }
 

@@ -6,6 +6,8 @@ import { createInterface } from 'node:readline';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 
 const server = fileURLToPath(new URL('./server.mjs', import.meta.url));
 const probe = process.env.SONORA_CONTROL_PROBE ?? fileURLToPath(new URL('../../build/tools/control_probe', import.meta.url));
@@ -50,7 +52,7 @@ test('MCP: legacy initialize exposes validated tools and requires explicit attac
   try {
     await initialize(c);
     const list = await c.request('tools/list');
-    assert.equal(list.result.tools.length, 13);
+    assert.equal(list.result.tools.length, 31);
     const guide = await c.request('resources/read', { uri: 'sonora://docs/control-v1' });
     assert.match(guide.result.contents[0].text, /Sonora control API/);
     assert.equal((await c.tool('sonora_project_inspect')).ok, false);
@@ -64,7 +66,7 @@ test('MCP: modern discover and per-request metadata work through official SDK', 
     const discovery = await c.request('server/discover');
     assert.ok(discovery.result, JSON.stringify(discovery));
     const list = await c.request('tools/list');
-    assert.equal(list.result.tools.length, 13);
+    assert.equal(list.result.tools.length, 31);
   } finally { await c.close(); }
 });
 test('MCP: real Serum workflow over authenticated IPC, retry and guarded undo', { timeout: 150000 }, async () => {
@@ -311,5 +313,123 @@ test('MCP: groups, clip create/copy and volume/filter automation through edits.a
     await c.close(); if (native.exitCode === null) { const exit = once(native, 'exit'); native.kill('SIGTERM'); await exit; }
   }
   assert.equal(native.exitCode, 0, errors); assert.match(output, /PASS: agent clip create\/copy and volume\/filter automation saved and reloaded/);
+  await assert.rejects(fs.access(registry));
+});
+
+test('MCP: complete control coverage, status, mixer, transport, structure, automation, history, import and save (AGT-7e)', { timeout: 90000 }, async () => {
+  const native = spawn(probe, ['--serve'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '', errors = '';
+  native.stdout.on('data', b => { output += b; }); native.stderr.on('data', b => { errors += b; });
+  const registry = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Startup timeout: ${errors}`)), 10000);
+    createInterface({ input: native.stdout }).once('line', line => { clearTimeout(timer); resolve(line); });
+    native.once('error', reject);
+  });
+  const entry = JSON.parse(await fs.readFile(registry, 'utf8')); const c = client();
+  const wav = path.join(os.tmpdir(), `sonora-mcp-import-${process.pid}.wav`);
+  try {
+    await initialize(c);
+    // Annotations: queries are read-only, live actions are not destructive, save overwrites a file.
+    const tools = Object.fromEntries((await c.request('tools/list')).result.tools.map(tool => [tool.name, tool]));
+    for (const name of ['sonora_status_get', 'sonora_automation_get']) assert.equal(tools[name].annotations.readOnlyHint, true, name);
+    for (const name of ['sonora_mixer_set', 'sonora_transport_set', 'sonora_session_launch', 'sonora_recording_set', 'sonora_devices_set_enabled', 'sonora_plugins_scan']) {
+      assert.equal(tools[name].annotations.readOnlyHint, false, name); assert.equal(tools[name].annotations.destructiveHint, false, name);
+    }
+    assert.equal(tools.sonora_project_save.annotations.destructiveHint, true);
+    for (const name of ['sonora_history_step', 'sonora_clips_import_audio', 'sonora_devices_move']) assert.equal(tools[name].annotations.destructiveHint, true, name);
+    // Live actions take no revision: the strict schema refuses one.
+    assert.equal(Object.hasOwn(tools.sonora_mixer_set.inputSchema.properties, 'expectedRevision'), false);
+    assert.equal(Object.hasOwn(tools.sonora_history_step.inputSchema.properties, 'expectedRevision'), true);
+
+    let current = await c.tool('sonora_session_attach', { instanceId: entry.instanceId, documentId: entry.documentId });
+    const caps = await c.tool('sonora_capabilities_get');
+    for (const operation of ['status.get', 'automation.get', 'history.step', 'devices.move', 'clips.import_audio', 'mixer.set', 'transport.set', 'project.save'])
+      assert.ok(caps.data.operations.includes(operation), operation);
+    assert.ok(caps.data.editTypes.includes('track.create') && caps.data.editTypes.includes('clip.update'));
+    assert.ok(!caps.data.operations.includes('recording.set'), 'the headless engine has no recording hook');
+    assert.ok(current.data.mainTrack && Number.isInteger(current.data.mainTrack.trackId));
+    assert.ok(current.data.returnTracks.length >= 1 && Array.isArray(current.data.returnTracks[0].mixer.sends));
+    assert.deepEqual(current.data.timeSignature, { numerator: 4, denominator: 4 });
+    const first = current.data.tracks[0], returnTrack = current.data.returnTracks[0], main = current.data.mainTrack;
+
+    const status = await c.tool('sonora_status_get');
+    assert.equal(status.ok, true); assert.equal(status.data.liveStatus, true); assert.equal(status.data.transport.metronome, false);
+
+    // Live mixer: tracks, returns and the main track; absolute values and a receipt with the previous ones.
+    const mixed = await c.tool('sonora_mixer_set', { trackId: first.trackId, gainDb: -6, pan: -0.5, muted: true });
+    assert.equal(mixed.ok, true, JSON.stringify(mixed)); assert.equal(mixed.data.undoable, false); assert.equal(mixed.status, 'applied');
+    assert.equal((await c.tool('sonora_mixer_set', { trackId: returnTrack.trackId, gainDb: -12 })).ok, true);
+    assert.equal((await c.tool('sonora_mixer_set', { trackId: main.trackId, gainDb: -3 })).ok, true);
+    const sent = await c.tool('sonora_mixer_set', { trackId: first.trackId, sends: [{ sendIndex: 0, gainDb: -20 }] });
+    assert.equal(sent.ok, true, JSON.stringify(sent));
+    assert.equal((await c.tool('sonora_mixer_set', { trackId: first.trackId })).ok, false);
+    assert.equal((await c.tool('sonora_mixer_set', { trackId: 424242, pan: 0 })).error.code, 'target_replaced');
+    current = await c.tool('sonora_project_inspect');
+    const after = current.data.tracks[0].mixer;
+    assert.ok(Math.abs(after.pan + 0.5) < 1e-6 && after.muted === true);
+    assert.ok(Math.abs(after.gainLinear - Math.pow(10, -6 / 20)) < 1e-4);
+    assert.ok(Math.abs(after.sends[0].gainLinear - 0.1) < 1e-4);
+    assert.ok(Math.abs(current.data.mainTrack.mixer.gainLinear - Math.pow(10, -3 / 20)) < 1e-4);
+    assert.ok(Math.abs(current.data.returnTracks[0].mixer.gainLinear - Math.pow(10, -12 / 20)) < 1e-4);
+
+    // Transport (the headless engine honours the metronome flag and the position request).
+    assert.equal((await c.tool('sonora_transport_set', { metronome: true })).ok, true);
+    assert.equal((await c.tool('sonora_status_get')).data.transport.metronome, true);
+    const rewind = await c.request('tools/call', { name: 'sonora_transport_set', arguments: { action: 'rewind' } });
+    assert.ok(rewind.error || rewind.result?.isError, 'an unknown action is refused by the schema');
+
+    // Structure, song and automation edits as one undo step; IDs come back in the receipt.
+    const created = await c.tool('sonora_edits_apply', { expectedRevision: current.revision, idempotencyKey: 'cover-structure', commands: [
+      { type: 'track.create', kind: 'midi', name: 'Agent Lead', color: 9, afterTrackId: first.trackId },
+      { type: 'track.create', kind: 'return', name: 'Agent Hall' },
+      { type: 'time_signature.set', numerator: 3, denominator: 4 },
+      { type: 'automation.set', trackId: main.trackId, target: 'tempo', points: [{ beat: 0, value: 100 }, { beat: 32, value: 140 }] }] });
+    assert.equal(created.ok, true, JSON.stringify(created));
+    assert.equal(created.data.tracks.length, 2);
+    current = await c.tool('sonora_project_inspect');
+    assert.equal(current.data.tracks[1].trackId, created.data.tracks[0].trackId); assert.equal(current.data.tracks[1].name, 'Agent Lead');
+    assert.equal(current.data.returnTracks.at(-1).name, 'Agent Hall');
+    assert.deepEqual(current.data.timeSignature, { numerator: 3, denominator: 4 });
+    const lane = await c.tool('sonora_automation_get', { trackId: main.trackId, target: 'tempo' });
+    assert.equal(lane.ok, true, JSON.stringify(lane)); assert.equal(lane.data.pointCount, 2); assert.equal(lane.data.points[1].value, 140);
+    assert.equal((await c.tool('sonora_automation_get', { trackId: main.trackId, target: 'tempo', offset: 1, limit: 1 })).data.points[0].beat, 32);
+
+    // General history: only the labelled step is undone, then redone.
+    const labels = (await c.tool('sonora_status_get')).data.history;
+    assert.equal(labels.canUndo, true);
+    const wrong = await c.tool('sonora_history_step', { expectedRevision: current.revision, idempotencyKey: 'step-wrong', direction: 'undo', expectedLabel: 'Not the label' });
+    assert.equal(wrong.error.code, 'undo_conflict');
+    const undone = await c.tool('sonora_history_step', { expectedRevision: current.revision, idempotencyKey: 'step-undo', direction: 'undo', expectedLabel: labels.undoLabel });
+    assert.equal(undone.ok, true, JSON.stringify(undone));
+    assert.equal((await c.tool('sonora_project_inspect')).data.tracks.length, current.data.tracks.length - 1);
+    const redone = await c.tool('sonora_history_step', { expectedRevision: undone.revision, idempotencyKey: 'step-redo', direction: 'redo', expectedLabel: labels.undoLabel });
+    assert.equal(redone.ok, true, JSON.stringify(redone));
+
+    // Audio import: a one-second 44.1 kHz mono WAV becomes a clip on a new audio track.
+    const frames = 44100, data = Buffer.alloc(frames * 2);
+    for (let i = 0; i < frames; i++) data.writeInt16LE(Math.round(Math.sin(i / 20) * 8000), i * 2);
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0); header.writeUInt32LE(36 + data.length, 4); header.write('WAVEfmt ', 8); header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20); header.writeUInt16LE(1, 22); header.writeUInt32LE(44100, 24); header.writeUInt32LE(88200, 28);
+    header.writeUInt16LE(2, 32); header.writeUInt16LE(16, 34); header.write('data', 36); header.writeUInt32LE(data.length, 40);
+    await fs.writeFile(wav, Buffer.concat([header, data]));
+    current = await c.tool('sonora_project_inspect');
+    assert.equal((await c.tool('sonora_clips_import_audio', { expectedRevision: current.revision, idempotencyKey: 'import-relative', paths: ['relative.wav'] })).error.code, 'invalid_request');
+    const imported = await c.tool('sonora_clips_import_audio', { expectedRevision: current.revision, idempotencyKey: 'import-wav', paths: [wav], startBeat: 8 });
+    assert.equal(imported.ok, true, JSON.stringify(imported));
+    current = await c.tool('sonora_project_inspect');
+    const withAudio = current.data.tracks.find(track => track.clips.some(clip => clip.kind === 'audio'));
+    assert.ok(withAudio, 'an audio clip exists after the import');
+    assert.equal(withAudio.clips.find(clip => clip.kind === 'audio').sampleFile, path.basename(wav));
+
+    // Save in place (the headless engine saves to its working file).
+    const saved = await c.tool('sonora_project_save');
+    assert.equal(saved.ok, true, JSON.stringify(saved)); assert.equal(saved.data.saved, true);
+    assert.equal((await c.tool('sonora_status_get')).data.dirty, false);
+  } finally {
+    await fs.rm(wav, { force: true });
+    await c.close(); if (native.exitCode === null) { const exit = once(native, 'exit'); native.kill('SIGTERM'); await exit; }
+  }
+  assert.equal(native.exitCode, 0, errors);
   await assert.rejects(fs.access(registry));
 });

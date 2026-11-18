@@ -98,6 +98,7 @@ set(SONORA_TEST_SOURCES
     test_updates.cpp
     test_update_feed.cpp ../src/app/UpdateFeed.cpp
     test_control.cpp
+    test_control_coverage.cpp
     test_device_control.cpp
     test_op.cpp
     test_locators.cpp

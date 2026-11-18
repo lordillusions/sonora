@@ -37,6 +37,13 @@ int controlIndex(const Song& song, TrackId id)
     throw OpError("target_replaced", "Track ID no longer exists");
 }
 
+// AGT-7e: automation also addresses the main track (its tempo lane and mixer), by its own id.
+int automationTrackIndex(const Song& song, TrackId id)
+{
+    if (id == mainTrackId(song) && song.main.kind == TrackKind::Main) return static_cast<int>(song.tracks.size() + song.returns.size());
+    return controlIndex(song, id);
+}
+
 ClipLocation location(const Song& song, const ClipRef& ref)
 {
     if (ref.scene >= 0 && ref.laneId >= 0) invalid("Choose scene OR laneId");
@@ -395,9 +402,10 @@ const Device* findDevice(const std::vector<Device>& devices, int targetId, Autom
 }
 
 // The manual (unautomated) value of a target, used as the value outside a new lane.
-double manualValue(const Track& track, const AutomationTargetInfo& info, int targetId)
+double manualValue(const Song& song, const Track& track, const AutomationTargetInfo& info, int targetId)
 {
     const auto& mixer = track.mixer;
+    if (info.kind == "tempo") return song.tempo;
     if (info.kind == "volume") return mixer.volume;
     if (info.kind == "pan") return mixer.pan;
     if (info.kind == "activator") return mixer.speakerOn ? 1.0 : 0.0;
@@ -426,7 +434,7 @@ void checkValue(const AutomationTargetInfo& info, double value)
 
 EditCommand build(const Song& song, const ops::SetAutomation& op)
 {
-    const int index = controlIndex(song, op.trackId);
+    const int index = automationTrackIndex(song, op.trackId);
     const auto& track = *trackAt(song, index);
     const auto info = describeAutomationTarget(track, op.targetId);
     if (info.kind.empty() || info.kind == "midi") throw OpError("target_replaced", "Automation target is not on this track");
@@ -474,7 +482,7 @@ EditCommand build(const Song& song, const ops::SetAutomation& op)
     {
         envelope.targetId = op.targetId;
         envelope.eventType = stepped ? (op.eventType.empty() ? "BoolEvent" : op.eventType) : "FloatEvent";
-        envelope.points.push_back({preRollTime, manualValue(track, info, op.targetId)});
+        envelope.points.push_back({preRollTime, manualValue(song, track, info, op.targetId)});
     }
     if (! op.eventType.empty()) envelope.eventType = op.eventType;
     envelope.stepped = stepped;

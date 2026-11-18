@@ -1,1200 +1,2804 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Sonora control request 1.0",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "apiVersion",
-    "operation"
-  ],
-  "properties": {
-    "apiVersion": {
-      "const": "1.0"
-    },
-    "operation": {
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "Sonora control request 1.0",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "apiVersion",
+  "operation"
+ ],
+ "properties": {
+  "apiVersion": {
+   "const": "1.0"
+  },
+  "operation": {
+   "enum": [
+    "project.inspect",
+    "capabilities.get",
+    "clips.get",
+    "devices.parameters",
+    "edits.apply",
+    "workflow.serum_supersaw",
+    "history.undo",
+    "devices.parameters.set",
+    "devices.catalog",
+    "devices.insert",
+    "devices.remove",
+    "automation.get",
+    "status.get",
+    "history.step",
+    "clips.import_audio",
+    "devices.move",
+    "mixer.set",
+    "transport.set",
+    "session.launch",
+    "recording.set",
+    "project.save",
+    "plugins.scan",
+    "devices.set_enabled",
+    "project.save_copy",
+    "project.export_audio",
+    "project.export_cancel",
+    "view.set",
+    "devices.open_editor",
+    "media.run"
+   ]
+  },
+  "target": {
+   "$ref": "#/$defs/target"
+  },
+  "expectedRevision": {
+   "type": "string",
+   "minLength": 1
+  },
+  "idempotencyKey": {
+   "type": "string",
+   "minLength": 1,
+   "maxLength": 128
+  },
+  "arguments": {
+   "type": "object"
+  }
+ },
+ "allOf": [
+  {
+   "if": {
+    "properties": {
+     "operation": {
       "enum": [
-        "project.inspect",
-        "capabilities.get",
-        "clips.get",
-        "devices.parameters",
-        "edits.apply",
-        "workflow.serum_supersaw",
-        "history.undo",
-        "devices.parameters.set",
-        "devices.catalog",
-        "devices.insert",
-        "devices.remove"
+       "clips.get",
+       "devices.parameters",
+       "edits.apply",
+       "workflow.serum_supersaw",
+       "history.undo",
+       "devices.parameters.set",
+       "devices.catalog",
+       "devices.insert",
+       "devices.remove",
+       "automation.get",
+       "status.get",
+       "history.step",
+       "clips.import_audio",
+       "devices.move",
+       "mixer.set",
+       "transport.set",
+       "session.launch",
+       "recording.set",
+       "project.save",
+       "plugins.scan",
+       "devices.set_enabled",
+       "project.save_copy",
+       "project.export_audio",
+       "project.export_cancel",
+       "view.set",
+       "devices.open_editor",
+       "media.run"
       ]
+     }
+    }
+   },
+   "then": {
+    "required": [
+     "target",
+     "arguments"
+    ]
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "enum": [
+       "edits.apply",
+       "workflow.serum_supersaw",
+       "history.undo",
+       "devices.parameters.set",
+       "devices.insert",
+       "devices.remove",
+       "history.step",
+       "clips.import_audio",
+       "devices.move"
+      ]
+     }
+    }
+   },
+   "then": {
+    "required": [
+     "expectedRevision",
+     "idempotencyKey"
+    ]
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "clips.get"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/clipQuery"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "devices.parameters"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/deviceQuery"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "history.undo"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/undo"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "workflow.serum_supersaw"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/serum"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "edits.apply"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/batch"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "devices.parameters.set"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/parameterBatch"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "devices.catalog"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/catalogQuery"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "devices.insert"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/deviceInsert"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "devices.remove"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/deviceQuery"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "automation.get"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/automationQuery"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "status.get"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/emptyArguments"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "history.step"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/historyStep"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "clips.import_audio"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/importAudio"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "devices.move"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/deviceMove"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "mixer.set"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/mixerSet"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "transport.set"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/transportSet"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "session.launch"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/sessionLaunch"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "recording.set"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/recordingSet"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "project.save"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/emptyArguments"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "plugins.scan"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/pluginsScan"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "devices.set_enabled"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/deviceEnabled"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "enum": [
+       "mixer.set",
+       "transport.set",
+       "session.launch",
+       "recording.set",
+       "project.save",
+       "plugins.scan",
+       "devices.set_enabled",
+       "project.save_copy",
+       "project.export_audio",
+       "project.export_cancel",
+       "view.set",
+       "devices.open_editor",
+       "media.run"
+      ]
+     }
+    }
+   },
+   "then": {
+    "not": {
+     "anyOf": [
+      {
+       "required": [
+        "expectedRevision"
+       ]
+      },
+      {
+       "required": [
+        "idempotencyKey"
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "project.save_copy"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/saveCopy"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "project.export_audio"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/exportAudio"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "project.export_cancel"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/emptyArguments"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "view.set"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/viewSet"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "devices.open_editor"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/openEditor"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "operation": {
+      "const": "media.run"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "arguments": {
+      "$ref": "#/$defs/mediaRun"
+     }
+    }
+   }
+  }
+ ],
+ "$defs": {
+  "id": {
+   "type": "integer",
+   "minimum": 0,
+   "maximum": 1000000000
+  },
+  "beat": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 1000000
+  },
+  "target": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "instanceId",
+    "documentId"
+   ],
+   "properties": {
+    "instanceId": {
+     "type": "string",
+     "minLength": 1
+    },
+    "documentId": {
+     "type": "string",
+     "minLength": 1
+    }
+   }
+  },
+  "clipQuery": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "trackId",
+    "clipId"
+   ],
+   "properties": {
+    "trackId": {
+     "$ref": "#/$defs/id"
+    },
+    "clipId": {
+     "$ref": "#/$defs/id"
+    },
+    "scene": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 1000000
+    },
+    "laneId": {
+     "$ref": "#/$defs/id"
+    },
+    "offset": {
+     "$ref": "#/$defs/id"
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 4096
+    }
+   },
+   "not": {
+    "required": [
+     "scene",
+     "laneId"
+    ]
+   }
+  },
+  "deviceQuery": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "trackId",
+    "deviceId"
+   ],
+   "properties": {
+    "trackId": {
+     "$ref": "#/$defs/id"
+    },
+    "deviceId": {
+     "$ref": "#/$defs/id"
+    }
+   }
+  },
+  "undo": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "undoToken"
+   ],
+   "properties": {
+    "undoToken": {
+     "type": "string",
+     "minLength": 1
+    }
+   }
+  },
+  "serum": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "root",
+    "mode",
+    "bars",
+    "startBeat"
+   ],
+   "properties": {
+    "root": {
+     "const": "D#"
+    },
+    "mode": {
+     "const": "minor"
+    },
+    "bars": {
+     "const": 4
+    },
+    "startBeat": {
+     "$ref": "#/$defs/beat"
+    }
+   }
+  },
+  "batch": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "commands"
+   ],
+   "properties": {
+    "commands": {
+     "type": "array",
+     "minItems": 1,
+     "maxItems": 32,
+     "items": {
+      "$ref": "#/$defs/edit"
+     }
+    }
+   }
+  },
+  "edit": {
+   "oneOf": [
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "bpm"
+     ],
+     "properties": {
+      "type": {
+       "const": "tempo.set"
+      },
+      "bpm": {
+       "type": "number",
+       "minimum": 20,
+       "maximum": 999
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "gainDb"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.set_gain"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "gainDb": {
+       "type": "number",
+       "minimum": -90,
+       "maximum": 6
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "clipId",
+      "destinationBeat"
+     ],
+     "properties": {
+      "type": {
+       "const": "clip.duplicate"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      },
+      "destinationBeat": {
+       "$ref": "#/$defs/beat"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "clipId",
+      "notes"
+     ],
+     "not": {
+      "required": [
+       "scene",
+       "laneId"
+      ]
+     },
+     "properties": {
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      },
+      "scene": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 1000000
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      },
+      "type": {
+       "const": "notes.add"
+      },
+      "notes": {
+       "type": "array",
+       "minItems": 1,
+       "maxItems": 4096,
+       "items": {
+        "$ref": "#/$defs/note"
+       }
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "clipId",
+      "notes"
+     ],
+     "not": {
+      "required": [
+       "scene",
+       "laneId"
+      ]
+     },
+     "properties": {
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      },
+      "scene": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 1000000
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      },
+      "type": {
+       "const": "notes.replace"
+      },
+      "notes": {
+       "type": "array",
+       "minItems": 0,
+       "maxItems": 4096,
+       "items": {
+        "$ref": "#/$defs/note"
+       }
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "clipId",
+      "updates"
+     ],
+     "not": {
+      "required": [
+       "scene",
+       "laneId"
+      ]
+     },
+     "properties": {
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      },
+      "scene": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 1000000
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      },
+      "type": {
+       "const": "notes.update"
+      },
+      "updates": {
+       "type": "array",
+       "minItems": 1,
+       "maxItems": 4096,
+       "items": {
+        "$ref": "#/$defs/noteUpdate"
+       }
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "clipId",
+      "noteIndices"
+     ],
+     "not": {
+      "required": [
+       "scene",
+       "laneId"
+      ]
+     },
+     "properties": {
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      },
+      "scene": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 1000000
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      },
+      "type": {
+       "const": "notes.delete"
+      },
+      "noteIndices": {
+       "type": "array",
+       "minItems": 1,
+       "maxItems": 4096,
+       "items": {
+        "$ref": "#/$defs/id"
+       }
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "beat"
+     ],
+     "properties": {
+      "type": {
+       "const": "locator.add"
+      },
+      "beat": {
+       "$ref": "#/$defs/beat"
+      },
+      "name": {
+       "$ref": "#/$defs/locatorName"
+      },
+      "color": {
+       "$ref": "#/$defs/locatorColor"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "minProperties": 3,
+     "required": [
+      "type",
+      "locatorId"
+     ],
+     "properties": {
+      "type": {
+       "const": "locator.update"
+      },
+      "locatorId": {
+       "$ref": "#/$defs/id"
+      },
+      "beat": {
+       "$ref": "#/$defs/beat"
+      },
+      "name": {
+       "$ref": "#/$defs/locatorName"
+      },
+      "infoText": {
+       "type": "string",
+       "maxLength": 4096
+      },
+      "color": {
+       "$ref": "#/$defs/locatorColor"
+      },
+      "songStart": {
+       "type": "boolean"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "locatorId"
+     ],
+     "properties": {
+      "type": {
+       "const": "locator.delete"
+      },
+      "locatorId": {
+       "$ref": "#/$defs/id"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "folded"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.set_folded"
+      },
+      "trackIds": {
+       "type": "array",
+       "maxItems": 1024,
+       "items": {
+        "$ref": "#/$defs/id"
+       },
+       "description": "Group track IDs; omit to fold or unfold every group"
+      },
+      "folded": {
+       "type": "boolean"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "lengthBeats"
+     ],
+     "not": {
+      "required": [
+       "startBeat",
+       "scene"
+      ]
+     },
+     "properties": {
+      "type": {
+       "const": "clip.create"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "startBeat": {
+       "$ref": "#/$defs/beat"
+      },
+      "scene": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 999
+      },
+      "lengthBeats": {
+       "type": "number",
+       "minimum": 0.015625,
+       "maximum": 65536
+      },
+      "name": {
+       "type": "string",
+       "maxLength": 256
+      },
+      "notes": {
+       "type": "array",
+       "maxItems": 4096,
+       "items": {
+        "$ref": "#/$defs/note"
+       }
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "clipId",
+      "destinationBeat"
+     ],
+     "properties": {
+      "type": {
+       "const": "clip.copy"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      },
+      "toTrackId": {
+       "$ref": "#/$defs/id"
+      },
+      "destinationBeat": {
+       "$ref": "#/$defs/beat"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "clipId",
+      "startBeat"
+     ],
+     "properties": {
+      "type": {
+       "const": "clip.move"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      },
+      "toTrackId": {
+       "$ref": "#/$defs/id"
+      },
+      "startBeat": {
+       "$ref": "#/$defs/beat"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "clipId"
+     ],
+     "not": {
+      "required": [
+       "scene",
+       "laneId"
+      ]
+     },
+     "properties": {
+      "type": {
+       "const": "clip.delete"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      },
+      "scene": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 1000000
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "points"
+     ],
+     "properties": {
+      "type": {
+       "const": "automation.set"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "target": {
+       "type": "string",
+       "enum": [
+        "volume",
+        "pan",
+        "activator",
+        "tempo",
+        "send",
+        "device"
+       ]
+      },
+      "sendIndex": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 1000
+      },
+      "deviceId": {
+       "$ref": "#/$defs/id"
+      },
+      "parameterId": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 1024,
+       "description": "devices.parameters parameterId, or \"on\" for the device switch"
+      },
+      "targetId": {
+       "$ref": "#/$defs/id"
+      },
+      "points": {
+       "type": "array",
+       "maxItems": 4096,
+       "items": {
+        "$ref": "#/$defs/automationPoint"
+       }
+      },
+      "rangeStartBeat": {
+       "$ref": "#/$defs/beat"
+      },
+      "rangeEndBeat": {
+       "$ref": "#/$defs/beat"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId"
+     ],
+     "properties": {
+      "type": {
+       "const": "automation.clear"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "target": {
+       "type": "string",
+       "enum": [
+        "volume",
+        "pan",
+        "activator",
+        "tempo",
+        "send",
+        "device"
+       ]
+      },
+      "sendIndex": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 1000
+      },
+      "deviceId": {
+       "$ref": "#/$defs/id"
+      },
+      "parameterId": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 1024,
+       "description": "devices.parameters parameterId, or \"on\" for the device switch"
+      },
+      "targetId": {
+       "$ref": "#/$defs/id"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "numerator",
+      "denominator"
+     ],
+     "properties": {
+      "type": {
+       "const": "time_signature.set"
+      },
+      "numerator": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 99
+      },
+      "denominator": {
+       "enum": [
+        1,
+        2,
+        4,
+        8,
+        16
+       ]
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "on",
+      "startBeat",
+      "lengthBeats"
+     ],
+     "properties": {
+      "type": {
+       "const": "loop.set"
+      },
+      "on": {
+       "type": "boolean"
+      },
+      "startBeat": {
+       "$ref": "#/$defs/beat"
+      },
+      "lengthBeats": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1000000
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ],
+     "properties": {
+      "type": {
+       "const": "punch.set"
+      },
+      "in": {
+       "type": "boolean"
+      },
+      "out": {
+       "type": "boolean"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "root",
+      "name"
+     ],
+     "properties": {
+      "type": {
+       "const": "scale.set"
+      },
+      "root": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 11
+      },
+      "name": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 34
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "value"
+     ],
+     "properties": {
+      "type": {
+       "const": "quantization.set"
+      },
+      "value": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 13
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "name"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.rename"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "name": {
+       "type": "string",
+       "maxLength": 256
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackIds",
+      "color"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.set_color"
+      },
+      "trackIds": {
+       "type": "array",
+       "maxItems": 1024,
+       "items": {
+        "$ref": "#/$defs/id"
+       }
+      },
+      "color": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 69
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "kind"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.create"
+      },
+      "kind": {
+       "enum": [
+        "midi",
+        "audio",
+        "return"
+       ]
+      },
+      "name": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 256
+      },
+      "color": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 69
+      },
+      "afterTrackId": {
+       "$ref": "#/$defs/id"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackIds"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.delete"
+      },
+      "trackIds": {
+       "$ref": "#/$defs/trackIdList"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackIds"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.duplicate"
+      },
+      "trackIds": {
+       "$ref": "#/$defs/trackIdList"
+      },
+      "withAutomation": {
+       "type": "boolean"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackIds"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.move"
+      },
+      "trackIds": {
+       "$ref": "#/$defs/trackIdList"
+      },
+      "beforeTrackId": {
+       "$ref": "#/$defs/id"
+      },
+      "groupId": {
+       "type": "integer",
+       "minimum": -1,
+       "maximum": 1000000000
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackIds"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.group"
+      },
+      "trackIds": {
+       "$ref": "#/$defs/trackIdList"
+      },
+      "name": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 256
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.ungroup"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackIds",
+      "hidden"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.set_hidden"
+      },
+      "trackIds": {
+       "$ref": "#/$defs/trackIdList"
+      },
+      "hidden": {
+       "type": "boolean"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackIds",
+      "deactivated"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.set_deactivated"
+      },
+      "trackIds": {
+       "$ref": "#/$defs/trackIdList"
+      },
+      "deactivated": {
+       "type": "boolean"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "mode"
+     ],
+     "properties": {
+      "type": {
+       "const": "track.set_monitoring"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "mode": {
+       "enum": [
+        "in",
+        "auto",
+        "off"
+       ]
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "clipId"
+     ],
+     "properties": {
+      "type": {
+       "const": "clip.update"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      },
+      "scene": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 1000000
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      },
+      "name": {
+       "type": "string",
+       "maxLength": 256
+      },
+      "color": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 69
+      },
+      "muted": {
+       "type": "boolean"
+      },
+      "startBeat": {
+       "$ref": "#/$defs/beat"
+      },
+      "endBeat": {
+       "$ref": "#/$defs/beat"
+      },
+      "loop": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [],
+       "properties": {
+        "enabled": {
+         "type": "boolean"
+        },
+        "startBeat": {
+         "type": "number",
+         "minimum": -1000000,
+         "maximum": 1000000
+        },
+        "endBeat": {
+         "type": "number",
+         "minimum": -1000000,
+         "maximum": 1000000
+        }
+       },
+       "minProperties": 1
+      },
+      "launchMode": {
+       "enum": [
+        "trigger",
+        "gate",
+        "toggle",
+        "repeat"
+       ]
+      },
+      "launchQuantization": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 14
+      },
+      "legato": {
+       "type": "boolean"
+      },
+      "gainDb": {
+       "type": "number",
+       "minimum": -70,
+       "maximum": 24
+      },
+      "pitchCoarse": {
+       "type": "integer",
+       "minimum": -48,
+       "maximum": 48
+      },
+      "pitchFine": {
+       "type": "number",
+       "minimum": -50,
+       "maximum": 50
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackIds",
+      "beat"
+     ],
+     "properties": {
+      "type": {
+       "const": "clip.split"
+      },
+      "trackIds": {
+       "$ref": "#/$defs/trackIdList"
+      },
+      "beat": {
+       "$ref": "#/$defs/beat"
+      },
+      "endBeat": {
+       "$ref": "#/$defs/beat"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "firstTrackId",
+      "lastTrackId",
+      "startBeat",
+      "endBeat"
+     ],
+     "properties": {
+      "type": {
+       "const": "region.duplicate"
+      },
+      "firstTrackId": {
+       "$ref": "#/$defs/id"
+      },
+      "lastTrackId": {
+       "$ref": "#/$defs/id"
+      },
+      "startBeat": {
+       "$ref": "#/$defs/beat"
+      },
+      "endBeat": {
+       "$ref": "#/$defs/beat"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "firstTrackId",
+      "lastTrackId",
+      "startBeat",
+      "endBeat"
+     ],
+     "properties": {
+      "type": {
+       "const": "region.delete"
+      },
+      "firstTrackId": {
+       "$ref": "#/$defs/id"
+      },
+      "lastTrackId": {
+       "$ref": "#/$defs/id"
+      },
+      "startBeat": {
+       "$ref": "#/$defs/beat"
+      },
+      "endBeat": {
+       "$ref": "#/$defs/beat"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "clipId"
+     ],
+     "properties": {
+      "type": {
+       "const": "clip.duplicate_linked"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "clipId"
+     ],
+     "properties": {
+      "type": {
+       "const": "clip.unlink"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      },
+      "scene": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 1000000
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "clipId",
+      "toScene"
+     ],
+     "properties": {
+      "type": {
+       "const": "clip.copy_to_scene"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      },
+      "scene": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 1000000
+      },
+      "toScene": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 999
+      },
+      "toTrackId": {
+       "$ref": "#/$defs/id"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "laneId",
+      "name"
+     ],
+     "properties": {
+      "type": {
+       "const": "take_lane.rename"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      },
+      "name": {
+       "type": "string",
+       "maxLength": 256
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "laneId",
+      "delta"
+     ],
+     "properties": {
+      "type": {
+       "const": "take_lane.move"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      },
+      "delta": {
+       "type": "integer",
+       "minimum": -64,
+       "maximum": 64
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "laneId"
+     ],
+     "properties": {
+      "type": {
+       "const": "take_lane.delete"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "laneId"
+     ],
+     "properties": {
+      "type": {
+       "const": "take_lane.duplicate"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId"
+     ],
+     "properties": {
+      "type": {
+       "const": "take_lane.audition"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "trackId",
+      "laneId",
+      "startBeat",
+      "endBeat"
+     ],
+     "properties": {
+      "type": {
+       "const": "take_lane.comp"
+      },
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "laneId": {
+       "$ref": "#/$defs/id"
+      },
+      "startBeat": {
+       "$ref": "#/$defs/beat"
+      },
+      "endBeat": {
+       "$ref": "#/$defs/beat"
+      }
+     }
+    }
+   ]
+  },
+  "note": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "pitch",
+    "startBeat",
+    "durationBeats",
+    "velocity"
+   ],
+   "properties": {
+    "pitch": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 127
+    },
+    "startBeat": {
+     "$ref": "#/$defs/beat"
+    },
+    "durationBeats": {
+     "type": "number",
+     "minimum": 1e-06,
+     "maximum": 1000000
+    },
+    "velocity": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 127
+    },
+    "releaseVelocity": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 127
+    },
+    "probability": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 1
+    },
+    "enabled": {
+     "type": "boolean"
+    },
+    "velocityDeviation": {
+     "type": "number",
+     "minimum": -127,
+     "maximum": 127
+    }
+   }
+  },
+  "noteUpdate": {
+   "type": "object",
+   "additionalProperties": false,
+   "minProperties": 2,
+   "required": [
+    "noteIndex"
+   ],
+   "properties": {
+    "pitch": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 127
+    },
+    "startBeat": {
+     "$ref": "#/$defs/beat"
+    },
+    "durationBeats": {
+     "type": "number",
+     "minimum": 1e-06,
+     "maximum": 1000000
+    },
+    "velocity": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 127
+    },
+    "releaseVelocity": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 127
+    },
+    "probability": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 1
+    },
+    "enabled": {
+     "type": "boolean"
+    },
+    "velocityDeviation": {
+     "type": "number",
+     "minimum": -127,
+     "maximum": 127
+    },
+    "noteIndex": {
+     "$ref": "#/$defs/id"
+    }
+   }
+  },
+  "parameterWrite": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "parameterId",
+    "name"
+   ],
+   "properties": {
+    "parameterId": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 256
+    },
+    "name": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 256
+    },
+    "normalized": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 1
+    },
+    "value": {
+     "type": "number",
+     "minimum": -1000000000000.0,
+     "maximum": 1000000000000.0
+    }
+   },
+   "oneOf": [
+    {
+     "required": [
+      "normalized"
+     ],
+     "not": {
+      "required": [
+       "value"
+      ]
+     }
+    },
+    {
+     "required": [
+      "value"
+     ],
+     "not": {
+      "required": [
+       "normalized"
+      ]
+     }
+    }
+   ]
+  },
+  "parameterBatch": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "trackId",
+    "deviceId",
+    "parameters"
+   ],
+   "properties": {
+    "trackId": {
+     "$ref": "#/$defs/id"
+    },
+    "deviceId": {
+     "$ref": "#/$defs/id"
+    },
+    "parameters": {
+     "type": "array",
+     "minItems": 1,
+     "maxItems": 128,
+     "items": {
+      "$ref": "#/$defs/parameterWrite"
+     }
+    }
+   }
+  },
+  "catalogQuery": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "filter": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 256
+    },
+    "kind": {
+     "enum": [
+      "native",
+      "vst3",
+      "vst2",
+      "au"
+     ]
+    },
+    "offset": {
+     "$ref": "#/$defs/id"
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 128
+    }
+   },
+   "required": []
+  },
+  "deviceInsert": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "trackId": {
+     "$ref": "#/$defs/id"
+    },
+    "catalogId": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 1024
+    },
+    "position": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 64
+    },
+    "replaceInstrument": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "trackId",
+    "catalogId"
+   ]
+  },
+  "locatorColor": {
+   "type": "integer",
+   "minimum": -1,
+   "maximum": 69,
+   "description": "Palette index 0-69; -1 = default locator colour"
+  },
+  "locatorName": {
+   "type": "string",
+   "maxLength": 256
+  },
+  "automationPoint": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "beat"
+   ],
+   "description": "Song time in quarter-note beats and exactly one of value (the target's own units: volume/send linear gain, pan -1..1, on/off 0 or 1, device parameter in its descriptor range, VST3 normalized 0..1) or gainDb (volume/send only).",
+   "properties": {
+    "beat": {
+     "$ref": "#/$defs/beat"
+    },
+    "value": {
+     "type": "number"
+    },
+    "gainDb": {
+     "type": "number",
+     "minimum": -1000,
+     "maximum": 6
+    }
+   }
+  },
+  "trackIdList": {
+   "type": "array",
+   "minItems": 1,
+   "maxItems": 256,
+   "uniqueItems": true,
+   "items": {
+    "$ref": "#/$defs/id"
+   }
+  },
+  "automationQuery": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "trackId"
+   ],
+   "properties": {
+    "trackId": {
+     "$ref": "#/$defs/id"
     },
     "target": {
-      "$ref": "#/$defs/target"
+     "enum": [
+      "volume",
+      "pan",
+      "activator",
+      "tempo",
+      "send",
+      "device"
+     ]
     },
-    "expectedRevision": {
-      "type": "string",
-      "minLength": 1
+    "sendIndex": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 1000
     },
-    "idempotencyKey": {
+    "deviceId": {
+     "$ref": "#/$defs/id"
+    },
+    "parameterId": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 1024
+    },
+    "targetId": {
+     "$ref": "#/$defs/id"
+    },
+    "offset": {
+     "$ref": "#/$defs/id"
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 1024
+    }
+   }
+  },
+  "emptyArguments": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [],
+   "properties": {}
+  },
+  "historyStep": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "direction",
+    "expectedLabel"
+   ],
+   "properties": {
+    "direction": {
+     "enum": [
+      "undo",
+      "redo"
+     ]
+    },
+    "expectedLabel": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 256
+    }
+   }
+  },
+  "importAudio": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "paths"
+   ],
+   "properties": {
+    "paths": {
+     "type": "array",
+     "minItems": 1,
+     "maxItems": 16,
+     "items": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 128
+      "maxLength": 4096
+     }
     },
-    "arguments": {
-      "type": "object"
+    "trackId": {
+     "$ref": "#/$defs/id"
+    },
+    "startBeat": {
+     "$ref": "#/$defs/beat"
+    },
+    "scene": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 999
     }
+   }
   },
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "operation": {
-            "enum": [
-              "clips.get",
-              "devices.parameters",
-              "edits.apply",
-              "workflow.serum_supersaw",
-              "history.undo",
-              "devices.parameters.set",
-              "devices.catalog",
-              "devices.insert",
-              "devices.remove"
-            ]
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "target",
-          "arguments"
-        ]
-      }
+  "deviceMove": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "trackId",
+    "deviceId"
+   ],
+   "properties": {
+    "trackId": {
+     "$ref": "#/$defs/id"
     },
-    {
-      "if": {
-        "properties": {
-          "operation": {
-            "enum": [
-              "edits.apply",
-              "workflow.serum_supersaw",
-              "history.undo",
-              "devices.parameters.set",
-              "devices.insert",
-              "devices.remove"
-            ]
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "expectedRevision",
-          "idempotencyKey"
-        ]
-      }
+    "deviceId": {
+     "$ref": "#/$defs/id"
     },
-    {
-      "if": {
-        "properties": {
-          "operation": {
-            "const": "clips.get"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "arguments": {
-            "$ref": "#/$defs/clipQuery"
-          }
-        }
-      }
+    "position": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 63
     },
-    {
-      "if": {
-        "properties": {
-          "operation": {
-            "const": "devices.parameters"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "arguments": {
-            "$ref": "#/$defs/deviceQuery"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "operation": {
-            "const": "history.undo"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "arguments": {
-            "$ref": "#/$defs/undo"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "operation": {
-            "const": "workflow.serum_supersaw"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "arguments": {
-            "$ref": "#/$defs/serum"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "operation": {
-            "const": "edits.apply"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "arguments": {
-            "$ref": "#/$defs/batch"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "operation": {
-            "const": "devices.parameters.set"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "arguments": {
-            "$ref": "#/$defs/parameterBatch"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "operation": {
-            "const": "devices.catalog"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "arguments": {
-            "$ref": "#/$defs/catalogQuery"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "operation": {
-            "const": "devices.insert"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "arguments": {
-            "$ref": "#/$defs/deviceInsert"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "operation": {
-            "const": "devices.remove"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "arguments": {
-            "$ref": "#/$defs/deviceQuery"
-          }
-        }
-      }
+    "toTrackId": {
+     "$ref": "#/$defs/id"
     }
-  ],
-  "$defs": {
-    "id": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 1000000000
+   }
+  },
+  "mixerSet": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "trackId"
+   ],
+   "properties": {
+    "trackId": {
+     "$ref": "#/$defs/id"
     },
-    "beat": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 1000000
+    "gainDb": {
+     "type": "number",
+     "minimum": -70,
+     "maximum": 6
+    },
+    "pan": {
+     "type": "number",
+     "minimum": -1,
+     "maximum": 1
+    },
+    "muted": {
+     "type": "boolean"
+    },
+    "solo": {
+     "type": "boolean"
+    },
+    "armed": {
+     "type": "boolean"
+    },
+    "sends": {
+     "type": "array",
+     "minItems": 1,
+     "maxItems": 12,
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "sendIndex",
+       "gainDb"
+      ],
+      "properties": {
+       "sendIndex": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 11
+       },
+       "gainDb": {
+        "type": "number",
+        "minimum": -70,
+        "maximum": 0
+       }
+      }
+     }
+    }
+   }
+  },
+  "transportSet": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [],
+   "properties": {
+    "action": {
+     "enum": [
+      "play",
+      "stop",
+      "continue",
+      "return_to_start"
+     ]
+    },
+    "positionBeats": {
+     "$ref": "#/$defs/beat"
+    },
+    "metronome": {
+     "type": "boolean"
+    }
+   }
+  },
+  "sessionLaunch": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "action"
+   ],
+   "properties": {
+    "action": {
+     "enum": [
+      "clip",
+      "scene",
+      "stop_track",
+      "stop_all",
+      "back_to_arrangement"
+     ]
+    },
+    "trackId": {
+     "$ref": "#/$defs/id"
+    },
+    "scene": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 999
+    }
+   }
+  },
+  "recordingSet": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "mode",
+    "recording"
+   ],
+   "properties": {
+    "mode": {
+     "enum": [
+      "arrangement",
+      "session"
+     ]
+    },
+    "recording": {
+     "type": "boolean"
+    }
+   }
+  },
+  "pluginsScan": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [],
+   "properties": {
+    "includeAudioUnits": {
+     "type": "boolean"
+    }
+   }
+  },
+  "deviceEnabled": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "trackId",
+    "deviceId",
+    "enabled"
+   ],
+   "properties": {
+    "trackId": {
+     "$ref": "#/$defs/id"
+    },
+    "deviceId": {
+     "$ref": "#/$defs/id"
+    },
+    "enabled": {
+     "type": "boolean"
+    }
+   }
+  },
+  "saveCopy": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "path"
+   ],
+   "properties": {
+    "path": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 4096
+    }
+   }
+  },
+  "exportAudio": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "destination",
+    "target",
+    "startBeat",
+    "endBeat",
+    "format",
+    "bitDepth"
+   ],
+   "properties": {
+    "destination": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 4096
     },
     "target": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "instanceId",
-        "documentId"
-      ],
-      "properties": {
-        "instanceId": {
-          "type": "string",
-          "minLength": 1
-        },
-        "documentId": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
+     "enum": [
+      "main",
+      "track",
+      "stems"
+     ]
     },
-    "clipQuery": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "trackId",
-        "clipId"
-      ],
-      "properties": {
-        "trackId": {
-          "$ref": "#/$defs/id"
-        },
-        "clipId": {
-          "$ref": "#/$defs/id"
-        },
-        "scene": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 1000000
-        },
-        "laneId": {
-          "$ref": "#/$defs/id"
-        },
-        "offset": {
-          "$ref": "#/$defs/id"
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 4096
-        }
-      },
-      "not": {
-        "required": [
-          "scene",
-          "laneId"
-        ]
-      }
+    "trackId": {
+     "$ref": "#/$defs/id"
     },
-    "deviceQuery": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "trackId",
-        "deviceId"
-      ],
-      "properties": {
-        "trackId": {
-          "$ref": "#/$defs/id"
-        },
-        "deviceId": {
-          "$ref": "#/$defs/id"
-        }
-      }
+    "startBeat": {
+     "$ref": "#/$defs/beat"
     },
-    "undo": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "undoToken"
-      ],
-      "properties": {
-        "undoToken": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
+    "endBeat": {
+     "$ref": "#/$defs/beat"
     },
-    "serum": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "root",
-        "mode",
-        "bars",
-        "startBeat"
-      ],
-      "properties": {
-        "root": {
-          "const": "D#"
-        },
-        "mode": {
-          "const": "minor"
-        },
-        "bars": {
-          "const": 4
-        },
-        "startBeat": {
-          "$ref": "#/$defs/beat"
-        }
-      }
+    "format": {
+     "enum": [
+      "wav",
+      "aiff",
+      "flac"
+     ]
     },
-    "batch": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "commands"
-      ],
-      "properties": {
-        "commands": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 32,
-          "items": {
-            "$ref": "#/$defs/edit"
-          }
-        }
-      }
+    "bitDepth": {
+     "enum": [
+      16,
+      24,
+      32
+     ]
     },
-    "edit": {
-      "oneOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "bpm"
-          ],
-          "properties": {
-            "type": {
-              "const": "tempo.set"
-            },
-            "bpm": {
-              "type": "number",
-              "minimum": 20,
-              "maximum": 999
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "trackId",
-            "gainDb"
-          ],
-          "properties": {
-            "type": {
-              "const": "track.set_gain"
-            },
-            "trackId": {
-              "$ref": "#/$defs/id"
-            },
-            "gainDb": {
-              "type": "number",
-              "minimum": -90,
-              "maximum": 6
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "trackId",
-            "clipId",
-            "destinationBeat"
-          ],
-          "properties": {
-            "type": {
-              "const": "clip.duplicate"
-            },
-            "trackId": {
-              "$ref": "#/$defs/id"
-            },
-            "clipId": {
-              "$ref": "#/$defs/id"
-            },
-            "destinationBeat": {
-              "$ref": "#/$defs/beat"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "trackId",
-            "clipId",
-            "notes"
-          ],
-          "not": {
-            "required": [
-              "scene",
-              "laneId"
-            ]
-          },
-          "properties": {
-            "trackId": {
-              "$ref": "#/$defs/id"
-            },
-            "clipId": {
-              "$ref": "#/$defs/id"
-            },
-            "scene": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 1000000
-            },
-            "laneId": {
-              "$ref": "#/$defs/id"
-            },
-            "type": {
-              "const": "notes.add"
-            },
-            "notes": {
-              "type": "array",
-              "minItems": 1,
-              "maxItems": 4096,
-              "items": {
-                "$ref": "#/$defs/note"
-              }
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "trackId",
-            "clipId",
-            "notes"
-          ],
-          "not": {
-            "required": [
-              "scene",
-              "laneId"
-            ]
-          },
-          "properties": {
-            "trackId": {
-              "$ref": "#/$defs/id"
-            },
-            "clipId": {
-              "$ref": "#/$defs/id"
-            },
-            "scene": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 1000000
-            },
-            "laneId": {
-              "$ref": "#/$defs/id"
-            },
-            "type": {
-              "const": "notes.replace"
-            },
-            "notes": {
-              "type": "array",
-              "minItems": 0,
-              "maxItems": 4096,
-              "items": {
-                "$ref": "#/$defs/note"
-              }
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "trackId",
-            "clipId",
-            "updates"
-          ],
-          "not": {
-            "required": [
-              "scene",
-              "laneId"
-            ]
-          },
-          "properties": {
-            "trackId": {
-              "$ref": "#/$defs/id"
-            },
-            "clipId": {
-              "$ref": "#/$defs/id"
-            },
-            "scene": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 1000000
-            },
-            "laneId": {
-              "$ref": "#/$defs/id"
-            },
-            "type": {
-              "const": "notes.update"
-            },
-            "updates": {
-              "type": "array",
-              "minItems": 1,
-              "maxItems": 4096,
-              "items": {
-                "$ref": "#/$defs/noteUpdate"
-              }
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "trackId",
-            "clipId",
-            "noteIndices"
-          ],
-          "not": {
-            "required": [
-              "scene",
-              "laneId"
-            ]
-          },
-          "properties": {
-            "trackId": {
-              "$ref": "#/$defs/id"
-            },
-            "clipId": {
-              "$ref": "#/$defs/id"
-            },
-            "scene": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 1000000
-            },
-            "laneId": {
-              "$ref": "#/$defs/id"
-            },
-            "type": {
-              "const": "notes.delete"
-            },
-            "noteIndices": {
-              "type": "array",
-              "minItems": 1,
-              "maxItems": 4096,
-              "items": {
-                "$ref": "#/$defs/id"
-              }
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "beat"
-          ],
-          "properties": {
-            "type": {
-              "const": "locator.add"
-            },
-            "beat": {
-              "$ref": "#/$defs/beat"
-            },
-            "name": {
-              "$ref": "#/$defs/locatorName"
-            },
-            "color": {
-              "$ref": "#/$defs/locatorColor"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "minProperties": 3,
-          "required": [
-            "type",
-            "locatorId"
-          ],
-          "properties": {
-            "type": {
-              "const": "locator.update"
-            },
-            "locatorId": {
-              "$ref": "#/$defs/id"
-            },
-            "beat": {
-              "$ref": "#/$defs/beat"
-            },
-            "name": {
-              "$ref": "#/$defs/locatorName"
-            },
-            "infoText": {
-              "type": "string",
-              "maxLength": 4096
-            },
-            "color": {
-              "$ref": "#/$defs/locatorColor"
-            },
-            "songStart": {
-              "type": "boolean"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "locatorId"
-          ],
-          "properties": {
-            "type": {
-              "const": "locator.delete"
-            },
-            "locatorId": {
-              "$ref": "#/$defs/id"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "folded"
-          ],
-          "properties": {
-            "type": {
-              "const": "track.set_folded"
-            },
-            "trackIds": {
-              "type": "array",
-              "maxItems": 1024,
-              "items": {
-                "$ref": "#/$defs/id"
-              },
-              "description": "Group track IDs; omit to fold or unfold every group"
-            },
-            "folded": {
-              "type": "boolean"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "trackId",
-            "lengthBeats"
-          ],
-          "not": {
-            "required": [
-              "startBeat",
-              "scene"
-            ]
-          },
-          "properties": {
-            "type": {
-              "const": "clip.create"
-            },
-            "trackId": {
-              "$ref": "#/$defs/id"
-            },
-            "startBeat": {
-              "$ref": "#/$defs/beat"
-            },
-            "scene": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 999
-            },
-            "lengthBeats": {
-              "type": "number",
-              "minimum": 0.015625,
-              "maximum": 65536
-            },
-            "name": {
-              "type": "string",
-              "maxLength": 256
-            },
-            "notes": {
-              "type": "array",
-              "maxItems": 4096,
-              "items": {
-                "$ref": "#/$defs/note"
-              }
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "trackId",
-            "clipId",
-            "destinationBeat"
-          ],
-          "properties": {
-            "type": {
-              "const": "clip.copy"
-            },
-            "trackId": {
-              "$ref": "#/$defs/id"
-            },
-            "clipId": {
-              "$ref": "#/$defs/id"
-            },
-            "toTrackId": {
-              "$ref": "#/$defs/id"
-            },
-            "destinationBeat": {
-              "$ref": "#/$defs/beat"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "trackId",
-            "clipId",
-            "startBeat"
-          ],
-          "properties": {
-            "type": {
-              "const": "clip.move"
-            },
-            "trackId": {
-              "$ref": "#/$defs/id"
-            },
-            "clipId": {
-              "$ref": "#/$defs/id"
-            },
-            "toTrackId": {
-              "$ref": "#/$defs/id"
-            },
-            "startBeat": {
-              "$ref": "#/$defs/beat"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "trackId",
-            "clipId"
-          ],
-          "not": {
-            "required": [
-              "scene",
-              "laneId"
-            ]
-          },
-          "properties": {
-            "type": {
-              "const": "clip.delete"
-            },
-            "trackId": {
-              "$ref": "#/$defs/id"
-            },
-            "clipId": {
-              "$ref": "#/$defs/id"
-            },
-            "scene": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 1000000
-            },
-            "laneId": {
-              "$ref": "#/$defs/id"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "trackId",
-            "points"
-          ],
-          "properties": {
-            "type": {
-              "const": "automation.set"
-            },
-            "trackId": {
-              "$ref": "#/$defs/id"
-            },
-            "target": {
-              "type": "string",
-              "enum": [
-                "volume",
-                "pan",
-                "activator",
-                "send",
-                "device"
-              ]
-            },
-            "sendIndex": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 1000
-            },
-            "deviceId": {
-              "$ref": "#/$defs/id"
-            },
-            "parameterId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 1024,
-              "description": "devices.parameters parameterId, or \"on\" for the device switch"
-            },
-            "targetId": {
-              "$ref": "#/$defs/id"
-            },
-            "points": {
-              "type": "array",
-              "maxItems": 4096,
-              "items": {
-                "$ref": "#/$defs/automationPoint"
-              }
-            },
-            "rangeStartBeat": {
-              "$ref": "#/$defs/beat"
-            },
-            "rangeEndBeat": {
-              "$ref": "#/$defs/beat"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "type",
-            "trackId"
-          ],
-          "properties": {
-            "type": {
-              "const": "automation.clear"
-            },
-            "trackId": {
-              "$ref": "#/$defs/id"
-            },
-            "target": {
-              "type": "string",
-              "enum": [
-                "volume",
-                "pan",
-                "activator",
-                "send",
-                "device"
-              ]
-            },
-            "sendIndex": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 1000
-            },
-            "deviceId": {
-              "$ref": "#/$defs/id"
-            },
-            "parameterId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 1024,
-              "description": "devices.parameters parameterId, or \"on\" for the device switch"
-            },
-            "targetId": {
-              "$ref": "#/$defs/id"
-            }
-          }
-        }
-      ]
+    "normalize": {
+     "type": "boolean"
     },
-    "note": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "pitch",
-        "startBeat",
-        "durationBeats",
-        "velocity"
-      ],
-      "properties": {
-        "pitch": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 127
-        },
-        "startBeat": {
-          "$ref": "#/$defs/beat"
-        },
-        "durationBeats": {
-          "type": "number",
-          "minimum": 1e-06,
-          "maximum": 1000000
-        },
-        "velocity": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 127
-        },
-        "releaseVelocity": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 127
-        },
-        "probability": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1
-        },
-        "enabled": {
-          "type": "boolean"
-        },
-        "velocityDeviation": {
-          "type": "number",
-          "minimum": -127,
-          "maximum": 127
-        }
-      }
+    "mono": {
+     "type": "boolean"
     },
-    "noteUpdate": {
-      "type": "object",
-      "additionalProperties": false,
-      "minProperties": 2,
-      "required": [
-        "noteIndex"
-      ],
-      "properties": {
-        "pitch": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 127
-        },
-        "startBeat": {
-          "$ref": "#/$defs/beat"
-        },
-        "durationBeats": {
-          "type": "number",
-          "minimum": 1e-06,
-          "maximum": 1000000
-        },
-        "velocity": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 127
-        },
-        "releaseVelocity": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 127
-        },
-        "probability": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1
-        },
-        "enabled": {
-          "type": "boolean"
-        },
-        "velocityDeviation": {
-          "type": "number",
-          "minimum": -127,
-          "maximum": 127
-        },
-        "noteIndex": {
-          "$ref": "#/$defs/id"
-        }
-      }
+    "dither": {
+     "type": "boolean"
     },
-    "parameterWrite": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "parameterId",
-        "name"
-      ],
-      "properties": {
-        "parameterId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "name": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "normalized": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1
-        },
-        "value": {
-          "type": "number",
-          "minimum": -1000000000000.0,
-          "maximum": 1000000000000.0
-        }
-      },
-      "oneOf": [
-        {
-          "required": [
-            "normalized"
-          ],
-          "not": {
-            "required": [
-              "value"
-            ]
-          }
-        },
-        {
-          "required": [
-            "value"
-          ],
-          "not": {
-            "required": [
-              "normalized"
-            ]
-          }
-        }
-      ]
+    "tailSeconds": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 60
     },
-    "parameterBatch": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "trackId",
-        "deviceId",
-        "parameters"
-      ],
-      "properties": {
-        "trackId": {
-          "$ref": "#/$defs/id"
-        },
-        "deviceId": {
-          "$ref": "#/$defs/id"
-        },
-        "parameters": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 128,
-          "items": {
-            "$ref": "#/$defs/parameterWrite"
-          }
-        }
-      }
-    },
-    "catalogQuery": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "filter": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "kind": {
-          "enum": [
-            "native",
-            "vst3"
-          ]
-        },
-        "offset": {
-          "$ref": "#/$defs/id"
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 128
-        }
-      },
-      "required": []
-    },
-    "deviceInsert": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "trackId": {
-          "$ref": "#/$defs/id"
-        },
-        "catalogId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 1024
-        },
-        "position": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 64
-        }
-      },
-      "required": [
-        "trackId",
-        "catalogId"
-      ]
-    },
-    "locatorColor": {
-      "type": "integer",
-      "minimum": -1,
-      "maximum": 69,
-      "description": "Palette index 0-69; -1 = default locator colour"
-    },
-    "locatorName": {
-      "type": "string",
-      "maxLength": 256
-    },
-    "automationPoint": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "beat"
-      ],
-      "description": "Song time in quarter-note beats and exactly one of value (the target's own units: volume/send linear gain, pan -1..1, on/off 0 or 1, device parameter in its descriptor range, VST3 normalized 0..1) or gainDb (volume/send only).",
-      "properties": {
-        "beat": {
-          "$ref": "#/$defs/beat"
-        },
-        "value": {
-          "type": "number"
-        },
-        "gainDb": {
-          "type": "number",
-          "minimum": -1000,
-          "maximum": 6
-        }
-      }
+    "autoTail": {
+     "type": "boolean"
     }
+   }
+  },
+  "viewSet": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [],
+   "minProperties": 1,
+   "properties": {
+    "mainView": {
+     "enum": [
+      "session",
+      "arrangement"
+     ]
+    },
+    "detail": {
+     "enum": [
+      "clip",
+      "devices",
+      "hidden"
+     ]
+    },
+    "selectTrackId": {
+     "$ref": "#/$defs/id"
+    },
+    "selectClip": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "trackId",
+      "clipId"
+     ],
+     "properties": {
+      "trackId": {
+       "$ref": "#/$defs/id"
+      },
+      "clipId": {
+       "$ref": "#/$defs/id"
+      },
+      "scene": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 1000000
+      }
+     }
+    },
+    "browserVisible": {
+     "type": "boolean"
+    },
+    "mixerVisible": {
+     "type": "boolean"
+    },
+    "followPlayhead": {
+     "type": "boolean"
+    }
+   }
+  },
+  "openEditor": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "trackId",
+    "deviceId"
+   ],
+   "properties": {
+    "trackId": {
+     "$ref": "#/$defs/id"
+    },
+    "deviceId": {
+     "$ref": "#/$defs/id"
+    }
+   }
+  },
+  "mediaRun": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "action",
+    "trackId"
+   ],
+   "properties": {
+    "action": {
+     "enum": [
+      "freeze",
+      "unfreeze",
+      "bounce_in_place",
+      "bounce_new_track",
+      "reverse",
+      "crop",
+      "toggle_warp",
+      "audio_to_midi",
+      "strip_silence"
+     ]
+    },
+    "trackId": {
+     "$ref": "#/$defs/id"
+    },
+    "clipId": {
+     "$ref": "#/$defs/id"
+    },
+    "scene": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 1000000
+    },
+    "mode": {
+     "enum": [
+      "melody",
+      "harmony",
+      "drums",
+      "slices"
+     ]
+    }
+   }
   }
+ }
 }

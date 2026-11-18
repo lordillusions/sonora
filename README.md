@@ -19,10 +19,10 @@ for starting new tracks, especially electronic music, and it can also open and s
 > breaks: the idea is to build it together with the people who use it.
 
 - Website: <https://sonoradaw.com>
-- Latest version: **0.1.52** — [macOS](https://github.com/lordillusions/sonora/releases/download/v0.1.52/Sonora-0.1.52.dmg) ·
-  [Windows](https://github.com/lordillusions/sonora/releases/download/v0.1.52/Sonora-0.1.52-windows-x64-setup.exe) ·
-  [Linux .deb](https://github.com/lordillusions/sonora/releases/download/v0.1.52/sonora_0.1.52_amd64.deb) ·
-  [AppImage](https://github.com/lordillusions/sonora/releases/download/v0.1.52/Sonora-0.1.52-x86_64.AppImage)
+- Latest version: **0.1.53** — [macOS](https://github.com/lordillusions/sonora/releases/download/v0.1.53/Sonora-0.1.53.dmg) ·
+  [Windows](https://github.com/lordillusions/sonora/releases/download/v0.1.53/Sonora-0.1.53-windows-x64-setup.exe) ·
+  [Linux .deb](https://github.com/lordillusions/sonora/releases/download/v0.1.53/sonora_0.1.53_amd64.deb) ·
+  [AppImage](https://github.com/lordillusions/sonora/releases/download/v0.1.53/Sonora-0.1.53-x86_64.AppImage)
 - Older downloads: [Releases](https://github.com/lordillusions/sonora/releases)
 - Everything it does today: [docs/ROADMAP.md](docs/ROADMAP.md)
 - User guide: [docs/UI_GUIDE.md](docs/UI_GUIDE.md)
@@ -34,7 +34,7 @@ for starting new tracks, especially electronic music, and it can also open and s
   **Sonora Resynth**.
 - VST3, VST2 and Audio Unit plug-ins, MIDI controllers and MIDI learn.
 - Real-time collaboration over the internet or the local network.
-- A built-in assistant, and an MCP server so external agents can work on the open project, every change undoable.
+- A built-in assistant, and an MCP server so external agents can work on the open project: tracks, MIDI, automation, devices, mixer, transport, save and export.
 - Updates itself on every system: small delta patches on the Mac, the full new version on Windows and Linux.
 
 <p align="center"><img src="site/assets/img/prism.webp" width="760" alt="Sonora Prism, the built-in wavetable synth: three oscillators, two filters, envelopes, LFOs and a modulation matrix."></p>

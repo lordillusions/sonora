@@ -7,16 +7,35 @@ namespace sonora::agent
 using control::object;
 namespace
 {
-struct Tool { const char* name; const char* operation; const char* schema; const char* description; bool mutation; };
+// kind: a query (target only), a mutation (revision guard, undo token) or a live action (target only, no undo, no revision).
+struct Tool { const char* name; const char* operation; const char* schema; const char* description; bool mutation; bool live = false; };
 constexpr Tool definitions[] = {
-    {"sonora_project_inspect", "project.inspect", "", "Inspect current document/revision, track IDs and kinds (group tracks list childTrackIds and folded; their clips are on the children), clip handles, devices, automation lanes, return tracks and Arrangement locators. Optional trackId focuses one track; trackOffset/clipOffset page the native summary.", false},
+    {"sonora_project_inspect", "project.inspect", "", "Inspect current document/revision, tempo, time signature, loop/punch/scale/quantisation, scenes, history labels, track IDs and kinds (group tracks list childTrackIds and folded; their clips are on the children), per-track mixer (pan, mute, solo, arm, sends), colour, monitoring, take lanes, clip handles with kind/muted/colour, devices (enabled, kind, role; nested chains only for a focused track), automation lanes, return tracks and the main track (its trackId addresses it everywhere). Optional trackId focuses one track; trackOffset/clipOffset page the native summary.", false},
+    {"sonora_status_get", "status.get", "", "Read transport (playing, position, tempo, metronome, loop), recording state, export and plug-in scan state, busy text, dirty flag and undo/redo labels. Poll this after asynchronous actions.", false},
+    {"sonora_automation_get", "automation.get", "automationQuery", "Read all breakpoints of ONE automation lane (paged offset/limit, default 512): same addressing as automation.set (target volume/pan/activator/tempo/send/device or targetId; tracks, returns and the main track). Beats are song beats.", false},
     {"sonora_capabilities_get", "capabilities.get", "", "Read actual operations and limitations. Never assume unsupported DAW actions exist.", false},
     {"sonora_clip_get", "clips.get", "clipQuery", "Read MIDI note indices and fields. Quarter-note beats relative to clip content. Default Arrangement; scene OR laneId selects Session/take. Page with offset/limit.", false},
     {"sonora_parameters_get", "devices.parameters", "deviceQuery", "Inspect native/rack/VST3 parameter IDs, names, writable metadata. Native values include units, minimum/maximum and choices; normalization is linear. Use filter (case-insensitive substring of name or ID), offset/limit to page; default 64, maximum 128.", false},
-    {"sonora_edits_apply", "edits.apply", "batch", "One staged undoable edit: tempo.set, track.set_gain (absolute dB), track.set_folded (groups; omit trackIds for all), clip.create (new MIDI clip with optional notes on a MIDI track; Arrangement startBeat or Session scene; region must be free), clip.copy/clip.move (Arrangement, optional toTrackId of the same kind), clip.duplicate, clip.delete, automation.set/automation.clear (target volume/pan/activator/send+sendIndex/device+deviceId+parameterId; points of song beat and value or gainDb; rangeStartBeat/rangeEndBeat replace only that span), notes.add/update/delete/replace, locator.add/update/delete (Arrangement markers: beat, name, color palette index or -1, songStart, infoText; locatorId from inspect). Read notes first. noteIndex follows current sorted notes after each command. Replace replaces all notes.", true},
+    {"sonora_edits_apply", "edits.apply", "batch", "One staged undoable edit: song (time_signature.set, loop.set, punch.set, scale.set, quantization.set), tracks (track.create midi/audio/return, track.delete, track.duplicate, track.move, track.group, track.ungroup, track.rename, track.set_color, track.set_hidden, track.set_deactivated, track.set_monitoring), clips (clip.update, clip.split, region.duplicate, region.delete, clip.duplicate_linked, clip.unlink, clip.copy_to_scene), take_lane.rename/move/delete/duplicate/audition/comp, and tempo.set, track.set_gain (absolute dB), track.set_folded (groups; omit trackIds for all), clip.create (new MIDI clip with optional notes on a MIDI track; Arrangement startBeat or Session scene; region must be free), clip.copy/clip.move (Arrangement, optional toTrackId of the same kind), clip.duplicate, clip.delete, automation.set/automation.clear (target volume/pan/activator/send+sendIndex/device+deviceId+parameterId; points of song beat and value or gainDb; rangeStartBeat/rangeEndBeat replace only that span), notes.add/update/delete/replace, locator.add/update/delete (Arrangement markers: beat, name, color palette index or -1, songStart, infoText; locatorId from inspect). Read notes first. noteIndex follows current sorted notes after each command. Replace replaces all notes.", true},
     {"sonora_parameters_set", "devices.parameters.set", "parameterBatch", "Write exact writable native/rack/VST3 ID/name pairs. Use normalized 0..1 OR native value in advertised units; VST3 requires normalized. Rebuilds that processor and returns NEW deviceId; may interrupt voices. Authored automation rejected. Undo restores captured state.", true},
-    {"sonora_devices_catalog", "devices.catalog", "catalogQuery", "List insertable implemented native devices and scanned VST3 plugins. Filter kind/name, page offset/limit. Select exact catalogId; no installation, scanning or preset browsing.", false},
-    {"sonora_devices_insert", "devices.insert", "deviceInsert", "Insert a catalogId on an existing track, optional position. MIDI effects/instruments require MIDI tracks; refuses an existing instrument. Default MIDI effects first, instrument next, audio effects last. One undo step; returns deviceId.", true},
+    {"sonora_devices_catalog", "devices.catalog", "catalogQuery", "List insertable implemented native devices and scanned VST3, VST2 and Audio Unit plug-ins. Filter kind/name, page offset/limit. Select exact catalogId; no installation or preset browsing (plugins.scan refreshes the list).", false},
+    {"sonora_devices_insert", "devices.insert", "deviceInsert", "Insert a catalogId on a track, return or the main track (audio effects only there), optional position. MIDI effects/instruments require MIDI tracks; an existing instrument is refused unless replaceInstrument is true (one undo step, swaps it like a browser drop). Default MIDI effects first, instrument next, audio effects last. Returns deviceId.", true},
+    {"sonora_devices_move", "devices.move", "deviceMove", "Move a top-level device: position reorders an audio effect on its track; toTrackId moves it to another track (returns the NEW deviceId). One undo step.", true},
+    {"sonora_devices_set_enabled", "devices.set_enabled", "deviceEnabled", "Switch a top-level device on/off like its power button. Live action: NOT undoable, no revision needed; refused when the switch has authored automation.", false, true},
+    {"sonora_mixer_set", "mixer.set", "mixerSet", "Set live mixer values of a track, return or main track: gainDb (-70..6), pan (-1..1), muted, solo, armed (audio/MIDI tracks), sends [{sendIndex, gainDb -70..0}]. Absolute values, NOT undoable, no revision; automation_conflict when that control has an envelope. Receipt has previous and current values.", false, true},
+    {"sonora_transport_set", "transport.set", "transportSet", "Play, stop, continue, return_to_start, jump to positionBeats (quarter notes) and/or set the metronome. Live action, asynchronous: read status.get for the resulting state.", false, true},
+    {"sonora_session_launch", "session.launch", "sessionLaunch", "Launch a Session clip (trackId + scene), a scene, stop a track, stop all clips or go back to the Arrangement. Live action; launches follow the clip's launch quantisation.", false, true},
+    {"sonora_recording_set", "recording.set", "recordingSet", "Start or stop Arrangement or Session recording (armed tracks). Live action and asynchronous: starting waits for input permission; poll status.get recording.", false, true},
+    {"sonora_plugins_scan", "plugins.scan", "pluginsScan", "Rescan installed plug-ins (VST3 and VST2, optionally Audio Units). Asynchronous: poll status.get pluginScan.running, then read devices.catalog. Loads third-party code in-process.", false, true},
+    {"sonora_project_save_copy", "project.save_copy", "saveCopy", "Write a copy of the project to a new absolute .als path (parent folder must exist, never overwrites; samples are copied into it). The open project keeps its own file and unsaved state. Live action.", false, true},
+    {"sonora_project_export_audio", "project.export_audio", "exportAudio", "Export audio: target main (one file), track (trackId, one file) or stems (destination is a NEW folder, one file per track); destination must not exist, its parent must; the extension must match format (wav/aiff/flac; 32-bit float is WAV only); range startBeat/endBeat in quarter notes; optional tailSeconds or autoTail, normalize, mono, dither. Asynchronous live action: poll status.get export (phase idle/running/done/failed/cancelled, progress, files, error). Takes over the audio graph while it runs.", false, true},
+    {"sonora_project_export_cancel", "project.export_cancel", "", "Cancel the running export started with sonora_project_export_audio; poll status.get export until the phase is cancelled.", false, true},
+    {"sonora_view_set", "view.set", "viewSet", "Change what the window shows: mainView session|arrangement, detail clip|devices|hidden, selectTrackId, selectClip {trackId, clipId, scene?}, browserVisible, mixerVisible, followPlayhead. Live action, not undoable, does not change the project.", false, true},
+    {"sonora_devices_open_editor", "devices.open_editor", "openEditor", "Open the plug-in editor window of a hosted top-level plug-in (VST3, VST2, Audio Unit). Native devices have no window (the device view shows them). Live action.", false, true},
+    {"sonora_media_run", "media.run", "mediaRun", "Run a clip or track audio job without prompts: freeze/unfreeze/bounce_in_place/bounce_new_track (trackId), reverse/crop/toggle_warp/audio_to_midi (mode melody|harmony|drums|slices)/strip_silence (trackId + clipId, scene for a Session clip; audio clips). Asynchronous live action: poll status.get mediaJob (running, done, failed, finished_without_change); a successful job is one history step (status.get history.undoLabel). Stem separation and Resynth are not available (they open prompts).", false, true},
+    {"sonora_project_save", "project.save", "", "Save the project in place. Fails with untitled_document when the project has no file yet (that needs the Save dialog). Live action; the receipt has saved and path.", false, true},
+    {"sonora_clips_import_audio", "clips.import_audio", "importAudio", "Import 1-16 existing audio files (absolute paths) as clips: on a new audio track, or on trackId at startBeat (Arrangement) or scene (Session). Tempo is detected like a sample drop. One undo step; receipt lists created tracks and clips. Reads files only.", true},
+    {"sonora_history_step", "history.step", "historyStep", "Undo or redo the application's latest history step, only when expectedLabel equals the label status.get reports. Use sonora_history_undo for your own latest edit.", true},
     {"sonora_devices_remove", "devices.remove", "deviceQuery", "Remove an exact top-level device, capturing current live state for undo. May interrupt voices. Does not delete plugin installation or source media.", true},
     {"sonora_serum_supersaw", "workflow.serum_supersaw", "serum", "NEW track with actual Serum 2.0.24 VST3: seven-voice saw, four D# minor bars D#m/B/F#/C#, 16 beats in 4/4. Keeps tempo. Declare minor assumption when omitted. Does not save/export.", true},
     {"sonora_history_undo", "history.undo", "undo", "Undo latest unchanged agent transaction using its returned undoToken. Refuses intervening edits; never force an inverse.", true}
@@ -28,8 +47,8 @@ const char* instructions =
     "For each mutation supply the exact latest observed expectedRevision. Never invent or silently update a stale revision. "
     "Use sequential writes; a write returns the next revision. The host supplies idempotency keys. Never retry a write under "
     "a new call after an unknown outcome; stop and report it. Stop on conflicts rather than overwriting human edits. "
-    "Only actual advertised operations are available: no arbitrary shell, files, internet tools, playback or save/export. "
-    "Do not claim saved, heard or rendered unless a tool proves it. Changes are unsaved. Explain unsupported requests clearly. "
+    "Only actual advertised operations are available: no arbitrary shell, files or internet tools; playback, mixer, launching, recording and in-place save exist as live actions (no undo, no revision; read status.get afterwards), save-a-copy, audio export, view changes and media jobs exist as live actions too; save-as, open and new project do not. "
+    "Do not claim saved, heard or rendered unless a tool proves it. Edits are unsaved until project.save succeeds. Explain unsupported requests clearly. "
     "Times are quarter-note beats, note times relative to clip content, velocities 0..127, VST3 parameters normalized 0..1; native parameters also accept value in their advertised units. Never guess ranges or catalog IDs. "
     "Parameter commits replace the processor: use returned NEW deviceId. Large queries are explicitly paged; inspect filters "
     "before fetching more. Keep final responses concise, name concrete edits and their limitations. A tool result is the "
@@ -264,7 +283,10 @@ void Conversation::addResult(const ToolCall& call, const juce::var& result)
 juce::var executeTool(control::ControlService& service, const ToolCall& call, const juce::String& document, const juce::String& operationKey)
 {
     const auto operation = operationForTool(call.name);
-    const bool mutation = operation == "edits.apply" || operation == "devices.parameters.set" || operation == "workflow.serum_supersaw" || operation == "history.undo" || operation == "devices.insert" || operation == "devices.remove";
+    const bool mutation = operation == "edits.apply" || operation == "devices.parameters.set" || operation == "workflow.serum_supersaw" || operation == "history.undo" || operation == "devices.insert" || operation == "devices.remove"
+                       || operation == "devices.move" || operation == "history.step" || operation == "clips.import_audio";
+    bool live = false;
+    for (const auto& d : definitions) if (operation == d.operation) live = d.live;
     try
     {
         if (operation.isEmpty()) return failed("unsupported_tool", "Tool is unavailable");
@@ -290,7 +312,7 @@ juce::var executeTool(control::ControlService& service, const ToolCall& call, co
         auto request = object({{"apiVersion", "1.0"}, {"operation", operation}, {"arguments", args},
             {"target", object({{"instanceId", service.instanceId()}, {"documentId", document}})}});
         if (expected.isString()) request.getDynamicObject()->setProperty("expectedRevision", expected);
-        request.getDynamicObject()->setProperty("idempotencyKey", operationKey);
+        if (! live) request.getDynamicObject()->setProperty("idempotencyKey", operationKey); // live actions carry no guard
         auto result = service.execute(request);
         if (! static_cast<bool>(result["ok"])) return result;
         if (operation == "devices.parameters" && result["data"].isArray())
@@ -309,6 +331,22 @@ juce::var executeTool(control::ControlService& service, const ToolCall& call, co
                 for (int i = trackId < 0 ? offset : 0; i < tracks->size() && selected.size() < 32; ++i)
                 {
                     auto track = clone((*tracks)[i]); if (trackId >= 0 && static_cast<int>(track["trackId"]) != trackId) continue;
+                    if (trackId < 0) // overview: nested rack contents and long lists are fetched by focusing one track
+                    {
+                        if (const auto* devices = track["devices"].getArray())
+                        {
+                            juce::Array<juce::var> flat;
+                            for (int dIndex = 0; dIndex < devices->size() && dIndex < 24; ++dIndex)
+                            {
+                                auto device = clone((*devices)[dIndex]);
+                                if (device.hasProperty("chains")) { device.getDynamicObject()->removeProperty("chains"); device.getDynamicObject()->setProperty("chainsOmitted", true); }
+                                flat.add(device);
+                            }
+                            track.getDynamicObject()->setProperty("devices", flat);
+                        }
+                        if (const auto* lanes = track["takeLanes"].getArray(); lanes && lanes->size() > 8)
+                        { juce::Array<juce::var> few; for (int l = 0; l < 8; ++l) few.add((*lanes)[l]); track.getDynamicObject()->setProperty("takeLanes", few); }
+                    }
                     for (const auto* key : {"clips", "sessionClips", "takeClips"})
                         if (const auto* clips = track[key].getArray())
                         {

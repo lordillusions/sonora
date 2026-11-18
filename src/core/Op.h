@@ -25,6 +25,11 @@ inline constexpr size_t maxNotesPerClip = 65536;
 
 // An Op that cannot apply to the given Song. `code` uses the control API vocabulary: invalid_request,
 // target_replaced, unsupported_clip, automation_conflict.
+// AGT-7e: the main track has no Id in a .als. Control addresses it by `song.main.id` when the file has one and by this
+// reserved value otherwise, so inspect always reports an ID that the commands accept.
+inline constexpr int mainTrackVirtualId = 999999999;
+inline int mainTrackId(const Song& song) { return song.main.id >= 0 ? song.main.id : mainTrackVirtualId; }
+
 struct OpError : std::runtime_error
 {
     OpError(std::string errorCode, const std::string& message) : std::runtime_error(message), code(std::move(errorCode)) {}
