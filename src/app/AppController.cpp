@@ -941,7 +941,11 @@ void AppController::installSong(std::unique_ptr<model::Song> song)
     ui_.recordingRequested = false;
     inputPermissionDenied_ = false;
     const auto start = juce::Time::getMillisecondCounterHiRes();
-    ui_.buildLog = engine_.reloadSongKeepingPlugins(*song_); // running plug-ins carry over (no re-creation)
+    // Another set: running plug-in instances carry over only with this set's saved state applied (ENG-17).
+    engine::AudioEngine::KeepRunning keep;
+    keep.wholeDevices = false;
+    keep.restoreSavedState = true;
+    ui_.buildLog = engine_.reloadSongKeepingPlugins(*song_, keep);
     for (const auto& w : song_->warnings)
         ui_.buildLog.push_back(w);
     const auto ms = juce::Time::getMillisecondCounterHiRes() - start;
@@ -1287,7 +1291,9 @@ void AppController::editFailed(const std::string& label, const std::string& what
     logf("%s", line.toRawUTF8());
     editingDevices_ = false;
     editingDevicesSince_ = 0;
-    try { rebuildEngine(); } // the engine follows the model again (whatever part of the edit went through)
+    // The engine follows the model again (whatever part of the edit went through): every device is built from the model,
+    // only plug-in instances carry over (creating SoundID Reference again on this thread can hang).
+    try { engine::AudioEngine::KeepRunning keep; keep.wholeDevices = false; rebuildEngine(keep); }
     catch (...) { ui_.song = song_.get(); }
     ui_.statusText = "That edit failed (" + what + "); the set can still be saved";
     juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "An edit failed",
@@ -1333,7 +1339,13 @@ void AppController::afterEdit(const std::vector<int>& tracks, bool songLevel, bo
     if (structureChanged)
     {
         remapTrackUi(idsBeforeStructureEdit_);
-        rebuildEngine();
+        // ENG-17: the devices of the tracks the edit left alone keep running; an edit that also changed devices only keeps
+        // plug-in instances, and the tracks it names are built again.
+        engine::AudioEngine::KeepRunning keep;
+        keep.wholeDevices = ! devicesChanged;
+        for (int index : tracks)
+            if (const auto* track = model::trackAt(*song_, index)) keep.rebuild.insert(track->id);
+        rebuildEngine(keep);
     }
     else
     for (int t : tracks)
@@ -1468,8 +1480,9 @@ void AppController::remapTrackUi(const std::vector<model::TrackId>& before)
     remapFloats(ui_.laneHeights);
 }
 
-// The track list changed: build and install a fresh graph from the model (keeping the play position).
-void AppController::rebuildEngine()
+// The track list changed: build and install a new graph from the model (keeping the play position). What `keep` allows keeps
+// running instead of being created again (ENG-17).
+void AppController::rebuildEngine(const engine::AudioEngine::KeepRunning& keep)
 {
     closePluginWindows();
     const double position = engine_.transport().positionBeats();
@@ -1477,7 +1490,10 @@ void AppController::rebuildEngine()
     ui_.controls.reset();
     if (ui_.modelChanged)
         ui_.modelChanged();
-    ui_.buildLog = engine_.loadSong(*song_);
+    const auto started = juce::Time::getMillisecondCounterHiRes();
+    ui_.buildLog = engine_.reloadSongKeepingPlugins(*song_, keep);
+    logf("structure edit: engine rebuilt in %.0f ms (%d devices and %d plug-in instances kept)",
+         juce::Time::getMillisecondCounterHiRes() - started, engine_.lastReusedDevices(), engine_.lastReusedPlugins());
     for (const auto& w : song_->warnings)
         ui_.buildLog.push_back(w);
     engine_.transport().setPosition(position);

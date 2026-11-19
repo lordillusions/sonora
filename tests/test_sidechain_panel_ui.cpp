@@ -279,7 +279,8 @@ TEST_CASE("engine rebuild: Duplicate Tracks keeps the running plug-ins of the se
     copy.devices[0].id = 13;
     duplicated.tracks.push_back(copy);
     eng.reloadSongKeepingPlugins(duplicated);
-    CHECK(eng.lastReusedPlugins() == 2);
+    CHECK(eng.lastReusedDevices() == 2); // ENG-17: the whole devices carry over, prepared as they were
+    CHECK(eng.lastReusedPlugins() == 0);
     graph = eng.latestGraph();
     REQUIRE(graph != nullptr);
     auto* bassAfter = dynamic_cast<plugins::PluginDevice*>(graph->nodes[0].processorForModelDevice[0]);
@@ -296,5 +297,84 @@ TEST_CASE("engine rebuild: Duplicate Tracks keeps the running plug-ins of the se
     float* out[2] = {l.data(), r.data()};
     eng.renderBlock(out, 2, 512);
     CHECK(std::isfinite(l[100]));
+
+    // Plug-in-only keeping (an edit that also changed devices): the instances carry over into new devices.
+    engine::AudioEngine::KeepRunning pluginsOnly;
+    pluginsOnly.wholeDevices = false;
+    eng.reloadSongKeepingPlugins(duplicated, pluginsOnly);
+    CHECK(eng.lastReusedPlugins() == 3);
+    CHECK(eng.lastReusedDevices() == 0);
+    graph = eng.latestGraph();
+    auto* bassKept = dynamic_cast<plugins::PluginDevice*>(graph->nodes[0].processorForModelDevice[0]);
+    REQUIRE(bassKept != nullptr);
+    CHECK(bassKept != bassAfter);
+    CHECK(&bassKept->instance() == bassInstance);
+    eng.renderBlock(out, 2, 512);
+    CHECK(std::isfinite(l[100]));
+#endif
+}
+
+TEST_CASE("engine rebuild (ENG-17): opening another set keeps a running plug-in only with that set's own state")
+{
+#if JUCE_MAC
+    juce::ScopedJuceInitialiser_GUI init;
+    const auto bundle = phaseAlignBundle();
+    if (! bundle.exists()) return;
+    juce::VST3PluginFormat format;
+    juce::OwnedArray<juce::PluginDescription> types;
+    format.findAllTypesForFile(types, bundle.getFullPathName());
+    REQUIRE(types.size() == 1);
+    plugins::PluginHost host;
+    host.knownPlugins().addType(*types[0]);
+    midi::MidiManager midiManager;
+    engine::AudioEngine eng(host, midiManager);
+
+    model::Song song;
+    model::Device plugin;
+    plugin.kind = model::DeviceKind::PluginVst3;
+    plugin.type = "PluginDevice";
+    plugin.id = 12;
+    plugin.displayName = "Sonora Phase Align";
+    model::PluginInfo info;
+    info.name = "Sonora Phase Align";
+    plugin.plugin = info;
+    song.main.devices.push_back(plugin);
+    eng.loadSong(song);
+    auto* running = dynamic_cast<plugins::PluginDevice*>(eng.latestGraph()->nodes[(size_t) eng.latestGraph()->mainNode].processorForModelDevice[0]);
+    REQUIRE(running != nullptr);
+    auto* instance = &running->instance();
+    // Its live state, saved the way a set stores it.
+    auto saved = plugin;
+    REQUIRE(running->captureState(saved));
+    REQUIRE(! saved.plugin->state.empty());
+
+    // The sets below differ from the running one only in that state (the capture also wrote the plug-in's class id).
+    auto noState = song;
+    noState.main.devices[0] = saved;
+    noState.main.devices[0].plugin->state.clear();
+    noState.main.devices[0].plugin->controllerState.clear();
+    eng.reloadSongKeepingPlugins(noState);
+    running = dynamic_cast<plugins::PluginDevice*>(eng.latestGraph()->nodes[(size_t) eng.latestGraph()->mainNode].processorForModelDevice[0]);
+    REQUIRE(running != nullptr);
+    instance = &running->instance();
+
+    engine::AudioEngine::KeepRunning other;
+    other.wholeDevices = false;
+    other.restoreSavedState = true;
+    // Another set whose Main has the same device but no saved state: a new instance (nothing of the old set's state stays).
+    eng.reloadSongKeepingPlugins(noState, other);
+    CHECK(eng.lastReusedPlugins() == 0);
+    auto* fresh = dynamic_cast<plugins::PluginDevice*>(eng.latestGraph()->nodes[(size_t) eng.latestGraph()->mainNode].processorForModelDevice[0]);
+    REQUIRE(fresh != nullptr);
+    CHECK(&fresh->instance() != instance);
+    // A set with saved state for it: the running instance carries over with that state applied.
+    instance = &fresh->instance();
+    auto withState = noState;
+    withState.main.devices[0] = saved;
+    eng.reloadSongKeepingPlugins(withState, other);
+    CHECK(eng.lastReusedPlugins() == 1);
+    auto* kept = dynamic_cast<plugins::PluginDevice*>(eng.latestGraph()->nodes[(size_t) eng.latestGraph()->mainNode].processorForModelDevice[0]);
+    REQUIRE(kept != nullptr);
+    CHECK(&kept->instance() == instance);
 #endif
 }

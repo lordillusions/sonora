@@ -70,6 +70,10 @@ public:
     // kind, state, rate and block size) instead of creating one. Message thread. False when the instance failed.
     bool preload(const juce::PluginDescription& desc, const model::PluginInfo& stateSource, model::DeviceKind kindInSet,
                  double sampleRate, int blockSize);
+    // The state `src` saved (VST3 component/controller, AU class info, VST2 bank and program) applied to `instance`, as a
+    // new instance gets it. ENG-17: a running instance carried over into another set gets that set's state.
+    void restoreSavedState(juce::AudioPluginInstance& instance, const juce::PluginDescription& desc, const model::PluginInfo& src,
+                           model::DeviceKind kindInSet, juce::String& error);
     void clearPreloaded() { preloaded_.clear(); } // drops instances no build used
     // A running instance handed back for the next build (AudioEngine::reloadSongKeepingPlugins): claimed like a preloaded
     // one when the build asks for the same plug-in with the same state and processing setup.

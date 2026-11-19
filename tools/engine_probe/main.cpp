@@ -1,7 +1,7 @@
 // engine_probe — headless engine check: load a set, time the build, render audio offline.
 //
 //   engine_probe <set.als> [--export file.wav|--stems folder] [--to <beat>] [--tail <s>] [--normalize] [--render <seconds>] [--from <beat>] [--out file.wav] [--no-plugins] [--check-finite] [--stress] [--bypass NAME]... [--editor-query-at <s>] [--launch TRACK:SCENE]... [--profile] [--block N]
-//                [--threads N] [--parallel-always] [--hash] [--realtime]
+//                [--threads N] [--parallel-always] [--hash] [--realtime] [--structure-edit [full]]
 //
 // Prints: model load time, graph build time (UI-blocking part), background sample load time,
 // failed samples, build log. With --render it plays the arrangement from --from (default 0)
@@ -13,12 +13,15 @@
 // "too little work" serial blocks, --hash prints a hash of the float output to compare serial and parallel renders,
 // --realtime renders each block at its buffer deadline on a time-constraint thread (the app's conditions: helpers idle
 // between blocks; an unpaced render keeps them busy and macOS demotes such realtime threads).
+// --structure-edit times what the app does on Insert Audio Track and on deleting it again (the UI-blocking engine rebuild,
+// keeping the running devices); "full" also times the old full rebuild that created every device again.
 
 #include "devices/DeviceFactory.h"
 #include "devices/RackProcessor.h"
 #include "engine/AudioEngine.h"
 #include "engine/ClipLauncher.h"
 #include "engine/Exporter.h"
+#include "core/Edit.h"
 #include "io/als/AlsReader.h"
 #include "midi/MidiManager.h"
 #include "plugins/PluginHost.h"
@@ -98,6 +101,7 @@ int main(int argc, char** argv)
     bool parallelAlways = false; // ENG-14e: --parallel-always: no "too little work" serial blocks
     bool hashOutput = false;
     bool realtime = false;       // ENG-14e: --realtime paces blocks at the buffer rate on a time-constraint thread, like CoreAudio     // ENG-14e: --hash prints a hash of the rendered float output (serial vs parallel A/B)
+    bool structureEdit = false, structureFull = false;
     double editorQueryAt = -1.0; // PLG-13: ask every device hasEditor() at this render time, like the device title does
     for (int i = 2; i < argc; ++i)
     {
@@ -142,6 +146,11 @@ int main(int argc, char** argv)
             hashOutput = true;
         else if (a == "--realtime")
             realtime = true;
+        else if (a == "--structure-edit")
+        {
+            structureEdit = true;
+            if (i + 1 < argc && juce::String(argv[i + 1]) == "full") { structureFull = true; ++i; }
+        }
     }
 
     auto t0 = juce::Time::getMillisecondCounterHiRes();
@@ -258,6 +267,49 @@ int main(int argc, char** argv)
         std::printf("  FAILED sample: %s\n", f.c_str());
     for (const auto& l : log)
         std::printf("  log: %s\n", l.c_str());
+
+    if (structureEdit)
+    {
+        // What AppController does on Insert Audio Track (after the selected first track) and on deleting it again: first
+        // the live state of every device goes into the model (syncModelFromEngine), then the rebuild.
+        {
+            model::Song synced = *r.song;
+            auto* graph = engine.latestGraph();
+            lap();
+            int index = 0;
+            auto sync = [&](model::Track& t) {
+                const auto& node = graph->nodes[(size_t) index++];
+                for (size_t di = 0; di < t.devices.size() && di < node.processorForModelDevice.size(); ++di)
+                    devices::captureDeviceState(t.devices[di], node.processorForModelDevice[di], nullptr);
+            };
+            for (auto& t : synced.tracks) sync(t);
+            for (auto& t : synced.returns) sync(t);
+            sync(synced.main);
+            std::printf("model capture   %7.0f ms  (blocks the UI; every device's live state)\n", lap());
+        }
+        model::Song edited = *r.song;
+        int end = 0;
+        auto track = io::createAudioTrack(edited, "Audio", 18, -1, -1, end);
+        auto insert = model::insertTracks({std::move(track)}, end, "Insert Audio Track", std::min<int>(1, (int) edited.tracks.size()));
+        insert.apply(edited);
+        lap();
+        engine.reloadSongKeepingPlugins(edited);
+        std::printf("insert track    %7.0f ms  (blocks the UI; %d plug-ins and %d devices kept)\n", lap(), engine.lastReusedPlugins(),
+                    engine.lastReusedDevices());
+        model::Song removed = edited;
+        auto del = model::deleteTracks(removed, {std::min<int>(1, (int) removed.tracks.size() - 1)});
+        del.apply(removed);
+        lap();
+        engine.reloadSongKeepingPlugins(removed);
+        std::printf("delete track    %7.0f ms  (blocks the UI; %d plug-ins and %d devices kept)\n", lap(), engine.lastReusedPlugins(),
+                    engine.lastReusedDevices());
+        if (structureFull)
+        {
+            lap();
+            engine.loadSong(edited);
+            std::printf("full rebuild    %7.0f ms  (every device created again)\n", lap());
+        }
+    }
 
     if (! bypassNames.empty())
     {

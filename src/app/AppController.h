@@ -370,7 +370,7 @@ private:
     void ungroupSelectedTracks();
     void groupSelectedDevices();   // DEV-15c, AppDeviceGroups.cpp
     void ungroupSelectedDevice();
-    void rebuildEngine();
+    void rebuildEngine(const engine::AudioEngine::KeepRunning& keep = {});
     void remapTrackUi(const std::vector<model::TrackId>& before);
     std::vector<model::TrackId> trackIds() const;
     std::vector<model::TrackId> idsBeforeStructureEdit_;

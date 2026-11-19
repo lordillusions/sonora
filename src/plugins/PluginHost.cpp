@@ -323,10 +323,18 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance(const juce
         return nullptr;
     const auto t1 = juce::Time::getMillisecondCounterHiRes();
 
+    restoreSavedState(*instance, desc, src, kindInSet, error);
+    lastStateMs_ = juce::Time::getMillisecondCounterHiRes() - t1;
+    return instance;
+}
+
+void PluginHost::restoreSavedState(juce::AudioPluginInstance& instance, const juce::PluginDescription& desc,
+                                   const model::PluginInfo& src, model::DeviceKind kindInSet, juce::String& error)
+{
     // ---- restore state saved by Live
     if (kindInSet == model::DeviceKind::PluginVst3 && desc.pluginFormatName == "VST3" && ! src.state.empty())
     {
-        if (auto* client = instance->getVST3Client())
+        if (auto* client = instance.getVST3Client())
         {
             const auto preset = buildVstPreset(src.vst3Uid, src.state, src.controllerState);
             if (! client->setPreset(juce::MemoryBlock(preset.data(), preset.size())))
@@ -342,7 +350,7 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance(const juce
                     state.createNewChildElement("IEditController")->addTextElement(juce::MemoryBlock(src.controllerState.data(), src.controllerState.size()).toBase64Encoding());
                 juce::MemoryBlock wrapped;
                 juce::AudioProcessor::copyXmlToBinary(state, wrapped);
-                instance->setStateInformation(wrapped.getData(), static_cast<int>(wrapped.getSize()));
+                instance.setStateInformation(wrapped.getData(), static_cast<int>(wrapped.getSize()));
             }
         }
     }
@@ -350,7 +358,7 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance(const juce
     {
         // Hypothesis (PLG-4): <AuPreset><Buffer> is the AU ClassInfo plist, which is what
         // JUCE's AU wrapper accepts in setStateInformation(). Verify with real plugins.
-        instance->setStateInformation(src.state.data(), (int) src.state.size());
+        instance.setStateInformation(src.state.data(), (int) src.state.size());
     }
     else if (kindInSet == model::DeviceKind::PluginVst2 && desc.pluginFormatName == "VST")
     {
@@ -361,17 +369,15 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance(const juce
             if (bank.empty())
                 error = desc.name + ": VST2 state layout not understood, loaded with default settings";
             else
-                instance->setStateInformation(bank.data(), (int) bank.size());
+                instance.setStateInformation(bank.data(), (int) bank.size());
         }
-        if (src.vst2ProgramNumber > 0 && src.vst2ProgramNumber < instance->getNumPrograms())
-            instance->setCurrentProgram(src.vst2ProgramNumber);
+        if (src.vst2ProgramNumber > 0 && src.vst2ProgramNumber < instance.getNumPrograms())
+            instance.setCurrentProgram(src.vst2ProgramNumber);
     }
     else if (kindInSet == model::DeviceKind::PluginVst2)
     {
         error = desc.name + ": VST2 state cannot be migrated to the VST3 build, loaded with default settings (PLG-5)";
     }
-    lastStateMs_ = juce::Time::getMillisecondCounterHiRes() - t1;
-    return instance;
 }
 
 } // namespace sonora::plugins

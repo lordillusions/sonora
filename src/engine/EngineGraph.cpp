@@ -27,7 +27,8 @@ void EngineGraph::prepare(double sampleRate, int maxBlockSize)
         n.inputMonitorMask.resize((size_t) maxBlockSize);
         n.audioState.prepare(sampleRate, maxBlockSize);
         for (auto& d : n.devices)
-            d->prepare(sampleRate, maxBlockSize);
+            if (std::find(alreadyPrepared.begin(), alreadyPrepared.end(), d.get()) == alreadyPrepared.end())
+                d->prepare(sampleRate, maxBlockSize);
         for (size_t t = 0; t < n.tap.size(); ++t)
             if (n.needTap[t])
             {
@@ -37,6 +38,7 @@ void EngineGraph::prepare(double sampleRate, int maxBlockSize)
         n.trackDelaySamples = std::max(0, (int) std::lround(n.trackDelayMs * 0.001 * sampleRate));
         n.trackDelay.prepare(n.trackDelaySamples);
     }
+    alreadyPrepared.clear(); // a later prepare (rate or block size change) prepares everything
     computeDelayCompensation();
     schedule = buildRenderSchedule(*this);
 }
@@ -315,7 +317,8 @@ TrackNode makeNode(const model::Track& t, int controlIndex, devices::BuildContex
 
     for (const auto& d : t.devices)
     {
-        auto p = devices::createDevice(d, ctx);
+        auto p = ctx.takeRunningDevice ? ctx.takeRunningDevice(t.id, d.id) : nullptr; // ENG-17: unchanged, still running
+        if (p == nullptr) p = devices::createDevice(d, ctx);
         n.processorForModelDevice.push_back(p.get());
         if (p)
             n.devices.push_back(std::move(p));

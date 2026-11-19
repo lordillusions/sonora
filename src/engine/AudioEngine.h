@@ -29,6 +29,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <set>
 
 namespace sonora::plugins
 {
@@ -62,8 +63,6 @@ public:
 
     // Builds and installs a graph for the song. Message thread. Returns the build log.
     std::vector<std::string> loadSong(const model::Song& song);
-    std::vector<std::string> loadSong(const model::Song& song,
-                                      std::function<std::unique_ptr<juce::AudioPluginInstance>(int trackId, int deviceId)> takeRunningPlugin);
     // UI-51: starts `device`'s plug-in ahead of loadSong(), which then uses that instance (message thread). False when
     // nothing was started: not a plug-in, not installed, or it failed (loadSong() reports those).
     bool preloadPlugin(const model::Device& device);
@@ -80,13 +79,27 @@ public:
     // Message thread: prepare inserted processors, briefly pause the device callback to edit the
     // chain, retain existing instances/state, refresh bindings and latency, then resume.
     std::vector<std::string> updateTrackDevices(int trackIndex, const model::Song& song);
-    // loadSong for a structural edit of the same set (duplicate, group, delete tracks): the running top-level plug-ins whose
-    // device still exists with the same state are handed to the new graph instead of being created again. Creating them
-    // again was slow and could deadlock (SoundID Reference blocked forever in its initialise on Duplicate Tracks).
-    std::vector<std::string> reloadSongKeepingPlugins(const model::Song& song);
+    // loadSong that hands running devices to the new graph instead of creating them again. Creating them again made every
+    // Insert / Delete / Duplicate / Group Track take seconds on a set with plug-ins and could deadlock: SoundID Reference
+    // blocks forever in its initialise when a second instance is created on the message thread (ENG-17).
+    struct KeepRunning
+    {
+        // Same set, structural edit (tracks inserted, deleted, moved, grouped): a top-level device of a track that is still
+        // there, built from the same device, carries over whole (native or plug-in, its live values, voices and tails), and
+        // skips prepare when the rate and block size did not change. Off: only plug-in instances carry over.
+        bool wholeDevices = true;
+        // Tracks the edit itself replaced (by id): nothing of theirs carries over whole.
+        std::set<model::TrackId> rebuild;
+        // Another set (open, revert, collab snapshot): a plug-in instance carries over only to a device with saved state of
+        // its own, which is applied to it, so no state leaks from the previous set.
+        bool restoreSavedState = false;
+    };
+    std::vector<std::string> reloadSongKeepingPlugins(const model::Song& song) { return reloadSongKeepingPlugins(song, KeepRunning{}); }
+    std::vector<std::string> reloadSongKeepingPlugins(const model::Song& song, const KeepRunning& keep);
     // Running instances the last reloadSongKeepingPlugins / updateTrackDevices handed over (DEV-15c: plug-ins moved into
     // or out of a rack by updateTrackDevices).
     int lastReusedPlugins() const { return lastReused_; }
+    int lastReusedDevices() const { return lastReusedDevices_; } // whole device processors (native ones too) carried over
     bool changingDevices() const { return changingDevices_; } // message thread: a device update or reprepare is running
     void reprepareGraph(); // message thread; retains instances, controls and transport on device changes
     bool graphPreparedForDevice() const
@@ -181,10 +194,15 @@ public:
     std::function<void(const std::string& track, const std::string& device, float inMagnitude, float outMagnitude)> onBadAudio;
 
 private:
+    // loadSong with what reloadSongKeepingPlugins hands over: `reuse` carries the take callbacks; `prepared` are carried-over
+    // devices already prepared at the current rate and block size. Same set: queued sample loads stay wanted.
+    std::vector<std::string> buildAndInstall(const model::Song& song, devices::BuildContext reuse,
+                                             const std::shared_ptr<std::vector<const devices::DeviceProcessor*>>& prepared, bool sameSet);
     std::shared_ptr<std::atomic<bool>> lifetime_ = std::make_shared<std::atomic<bool>>(true);
     void queueReprepare(); // device callbacks may outlive shutdown in the message queue
     bool changingDevices_ = false, reprepareQueued_ = false; // message thread only
     int lastReused_ = 0;
+    int lastReusedDevices_ = 0;
     // juce::AudioIODeviceCallback
     void audioDeviceIOCallbackWithContext(const float* const* inputs, int numInputs, float* const* outputs,
                                           int numOutputs, int numSamples,

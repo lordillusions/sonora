@@ -11,6 +11,7 @@ set(SONORA_TEST_SOURCES
     test_sample_drop.cpp
     test_sample_files.cpp
     test_engine.cpp
+    test_engine_rebuild.cpp
     test_parallel_engine.cpp
     test_devices.cpp
     test_simpler_parity.cpp

@@ -106,27 +106,92 @@ juce::String AudioEngine::enableRecordingInputs(int requiredChannels)
     return deviceManager_.setAudioDeviceSetup(setup, true);
 }
 
-std::vector<std::string> AudioEngine::loadSong(const model::Song& song)
+namespace
 {
-    return loadSong(song, {});
+// ENG-17: whether the processor built for `before` also is what `after` builds. Values the running device owns (parameters,
+// plug-in state, the on switch, rack chain mixers) are left out: the model takes them from the processor
+// (captureDeviceState), and edits of them go through updateTrackDevices. What changes what gets built is compared.
+bool sameContent(const std::shared_ptr<const std::string>& a, const std::shared_ptr<const std::string>& b)
+{
+    return a == b || (a && b && *a == *b);
 }
 
-std::vector<std::string> AudioEngine::loadSong(const model::Song& song,
-                                               std::function<std::unique_ptr<juce::AudioPluginInstance>(int, int)> takeRunningPlugin)
+bool sameBuild(const model::Device& a, const model::Device& b)
+{
+    if (a.kind != b.kind || a.type != b.type || a.id != b.id || a.maxPatch != b.maxPatch || a.maxPatchPath != b.maxPatchPath
+        || a.sourceDirectory != b.sourceDirectory || ! sameContent(a.sourceXml, b.sourceXml))
+        return false;
+    if (a.sidechain.on != b.sidechain.on || a.sidechain.sourceTrackId != b.sidechain.sourceTrackId || a.sidechain.tap != b.sidechain.tap)
+        return false;
+    if (a.plugin.has_value() != b.plugin.has_value())
+        return false;
+    if (a.plugin)
+    {
+        const auto &p = *a.plugin, &q = *b.plugin;
+        if (p.name != q.name || p.vst3Uid != q.vst3Uid || p.vst2UniqueId != q.vst2UniqueId || p.auType != q.auType
+            || p.auSubType != q.auSubType || p.auManufacturer != q.auManufacturer || p.isInstrument != q.isInstrument)
+            return false;
+    }
+    // Content the device decodes when it is built (wavetables, Hush sessions): the device rewrites it from its own state
+    // (a new pointer with what it already plays), so the format decides; another decoded content comes with another id.
+    if ((a.nativeContent == nullptr) != (b.nativeContent == nullptr) || (a.nativeContent && a.nativeContent->format != b.nativeContent->format))
+        return false;
+    if (a.sampleParts.size() != b.sampleParts.size())
+        return false;
+    for (size_t i = 0; i < a.sampleParts.size(); ++i)
+    {
+        const auto &x = a.sampleParts[i].sample, &y = b.sampleParts[i].sample;
+        if (x.absolutePath != y.absolutePath || x.relativePath != y.relativePath || x.relativePathType != y.relativePathType
+            || x.sourceDirectory != y.sourceDirectory)
+            return false;
+    }
+    if (a.chains.size() != b.chains.size())
+        return false;
+    for (size_t c = 0; c < a.chains.size(); ++c)
+    {
+        const auto &x = a.chains[c], &y = b.chains[c];
+        if (x.devices.size() != y.devices.size() || x.receivingNote != y.receivingNote || x.sendingNote != y.sendingNote
+            || x.chokeGroup != y.chokeGroup || x.keyMin != y.keyMin || x.keyMax != y.keyMax || x.velMin != y.velMin
+            || x.velMax != y.velMax || x.selMin != y.selMin || x.selMax != y.selMax)
+            return false;
+        for (size_t d = 0; d < x.devices.size(); ++d)
+            if (! sameBuild(x.devices[d], y.devices[d]))
+                return false;
+    }
+    return true;
+}
+
+bool hasSavedState(const model::Device& d)
+{
+    return d.plugin && (! d.plugin->state.empty() || (d.kind == model::DeviceKind::PluginVst2 && d.plugin->vst2ProgramNumber > 0));
+}
+} // namespace
+
+std::vector<std::string> AudioEngine::loadSong(const model::Song& song)
+{
+    return buildAndInstall(song, {}, nullptr, false);
+}
+
+std::vector<std::string> AudioEngine::buildAndInstall(const model::Song& song, devices::BuildContext reuse,
+                                                      const std::shared_ptr<std::vector<const devices::DeviceProcessor*>>& prepared, bool sameSet)
 {
     if (lastSong_.get() != &song)
         lastSong_ = std::make_unique<model::Song>(song);
 
-    samples_.cancelQueued(); // the previous song's pending loads are no longer needed
+    // Another set: the previous song's pending loads are no longer needed. The same set still wants them: a carried-over
+    // Simpler whose sample is still queued would otherwise never get it.
+    if (! sameSet) samples_.cancelQueued();
 
     devices::BuildContext ctx;
     ctx.pluginHost = &host_;
     ctx.sampleRate = sampleRate_;
     ctx.blockSize = blockSize_;
     ctx.placeholderForMissingInstruments = placeholderInstruments;
-    ctx.takeRunningPlugin = std::move(takeRunningPlugin);
+    ctx.takeRunningPlugin = std::move(reuse.takeRunningPlugin);
+    ctx.takeRunningDevice = std::move(reuse.takeRunningDevice);
 
     auto result = buildGraph(*lastSong_, ctx, samples_);
+    if (prepared) result.graph->alreadyPrepared = *prepared; // filled while the build took them
 
     transport_.setTempo(song.tempo);
     transport_.setTimeSignature(song.timeSigNumerator, song.timeSigDenominator);
@@ -138,9 +203,10 @@ std::vector<std::string> AudioEngine::loadSong(const model::Song& song,
     return result.log;
 }
 
-std::vector<std::string> AudioEngine::reloadSongKeepingPlugins(const model::Song& song)
+std::vector<std::string> AudioEngine::reloadSongKeepingPlugins(const model::Song& song, const KeepRunning& keep)
 {
     lastReused_ = 0;
+    lastReusedDevices_ = 0;
     if (latest_ == nullptr || lastSong_ == nullptr) return loadSong(song);
     const bool running = deviceManager_.getCurrentAudioDevice() != nullptr;
     if (running) deviceManager_.removeAudioCallback(this); // waits for a running callback; nothing processes below
@@ -149,27 +215,63 @@ std::vector<std::string> AudioEngine::reloadSongKeepingPlugins(const model::Song
         delete current_;
         current_ = p;
     }
-    // The running top-level plug-ins by (track id, device id), when the new song still has that device with the same
-    // plug-in: the instance (and its live state) carries over.
+    // The new song's devices and tracks by id.
     std::map<std::pair<int, int>, const model::Device*> fresh;
-    const auto index = [&](const model::Track& t) { for (const auto& d : t.devices) fresh[{t.id, d.id}] = &d; };
+    std::map<model::TrackId, const model::Track*> freshTracks;
+    const auto index = [&](const model::Track& t) {
+        freshTracks[t.id] = &t;
+        for (const auto& d : t.devices) fresh[{t.id, d.id}] = &d;
+    };
     for (const auto& t : song.tracks) index(t);
     for (const auto& t : song.returns) index(t);
     index(song.main);
-    auto kept = std::make_shared<std::map<std::pair<int, int>, std::unique_ptr<juce::AudioPluginInstance>>>();
+    // Whole devices carry over only when the old graph was prepared the way the new one will be (else they are prepared
+    // again like any other device).
+    const bool samePrepare = juce::approximatelyEqual(latest_->preparedSampleRate, sampleRate_) && latest_->preparedBlockSize == blockSize_;
+    using Key = std::pair<int, int>;
+    auto keptDevices = std::make_shared<std::map<Key, std::unique_ptr<devices::DeviceProcessor>>>();
+    auto kept = std::make_shared<std::map<Key, std::unique_ptr<juce::AudioPluginInstance>>>();
     const auto harvest = [&](const model::Track& t, int nodeIndex) {
         if (nodeIndex < 0 || (size_t) nodeIndex >= latest_->nodes.size()) return;
         auto& node = latest_->nodes[(size_t) nodeIndex];
+        const auto now = freshTracks.find(t.id);
+        if (now == freshTracks.end()) return; // deleted: its devices go with the old graph
+        // A frozen or deactivated track builds something else than its devices; the edit's own tracks are built again.
+        const bool whole = keep.wholeDevices && ! keep.rebuild.count(t.id) && ! t.frozen && ! t.deactivated
+                           && ! now->second->frozen && ! now->second->deactivated;
+        if (t.frozen || t.deactivated || keep.rebuild.count(t.id)) return;
         for (size_t di = 0; di < t.devices.size() && di < node.processorForModelDevice.size(); ++di)
         {
-            auto* plugin = dynamic_cast<plugins::PluginDevice*>(node.processorForModelDevice[di]);
-            if (plugin == nullptr) continue;
+            auto* processor = node.processorForModelDevice[di];
+            if (processor == nullptr) continue;
             const auto& before = t.devices[di];
             const auto found = fresh.find({t.id, before.id});
-            if (found == fresh.end() || ! found->second->plugin || ! before.plugin || found->second->kind != before.kind
-                || found->second->plugin->name != before.plugin->name || found->second->plugin->vst3Uid != before.plugin->vst3Uid)
+            if (found == fresh.end()) continue;
+            const auto& after = *found->second;
+            if (whole && sameBuild(before, after))
+            {
+                const auto owner = std::find_if(node.devices.begin(), node.devices.end(), [processor](const auto& p) { return p.get() == processor; });
+                if (owner == node.devices.end()) continue;
+                processor->setSidechain(nullptr, 0.0f); // its old source's tap goes with the old graph; the build links it again
+                (*keptDevices)[{t.id, before.id}] = std::move(*owner);
                 continue;
-            (*kept)[{t.id, before.id}] = plugin->releaseInstance();
+            }
+            auto* plugin = dynamic_cast<plugins::PluginDevice*>(processor);
+            if (plugin == nullptr || ! after.plugin || ! before.plugin || after.kind != before.kind
+                || after.plugin->name != before.plugin->name || after.plugin->vst3Uid != before.plugin->vst3Uid)
+                continue;
+            if (keep.restoreSavedState && ! hasSavedState(after)) continue; // the previous set's state would stay
+            auto instance = plugin->releaseInstance();
+            if (keep.restoreSavedState && instance)
+            {
+                // Only where the saved state applies to this format (a VST2 device played by the VST3 build keeps defaults).
+                const auto format = instance->getPluginDescription().pluginFormatName;
+                const bool applies = (after.kind == model::DeviceKind::PluginVst3 && format == "VST3")
+                                     || (after.kind == model::DeviceKind::PluginAu && format == "AudioUnit")
+                                     || (after.kind == model::DeviceKind::PluginVst2 && format == "VST");
+                if (! applies) continue; // released and destroyed: the new device gets a new instance
+            }
+            (*kept)[{t.id, before.id}] = std::move(instance);
         }
     };
     const auto& old = *lastSong_;
@@ -177,14 +279,33 @@ std::vector<std::string> AudioEngine::reloadSongKeepingPlugins(const model::Song
     for (size_t i = 0; i < old.returns.size() && i < latest_->returnNodes.size(); ++i) harvest(old.returns[i], latest_->returnNodes[i]);
     harvest(old.main, latest_->mainNode);
 
-    auto log = loadSong(song, [kept, this](int trackId, int deviceId) -> std::unique_ptr<juce::AudioPluginInstance> {
+    devices::BuildContext reuse;
+    auto prepared = std::make_shared<std::vector<const devices::DeviceProcessor*>>();
+    reuse.takeRunningDevice = [keptDevices, prepared, samePrepare, this](int trackId, int deviceId) -> std::unique_ptr<devices::DeviceProcessor> {
+        const auto it = keptDevices->find({trackId, deviceId});
+        if (it == keptDevices->end()) return nullptr;
+        ++lastReusedDevices_;
+        auto device = std::move(it->second);
+        keptDevices->erase(it);
+        if (samePrepare) prepared->push_back(device.get());
+        return device;
+    };
+    reuse.takeRunningPlugin = [kept, &fresh, &keep, this](int trackId, int deviceId) -> std::unique_ptr<juce::AudioPluginInstance> {
         const auto it = kept->find({trackId, deviceId});
         if (it == kept->end()) return nullptr;
         ++lastReused_;
         auto instance = std::move(it->second);
         kept->erase(it);
+        if (keep.restoreSavedState)
+            if (const auto device = fresh.find({trackId, deviceId}); device != fresh.end() && device->second->plugin)
+            {
+                juce::String error;
+                host_.restoreSavedState(*instance, instance->getPluginDescription(), *device->second->plugin, device->second->kind, error);
+            }
         return instance;
-    });
+    };
+    // Built from a copy of `song` taken first, so `fresh` (into `song`) stays valid while the callbacks run.
+    auto log = buildAndInstall(song, std::move(reuse), prepared, ! keep.restoreSavedState);
     if (auto* p = pending_.exchange(nullptr)) // the old graph (with emptied plug-in devices) goes now, audio still off
     {
         delete current_;

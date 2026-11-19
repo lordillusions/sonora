@@ -54,6 +54,8 @@ struct BuildContext
     // plug-in device `deviceId` on track `trackId`, or null to create one. makeNode sets trackId for its track.
     int trackId = -1;
     std::function<std::unique_ptr<juce::AudioPluginInstance>(int trackId, int deviceId)> takeRunningPlugin;
+    // ENG-17: the same, for the whole running processor of an unchanged top-level device (makeNode asks before building).
+    std::function<std::unique_ptr<DeviceProcessor>(int trackId, int deviceId)> takeRunningDevice;
 };
 
 // Returns nullptr when the device cannot run; the chain then just skips it (pass-through).

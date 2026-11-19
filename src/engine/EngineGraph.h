@@ -217,6 +217,9 @@ struct EngineGraph
     int mainNode = -1;
     std::shared_ptr<ControlBank> controls;
     RenderSchedule schedule; // ENG-14e: rebuilt by prepare() (message thread)
+    // ENG-17: devices carried over from the previous graph, prepared at this rate and block size already: the next
+    // prepare() leaves them as they are (a plug-in's prepareToPlay can take 100 ms and resets its tails).
+    std::vector<const devices::DeviceProcessor*> alreadyPrepared;
 
     void prepare(double sampleRate, int maxBlockSize);
     // Called by prepare() after the devices are prepared (their latency is known then).
