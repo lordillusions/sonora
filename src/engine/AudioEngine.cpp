@@ -161,6 +161,19 @@ bool sameBuild(const model::Device& a, const model::Device& b)
     return true;
 }
 
+// The first device with `id` that hosts a plug-in, in `list` or the rack chains inside it. A plain function: MSVC 14.52
+// overflowed its stack on the recursive generic lambda (inside a lambda, through a std::function) this replaces (COM-7).
+const model::Device* findPluginDevice(const std::vector<model::Device>& list, int id)
+{
+    for (const auto& d : list)
+    {
+        if (d.id == id && d.plugin) return &d;
+        for (const auto& chain : d.chains)
+            if (const auto* found = findPluginDevice(chain.devices, id)) return found;
+    }
+    return nullptr;
+}
+
 bool hasSavedState(const model::Device& d)
 {
     return d.plugin && (! d.plugin->state.empty() || (d.kind == model::DeviceKind::PluginVst2 && d.plugin->vst2ProgramNumber > 0));
@@ -399,15 +412,7 @@ std::vector<std::string> AudioEngine::updateTrackDevices(int trackIndex, const m
     std::map<int, std::string> handover; // device id -> plug-in name, for the new devices that take a running instance
     {
         const auto beforeOf = [&](int id) -> const model::Device* {
-            std::function<const model::Device*(const std::vector<model::Device>&)> find = [&](const auto& list) -> const model::Device* {
-                for (const auto& d : list)
-                {
-                    if (d.id == id && d.plugin && movable.count(id) > 0) return &d;
-                    for (const auto& chain : d.chains) if (const auto* f = find(chain.devices)) return f;
-                }
-                return nullptr;
-            };
-            return find(before->devices);
+            return movable.count(id) > 0 ? findPluginDevice(before->devices, id) : nullptr;
         };
         std::function<void(const model::Device&)> want = [&](const model::Device& d) {
             if (d.plugin)

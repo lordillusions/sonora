@@ -33,8 +33,17 @@ ln -s /Applications "$STAGE/root/Applications"
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
 echo "== disk image $OUT"
-hdiutil create -quiet -volname "$NAME $VERSION" -srcfolder "$STAGE/root" -fs HFS+ -format UDZO -imagekey zlib-level=9 \
-    -ov "$OUT"
+# hdiutil create fails now and then on CI runners ("Resource busy"); 0.1.55's first tag lost its macOS job to it.
+for attempt in 1 2 3; do
+    if hdiutil create -quiet -volname "$NAME $VERSION" -srcfolder "$STAGE/root" -fs HFS+ -format UDZO -imagekey zlib-level=9 \
+        -ov "$OUT"; then
+        break
+    fi
+    [ "$attempt" -lt 3 ] || fail "hdiutil create failed three times"
+    echo "hdiutil create failed (attempt $attempt), retrying in 10 s" >&2
+    rm -f "$OUT"
+    sleep 10
+done
 
 if [ "$IDENTITY" != "-" ]; then
     codesign --force --timestamp --sign "$IDENTITY" "$OUT"
