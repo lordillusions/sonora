@@ -4,13 +4,17 @@
 // transient settings, BPM, /2 x2, Reverse / Stems, Fade / RAM / HiQ, gain fader and pitch) or the MIDI boxes (Pitch & Time,
 // Transform, Generate), and the Launch box (mode, quantisation, legato, velocity). Boxes flow into further columns when the
 // detail view is too short to stack them (columnsFor()); the panel scrolls vertically only when one box is taller than it.
-// Numeric fields drag vertically (Shift: fine, double-click resets gain / pitch); menus use native popups.
-// Every gesture is one undoable model::modifyClip.
+// Numeric fields drag vertically (Shift: fine, double-click resets gain / pitch). A click without a drag opens the shared
+// value field (ui/ValueEntry, as on dials) with the value selected: typing replaces it (bar.beat.sixteenth for positions,
+// m:s for unwarped audio), Return or a click elsewhere commits, Esc cancels. Menus use native popups. Every gesture is one
+// undoable model::modifyClip.
 
 #include "core/Edit.h"
 #include "ui/MidiClipEdits.h"
 #include "ui/Widget.h"
 
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace sonora::ui
@@ -36,9 +40,8 @@ public:
     void mouseDrag(const MouseEvent&) override;
     void mouseUp(const MouseEvent&) override;
     bool mouseWheel(const MouseEvent&) override;
-    bool wantsTextInput() const override { return editingBpm_; }
-    void focusLost() override { editingBpm_ = false; repaint(); }
 
+    const midiedit::ToolSettings& toolSettings(bool generate) const { return generate ? generator_ : transform_; }
     bool toolPanelOpen() const { return transformOpen_ || generateOpen_; }
     void showTool(midiedit::Tool tool)
     {
@@ -64,10 +67,14 @@ private:
         Rect r;
     };
     void applyTool(bool generate);
-    void finishBpmEdit();
-    bool editingBpm_ = false, bpmSelected_ = false;
-    std::string bpmText_;
-    const model::Song* bpmSong_ = nullptr;
+    // Typed values (UI-114).
+    bool typable(Id id, const model::Clip& clip) const;
+    void beginEdit(Id id);
+    void applyTyped(Id id, const model::ClipLocation& location, const model::Song* song, const std::string& text);
+    std::optional<model::Clip> withTyped(Id id, const model::Clip& base, double value) const;
+    std::string toolText(Id id) const;
+    bool applyToolValue(Id id, double value);
+    static const char* editLabel(Id id);
     midiedit::ToolSettings transform_, generator_{.tool = midiedit::Tool::Rhythm};
     bool transformOpen_ = false, generateOpen_ = false;
     uint32_t toolSeed_ = 1;
@@ -94,6 +101,7 @@ private:
     // Active drag
     bool dragging_ = false, dragChanged_ = false, toolDragging_ = false;
     midiedit::ToolSettings toolBefore_;
+    std::string toolTextBefore_;
     Id dragId_ = Id::Start;
     float grabY_ = 0;
     model::Clip before_, working_;

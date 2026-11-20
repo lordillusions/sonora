@@ -8,6 +8,7 @@
 #include "ui/MidiClipEdits.h"
 #include "ui/Painter.h"
 #include "ui/UiContext.h"
+#include "ui/ValueEntry.h"
 #include "core/ClipGeometry.h"
 #include "core/TimeUtils.h"
 #include "engine/Transport.h"
@@ -134,6 +135,35 @@ void positionField(SkCanvas& c, const Theme& t, const Rect& r, const std::string
         paint::text(c, parts[i], {r.x + 3 + slot * (float) i, r.y, slot, r.h}, fg, t.metrics.fontSize, Align::Right);
 }
 
+// Beats per bar of the song's signature (the unit of a position field's first part).
+int barBeats(const model::Song* song)
+{
+    return song ? std::max(1, song->timeSigNumerator * 4 / std::max(1, song->timeSigDenominator)) : 4;
+}
+
+bool isPositionField(ClipControls::Id id)
+{
+    using Id = ClipControls::Id;
+    return id == Id::Start || id == Id::End || id == Id::Position || id == Id::Length;
+}
+
+bool isToolField(ClipControls::Id id)
+{
+    using Id = ClipControls::Id;
+    return id == Id::ToolRate || id == Id::ToolAmount || id == Id::ToolGate || id == Id::ToolParts || id == Id::ToolLow
+           || id == Id::ToolHigh || id == Id::ToolDensity;
+}
+
+// The signature denominators Live offers.
+constexpr int kDenominators[] = {1, 2, 4, 8, 16};
+int stepDenominator(int current, int steps)
+{
+    int index = 0;
+    for (int i = 0; i < 5; ++i)
+        if (kDenominators[i] <= current) index = i;
+    return kDenominators[std::clamp(index + steps, 0, 4)];
+}
+
 // Numeric box drawn as a horizontal slider: the filled part shows the value (Transient Envelope).
 void sliderBox(SkCanvas& c, const Theme& t, const Rect& r, const std::string& text, double fraction)
 {
@@ -206,7 +236,7 @@ int ClipControls::columnsFor(float panelHeight)
 std::string ClipControls::valueText(Id id, const model::Clip& clip) const
 {
     const auto& song = ctx().song;
-    const int perBar = song ? std::max(1, song->timeSigNumerator * 4 / std::max(1, song->timeSigDenominator)) : 4;
+    const int perBar = barBeats(song);
     const bool beats = clip.kind == model::Clip::Kind::Midi || clip.warped;
     auto position = [&](double v, bool oneBased) { return beats ? audioedit::formatBeats(v, perBar, oneBased) : audioedit::formatSeconds(v); };
     switch (id)
@@ -220,8 +250,7 @@ std::string ClipControls::valueText(Id id, const model::Clip& clip) const
         }
         case Id::Position: return position(clip.loop.loopStart, true);
         case Id::Length: return position(clip.loop.loopEnd - clip.loop.loopStart, false);
-        case Id::Bpm: return editingBpm_ && clip.uid == location_.uid && song == bpmSong_ ? bpmText_ + "|"
-                            : number("%.1f", audioedit::clipBpm(clip, song ? song->tempo : 120.0));
+        case Id::Bpm: return number("%.1f", audioedit::clipBpm(clip, song ? song->tempo : 120.0));
         case Id::Envelope: return number("%.0f", clip.transientEnvelope);
         case Id::Grain:
             return number("%.0f", clip.warpMode == model::WarpMode::Texture ? clip.granularityTexture : clip.granularityTones);
@@ -665,17 +694,17 @@ void ClipControls::paint(SkCanvas& c, const Theme& t)
     {
         const auto& tool = generateOpen_ ? generator_ : transform_;
         ctl::dropdown(c, t, rect(generateOpen_ ? Id::GenerateType : Id::TransformType), midiedit::toolName(tool.tool));
-        auto field = [&](Id id, const char* label, const std::string& text) {
+        auto field = [&](Id id, const char* label) {
             const auto r = rect(id); if (r.isEmpty()) return;
-            caption(label, r.x, r.y - kCaption - 1, r.w); ctl::valueBox(c, t, r, text, Align::Centre);
+            caption(label, r.x, r.y - kCaption - 1, r.w); ctl::valueBox(c, t, r, toolText(id), Align::Centre);
         };
-        field(Id::ToolRate, "Rate (beats)", number("%.3g", tool.rate));
-        field(Id::ToolAmount, "Amount", number("%.0f %%", tool.amount * 100));
-        field(Id::ToolGate, "Gate", number("%.0f %%", tool.gate * 100));
-        field(Id::ToolParts, tool.tool == midiedit::Tool::Recombine ? "Rotate Steps" : "Parts / Steps", std::to_string(tool.parts));
-        field(Id::ToolDensity, "Density", number("%.0f %%", tool.density * 100));
-        field(Id::ToolLow, "Min Pitch", std::to_string(tool.lowPitch));
-        field(Id::ToolHigh, "Max Pitch", std::to_string(tool.highPitch));
+        field(Id::ToolRate, "Rate (beats)");
+        field(Id::ToolAmount, "Amount");
+        field(Id::ToolGate, "Gate");
+        field(Id::ToolParts, tool.tool == midiedit::Tool::Recombine ? "Rotate Steps" : "Parts / Steps");
+        field(Id::ToolDensity, "Density");
+        field(Id::ToolLow, "Min Pitch");
+        field(Id::ToolHigh, "Max Pitch");
         ctl::toggle(c, t, rect(Id::ToolApply), "Apply", false, 0);
         ctl::toggle(c, t, rect(Id::ToolReset), "Reset", false, 0);
     }
@@ -769,8 +798,133 @@ model::Clip ClipControls::dragged(Id id, const model::Clip& base, float dy, bool
         case Id::Formants: c.complexProFormants = std::clamp(base.complexProFormants + std::round(dy / 2.0), 0.0, 100.0); break;
         case Id::ProEnvelope: c.complexProEnvelope = std::clamp(base.complexProEnvelope + std::round(dy / 2.0), 8.0, 256.0); break;
         case Id::SigNum: c.timeSigNumerator = std::clamp(base.timeSigNumerator + (int) std::lround(dy / 6.0), 1, 99); break;
+        case Id::SigDen: c.timeSigDenominator = stepDenominator(base.timeSigDenominator, (int) std::lround(dy / 12.0)); break;
         case Id::LaunchVelocity: c.velocityAmount = std::clamp(base.velocityAmount + std::round(dy / 2.0) * (fine ? 0.001 : 0.01), 0.0, 1.0); break;
         default: break;
+    }
+    return c;
+}
+
+bool ClipControls::typable(Id id, const model::Clip& clip) const
+{
+    switch (id)
+    {
+        case Id::Start: case Id::End: case Id::Position: case Id::Length: case Id::Envelope: case Id::Grain: case Id::Flux:
+        case Id::Formants: case Id::ProEnvelope: case Id::PitchStBox: case Id::PitchCt: case Id::SigNum: case Id::SigDen:
+        case Id::LaunchVelocity: return true;
+        case Id::Bpm: return clip.warped;
+        default: return isToolField(id);
+    }
+}
+
+const char* ClipControls::editLabel(Id id)
+{
+    switch (id)
+    {
+        case Id::SigNum: case Id::SigDen: return "Change Clip Signature";
+        case Id::LaunchVelocity: return "Change Launch Velocity";
+        case Id::Gain: return "Change Clip Gain";
+        case Id::PitchSt: case Id::PitchStBox: case Id::PitchCt: return "Change Clip Pitch";
+        case Id::Bpm: return "Change Clip BPM";
+        default: return "Edit Clip Settings";
+    }
+}
+
+std::string ClipControls::toolText(Id id) const
+{
+    const auto& tool = generateOpen_ ? generator_ : transform_;
+    switch (id)
+    {
+        case Id::ToolRate: return number("%.3g", tool.rate);
+        case Id::ToolAmount: return number("%.0f %%", tool.amount * 100);
+        case Id::ToolGate: return number("%.0f %%", tool.gate * 100);
+        case Id::ToolParts: return std::to_string(tool.parts);
+        case Id::ToolDensity: return number("%.0f %%", tool.density * 100);
+        case Id::ToolLow: return std::to_string(tool.lowPitch);
+        case Id::ToolHigh: return std::to_string(tool.highPitch);
+        default: return {};
+    }
+}
+
+bool ClipControls::applyToolValue(Id id, double value)
+{
+    auto& tool = generateOpen_ ? generator_ : transform_;
+    const auto whole = [value] { return (int) std::clamp(std::lround(value), -100000L, 100000L); };
+    switch (id)
+    {
+        case Id::ToolRate: tool.rate = std::clamp(value, 0.03125, 16.0); break;
+        case Id::ToolAmount: tool.amount = std::clamp(value / 100.0, 0.0, 1.0); break;
+        case Id::ToolGate: tool.gate = std::clamp(value / 100.0, 0.05, 2.0); break;
+        case Id::ToolParts: tool.parts = std::clamp(whole(), 1, 64); break;
+        case Id::ToolLow: tool.lowPitch = std::clamp(whole(), 0, tool.highPitch); break;
+        case Id::ToolHigh: tool.highPitch = std::clamp(whole(), tool.lowPitch, 127); break;
+        case Id::ToolDensity: tool.density = std::clamp(value / 100.0, 0.0, 1.0); break;
+        default: return false;
+    }
+    return true;
+}
+
+// The clip with a typed value in a field (positions in beats, or seconds for unwarped audio, zero-based); nothing when
+// the field does not take it. Out-of-range numbers are clamped to the field's range like Live.
+std::optional<model::Clip> ClipControls::withTyped(Id id, const model::Clip& base, double value) const
+{
+    auto c = base;
+    const bool beats = base.kind == model::Clip::Kind::Midi || base.warped;
+    const double unit = beats ? 0.0625 : 0.001;
+    const auto whole = [value](long low, long high) { return (int) std::clamp(std::lround(std::clamp(value, -1e6, 1e6)), low, high); };
+    // Markers go through core/ClipGeometry like the drags (UI-71): an unlooped Arrangement clip's End is its right edge.
+    const double tempo = ctx().song ? ctx().song->tempo : 120.0;
+    const bool arrangement = location_.kind != model::ClipLocation::Kind::Session;
+    auto m = model::clipMarkers(base, arrangement, tempo);
+    switch (id)
+    {
+        case Id::Start:
+            m.start = std::clamp(value, 0.0, std::max(0.0, (m.looping ? m.loopEnd : m.end) - unit));
+            return model::withMarkers(base, m, arrangement, tempo);
+        case Id::End:
+            if (m.looping) m.loopEnd = std::max(std::max(m.loopStart, m.start) + unit, value);
+            else m.end = std::max(m.start + unit, value);
+            return model::withMarkers(base, m, arrangement, tempo);
+        case Id::Position:
+        {
+            if (! m.looping) return std::nullopt; // the loop brace is off: Live greys Position out
+            const double moved = std::max(0.0, value);
+            m.loopEnd += moved - m.loopStart;
+            m.loopStart = moved;
+            return model::withMarkers(base, m, arrangement, tempo);
+        }
+        case Id::Length:
+            if (! m.looping) return std::nullopt;
+            m.loopEnd = m.loopStart + std::max(unit, value);
+            return model::withMarkers(base, m, arrangement, tempo);
+        case Id::Bpm:
+        {
+            if (! base.warped || ! ctx().song) return std::nullopt;
+            const double current = audioedit::clipBpm(base, ctx().song->tempo);
+            const double bpm = std::clamp(std::round(value * 10) / 10, 20.0, 999.0);
+            if (base.tempoAnalyzed && std::abs(bpm - current) <= 1e-8) return std::nullopt;
+            return audioedit::scaleTempo(base, bpm / current);
+        }
+        case Id::Envelope: c.transientEnvelope = std::clamp(std::round(value), 0.0, 100.0); break;
+        case Id::Grain:
+            if (base.warpMode == model::WarpMode::Texture) c.granularityTexture = std::clamp(std::round(value), 2.0, 263.0);
+            else c.granularityTones = std::clamp(std::round(value), 10.0, 100.0);
+            break;
+        case Id::Flux: c.fluctuationTexture = std::clamp(std::round(value), 0.0, 100.0); break;
+        case Id::Formants: c.complexProFormants = std::clamp(std::round(value), 0.0, 100.0); break;
+        case Id::ProEnvelope: c.complexProEnvelope = std::clamp(std::round(value), 8.0, 256.0); break;
+        case Id::PitchStBox: c.pitchCoarse = whole(-48, 48); break;
+        case Id::PitchCt: c.pitchFine = std::clamp(std::round(value), -50.0, 50.0); break;
+        case Id::SigNum: c.timeSigNumerator = whole(1, 99); break;
+        case Id::SigDen:
+        {
+            const int v = whole(0, 64);
+            if (std::find(std::begin(kDenominators), std::end(kDenominators), v) == std::end(kDenominators)) return std::nullopt;
+            c.timeSigDenominator = v;
+            break;
+        }
+        case Id::LaunchVelocity: c.velocityAmount = std::clamp(std::round(value * 10) / 1000.0, 0.0, 1.0); break;
+        default: return std::nullopt;
     }
     return c;
 }
@@ -825,10 +979,6 @@ void ClipControls::showMenu(Id id, const model::Clip& clip)
             for (int v = 0; v < 3; ++v)
                 item(loopModeName(v), base.transientLoopMode == v, change([v](model::Clip& c) { c.transientLoopMode = v; }, "Change Transient Loop Mode"));
             break;
-        case Id::SigDen:
-            for (int v : {1, 2, 4, 8, 16})
-                item(std::to_string(v).c_str(), base.timeSigDenominator == v, change([v](model::Clip& c) { c.timeSigDenominator = v; }, "Change Clip Signature"));
-            break;
         case Id::LaunchMode:
             for (int v = 0; v < 4; ++v)
                 item(launchModeName(v), base.launchMode == v, change([v](model::Clip& c) { c.launchMode = v; }, "Change Launch Mode"));
@@ -859,35 +1009,40 @@ void ClipControls::showMenu(Id id, const model::Clip& clip)
 
 bool ClipControls::keyPressed(const KeyEvent& key)
 {
-    if (editingBpm_)
-    {
-        if (ctx().song != bpmSong_ || ctx().selectedClipLocation().uid != location_.uid) { editingBpm_ = false; return false; }
-        if (key.keyCode == juce::KeyPress::escapeKey) editingBpm_ = false;
-        else if (key.keyCode == juce::KeyPress::returnKey) { finishBpmEdit(); return true; }
-        else if (key.cmd && (key.textChar == 'a' || key.textChar == 'A')) bpmSelected_ = true;
-        else if (key.keyCode == juce::KeyPress::backspaceKey || key.keyCode == juce::KeyPress::deleteKey)
-        { if (bpmSelected_) bpmText_.clear(); else paint::popLastCodePoint(bpmText_); bpmSelected_ = false; }
-        else if (! key.cmd && ! key.alt && ((key.textChar >= '0' && key.textChar <= '9') || key.textChar == '.' || key.textChar == ','))
-        { if (bpmSelected_) bpmText_.clear(); bpmSelected_ = false; if (bpmText_.size() < 8) bpmText_ += key.textChar == ',' ? '.' : (char) key.textChar; }
-        repaint(); return true;
-    }
     if (key.cmd && ! key.shift && ! key.alt && key.keyCode == juce::KeyPress::returnKey && (transformOpen_ || generateOpen_))
     { applyTool(generateOpen_); return true; }
     return false;
 }
 
-void ClipControls::finishBpmEdit()
+void ClipControls::beginEdit(Id id)
 {
-    editingBpm_ = false;
-    char* end = nullptr;
-    const double entered = std::strtod(bpmText_.c_str(), &end);
-    const auto* clip = ctx().song == bpmSong_ ? model::findClip(*bpmSong_, location_) : nullptr;
-    if (clip && clip->warped && end != bpmText_.c_str() && *end == '\0' && std::isfinite(entered) && entered >= 20 && entered <= 999)
+    const auto* clip = ctx().selectedClip();
+    const Rect r = controlBounds(id);
+    if (! clip || r.isEmpty()) return;
+    const auto location = ctx().selectedClipLocation();
+    const auto* song = ctx().song;
+    beginValueEntry(*this, r, isToolField(id) ? toolText(id) : valueText(id, *clip),
+                    [this, id, location, song](const std::string& text) { applyTyped(id, location, song, text); }, 0, ctx().theme.metrics.fontSize);
+}
+
+void ClipControls::applyTyped(Id id, const model::ClipLocation& location, const model::Song* song, const std::string& text)
+{
+    if (isToolField(id))
     {
-        const double bpm = std::round(entered * 10) / 10;
-        if (! clip->tempoAnalyzed || std::abs(bpm - audioedit::clipBpm(*clip, ctx().song->tempo)) > 1e-8)
-            commit(audioedit::scaleTempo(*clip, bpm / audioedit::clipBpm(*clip, ctx().song->tempo)), "Change Clip BPM");
+        if (const auto value = audioedit::parseNumber(text)) applyToolValue(id, *value);
+        repaint();
+        return;
     }
+    if (! ctx().song || ctx().song != song) return;
+    const auto* clip = model::findClip(*ctx().song, location);
+    if (! clip) return;
+    const bool beats = clip->kind == model::Clip::Kind::Midi || clip->warped;
+    const auto value = ! isPositionField(id) ? audioedit::parseNumber(text)
+                       : beats ? audioedit::parseBeats(text, barBeats(song), id != Id::Length) : audioedit::parseSeconds(text);
+    if (! value) return;
+    location_ = location; // withTyped and valueText read the clip's kind of location (Session / Arrangement)
+    if (const auto changed = withTyped(id, *clip, *value); changed && (id == Id::Bpm || valueText(id, *changed) != valueText(id, *clip)))
+        commit(*changed, editLabel(id));
     repaint();
 }
 
@@ -912,8 +1067,10 @@ void ClipControls::mouseDown(const MouseEvent& e)
     if (e.y < kTitle)
         hit = &controls_.front(); // activator / title
     if (! hit)
+    {
+        repaint();
         return;
-    editingBpm_ = false;
+    }
     location_ = ctx().selectedClipLocation();
     const auto& clip = *selected;
     auto& song = *ctx().song;
@@ -936,7 +1093,8 @@ void ClipControls::mouseDown(const MouseEvent& e)
         case Id::TransformType: case Id::GenerateType: showMenu(hit->id, clip); break;
         case Id::ToolRate: case Id::ToolAmount: case Id::ToolGate: case Id::ToolParts: case Id::ToolLow: case Id::ToolHigh: case Id::ToolDensity:
             toolDragging_ = true; toolBefore_ = generateOpen_ ? generator_ : transform_;
-            dragId_ = hit->id; grabY_ = e.y; break;
+            dragId_ = hit->id; grabY_ = e.y; toolTextBefore_ = toolText(hit->id);
+            break; // a click without a drag types a value (mouseUp)
         case Id::FitScale: { auto saved = transform_; transform_.tool = midiedit::Tool::FitScale; applyTool(false); transform_ = saved; break; }
         case Id::Humanize: { auto saved = transform_; transform_.tool = midiedit::Tool::Humanize; transform_.amount = 0.1; applyTool(false); transform_ = saved; break; }
         case Id::LaunchHeader: launchOpen_ = ! launchOpen_; repaint(); break;
@@ -989,13 +1147,7 @@ void ClipControls::mouseDown(const MouseEvent& e)
             }
             break;
         case Id::Bpm:
-            if (! clip.warped) break;
-            if (e.clicks >= 2)
-            {
-                editingBpm_ = bpmSelected_ = true; bpmSong_ = ctx().song;
-                bpmText_ = number("%.1f", audioedit::clipBpm(clip, song.tempo));
-            }
-            else { dragging_ = true; dragId_ = Id::Bpm; grabY_ = e.y; before_ = working_ = clip; }
+            if (clip.warped) { dragging_ = true; dragId_ = Id::Bpm; grabY_ = e.y; before_ = working_ = clip; }
             break;
         case Id::Half: if (clip.warped) commit(audioedit::scaleTempo(clip, 0.5), "Clip BPM /2"); break;
         case Id::Double: if (clip.warped) commit(audioedit::scaleTempo(clip, 2.0), "Clip BPM x2"); break;
@@ -1010,7 +1162,6 @@ void ClipControls::mouseDown(const MouseEvent& e)
         case Id::WarpMode:
         case Id::Preserve:
         case Id::LoopMode:
-        case Id::SigDen:
         case Id::LaunchMode:
         case Id::LaunchQuant:
         case Id::ScaleRoot:
@@ -1050,25 +1201,30 @@ void ClipControls::mouseDrag(const MouseEvent& e)
             case Id::ToolDensity: tool.density = std::clamp(toolBefore_.density + delta, 0.0, 1.0); break;
             default: break;
         }
+        dragChanged_ |= toolText(dragId_) != toolTextBefore_;
         repaint(); return;
     }
     if (! dragging_)
         return;
     working_ = dragged(dragId_, before_, grabY_ - e.y, e.shift);
-    dragChanged_ = true;
+    // Typable fields count as dragged once their value shows a change, so a click with a little jitter still focuses them.
+    dragChanged_ |= ! typable(dragId_, before_) || valueText(dragId_, working_) != valueText(dragId_, before_);
     repaint();
 }
 
 void ClipControls::mouseUp(const MouseEvent&)
 {
-    if (toolDragging_) { toolDragging_ = false; repaint(); return; }
-    if (dragging_ && dragChanged_)
+    if (toolDragging_)
     {
-        const char* label = dragId_ == Id::SigNum ? "Change Clip Signature" : dragId_ == Id::LaunchVelocity ? "Change Launch Velocity"
-                            : dragId_ == Id::Gain ? "Change Clip Gain" : dragId_ == Id::PitchSt || dragId_ == Id::PitchStBox || dragId_ == Id::PitchCt ? "Change Clip Pitch"
-                            : dragId_ == Id::Bpm ? "Change Clip BPM" : "Edit Clip Settings";
-        commit(working_, label);
+        toolDragging_ = false;
+        if (! dragChanged_) beginEdit(dragId_); // a click without a drag types a value
+        dragChanged_ = false;
+        repaint(); return;
     }
+    if (dragging_ && dragChanged_)
+        commit(working_, editLabel(dragId_));
+    else if (dragging_ && typable(dragId_, before_))
+        beginEdit(dragId_); // a click without a drag opens a field to type the value (UI-114)
     dragging_ = false;
     dragChanged_ = false;
     repaint();
@@ -1081,7 +1237,7 @@ bool ClipControls::mouseWheel(const MouseEvent& e)
         layoutControls(*clip);
         if (const auto* control = controlAt(e.x, e.y); control && control->id == Id::Bpm && std::abs(e.wheelDeltaY) > 1e-8f)
         {
-            editingBpm_ = false; location_ = ctx().selectedClipLocation();
+            location_ = ctx().selectedClipLocation();
             const double current = audioedit::clipBpm(*clip, ctx().song->tempo);
             const double next = std::clamp((std::round(current * 10) + (e.wheelDeltaY > 0 ? 1 : -1)) / 10, 20.0, 999.0);
             if (std::abs(current - next) > 1e-8) commit(audioedit::scaleTempo(*clip, next / current), "Change Clip BPM");

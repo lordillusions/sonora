@@ -4,6 +4,10 @@
 
 #include "core/Model.h"
 
+#include <optional>
+#include <string>
+#include <string_view>
+
 namespace sonora::ui::audioedit
 {
 
@@ -38,5 +42,14 @@ model::Clip cropped(const model::Clip& clip, double startSeconds);
 std::string formatBeats(double beats, int beatsPerBar, bool oneBased);
 // "m: s.mmm"
 std::string formatSeconds(double seconds);
+
+// Typed entry for the Clip panel's number boxes, as Live accepts it. parseBeats reads "bar.beat.sixteenth" with any of
+// '.', ',', ' ', ':' between the parts; missing parts are the first one ("5" is 5.1.1 for a position, 5 bars for a
+// length), parts may overflow ("1.5" in 4/4 is 2.1.1) and a leading '-' negates. parseSeconds reads "m:s.mmm" or
+// plain seconds. parseNumber reads a decimal ("," as the point), a fraction ("1/4") and ignores a trailing '%'.
+// Each returns nothing for text that is not a number.
+std::optional<double> parseBeats(std::string_view text, int beatsPerBar, bool oneBased);
+std::optional<double> parseSeconds(std::string_view text);
+std::optional<double> parseNumber(std::string_view text);
 
 } // namespace sonora::ui::audioedit

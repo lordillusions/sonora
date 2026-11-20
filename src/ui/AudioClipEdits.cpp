@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <vector>
 
 namespace sonora::ui::audioedit
 {
@@ -145,6 +147,91 @@ std::string formatSeconds(double seconds)
     char text[32];
     std::snprintf(text, sizeof(text), "%d: %d.%03d", minutes, (int) std::floor(rest), (int) std::lround((rest - std::floor(rest)) * 1000.0) % 1000);
     return text;
+}
+
+namespace
+{
+// Splits on the separators, collapsing runs ("1. 1. 1" has three parts); false for any other character.
+bool splitParts(std::string_view text, std::string_view separators, std::vector<std::string>& parts)
+{
+    std::string current;
+    for (char ch : text)
+    {
+        if (separators.find(ch) != std::string_view::npos)
+        {
+            if (! current.empty()) parts.push_back(std::move(current));
+            current.clear();
+        }
+        else if ((ch >= '0' && ch <= '9') || ch == '.') current += ch;
+        else return false;
+    }
+    if (! current.empty()) parts.push_back(std::move(current));
+    return true;
+}
+
+std::string_view trimmed(std::string_view text)
+{
+    while (! text.empty() && text.front() == ' ') text.remove_prefix(1);
+    while (! text.empty() && text.back() == ' ') text.remove_suffix(1);
+    return text;
+}
+
+std::optional<double> plainNumber(std::string_view text)
+{
+    text = trimmed(text);
+    if (text.empty() || text.size() > 30) return std::nullopt;
+    std::string copy(text);
+    std::replace(copy.begin(), copy.end(), ',', '.');
+    char* end = nullptr;
+    const double v = std::strtod(copy.c_str(), &end);
+    if (end == copy.c_str() || *end != '\0' || ! std::isfinite(v)) return std::nullopt;
+    return v;
+}
+} // namespace
+
+std::optional<double> parseBeats(std::string_view text, int beatsPerBar, bool oneBased)
+{
+    text = trimmed(text);
+    const bool negative = ! text.empty() && text.front() == '-';
+    if (negative) text.remove_prefix(1);
+    std::vector<std::string> parts;
+    if (! splitParts(text, ".,: ", parts) || parts.empty() || parts.size() > 3) return std::nullopt;
+    const double units[] = {(double) std::max(1, beatsPerBar), 1.0, 0.25};
+    double beats = 0;
+    for (size_t i = 0; i < parts.size(); ++i)
+    {
+        const auto v = plainNumber(parts[i]);
+        if (! v) return std::nullopt;
+        const double part = *v - (oneBased ? 1.0 : 0.0);
+        if (part < 0) return std::nullopt;
+        beats += part * units[i];
+    }
+    return negative ? -beats : beats;
+}
+
+std::optional<double> parseSeconds(std::string_view text)
+{
+    text = trimmed(text);
+    if (const auto colon = text.find(':'); colon != std::string_view::npos)
+    {
+        const auto minutes = plainNumber(text.substr(0, colon)), seconds = plainNumber(text.substr(colon + 1));
+        if (! minutes || ! seconds || *minutes < 0 || *seconds < 0) return std::nullopt;
+        return *minutes * 60.0 + *seconds;
+    }
+    return plainNumber(text);
+}
+
+std::optional<double> parseNumber(std::string_view text)
+{
+    text = trimmed(text);
+    if (! text.empty() && text.back() == '%') text.remove_suffix(1);
+    if (const auto slash = text.find('/'); slash != std::string_view::npos)
+    {
+        const auto a = plainNumber(text.substr(0, slash)), b = plainNumber(text.substr(slash + 1));
+        if (! a || ! b || std::abs(*b) < 1e-12) return std::nullopt;
+        return *a / *b;
+    }
+    return plainNumber(text);
 }
 
 } // namespace sonora::ui::audioedit
